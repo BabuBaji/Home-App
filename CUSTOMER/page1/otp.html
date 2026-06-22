@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HomeHelp — Verify OTP</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .otp-card { margin-top: 0; border-radius: 0; box-shadow: none; flex: 1; }
+    .back { background: none; border: none; color: var(--purple); font-size: 15px; cursor: pointer; padding: 0; margin-bottom: 18px; }
+    .otp-inputs { display: flex; gap: 10px; justify-content: space-between; margin: 18px 0 4px; }
+    .otp-inputs input {
+      width: 100%; height: 56px; text-align: center;
+      font-size: 22px; font-weight: 600; color: var(--ink);
+      border: 1.5px solid var(--line); border-radius: 12px; outline: none;
+    }
+    .otp-inputs input:focus { border-color: var(--purple); }
+    .resend { margin-top: 16px; font-size: 14px; color: var(--muted); text-align: center; }
+    .resend button { background: none; border: none; color: var(--purple); font-weight: 600; cursor: pointer; }
+    .resend button:disabled { color: var(--muted); cursor: not-allowed; }
+    .hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar" style="color:#1f2937">
+      <span class="time">9:41</span>
+    </div>
+    <section class="card otp-card" style="padding-top:60px">
+      <button class="back" onclick="history.back()">&larr; Back</button>
+      <h1 class="card-title">Verify your number</h1>
+      <p class="card-sub">Enter the 6-digit code sent to <strong id="phone-label">your number</strong></p>
+
+      <form id="otp-form" novalidate>
+        <div class="otp-inputs" id="otp-inputs">
+          <input type="tel" inputmode="numeric" maxlength="1" aria-label="OTP digit 1" />
+          <input type="tel" inputmode="numeric" maxlength="1" aria-label="OTP digit 2" />
+          <input type="tel" inputmode="numeric" maxlength="1" aria-label="OTP digit 3" />
+          <input type="tel" inputmode="numeric" maxlength="1" aria-label="OTP digit 4" />
+          <input type="tel" inputmode="numeric" maxlength="1" aria-label="OTP digit 5" />
+          <input type="tel" inputmode="numeric" maxlength="1" aria-label="OTP digit 6" />
+        </div>
+        <p class="error" id="otp-error" role="alert"></p>
+        <button type="submit" id="verify-btn" class="btn-primary" disabled>Verify &amp; Continue</button>
+      </form>
+
+      <p class="resend">
+        Didn't get the code?
+        <button id="resend-btn" disabled>Resend in <span id="timer">30</span>s</button>
+      </p>
+      <p class="hint">Demo code is <strong>123456</strong>. OTP expires in 5 minutes.</p>
+    </section>
+    <div class="home-indicator"></div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var DEMO_OTP = "123456";
+      var MAX_ATTEMPTS = 5;          // security criteria from spec
+      var EXPIRY_MS = 5 * 60 * 1000; // OTP expires after 5 minutes
+      var attempts = 0;
+      var issuedAt = Date.now();
+
+      var params = new URLSearchParams(location.search);
+      var phone = params.get("phone");
+      if (!phone) { try { phone = sessionStorage.getItem("hh_otp_phone"); } catch (e) {} }
+      if (phone) document.getElementById("phone-label").textContent = phone;
+
+      var boxes = Array.prototype.slice.call(document.querySelectorAll("#otp-inputs input"));
+      var form = document.getElementById("otp-form");
+      var errorEl = document.getElementById("otp-error");
+      var verifyBtn = document.getElementById("verify-btn");
+      var resendBtn = document.getElementById("resend-btn");
+      var timerEl = document.getElementById("timer");
+
+      function code() { return boxes.map(function (b) { return b.value; }).join(""); }
+      function refresh() { verifyBtn.disabled = code().length !== 6; }
+
+      boxes.forEach(function (box, i) {
+        box.addEventListener("input", function () {
+          box.value = box.value.replace(/\D/g, "").slice(0, 1);
+          if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+          errorEl.textContent = "";
+          refresh();
+        });
+        box.addEventListener("keydown", function (e) {
+          if (e.key === "Backspace" && !box.value && i > 0) boxes[i - 1].focus();
+        });
+      });
+      boxes[0].focus();
+
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (Date.now() - issuedAt > EXPIRY_MS) {
+          errorEl.textContent = "OTP expired. Please resend a new code.";
+          return;
+        }
+        if (code() === DEMO_OTP) {
+          // Verified -> Home screen (placeholder)
+          verifyBtn.textContent = "Verified ✓";
+          alert("OTP verified! Proceeding to Home screen.");
+          // window.location.href = "../page2/index.html"; // wire to next screen
+        } else {
+          attempts++;
+          if (attempts >= MAX_ATTEMPTS) {
+            errorEl.textContent = "Too many attempts. Please try again later.";
+            verifyBtn.disabled = true;
+          } else {
+            errorEl.textContent = "Incorrect OTP. " + (MAX_ATTEMPTS - attempts) + " attempt(s) left.";
+          }
+        }
+      });
+
+      // Resend countdown (rate-limit resend per security criteria)
+      function startTimer() {
+        var t = 30;
+        resendBtn.disabled = true;
+        timerEl.textContent = t;
+        var iv = setInterval(function () {
+          t--;
+          if (t <= 0) {
+            clearInterval(iv);
+            resendBtn.disabled = false;
+            resendBtn.innerHTML = "Resend code";
+          } else {
+            timerEl.textContent = t;
+          }
+        }, 1000);
+      }
+      resendBtn.addEventListener("click", function () {
+        if (resendBtn.disabled) return;
+        issuedAt = Date.now();
+        attempts = 0;
+        resendBtn.innerHTML = "Resend in <span id=\"timer\">30</span>s";
+        timerEl = document.getElementById("timer");
+        startTimer();
+      });
+      startTimer();
+    })();
+  </script>
+</body>
+</html>

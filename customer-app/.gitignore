@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+
+# Android / Capacitor build artifacts
+android/.gradle
+android/build
+android/app/build
+android/capacitor-cordova-android-plugins
+android/app/src/main/assets/public
+*.apk
+
+# backend db
+server/homehelp.db

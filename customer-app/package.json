@@ -1,0 +1,31 @@
+{
+  "name": "homehelp-customer-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,web -c magenta,cyan \"npm:server\" \"vite\"",
+    "web": "vite",
+    "server": "node --no-warnings server/index.js",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/geolocation": "^6.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.1",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "concurrently": "^9.2.3",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.6"
+  }
+}

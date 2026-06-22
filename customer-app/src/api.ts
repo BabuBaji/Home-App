@@ -1,0 +1,66 @@
+import { io, type Socket } from 'socket.io-client'
+import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket } from './types'
+
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
+let token = localStorage.getItem('hh_token') || ''
+export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }
+export function clearToken() { token = ''; localStorage.removeItem('hh_token') }
+export function getToken() { return token }
+
+async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(API_BASE + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
+  })
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Request failed (${res.status})`) }
+  return res.json()
+}
+
+/* auth */
+export const requestOtp = (phone: string) => req<{ ok: boolean; devOtp: string }>('/api/auth/request-otp', { method: 'POST', body: JSON.stringify({ phone }) })
+export const verifyOtp = (phone: string, otp: string) => req<{ token: string; user: User }>('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, otp }) })
+export const googleAuth = (p: { credential?: string; demo?: boolean }) => req<{ token: string; user: User }>('/api/auth/google', { method: 'POST', body: JSON.stringify(p) })
+
+/* catalogue */
+export const fetchServices = () => req<{ categories: string[]; services: Service[] }>('/api/services')
+export const fetchService = (id: string) => req<ServiceDetail>(`/api/services/${id}`)
+
+/* coupons & quote */
+export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
+export const validateCoupon = (code: string, subtotal: number) => req<{ code: string; discount: number; label: string }>('/api/coupons/validate', { method: 'POST', body: JSON.stringify({ code, subtotal }) })
+export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon }) })
+
+/* me / addresses */
+export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
+export const updateMe = (patch: Partial<User>) => req<{ user: User }>('/api/me', { method: 'PATCH', body: JSON.stringify(patch) })
+export const fetchAddresses = () => req<Address[]>('/api/addresses')
+export const addAddressApi = (a: Partial<Address>) => req<Address>('/api/addresses', { method: 'POST', body: JSON.stringify(a) })
+export const setDefaultAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}/default`, { method: 'PATCH' })
+export const deleteAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}`, { method: 'DELETE' })
+
+/* wallet */
+export const fetchWallet = () => req<{ balance: number; cashback: number; transactions: Transaction[] }>('/api/wallet')
+export const addMoney = (amount: number) => req<{ balance: number }>('/api/wallet/add', { method: 'POST', body: JSON.stringify({ amount }) })
+
+/* support */
+export const fetchTickets = () => req<Ticket[]>('/api/tickets')
+export const createTicket = (category: string, message: string) => req<Ticket>('/api/tickets', { method: 'POST', body: JSON.stringify({ category, message }) })
+
+/* bookings */
+export const createBookingApi = (payload: any) => req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify(payload) })
+export const fetchBookings = () => req<Booking[]>('/api/bookings')
+export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
+export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
+export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })
+export const completeBooking = (id: number) => req<Booking>(`/api/bookings/${id}/complete`, { method: 'POST' })
+export const rescheduleBookingApi = (id: number, date: string, time: string) => req<Booking>(`/api/bookings/${id}/reschedule`, { method: 'POST', body: JSON.stringify({ date, time }) })
+export const cancelBookingApi = (id: number, reason: string) => req<Booking>(`/api/bookings/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) })
+export const reviewBooking = (id: number, rating: number, review: string, photo?: string) => req<Booking>(`/api/bookings/${id}/review`, { method: 'POST', body: JSON.stringify({ rating, review, photo }) })
+
+/* socket */
+let socket: Socket | null = null
+export function getSocket(): Socket {
+  if (!socket) socket = API_BASE ? io(API_BASE, { transports: ['websocket', 'polling'] }) : io({ path: '/socket.io', transports: ['websocket', 'polling'] })
+  return socket
+}
