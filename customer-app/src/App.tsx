@@ -5,10 +5,14 @@ import { useStore } from './store'
 import { fetchMe, getToken } from './api'
 
 import Login from './screens/Login'
+import NameSelect from './screens/NameSelect'
 import CountrySelect from './screens/CountrySelect'
 import LocationSelect from './screens/LocationSelect'
 import Home from './screens/Home'
 import ServiceDetails from './screens/ServiceDetails'
+import Book from './screens/Book'
+import Confirmed from './screens/Confirmed'
+import Notifications from './screens/Notifications'
 import Cart from './screens/Cart'
 import AddressSelect from './screens/AddressSelect'
 import Schedule from './screens/Schedule'
@@ -40,12 +44,16 @@ export default function App() {
           <Routes>
             <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
             <Route element={<Guard authed={!!user} />}>
+              <Route path="/onboarding/name" element={<NameSelect />} />
               <Route path="/onboarding/country" element={<CountrySelect />} />
               <Route path="/onboarding/location" element={<LocationSelect />} />
             </Route>
-            <Route element={<Guard authed={!!user} needsOnboard={!!user && !user.country} />}>
+            <Route element={<AppGuard user={user} />}>
               <Route path="/home" element={<Home />} />
               <Route path="/service/:id" element={<ServiceDetails />} />
+              <Route path="/book/:id" element={<Book />} />
+              <Route path="/confirmed/:id" element={<Confirmed />} />
+              <Route path="/notifications" element={<Notifications />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/address" element={<AddressSelect />} />
               <Route path="/schedule" element={<Schedule />} />
@@ -69,9 +77,18 @@ export default function App() {
   )
 }
 
-function Guard({ authed, needsOnboard }: { authed: boolean; needsOnboard?: boolean }) {
+function Guard({ authed }: { authed: boolean }) {
   const loc = useLocation()
   if (!authed) return <Navigate to="/login" replace state={{ from: loc }} />
-  if (needsOnboard) return <Navigate to="/onboarding/country" replace />
+  return <Outlet />
+}
+
+// Gate for the main app: an authenticated user must have a name and a location
+// before reaching the home screen. Sends them to whichever step is missing.
+function AppGuard({ user }: { user: ReturnType<typeof useStore>['user'] }) {
+  const loc = useLocation()
+  if (!user) return <Navigate to="/login" replace state={{ from: loc }} />
+  if (!user.name?.trim()) return <Navigate to="/onboarding/name" replace />
+  if (!user.location) return <Navigate to="/onboarding/location" replace />
   return <Outlet />
 }

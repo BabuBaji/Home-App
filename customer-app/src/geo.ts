@@ -1,28 +1,84 @@
 import { Geolocation } from '@capacitor/geolocation'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 
 export interface Place { label: string; sub?: string; lat: number; lng: number }
 
-/** Native GPS via Capacitor (falls back to browser geolocation on web). */
-export async function getCurrentPosition(): Promise<{ lat: number; lng: number }> {
-  try {
-    const perm = await Geolocation.checkPermissions()
-    if (perm.location !== 'granted') {
-      const r = await Geolocation.requestPermissions()
-      if (r.location !== 'granted') throw new Error('Location permission denied')
-    }
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 })
-    return { lat: pos.coords.latitude, lng: pos.coords.longitude }
-  } catch (e) {
-    // browser fallback
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) return reject(e)
-      navigator.geolocation.getCurrentPosition(
-        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        (err) => reject(err),
-        { enableHighAccuracy: true, timeout: 10000 },
-      )
-    })
+/** Typed reason so the UI can react ('permission' vs 'disabled' vs generic). */
+export class GeoError extends Error {
+  constructor(public reason: 'permission' | 'disabled' | 'unavailable', message: string) {
+    super(message)
   }
+}
+
+// Native bridge (see android/.../LocationServicesPlugin.java) that reports and
+// turns on the system location toggle via the in-app "Turn on location" dialog.
+interface LocationServicesPlugin {
+  check(): Promise<{ enabled: boolean }>
+  requestEnable(): Promise<{ enabled: boolean }>
+}
+const LocationServices = registerPlugin<LocationServicesPlugin>('LocationServices')
+
+/** Ask for app location permission. Returns true if granted.
+ *  checkPermissions() can reject when location services are off, so stay tolerant. */
+async function ensurePermission(): Promise<boolean> {
+  try {
+    let perm = await Geolocation.checkPermissions()
+    if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
+      perm = await Geolocation.requestPermissions()
+    }
+    return perm.location === 'granted' || perm.coarseLocation === 'granted'
+  } catch {
+    try {
+      const perm = await Geolocation.requestPermissions()
+      return perm.location === 'granted' || perm.coarseLocation === 'granted'
+    } catch {
+      return true // don't block — let the position call surface the real failure
+    }
+  }
+}
+
+/** Make sure the system location toggle is on; pops the system dialog if not. */
+export async function ensureLocationEnabled(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return true
+  try {
+    const { enabled } = await LocationServices.check()
+    if (enabled) return true
+    const r = await LocationServices.requestEnable()
+    return r.enabled
+  } catch {
+    return true // plugin missing — don't block the flow
+  }
+}
+
+/**
+ * Native GPS via Capacitor (falls back to browser geolocation on web).
+ * Proactively requests permission and asks the OS to turn on location.
+ */
+export async function getCurrentPosition(): Promise<{ lat: number; lng: number }> {
+  if (Capacitor.isNativePlatform()) {
+    // Turn on the system location toggle FIRST (pops the in-app dialog); doing this
+    // before checkPermissions avoids its "location services not enabled" rejection.
+    const enabled = await ensureLocationEnabled()
+    if (!(await ensurePermission())) throw new GeoError('permission', 'Location permission denied')
+    if (!enabled) throw new GeoError('disabled', 'Location is turned off')
+    try {
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 })
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude }
+    } catch {
+      // GPS may not get a fix indoors — retry with a faster network/coarse fix.
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 })
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude }
+    }
+  }
+  // browser fallback (web)
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new GeoError('unavailable', 'Geolocation not available'))
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      (err) => reject(err?.code === 1 ? new GeoError('permission', 'Location permission denied') : new GeoError('unavailable', 'Could not get location')),
+      { enableHighAccuracy: true, timeout: 15000 },
+    )
+  })
 }
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org'

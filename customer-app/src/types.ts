@@ -5,20 +5,35 @@ export interface Service {
   price: number
   category: string
   available: boolean
+  image?: string | null
 }
 
-export interface Duration { id: string; label: string; minutes: number; price: number }
+export interface Duration { id: string; label: string; minutes: number; price: number; original?: number }
 export interface Review { name: string; rating: number; text: string; date: string }
+
+export interface Term { t: string; d: string }
 
 export interface ServiceDetail extends Service {
   description: string
   includes: string[]
   excludes: string[]
+  note?: string
+  terms?: Term[]
   durations: Duration[]
   rating: number
   reviewsCount: number
   reviews: Review[]
 }
+
+export interface Referral { code: string; reward: number; label: string }
+export interface TrustBadge { icon: string; label: string }
+export interface HomeContent { referral: Referral; trust: TrustBadge[]; instantEta: number }
+
+export interface AppNotification { id: string; type: 'booking' | 'offer' | 'cashback'; title: string; body: string; time: string | null; bookingId?: number }
+
+export interface PaymentOption { id: string; name: string; icon: string; sub?: string }
+export interface PaymentGroup { group: string; recommended?: boolean; options: PaymentOption[] }
+export interface ChargeResult { status: string; txnId: string; method: string; amount: number }
 
 export interface CartItem {
   id: string

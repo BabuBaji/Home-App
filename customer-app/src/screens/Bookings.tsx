@@ -11,7 +11,7 @@ const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_pro
 export default function Bookings() {
   const nav = useNavigate()
   const toast = useToast()
-  const { addToCart, clearCart } = useStore()
+  const { setBookingType } = useStore()
   const [tab, setTab] = useState<Tab>('Upcoming')
   const [items, setItems] = useState<Booking[] | null>(null)
 
@@ -21,7 +21,7 @@ export default function Bookings() {
   const list = items.filter((b) => tab === 'Upcoming' ? ACTIVE.includes(b.status) : tab === 'Cancelled' ? b.status === 'cancelled' : b.status === 'completed')
 
   function rebook(b: Booking) {
-    clearCart(); b.items.forEach((i) => addToCart(i)); toast('Added to a new booking'); nav('/cart')
+    setBookingType('instant'); nav(`/book/${b.items[0].id}`)
   }
   function invoice(b: Booking) {
     const lines = [

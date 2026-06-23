@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { useToast } from '../components/UI'
 import { useStore } from '../store'
 import { updateMe } from '../api'
-import { getCurrentPosition, reverseGeocode, nearbyPlaces, searchPlaces, type Place } from '../geo'
+import { getCurrentPosition, reverseGeocode, nearbyPlaces, searchPlaces, GeoError, type Place } from '../geo'
 
 export default function LocationSelect() {
   const nav = useNavigate()
   const toast = useToast()
-  const { setUser } = useStore()
+  const { user, setUser } = useStore()
+  const changing = !!user?.location // re-opened from Home to change location, not onboarding
   const [detecting, setDetecting] = useState(false)
   const [current, setCurrent] = useState<Place | null>(null)
   const [nearby, setNearby] = useState<Place[]>([])
@@ -16,9 +17,10 @@ export default function LocationSelect() {
   const [results, setResults] = useState<Place[]>([])
   const [sel, setSel] = useState<Place | null>(null)
   const [busy, setBusy] = useState(false)
+  const [geoErr, setGeoErr] = useState('')
 
   async function detect() {
-    setDetecting(true)
+    setDetecting(true); setGeoErr('')
     try {
       const { lat, lng } = await getCurrentPosition()
       const rev = await reverseGeocode(lat, lng).catch(() => ({ label: 'Current location', sub: '', raw: {} }))
@@ -27,7 +29,13 @@ export default function LocationSelect() {
       const city = (rev as any).raw?.address?.city || (rev as any).raw?.address?.state || rev.label.split(',').pop()?.trim() || ''
       setNearby(await nearbyPlaces(lat, lng, city))
     } catch (e) {
-      toast('Could not get GPS location. Please allow location or search manually.')
+      const reason = e instanceof GeoError ? e.reason : 'unavailable'
+      const msg = reason === 'permission'
+        ? 'Location permission is needed. Please allow it, or search your area below.'
+        : reason === 'disabled'
+        ? 'Turn on Location/GPS to detect your area, or search it below.'
+        : 'Could not detect your location. Please search your area below.'
+      setGeoErr(msg); toast(msg)
     } finally { setDetecting(false) }
   }
   useEffect(() => { detect() }, [])
@@ -60,7 +68,7 @@ export default function LocationSelect() {
   return (
     <div className="screen">
       <div className="onb-hero">
-        <div className="onb-step">Step 2 of 2</div>
+        <div className="onb-step">{changing ? 'Change location' : 'Step 2 of 2'}</div>
         <h1>Your location</h1>
         <p>We'll find experts near you.</p>
       </div>
@@ -69,6 +77,13 @@ export default function LocationSelect() {
           <span className="gps-ic">{detecting ? '⏳' : '🎯'}</span>
           <span className="grow"><b>{detecting ? 'Detecting your location…' : 'Use my current location'}</b><span className="muted sm">via GPS</span></span>
         </button>
+
+        {geoErr && !detecting && (
+          <div className="loc-warn">
+            <span>⚠️ {geoErr}</span>
+            <button className="bk-btn" onClick={detect}>Turn on & retry</button>
+          </div>
+        )}
 
         <div className="search" style={{ marginTop: 14 }}><span>🔍</span><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search area, street, city…" /></div>
 

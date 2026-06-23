@@ -1,84 +1,119 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Header, FooterCTA, Loading, useToast } from '../components/UI'
+import { Loading, useToast } from '../components/UI'
 import { useStore } from '../store'
-import { fetchService } from '../api'
-import type { ServiceDetail, Duration } from '../types'
+import { fetchService, fetchServices } from '../api'
+import type { ServiceDetail, Service } from '../types'
 
 export default function ServiceDetails() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
-  const { addToCart, inCart } = useStore()
+  const { setBookingType } = useStore()
   const [s, setS] = useState<ServiceDetail | null>(null)
-  const [dur, setDur] = useState<Duration | null>(null)
+  const [services, setServices] = useState<Service[]>([])
+  const [openTerms, setOpenTerms] = useState(false)
 
   useEffect(() => {
-    fetchService(id!).then((d) => { setS(d); setDur(d.durations[1] || d.durations[0]) }).catch(() => toast('Could not load service'))
+    setOpenTerms(false)
+    fetchService(id!).then(setS).catch(() => toast('Could not load service'))
+    fetchServices().then((c) => setServices(c.services.filter((x) => x.available))).catch(() => {})
   }, [id])
 
-  if (!s || !dur) return <div className="screen"><Header title="Service" /><Loading /></div>
+  if (!s) return <div className="screen"><Loading /></div>
 
-  function add(goNext: boolean) {
-    addToCart({ id: s!.id, name: s!.name, icon: s!.icon, category: s!.category, durationId: dur!.id, durationLabel: dur!.label, price: dur!.price })
-    if (goNext) nav('/cart'); else toast(`${s!.name} added to your booking`)
+  function book(mode: 'instant' | 'schedule') {
+    setBookingType(mode)
+    nav(`/book/${s!.id}`)
   }
 
   return (
     <div className="screen">
-      <Header title={s.name} />
-      <div className="content pad-cta">
-        <div className="sd-hero">
-          <span className="sd-emoji">{s.icon}</span>
-          <div>
-            <h2>{s.name}</h2>
-            <div className="sd-rate">⭐ {s.rating} <span className="muted">· {s.reviewsCount} reviews</span></div>
-          </div>
-        </div>
-        <p className="sd-desc">{s.description}</p>
-
-        <h3 className="section-title">Choose duration</h3>
-        <div className="dur-grid">
-          {s.durations.map((d) => (
-            <button key={d.id} className={`dur ${dur.id === d.id ? 'sel' : ''}`} onClick={() => setDur(d)}>
-              <span className="dl">{d.label}</span>
-              <span className="dp">₹{d.price}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="incl-2">
-          <div className="card pad">
-            <div className="incl-h ok">✓ What's included</div>
-            <ul>{s.includes.map((i) => <li key={i}>{i}</li>)}</ul>
-          </div>
-          <div className="card pad">
-            <div className="incl-h no">✕ Not included</div>
-            <ul>{s.excludes.map((i) => <li key={i}>{i}</li>)}</ul>
-          </div>
-        </div>
-
-        <h3 className="section-title">Ratings & reviews</h3>
-        <div className="card pad">
-          <div className="rev-top"><span className="rev-big">{s.rating}</span><span className="muted">⭐ from {s.reviewsCount} reviews</span></div>
-          {s.reviews.map((r, i) => (
-            <div key={i} className="rev">
-              <div className="rev-h"><b>{r.name}</b><span className="muted sm">{r.date}</span></div>
-              <div className="rev-stars">{'★'.repeat(r.rating)}<span className="dim">{'★'.repeat(5 - r.rating)}</span></div>
-              <p className="rev-t">{r.text}</p>
+      <button className="sheet-back overlay" onClick={() => nav(-1)}>✕</button>
+      <div className="content pad-cta no-pad">
+        {/* hero */}
+        <div className="sd2-hero">
+          {s.image
+            ? <img className="sd2-img" alt="" src={s.image} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+            : <div className="sd2-img sd2-emoji">{s.icon}</div>}
+          <div className="sd2-fade" />
+          <div className="sd2-meta">
+            <span className="sd2-eta">⚡ Arrives in 5 min</span>
+            <h1 className="sd2-name">{s.name}</h1>
+            <div className="sd2-row">
+              <span className="sd2-rate">⭐ {s.rating} <span className="dim">({s.reviewsCount})</span></span>
+              <span className="sd2-dot">·</span>
+              <span className="sd2-price">from ₹{s.price}</span>
             </div>
-          ))}
+          </div>
+        </div>
+
+        <div className="sd2-body">
+          {s.description && <p className="sd2-desc">{s.description}</p>}
+
+          {/* other services */}
+          <div className="svc-chips">
+            {services.map((x) => (
+              <button key={x.id} className={`svc-chip ${x.id === s!.id ? 'sel' : ''}`} onClick={() => nav(`/service/${x.id}`, { replace: true })}>
+                <span className="svc-chip-th">
+                  {x.image ? <img alt="" src={x.image} onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} /> : <span>{x.icon}</span>}
+                </span>
+                <span className="svc-chip-name">{x.name}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* trained to */}
+          <div className="info-card">
+            <h3 className="incl-head"><span className="hi ok">✓</span> The expert is trained to</h3>
+            <ul className="incl-list ok">
+              {s.includes.map((i) => <li key={i}><span className="ic ok">✓</span>{i}</li>)}
+            </ul>
+          </div>
+
+          {/* not included */}
+          {s.excludes.length > 0 && (
+            <div className="info-card">
+              <h3 className="incl-head"><span className="hi no">✕</span> What is not included</h3>
+              <ul className="incl-list no">
+                {s.excludes.map((i) => <li key={i}><span className="ic no">✕</span>{i}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {/* equipment note */}
+          {s.note && (
+            <div className="equip-note"><span className="equip-ic">🧹🪣</span><span>{s.note}</span></div>
+          )}
+
+          {/* terms & conditions */}
+          {s.terms && s.terms.length > 0 && (
+            <div className="info-card terms-card">
+              <button className="terms-toggle" onClick={() => setOpenTerms((o) => !o)}>
+                <span className="hi t">📄</span>
+                <span className="grow">Terms &amp; Conditions</span>
+                <span className={`terms-chev ${openTerms ? 'up' : ''}`}>⌄</span>
+              </button>
+              {openTerms && (
+                <div className="terms-list">
+                  {s.terms.map((t, i) => (
+                    <div className="term" key={i}>
+                      <div className="term-t">{i + 1}. {t.t}</div>
+                      <div className="term-d">{t.d}</div>
+                    </div>
+                  ))}
+                  <p className="terms-foot">By booking, you agree to HomeHelp's Terms &amp; Conditions and Privacy Policy.</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <FooterCTA>
-        <div className="sd-cta">
-          <button className="btn-ghost sd-add" onClick={() => add(false)} disabled={inCart(s.id)}>
-            {inCart(s.id) ? '✓ Added' : '+ Add to booking'}
-          </button>
-          <button className="btn sd-book" onClick={() => add(true)}>Book · ₹{dur.price}</button>
-        </div>
-      </FooterCTA>
+      <div className="footer-cta sheet-cta">
+        <button className="btn-outline half" onClick={() => book('schedule')}>Schedule</button>
+        <button className="btn half" onClick={() => book('instant')}>Book Instant</button>
+      </div>
     </div>
   )
 }

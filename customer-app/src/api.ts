@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client'
-import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket } from './types'
+import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
@@ -25,6 +25,13 @@ export const googleAuth = (p: { credential?: string; demo?: boolean }) => req<{ 
 /* catalogue */
 export const fetchServices = () => req<{ categories: string[]; services: Service[] }>('/api/services')
 export const fetchService = (id: string) => req<ServiceDetail>(`/api/services/${id}`)
+export const fetchHome = () => req<HomeContent>('/api/home')
+export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
+
+/* favourites */
+export const fetchFavourites = () => req<string[]>('/api/favourites')
+export const addFavouriteApi = (id: string) => req<string[]>(`/api/favourites/${id}`, { method: 'POST' })
+export const removeFavouriteApi = (id: string) => req<string[]>(`/api/favourites/${id}`, { method: 'DELETE' })
 
 /* coupons & quote */
 export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
@@ -38,6 +45,11 @@ export const fetchAddresses = () => req<Address[]>('/api/addresses')
 export const addAddressApi = (a: Partial<Address>) => req<Address>('/api/addresses', { method: 'POST', body: JSON.stringify(a) })
 export const setDefaultAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}/default`, { method: 'PATCH' })
 export const deleteAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}`, { method: 'DELETE' })
+
+/* payment gateway */
+export const fetchPaymentMethods = () => req<{ methods: PaymentGroup[] }>('/api/payment/methods')
+export const createOrder = (amount: number) => req<{ orderId: string; amount: number; currency: string }>('/api/payment/order', { method: 'POST', body: JSON.stringify({ amount }) })
+export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
 
 /* wallet */
 export const fetchWallet = () => req<{ balance: number; cashback: number; transactions: Transaction[] }>('/api/wallet')

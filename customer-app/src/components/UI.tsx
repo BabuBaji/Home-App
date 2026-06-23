@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { ChevronLeft, House, CalendarDays, Wallet, User, AlertTriangle } from 'lucide-react'
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string) => void>(() => {})
@@ -28,7 +29,7 @@ export function Header({ title, subtitle, right, back = true }: {
   const nav = useNavigate()
   return (
     <header className="appbar">
-      {back ? <button className="iconbtn" onClick={() => nav(-1)}>‹</button> : <span className="iconbtn ghost" />}
+      {back ? <button className="iconbtn" onClick={() => nav(-1)}><ChevronLeft size={24} /></button> : <span className="iconbtn ghost" />}
       <div className="titles">
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
@@ -40,20 +41,23 @@ export function Header({ title, subtitle, right, back = true }: {
 
 /* ---------- Bottom nav ---------- */
 const NAV = [
-  { to: '/home', label: 'Home', icon: '🏠' },
-  { to: '/bookings', label: 'Bookings', icon: '🗓' },
-  { to: '/wallet', label: 'Wallet', icon: '👛' },
-  { to: '/profile', label: 'Profile', icon: '👤' },
+  { to: '/home', label: 'Home', Icon: House },
+  { to: '/bookings', label: 'Bookings', Icon: CalendarDays },
+  { to: '/wallet', label: 'Wallet', Icon: Wallet },
+  { to: '/profile', label: 'Profile', Icon: User },
 ]
 export function BottomNav() {
   const { pathname } = useLocation()
   return (
     <nav className="bottomnav">
-      {NAV.map((n) => (
-        <Link key={n.to} to={n.to} className={pathname.startsWith(n.to) ? 'active' : ''}>
-          <span className="ni">{n.icon}</span>{n.label}
-        </Link>
-      ))}
+      {NAV.map((n) => {
+        const active = pathname.startsWith(n.to)
+        return (
+          <Link key={n.to} to={n.to} className={active ? 'active' : ''}>
+            <span className="ni"><n.Icon size={22} strokeWidth={active ? 2.4 : 2} /></span>{n.label}
+          </Link>
+        )
+      })}
     </nav>
   )
 }
@@ -70,7 +74,7 @@ export function Loading() {
 export function ErrorState({ msg, onRetry }: { msg: string; onRetry: () => void }) {
   return (
     <div className="state">
-      <div className="ico">⚠️</div>
+      <div className="ico"><AlertTriangle size={42} /></div>
       <h3>Something went wrong</h3>
       <p>{msg}</p>
       <button className="btn" style={{ maxWidth: 200 }} onClick={onRetry}>Retry</button>

@@ -53,8 +53,7 @@ export default function Profile() {
         <h3 className="section-title">Payment Methods</h3>
         <div className="card pad">
           <div className="pm-row"><span>💳</span><div className="grow">HDFC Debit •••• 4821</div><span className="muted sm">Default</span></div>
-          <div className="pm-row"><span>UPI⟫</span><div className="grow">rahul@okhdfcbank</div></div>
-          <button className="add-more" style={{ marginTop: 6 }} onClick={() => toast('Add payment method')}>+ Add payment method</button>
+          <button className="add-more" style={{ marginTop: 6 }} onClick={() => toast('Add payment method')}>+ Add UPI / payment method</button>
         </div>
 
         {/* notifications */}

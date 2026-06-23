@@ -69,7 +69,7 @@ export default function Track() {
 
         {b.status !== 'cancelled' && (
           <div className="map">
-            <svg viewBox="0 0 360 200" preserveAspectRatio="none"><path d="M 36 50 C 130 60,150 150,250 150 S 300 170,320 168" stroke="#5b3df0" strokeWidth="4" fill="none" strokeLinecap="round" strokeDasharray={b.status === 'arrived' ? '8 8' : '0'} /></svg>
+            <svg viewBox="0 0 360 200" preserveAspectRatio="none"><path d="M 36 50 C 130 60,150 150,250 150 S 300 170,320 168" stroke="#0ea5a4" strokeWidth="4" fill="none" strokeLinecap="round" strokeDasharray={b.status === 'arrived' ? '8 8' : '0'} /></svg>
             {!serving && <div className="pro-pin" style={{ left: posLeft, top: posTop }}>🛵</div>}
             {serving && <div className="serving-zone">🧹</div>}
             <div className="home-pin">🏠</div>

@@ -2,7 +2,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { SERVICES_SEED, CATEGORIES } from './catalog.js'
+import { SERVICES_SEED, SERVICE_IMAGES, CATEGORIES } from './catalog.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 export const db = new DatabaseSync(join(__dirname, 'homehelp.db'))
@@ -45,14 +45,26 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL,
     message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Open', ref TEXT, created TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS favourites (
+    user_id INTEGER NOT NULL, service_id TEXT NOT NULL, created TEXT NOT NULL,
+    PRIMARY KEY (user_id, service_id)
+  );
 `)
 
 export { CATEGORIES }
 
-if (db.prepare('SELECT COUNT(*) AS n FROM services').get().n === 0) {
-  const ins = db.prepare('INSERT INTO services (id,name,icon,price,category,available,sort) VALUES (?,?,?,?,?,?,?)')
-  SERVICES_SEED.forEach((r, i) => ins.run(...r, i))
-  console.log(`[db] seeded ${SERVICES_SEED.length} services`)
+// Upsert the catalogue on every boot so name/price/icon/category changes (e.g. the
+// Snabbit rename) apply to an already-seeded DB without wiping bookings.
+{
+  const up = db.prepare(`INSERT INTO services (id,name,icon,price,category,available,sort)
+    VALUES (?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, icon=excluded.icon,
+      price=excluded.price, category=excluded.category, sort=excluded.sort`)
+  SERVICES_SEED.forEach((r, i) => up.run(...r, i))
+  // prune services removed from the catalogue (past bookings keep their own item snapshots)
+  const keep = SERVICES_SEED.map((r) => `'${r[0]}'`).join(',')
+  db.exec(`DELETE FROM services WHERE id NOT IN (${keep})`)
+  console.log(`[db] synced ${SERVICES_SEED.length} services`)
 }
 
 const now = () => new Date().toISOString()
@@ -60,11 +72,11 @@ const now = () => new Date().toISOString()
 /* ---------- services ---------- */
 export function getServices() {
   return db.prepare('SELECT id,name,icon,price,category,available FROM services ORDER BY sort').all()
-    .map((s) => ({ ...s, available: !!s.available }))
+    .map((s) => ({ ...s, available: !!s.available, image: SERVICE_IMAGES[s.id] || null }))
 }
 export function getServiceById(id) {
   const s = db.prepare('SELECT id,name,icon,price,category,available FROM services WHERE id=?').get(id)
-  return s ? { ...s, available: !!s.available } : null
+  return s ? { ...s, available: !!s.available, image: SERVICE_IMAGES[s.id] || null } : null
 }
 export function updateService(id, patch) {
   const cur = db.prepare('SELECT * FROM services WHERE id=?').get(id)
@@ -76,19 +88,18 @@ export function updateService(id, patch) {
 }
 
 /* ---------- users ---------- */
+// New accounts start with just a welcome wallet credit. No fake name or
+// addresses — the user supplies those during onboarding (name + location).
 function provisionExtras(uid) {
-  db.prepare('INSERT INTO addresses (user_id,label,line,house,street,city,pincode,is_default) VALUES (?,?,?,?,?,?,?,1)')
-    .run(uid, 'Home', '221B, Baker Street, Bandra West, Mumbai - 400050', '221B', 'Baker Street', 'Mumbai', '400050')
-  db.prepare('INSERT INTO addresses (user_id,label,line,street,city,pincode,is_default) VALUES (?,?,?,?,?,?,0)')
-    .run(uid, 'Work', 'WeWork, BKC, Mumbai - 400051', 'BKC', 'Mumbai', '400051')
   db.prepare('INSERT INTO transactions (user_id,type,title,amount,balance,created) VALUES (?,?,?,?,?,?)')
-    .run(uid, 'credit', 'Added to wallet', 1000, 1240, now())
+    .run(uid, 'credit', 'Welcome bonus', 1240, 1240, now())
 }
 export function findOrCreateUser(phone) {
   let u = db.prepare('SELECT * FROM users WHERE phone=?').get(phone)
   if (!u) {
-    const info = db.prepare('INSERT INTO users (phone,name,email,provider,created) VALUES (?,?,?,?,?)')
-      .run(phone, 'Rahul Sharma', 'rahul.sharma@gmail.com', 'phone', now())
+    // name left empty so the app routes the user to the "What's your name?" step.
+    const info = db.prepare('INSERT INTO users (phone,name,email,provider,country,created) VALUES (?,?,?,?,?,?)')
+      .run(phone, '', '', 'phone', 'IN', now())
     provisionExtras(info.lastInsertRowid)
     u = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid)
   }
@@ -97,12 +108,21 @@ export function findOrCreateUser(phone) {
 export function findOrCreateGoogleUser({ email, name, avatar }) {
   let u = db.prepare('SELECT * FROM users WHERE email=?').get(email)
   if (!u) {
-    const info = db.prepare('INSERT INTO users (phone,name,email,provider,avatar,created) VALUES (?,?,?,?,?,?)')
-      .run(null, name || 'Google User', email, 'google', avatar || null, now())
+    const info = db.prepare('INSERT INTO users (phone,name,email,provider,avatar,country,created) VALUES (?,?,?,?,?,?,?)')
+      .run(null, name || '', email, 'google', avatar || null, 'IN', now())
     provisionExtras(info.lastInsertRowid)
     u = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid)
   }
   return u
+}
+// When the user confirms their location and has no address yet, create a
+// default "Home" address from the chosen place so bookings have somewhere to go.
+export function ensureDefaultAddressFromLocation(uid, city, location) {
+  if (!location && !city) return
+  const n = db.prepare('SELECT COUNT(*) AS n FROM addresses WHERE user_id=?').get(uid).n
+  if (n > 0) return
+  db.prepare('INSERT INTO addresses (user_id,label,line,city,is_default) VALUES (?,?,?,?,1)')
+    .run(uid, 'Home', location || city, city || null)
 }
 export function getUser(id) { return db.prepare('SELECT * FROM users WHERE id=?').get(id) }
 export function updateUser(id, patch) {
@@ -166,6 +186,19 @@ export function cancelBookingRow(id, reason, fee, refund) {
 export function setBookingReview(id, rating, review, photo) {
   db.prepare('UPDATE bookings SET rating=?, review=?, photo=? WHERE id=?').run(rating, review ?? null, photo ?? null, id)
   return getBooking(id)
+}
+
+/* ---------- favourites ---------- */
+export function getFavourites(uid) {
+  return db.prepare('SELECT service_id FROM favourites WHERE user_id=? ORDER BY created DESC').all(uid).map((r) => r.service_id)
+}
+export function addFavourite(uid, sid) {
+  db.prepare('INSERT OR IGNORE INTO favourites (user_id,service_id,created) VALUES (?,?,?)').run(uid, sid, now())
+  return getFavourites(uid)
+}
+export function removeFavourite(uid, sid) {
+  db.prepare('DELETE FROM favourites WHERE user_id=? AND service_id=?').run(uid, sid)
+  return getFavourites(uid)
 }
 
 /* ---------- support ---------- */

@@ -5,13 +5,14 @@ import { Server } from 'socket.io'
 import {
   getServices, getServiceById, updateService,
   findOrCreateUser, findOrCreateGoogleUser, getUser, updateUser,
-  getAddresses, addAddress, setDefaultAddress, deleteAddress,
+  getAddresses, addAddress, setDefaultAddress, deleteAddress, ensureDefaultAddressFromLocation,
   getTransactions, addTransaction,
   createBooking, getBooking, getBookings, setBookingStatus, setPaymentStatus,
   rescheduleBooking, cancelBookingRow, setBookingReview,
   createTicket, getTickets, CATEGORIES,
+  getFavourites, addFavourite, removeFavourite,
 } from './db.js'
-import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS } from './catalog.js'
+import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
 
 const app = express()
 app.use(cors())
@@ -36,7 +37,7 @@ function priceItems(rawItems) {
     const s = getServiceById(it.id)
     if (!s || !s.available) return { error: `"${it.id}" is not available` }
     const durs = durationsFor(s.price)
-    const dur = durs.find((d) => d.id === (it.durationId || '1h')) || durs[1]
+    const dur = durs.find((d) => d.id === (it.durationId || '60m')) || durs[0]
     items.push({ id: s.id, name: s.name, icon: s.icon, category: s.category, durationId: dur.id, durationLabel: dur.label, price: dur.price })
   }
   const subtotal = Math.max(0, items.reduce((sum, x) => sum + x.price, 0))
@@ -90,6 +91,36 @@ app.patch('/api/services/:id', (req, res) => {
   io.emit('services:update', getServices()); res.json(u)
 })
 
+/* ---------- home content (referral + trust badges) ---------- */
+app.get('/api/home', (_q, res) => res.json({
+  referral: REFERRAL,
+  trust: TRUST_BADGES,
+  instantEta: 5, // minutes
+}))
+app.get('/api/referral', (_q, res) => res.json(REFERRAL))
+
+/* ---------- payment gateway (mock) ---------- */
+const orders = new Map()
+app.get('/api/payment/methods', (_q, res) => res.json({ methods: PAYMENT_METHODS }))
+app.post('/api/payment/order', auth, (req, res) => {
+  const amount = Math.max(0, Math.round(Number(req.body?.amount) || 0))
+  if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' })
+  const orderId = 'ORD' + Math.floor(100000 + Math.random() * 899999)
+  orders.set(orderId, { amount, user: req.user.id, paid: false })
+  res.json({ orderId, amount, currency: 'INR' })
+})
+app.post('/api/payment/charge', auth, (req, res) => {
+  const method = String(req.body?.method || 'phonepe')
+  const order = orders.get(String(req.body?.orderId || ''))
+  const amount = order ? order.amount : Math.max(0, Math.round(Number(req.body?.amount) || 0))
+  if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' })
+  if (method === 'wallet' && req.user.wallet < amount) return res.status(402).json({ error: 'Insufficient wallet balance' })
+  // simulate gateway authorisation
+  const txnId = 'TXN' + Math.floor(10000000 + Math.random() * 89999999)
+  if (order) order.paid = true
+  res.json({ status: 'paid', txnId, method, amount })
+})
+
 /* ---------- coupons ---------- */
 app.get('/api/coupons', (_q, res) => res.json(COUPONS))
 app.post('/api/coupons/validate', (req, res) => {
@@ -107,9 +138,36 @@ app.post('/api/quote', (req, res) => {
   res.json({ items: q.items, coupon, ...priceBreakdown(q.subtotal, discount) })
 })
 
+/* ---------- favourites ---------- */
+app.get('/api/favourites', auth, (req, res) => res.json(getFavourites(req.user.id)))
+app.post('/api/favourites/:id', auth, (req, res) => res.json(addFavourite(req.user.id, req.params.id)))
+app.delete('/api/favourites/:id', auth, (req, res) => res.json(removeFavourite(req.user.id, req.params.id)))
+
+/* ---------- notifications ---------- */
+const STATUS_TITLES = {
+  confirmed: 'Booking confirmed', worker_assigned: 'Expert assigned', on_the_way: 'Your expert is on the way',
+  arrived: 'Your expert has arrived', in_progress: 'Service in progress', completed: 'Service completed', cancelled: 'Booking cancelled',
+}
+app.get('/api/notifications', auth, (req, res) => {
+  const items = []
+  for (const b of getBookings(req.user.id).slice(0, 6)) {
+    items.push({
+      id: 'b' + b.id, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update',
+      body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id,
+    })
+  }
+  items.push({ id: 'o1', type: 'offer', title: '20% off this weekend', body: 'Use code SAVE20 on any service. Limited time!', time: null })
+  items.push({ id: 'o2', type: 'cashback', title: `Earn ₹${REFERRAL.reward} per friend`, body: `Share code ${REFERRAL.code} and earn on every referral.`, time: null })
+  res.json(items)
+})
+
 /* ---------- me / addresses ---------- */
 app.get('/api/me', auth, (req, res) => res.json({ user: publicUser(req.user), addresses: getAddresses(req.user.id) }))
-app.patch('/api/me', auth, (req, res) => res.json({ user: publicUser(updateUser(req.user.id, req.body || {})) }))
+app.patch('/api/me', auth, (req, res) => {
+  const user = updateUser(req.user.id, req.body || {})
+  if (req.body?.location || req.body?.city) ensureDefaultAddressFromLocation(user.id, user.city, user.location)
+  res.json({ user: publicUser(user) })
+})
 app.get('/api/addresses', auth, (req, res) => res.json(getAddresses(req.user.id)))
 app.post('/api/addresses', auth, (req, res) => res.status(201).json(addAddress(req.user.id, req.body || {})))
 app.patch('/api/addresses/:id/default', auth, (req, res) => res.json(setDefaultAddress(req.user.id, Number(req.params.id))))
@@ -143,8 +201,10 @@ app.post('/api/bookings', auth, (req, res) => {
   const pb = priceBreakdown(q.subtotal, discount)
   const addresses = getAddresses(req.user.id)
   const address = body.address || addresses.find((a) => a.is_default)?.line || addresses[0]?.line || ''
-  const payment = body.payment || 'upi'
-  const paymentStatus = payment === 'cash' ? 'pending' : 'paid'
+  const payment = body.payment || 'phonepe'
+  const isCash = payment === 'cash'
+  const isWallet = payment === 'wallet'
+  const paymentStatus = isCash ? 'pending' : 'paid'
 
   const booking = createBooking({
     ref: ref(), user_id: req.user.id, type: body.type || 'instant', freq: body.freq, note: body.note,
@@ -153,7 +213,9 @@ app.post('/api/bookings', auth, (req, res) => {
     subtotal: pb.subtotal, fee: pb.fee, tax: pb.tax, discount: pb.discount, coupon, total: pb.total,
     status: 'confirmed', service_otp: otp4(),
   })
-  if (payment !== 'cash') addTransaction(req.user.id, 'debit', `Booking Payment ${booking.ref}`, pb.total, booking.ref)
+  // Only the in-app wallet reduces the balance; external gateway methods (UPI/card/
+  // netbanking) are settled outside, so we just record them as paid.
+  if (isWallet) addTransaction(req.user.id, 'debit', `Booking Payment ${booking.ref}`, pb.total, booking.ref)
   res.status(201).json(booking)
 })
 
