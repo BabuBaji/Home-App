@@ -14,6 +14,14 @@ export default function Track() {
   const toast = useToast()
   const [b, setB] = useState<Booking | null>(null)
   const [busy, setBusy] = useState(false)
+  const [otpInput, setOtpInput] = useState('')
+  const [, force] = useState(0)
+
+  // 1-second heartbeat so the live service timer re-renders
+  useEffect(() => {
+    const i = setInterval(() => force((n) => n + 1), 1000)
+    return () => clearInterval(i)
+  }, [])
 
   useEffect(() => {
     fetchBooking(bid).then((data) => {
@@ -44,7 +52,26 @@ export default function Track() {
   const posLeft = b.pos ? `${8 + b.pos.lng * 70}%` : '10%'
   const posTop = b.pos ? `${18 + b.pos.lat * 55}%` : '20%'
 
-  async function verify() { setBusy(true); try { setB(await verifyServiceOtp(bid, b!.service_otp)); toast('OTP verified · service started') } catch (e) { toast((e as Error).message) } finally { setBusy(false) } }
+  // live service timer
+  const DUR_MIN: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+  const targetMin = DUR_MIN[b.items[0]?.durationId] ?? 60
+  const startedMs = b.started_at ? new Date(b.started_at).getTime() : Date.now()
+  const elapsedSec = b.status === 'completed' ? targetMin * 60 : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+  const targetSec = targetMin * 60
+  const remainingSec = Math.max(0, targetSec - elapsedSec)
+  const pct = Math.min(100, (elapsedSec / targetSec) * 100)
+  const fmt = (s: number) => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`
+  }
+
+  async function verify() {
+    if (otpInput.length !== 4) return toast('Enter the 4-digit OTP')
+    setBusy(true)
+    try { setB(await verifyServiceOtp(bid, otpInput)); toast('OTP verified · service started') }
+    catch (e) { toast((e as Error).message) } finally { setBusy(false) }
+  }
   async function complete() { setBusy(true); try { await completeBooking(bid); nav(`/rate/${bid}`, { replace: true }) } catch (e) { toast((e as Error).message); setBusy(false) } }
 
   const phone = '+919876500000'
@@ -99,11 +126,25 @@ export default function Track() {
         </div>
 
         {b.status === 'arrived' && (
-          <div className="otp-box"><div className="ot">📋 Start Service OTP</div><p className="muted sm">Share this OTP with your expert to begin</p>
-            <div className="otp-digits">{b.service_otp.split('').map((d, i) => <span key={i}>{d}</span>)}</div><p className="muted sm">Valid for 10:00 mins</p></div>
+          <div className="otp-box">
+            <div className="ot">📋 Start Service OTP</div>
+            <p className="muted sm">Share this OTP with your expert to begin</p>
+            <div className="otp-digits">{b.service_otp.split('').map((d, i) => <span key={i}>{d}</span>)}</div>
+            <div className="otp-entry-wrap">
+              <p className="muted sm">Expert enters it here to start the service</p>
+              <input className="otp-entry" value={otpInput} inputMode="numeric" placeholder="• • • •"
+                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+            </div>
+          </div>
         )}
-        {b.status === 'in_progress' && (
-          <div className="otp-box light"><div className="ot">🕐 Estimated time left</div><div className="big-time">25 - 30 mins</div><p className="muted sm">We'll notify you when it's done.</p></div>
+        {(b.status === 'in_progress' || b.status === 'completed') && (
+          <div className="timer-card">
+            <div className="tc-top">{b.status === 'completed' ? '✅ Service completed' : '🧹 Service in progress'}</div>
+            <div className="tc-time">{fmt(elapsedSec)}</div>
+            <div className="tc-sub">{b.status === 'completed' ? 'total service time' : `elapsed · ${targetMin} min booked`}</div>
+            {b.status !== 'completed' && <div className="tc-bar"><span style={{ width: `${pct}%` }} /></div>}
+            {b.status !== 'completed' && <div className="tc-remain">{remainingSec > 0 ? `${fmt(remainingSec)} remaining` : 'Booked time reached — you can mark it complete'}</div>}
+          </div>
         )}
       </div>
 
@@ -114,7 +155,7 @@ export default function Track() {
             <button className="btn-ghost danger-ghost" onClick={() => nav(`/cancel/${bid}`)}>Cancel</button>
           </div>
         )}
-        {b.status === 'arrived' && <button className="btn full" onClick={verify} disabled={busy}>{busy ? 'Verifying…' : 'Verify OTP & Start Service'}</button>}
+        {b.status === 'arrived' && <button className="btn full" onClick={verify} disabled={busy || otpInput.length !== 4}>{busy ? 'Verifying…' : 'Verify OTP & Start Service'}</button>}
         {b.status === 'in_progress' && <button className="btn full" onClick={complete} disabled={busy}>Mark Service Completed</button>}
         {(b.status === 'completed') && <button className="btn full" onClick={() => nav(`/rate/${bid}`)}>Rate your experience</button>}
         {(b.status === 'cancelled') && <button className="btn full" onClick={() => nav('/bookings', { replace: true })}>Go to My Bookings</button>}

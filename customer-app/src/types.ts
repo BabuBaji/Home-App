@@ -102,6 +102,7 @@ export interface Booking {
   total: number
   status: BookingStatus
   service_otp: string
+  started_at?: string | null
   pro_name: string
   pro_rating: number
   rating?: number

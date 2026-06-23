@@ -7,7 +7,7 @@ import {
   findOrCreateUser, findOrCreateGoogleUser, getUser, updateUser,
   getAddresses, addAddress, setDefaultAddress, deleteAddress, ensureDefaultAddressFromLocation,
   getTransactions, addTransaction,
-  createBooking, getBooking, getBookings, setBookingStatus, setPaymentStatus,
+  createBooking, getBooking, getBookings, setBookingStatus, setBookingStarted, setPaymentStatus,
   rescheduleBooking, cancelBookingRow, setBookingReview,
   createTicket, getTickets, CATEGORIES,
   getFavourites, addFavourite, removeFavourite,
@@ -254,8 +254,8 @@ app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   if (String(req.body?.otp) !== b.service_otp) return res.status(401).json({ error: 'Incorrect OTP' })
-  const u = setBookingStatus(b.id, 'in_progress')
-  io.to(room(b.id)).emit('booking:update', { ...u, eta: 28 }); res.json(u)
+  const u = setBookingStarted(b.id) // status -> in_progress + stamp started_at
+  io.to(room(b.id)).emit('booking:update', u); res.json(u)
 })
 app.post('/api/bookings/:id/complete', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))

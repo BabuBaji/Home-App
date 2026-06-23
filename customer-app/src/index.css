@@ -903,3 +903,21 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 @keyframes spxFade { from { opacity: 0; transform: translateY(4px); } to { opacity: .82; transform: none; } }
 
 .splashx-foot { position: absolute; bottom: 38px; font-size: 12px; font-weight: 600; opacity: .85; animation: spxUp .6s ease .8s both; }
+
+/* ============================================================
+   Track: OTP entry + live service timer
+   ============================================================ */
+.otp-entry-wrap { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 14px; }
+.otp-entry { width: 170px; height: 54px; margin: 8px auto 0; display: block; text-align: center;
+  font-size: 26px; font-weight: 800; letter-spacing: 12px; padding-left: 12px;
+  border: 2px solid var(--primary); border-radius: 14px; color: var(--ink); background: var(--primary-50); }
+.otp-entry:focus { outline: none; box-shadow: 0 0 0 4px rgba(14,165,164,.15); }
+
+.timer-card { text-align: center; background: linear-gradient(160deg, #0ea5a4, #0c7d7c); color: #fff;
+  border-radius: 20px; padding: 24px 20px; box-shadow: 0 14px 34px rgba(14,165,164,.30); }
+.tc-top { font-size: 14px; font-weight: 700; opacity: .95; }
+.tc-time { font-size: 52px; font-weight: 800; letter-spacing: 1px; line-height: 1.1; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+.tc-sub { font-size: 12.5px; opacity: .85; }
+.tc-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,.28); overflow: hidden; margin: 16px 0 10px; }
+.tc-bar span { display: block; height: 100%; border-radius: 5px; background: #fff; transition: width 1s linear; }
+.tc-remain { font-size: 13px; font-weight: 600; opacity: .95; }
