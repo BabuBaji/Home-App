@@ -1,5 +1,14 @@
 package com.homehelp.pro
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -201,6 +210,39 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
 fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
+    var myLocation by remember { mutableStateOf("Locating…") }
+    var myLat by remember { mutableStateOf<Double?>(null) }
+    var myLng by remember { mutableStateOf<Double?>(null) }
+
+    fun readLocation() {
+        try {
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (loc != null) {
+                myLat = loc.latitude
+                myLng = loc.longitude
+                myLocation = "%.5f, %.5f".format(loc.latitude, loc.longitude)
+            } else {
+                myLocation = "Acquiring GPS fix…"
+            }
+        } catch (e: SecurityException) {
+            myLocation = "Location permission required"
+        }
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) readLocation() else myLocation = "Location permission denied"
+    }
+
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            readLocation()
+        } else {
+            permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header("On The Way", onBack = { nav.popBackStack() }, trailing = {
             Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
@@ -215,17 +257,33 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(10.dp))
-                    Text(job.address, fontSize = 13.sp, color = TextDark, modifier = Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text(job.address, fontSize = 13.sp, color = TextDark)
+                        Text("Destination: ${job.lat}, ${job.lng}", fontSize = 11.sp, color = TextGray)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Navigation, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Your GPS: $myLocation", fontSize = 12.sp, color = TextDark, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${job.distanceKm} km away", fontSize = 13.sp, color = TextGray, modifier = Modifier.weight(1f))
-                    OutlineButton("Navigate", modifier = Modifier.width(120.dp)) {
-                        toast(ctx, "Opening navigation to ${job.area}")
+                    OutlineButton("Navigate", modifier = Modifier.width(130.dp)) {
+                        launchNavigation(ctx, job.lat, job.lng, job.customerName)
                     }
                 }
             }
-            MapPlaceholder()
+            OsmMap(
+                destLat = job.lat,
+                destLng = job.lng,
+                destLabel = job.customerName,
+                myLat = myLat,
+                myLng = myLng,
+                modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(12.dp)),
+            )
             Card {
                 Text("Customer", fontSize = 12.sp, color = TextGray)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -240,12 +298,32 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 Text("Estimated Arrival", fontSize = 12.sp, color = TextGray)
                 Text("09:15 AM", fontWeight = FontWeight.SemiBold, color = TextDark)
             }
+            PrimaryButton("Start Turn-by-Turn Navigation") {
+                launchNavigation(ctx, job.lat, job.lng, job.customerName)
+            }
         }
         Box(Modifier.background(Color.White).padding(16.dp)) {
             PrimaryButton("Reached Location") {
                 vm.markArrived(); nav.navigate(Routes.START_SERVICE)
             }
         }
+    }
+}
+
+/** Hands off to the device's Google Maps turn-by-turn navigation; falls back to any maps/geo handler. */
+private fun launchNavigation(ctx: Context, lat: Double, lng: Double, label: String) {
+    val navIntent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$lat,$lng"))
+        .setPackage("com.google.android.apps.maps")
+    try {
+        ctx.startActivity(navIntent)
+        return
+    } catch (_: Exception) {
+    }
+    val geoIntent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)"))
+    try {
+        ctx.startActivity(geoIntent)
+    } catch (_: Exception) {
+        toast(ctx, "No maps app available to navigate")
     }
 }
 

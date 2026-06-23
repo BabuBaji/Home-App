@@ -33,6 +33,8 @@ import androidx.navigation.compose.rememberNavController
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // osmdroid requires a unique user-agent or OSM tile servers return 403.
+        org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
         setContent {
             HomeHelpTheme {
                 AppRoot()
@@ -54,6 +56,14 @@ object Routes {
     const val START_SERVICE = "startservice"
     const val IN_PROGRESS = "inprogress"
     const val JOB_COMPLETED = "jobcompleted"
+    const val P_PERSONAL = "profile_personal"
+    const val P_DOCUMENTS = "profile_documents"
+    const val P_BANK = "profile_bank"
+    const val P_AVAILABILITY = "profile_availability"
+    const val P_PREFERENCES = "profile_preferences"
+    const val P_NOTIFICATIONS = "profile_notifications"
+    const val P_HELP = "profile_help"
+    const val P_ABOUT = "profile_about"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -95,6 +105,14 @@ fun AppRoot() {
             composable(Routes.START_SERVICE) { StartServiceScreen(vm, nav) }
             composable(Routes.IN_PROGRESS) { InProgressScreen(vm, nav) }
             composable(Routes.JOB_COMPLETED) { JobCompletedScreen(vm, nav) }
+            composable(Routes.P_PERSONAL) { PersonalInfoScreen(vm, nav) }
+            composable(Routes.P_DOCUMENTS) { DocumentsScreen(vm, nav) }
+            composable(Routes.P_BANK) { BankDetailsScreen(vm, nav) }
+            composable(Routes.P_AVAILABILITY) { AvailabilityScreen(vm, nav) }
+            composable(Routes.P_PREFERENCES) { PreferencesScreen(vm, nav) }
+            composable(Routes.P_NOTIFICATIONS) { NotificationsScreen(vm, nav) }
+            composable(Routes.P_HELP) { HelpSupportScreen(nav) }
+            composable(Routes.P_ABOUT) { AboutScreen(nav) }
         }
     }
 }

@@ -3,6 +3,7 @@ package com.homehelp.pro
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -28,6 +29,8 @@ data class Job(
     val distanceKm: Double,
     val earnings: Int,
     val otp: String,
+    val lat: Double,
+    val lng: Double,
 )
 
 data class Booking(
@@ -74,20 +77,51 @@ class AppViewModel : ViewModel() {
     var pendingAmount by mutableIntStateOf(1200)
         private set
 
+    // ---- editable profile state (Profile sub-screens) ----
+    var workerName by mutableStateOf("Rahul Kumar")
+    var workerPhone by mutableStateOf("+91 90000 12345")
+    var workerEmail by mutableStateOf("rahul.kumar@email.com")
+    var workerCity by mutableStateOf("Mumbai")
+    val jobsCompleted = 128
+    val workerRating = 4.7
+
+    var bankName by mutableStateOf("HDFC Bank")
+    var bankAccount by mutableStateOf("xxxx xxxx 1234")
+    var bankIfsc by mutableStateOf("HDFC0001234")
+    var bankHolder by mutableStateOf("Rahul Kumar")
+
+    val availableDays = mutableStateMapOf(
+        "Mon" to true, "Tue" to true, "Wed" to true,
+        "Thu" to true, "Fri" to true, "Sat" to true, "Sun" to false,
+    )
+    var shiftStart by mutableStateOf("08:00 AM")
+    var shiftEnd by mutableStateOf("08:00 PM")
+
+    val jobPreferences = mutableStateMapOf(
+        "Utensil Wash" to true, "Mopping" to true, "Sweeping" to true,
+        "Dusting" to true, "Bathroom Cleaning" to true, "Laundry" to false,
+        "Kitchen Cleaning" to true,
+    )
+
+    var notifNewJobs by mutableStateOf(true)
+    var notifPayments by mutableStateOf(true)
+    var notifPromotions by mutableStateOf(false)
+    var notifRatings by mutableStateOf(true)
+
     // A rotating pool of incoming jobs so the workflow feels real on repeat runs.
     private val jobPool = listOf(
         Job("JOB1201", "Priya Sharma", "PS", "+91 98765 43210", 4.7,
             listOf("Utensil Wash", "Mopping", "Dusting"), "16 May 2025, 09:00 AM", 2,
-            "221B, Baker Street, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 1.8, 297, "4721"),
+            "221B, Baker Street, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 1.8, 297, "4721", 19.0596, 72.8295),
         Job("JOB1202", "Rohan Verma", "RV", "+91 99203 11882", 4.5,
             listOf("Bathroom Cleaning", "Laundry"), "16 May 2025, 11:30 AM", 2,
-            "14, Lokhandwala Complex, Andheri West, Mumbai - 400053", "Andheri West, Mumbai", 2.3, 349, "5630"),
+            "14, Lokhandwala Complex, Andheri West, Mumbai - 400053", "Andheri West, Mumbai", 2.3, 349, "5630", 19.1364, 72.8296),
         Job("JOB1203", "Sneha Iyer", "SI", "+91 98191 55470", 4.8,
             listOf("Sweeping", "Mopping", "Dusting"), "16 May 2025, 02:00 PM", 2,
-            "Hill Road, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 2.0, 249, "8125"),
+            "Hill Road, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 2.0, 249, "8125", 19.0550, 72.8260),
         Job("JOB1204", "Arjun Nair", "AN", "+91 90045 77310", 4.6,
             listOf("Kitchen Cleaning", "Utensil Wash"), "16 May 2025, 04:30 PM", 3,
-            "Hiranandani Gardens, Powai, Mumbai - 400076", "Powai, Mumbai", 3.1, 399, "6204"),
+            "Hiranandani Gardens, Powai, Mumbai - 400076", "Powai, Mumbai", 3.1, 399, "6204", 19.1176, 72.9060),
     )
     private var jobIndex by mutableIntStateOf(0)
 

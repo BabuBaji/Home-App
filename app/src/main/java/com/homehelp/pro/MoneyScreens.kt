@@ -163,16 +163,16 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar("RK", size = 56)
+                    Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 56)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Rahul Kumar", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextDark)
+                        Text(vm.workerName, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextDark)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Verified Partner", fontSize = 12.sp, color = Purple)
                         }
-                        Text("4.7 ★  •  128 Jobs Completed", fontSize = 12.sp, color = TextGray)
+                        Text("${vm.workerRating} ★  •  ${vm.jobsCompleted} Jobs Completed", fontSize = 12.sp, color = TextGray)
                     }
                 }
             }
@@ -188,14 +188,14 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             Card(padding = Dp16.S) {
-                MenuItem(Icons.Filled.Person, "Personal Information")
-                MenuItem(Icons.Filled.Description, "Documents")
-                MenuItem(Icons.Filled.AccountBalance, "Bank Details")
-                MenuItem(Icons.Filled.Schedule, "Availability")
-                MenuItem(Icons.Filled.Tune, "Preferences")
-                MenuItem(Icons.Filled.Notifications, "Notification Settings")
-                MenuItem(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support")
-                MenuItem(Icons.Filled.Info, "About Us", divider = false)
+                MenuItem(Icons.Filled.Person, "Personal Information") { nav.navigate(Routes.P_PERSONAL) }
+                MenuItem(Icons.Filled.Description, "Documents") { nav.navigate(Routes.P_DOCUMENTS) }
+                MenuItem(Icons.Filled.AccountBalance, "Bank Details") { nav.navigate(Routes.P_BANK) }
+                MenuItem(Icons.Filled.Schedule, "Availability") { nav.navigate(Routes.P_AVAILABILITY) }
+                MenuItem(Icons.Filled.Tune, "Preferences") { nav.navigate(Routes.P_PREFERENCES) }
+                MenuItem(Icons.Filled.Notifications, "Notification Settings") { nav.navigate(Routes.P_NOTIFICATIONS) }
+                MenuItem(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { nav.navigate(Routes.P_HELP) }
+                MenuItem(Icons.Filled.Info, "About Us", divider = false) { nav.navigate(Routes.P_ABOUT) }
             }
             Surface(
                 Modifier.fillMaxWidth().clickable {
@@ -307,8 +307,8 @@ private fun TabPill(text: String, selected: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun MenuItem(icon: ImageVector, label: String, divider: Boolean = true) {
-    Column {
+private fun MenuItem(icon: ImageVector, label: String, divider: Boolean = true, onClick: () -> Unit) {
+    Column(Modifier.clickable { onClick() }) {
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(14.dp))

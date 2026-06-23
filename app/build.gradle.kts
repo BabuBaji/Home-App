@@ -11,8 +11,8 @@ android {
         applicationId = "com.homehelp.pro"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     buildTypes {
@@ -53,4 +53,5 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
 }
