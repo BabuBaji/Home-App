@@ -843,3 +843,63 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 .nt-title { font-size: 15px; font-weight: 700; color: var(--ink); }
 .nt-body { font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
 .nt-time { font-size: 11.5px; color: var(--muted-2); flex: 0 0 auto; }
+
+/* ============================================================
+   Premium animated launch / welcome splash
+   ============================================================ */
+.splashx { position: absolute; inset: 0; z-index: 200; overflow: hidden; color: #fff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transition: opacity .5s ease, transform .5s ease, filter .5s ease; will-change: opacity, transform; }
+.splashx--hide { opacity: 0; transform: scale(1.12); filter: blur(8px); pointer-events: none; }
+
+/* shifting gradient backdrop */
+.splashx-bg { position: absolute; inset: -20%; z-index: -2;
+  background: linear-gradient(135deg, #1ed3cf 0%, #0ea5a4 45%, #0b7a79 80%, #0c8584 100%);
+  background-size: 200% 200%; animation: spxGrad 6s ease infinite; }
+@keyframes spxGrad { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+
+/* floating bubbles */
+.splashx-bubbles { position: absolute; inset: 0; z-index: -1; }
+.splashx-bubbles span { position: absolute; bottom: -30px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.55), rgba(255,255,255,.08));
+  opacity: 0; animation-name: spxRise; animation-iteration-count: infinite; animation-timing-function: ease-in; }
+@keyframes spxRise { 0% { transform: translateY(0) scale(.7); opacity: 0; } 12% { opacity: .8; } 100% { transform: translateY(-115vh) scale(1.1); opacity: 0; } }
+
+.splashx-center { display: flex; flex-direction: column; align-items: center; position: relative; }
+
+/* logo + glow rings */
+.splashx-logo { position: relative; display: grid; place-items: center; margin-bottom: 26px; }
+.splashx-ring { position: absolute; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); animation: spxRing 2.4s ease-out infinite; }
+.splashx-ring.r1 { width: 132px; height: 132px; }
+.splashx-ring.r2 { width: 132px; height: 132px; animation-delay: 1.2s; }
+@keyframes spxRing { 0% { transform: scale(.85); opacity: .7; } 100% { transform: scale(1.7); opacity: 0; } }
+.splashx-badge { position: relative; width: 124px; height: 124px; border-radius: 34px; overflow: hidden;
+  background: rgba(255,255,255,.16); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.25);
+  display: grid; place-items: center; box-shadow: 0 22px 60px rgba(0,0,0,.25);
+  animation: spxPop .8s cubic-bezier(.18,1.4,.35,1) both; }
+@keyframes spxPop { 0% { transform: scale(.4) rotate(-12deg); opacity: 0; } 55% { transform: scale(1.12) rotate(3deg); } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+.spx-house { transform-box: fill-box; transform-origin: 50% 60%; animation: spxHouse .7s cubic-bezier(.2,1.3,.3,1) .15s both; }
+@keyframes spxHouse { 0% { transform: translateY(10px) scale(.88); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.spx-spark { transform-box: fill-box; transform-origin: center; animation: spxTwinkle 1.5s ease-in-out .8s infinite; }
+@keyframes spxTwinkle { 0%, 100% { transform: scale(.6) rotate(0); opacity: .5; } 50% { transform: scale(1.25) rotate(12deg); opacity: 1; } }
+.splashx-shine { position: absolute; top: 0; left: -60%; width: 50%; height: 100%; transform: skewX(-20deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); animation: spxShine 2.6s ease-in-out .9s infinite; }
+@keyframes spxShine { 0% { left: -60%; } 45%, 100% { left: 140%; } }
+
+/* brand + tag */
+.splashx-brand { font-size: 34px; font-weight: 800; letter-spacing: -.6px; line-height: 1;
+  background: linear-gradient(90deg, #ffffff 30%, #d6fffd 50%, #ffffff 70%); background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  animation: spxUp .6s ease .35s both, spxShimmer 2.4s linear .9s infinite; }
+@keyframes spxShimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+.splashx-tag { margin-top: 9px; font-size: 14.5px; opacity: .92; animation: spxUp .6s ease .5s both; }
+@keyframes spxUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+/* progress bar */
+.splashx-bar { width: 180px; height: 5px; border-radius: 4px; background: rgba(255,255,255,.25); overflow: hidden; margin-top: 26px; animation: spxUp .6s ease .6s both; }
+.splashx-bar span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #fff, #d6fffd); box-shadow: 0 0 12px rgba(255,255,255,.7); animation: spxFill 1.6s cubic-bezier(.4,0,.2,1) .3s both; }
+@keyframes spxFill { 0% { width: 4%; } 35% { width: 42%; } 70% { width: 72%; } 100% { width: 100%; } }
+.splashx-msg { margin-top: 13px; font-size: 12.5px; opacity: .82; min-height: 16px; animation: spxFade .5s ease; }
+@keyframes spxFade { from { opacity: 0; transform: translateY(4px); } to { opacity: .82; transform: none; } }
+
+.splashx-foot { position: absolute; bottom: 38px; font-size: 12px; font-weight: 600; opacity: .85; animation: spxUp .6s ease .8s both; }

@@ -1,0 +1,16 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Transparent foreground; sits inside the adaptive safe zone (~center 66%). -->
+  <g transform="translate(512 512) scale(1.18) translate(-512 -519)">
+    <!-- house body -->
+    <path d="M512 318 L322 470 V712 a26 26 0 0 0 26 26 H676 a26 26 0 0 0 26 -26 V470 Z" fill="#ffffff"/>
+    <!-- roof -->
+    <path d="M512 300 L286 481 a30 30 0 0 0 37 47 L512 376 L701 528 a30 30 0 0 0 37 -47 Z" fill="#ffffff"/>
+    <!-- door (cut-out in teal to match background) -->
+    <rect x="468" y="566" width="88" height="172" rx="16" fill="#0ea5a4"/>
+    <!-- window -->
+    <rect x="372" y="520" width="74" height="74" rx="12" fill="#0ea5a4"/>
+    <!-- coral cleaning sparkle -->
+    <path d="M672 372 c8 34 14 40 48 48 c-34 8 -40 14 -48 48 c-8 -34 -14 -40 -48 -48 c34 -8 40 -14 48 -48 Z" fill="#ff7a59"/>
+    <circle cx="612" cy="452" r="13" fill="#ff7a59"/>
+  </g>
+</svg>

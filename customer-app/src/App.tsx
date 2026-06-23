@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
-import { ToastHost, Loading } from './components/UI'
+import { ToastHost } from './components/UI'
+import Splash from './components/Splash'
 import { useStore } from './store'
 import { fetchMe, getToken } from './api'
 
@@ -31,16 +32,22 @@ import Addresses from './screens/Addresses'
 export default function App() {
   const { user, signIn, setUser } = useStore()
   const [booting, setBooting] = useState(true)
+  const [minTime, setMinTime] = useState(false)
 
   useEffect(() => {
-    if (!getToken()) { setBooting(false); return }
+    const t = setTimeout(() => setMinTime(true), 2100) // let the welcome animation play
+    if (!getToken()) { setBooting(false); return () => clearTimeout(t) }
     fetchMe().then(({ user }) => { signIn(getToken(), user); setUser(user) }).catch(() => {}).finally(() => setBooting(false))
+    return () => clearTimeout(t)
   }, [])
+
+  const showSplash = booting || !minTime
 
   return (
     <ToastHost>
       <div className="device">
-        {booting ? <Loading /> : (
+        <Splash visible={showSplash} />
+        {!booting && (
           <Routes>
             <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
             <Route element={<Guard authed={!!user} />}>
