@@ -118,8 +118,6 @@ export default function Book() {
         {quote && (
           <div className="bill">
             <div className="bill-row"><span>Item total</span><span>₹{quote.subtotal}</span></div>
-            <div className="bill-row"><span>Platform fee</span><span>₹{quote.fee}</span></div>
-            <div className="bill-row"><span>Taxes</span><span>₹{quote.tax}</span></div>
             {quote.discount > 0 && <div className="bill-row disc"><span><Check size={14} /> Coupon discount</span><span>−₹{quote.discount}</span></div>}
             <div className="bill-row total"><span>To pay</span><span>₹{quote.total}</span></div>
           </div>

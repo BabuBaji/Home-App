@@ -72,8 +72,6 @@ export default function Summary() {
         <div className="card pad mt">
           <div className="label">Bill Details</div>
           <div className="kv"><span className="k">Item total</span><span className="v">₹{quote.subtotal}</span></div>
-          <div className="kv"><span className="k">Platform fee</span><span className="v">₹{quote.fee}</span></div>
-          <div className="kv"><span className="k">Taxes (GST)</span><span className="v">₹{quote.tax}</span></div>
           {quote.discount > 0 && <div className="kv"><span className="k" style={{ color: 'var(--green)' }}>Discount{quote.coupon ? ` (${quote.coupon})` : ''}</span><span className="v" style={{ color: 'var(--green)' }}>-₹{quote.discount}</span></div>}
           <div className="divider" />
           <div className="kv total"><span className="k">Total</span><span className="v">₹{quote.total}</span></div>

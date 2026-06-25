@@ -81,7 +81,7 @@ export default function Home() {
             <span className="sn-eta"><Zap size={13} /> {eta} mins</span>
             <div className="sn-hc-title">Instant <span className="chev">›</span></div>
             <div className="sn-hc-sub">Get now</div>
-            <img className="sn-expert" alt="" loading="lazy" decoding="async" src="https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?w=260&q=75&auto=format&fit=crop"
+            <img className="sn-expert" alt="" loading="lazy" decoding="async" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600&q=80&auto=format&fit=crop"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
           </button>
         </div>
@@ -116,13 +116,10 @@ export default function Home() {
                   ? <img alt="" loading="lazy" decoding="async" src={s.image} onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display = 'none'; (t.nextElementSibling as HTMLElement).style.display = 'grid' }} />
                   : null}
                 <span className="sn-thumb-emoji" style={{ display: s.image ? 'none' : 'grid' }}>{s.icon}</span>
-                <span className="sn-scrim" />
                 {!s.available && <span className="sn-soon">Soon</span>}
-                <div className="sn-tile-info">
-                  <span className="sn-tile-name">{s.name}</span>
-                  <span className="sn-tile-price">from ₹{s.price}</span>
-                </div>
               </div>
+              <span className="sn-tile-name">{s.name}</span>
+              <span className="sn-tile-price">from ₹{s.price}</span>
             </button>
           ))}
           {filtered.length === 0 && <p className="muted" style={{ gridColumn: '1/-1', padding: 20, textAlign: 'center' }}>No services found.</p>}
@@ -135,7 +132,31 @@ export default function Home() {
               <div className="sn-refer-t">{home.referral.label}</div>
               <button className="sn-refer-btn" onClick={() => { navigator.clipboard?.writeText(home.referral.code) }}>Refer now</button>
             </div>
-            <span className="sn-refer-img">🎁💰</span>
+            <svg className="sn-refer-img" viewBox="0 0 124 104" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M15 18l1.8 4.6L21 24.4l-4.2 1.8L15 31l-1.8-4.8L9 24.4l4.2-1.8z" fill="#ffce33" />
+              <circle cx="110" cy="24" r="3" fill="#ffce33" />
+              <circle cx="100" cy="12" r="2" fill="#ffce33" />
+              <g>
+                <rect x="40" y="24" width="30" height="20" rx="3" fill="#56cc83" transform="rotate(-16 55 34)" />
+                <rect x="55" y="22" width="30" height="20" rx="3" fill="#41c071" transform="rotate(12 70 32)" />
+                <rect x="47" y="17" width="30" height="20" rx="3" fill="#74d99c" transform="rotate(-3 62 27)" />
+                <text x="62" y="32" fontSize="11" fontWeight="800" fill="#0f5a31" textAnchor="middle">₹</text>
+              </g>
+              <ellipse cx="29" cy="84" rx="11" ry="10" fill="#e0a800" />
+              <ellipse cx="29" cy="81" rx="11" ry="10" fill="#ffd24d" />
+              <text x="29" y="85" fontSize="10" fontWeight="800" fill="#a9730a" textAnchor="middle">₹</text>
+              <ellipse cx="99" cy="88" rx="10" ry="9" fill="#e0a800" />
+              <ellipse cx="99" cy="85" rx="10" ry="9" fill="#ffd24d" />
+              <text x="99" y="89" fontSize="9" fontWeight="800" fill="#a9730a" textAnchor="middle">₹</text>
+              <path d="M36 56l8 42h36l8-42z" fill="#1f9d57" />
+              <path d="M36 56l8 42h18V56z" fill="#18814a" />
+              <rect x="31" y="50" width="62" height="14" rx="3" fill="#27b365" />
+              <rect x="31" y="50" width="31" height="14" rx="3" fill="#1f9d57" />
+              <rect x="57" y="50" width="10" height="48" fill="#ffd24d" />
+              <path d="M62 50c-11-11-23-6-16 5z" fill="#ffd24d" />
+              <path d="M62 50c11-11 23-6 16 5z" fill="#ffce33" />
+              <circle cx="62" cy="50" r="4" fill="#ffe27a" />
+            </svg>
           </div>
         )}
 
