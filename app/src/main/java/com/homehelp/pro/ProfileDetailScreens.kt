@@ -1,5 +1,10 @@
 package com.homehelp.pro
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -84,33 +89,75 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
         Field("Mobile Number", vm.workerPhone) { vm.workerPhone = it }
         Field("Email", vm.workerEmail) { vm.workerEmail = it }
         Field("City", vm.workerCity) { vm.workerCity = it }
-        PrimaryButton("Save Changes") { toast(ctx, "Profile updated") }
+        PrimaryButton("Save Changes") { vm.saveProfile(); toast(ctx, "Profile updated") }
     }
+}
+
+/** Resolve a human-readable file name for a picked content Uri. */
+private fun pickedFileName(ctx: Context, uri: Uri): String {
+    var name = uri.lastPathSegment ?: "document"
+    try {
+        ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && c.moveToFirst()) c.getString(idx)?.let { name = it }
+        }
+    } catch (_: Exception) {
+    }
+    return name
 }
 
 @Composable
 fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    val docs = listOf(
-        "Aadhaar Card" to "Verified",
-        "PAN Card" to "Verified",
-        "Police Verification" to "Verified",
-        "Address Proof" to "Pending",
-    )
+    // Which document the picker was opened for (each row shares one launcher).
+    var pendingDoc by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val docName = pendingDoc
+        if (uri != null && docName != null) {
+            val fileName = pickedFileName(ctx, uri)
+            vm.uploadDocument(docName, fileName)
+            toast(ctx, "$docName uploaded: $fileName")
+        } else if (docName != null) {
+            toast(ctx, "Upload cancelled")
+        }
+        pendingDoc = null
+    }
+
     DetailScaffold("Documents", nav) {
-        docs.forEach { (name, status) ->
+        Text(
+            "Upload a clear photo or PDF scan for each document. Files are reviewed within 24–48 hours.",
+            fontSize = 12.sp, color = TextGray,
+        )
+        vm.documents.forEach { doc ->
+            val (pillBg, pillFg) = when (doc.status) {
+                "Verified" -> GreenLight to GreenSuccess
+                "Under Review" -> PurpleLight to Purple
+                else -> Color(0xFFFFF3D6) to Gold
+            }
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Verified, contentDescription = null,
-                        tint = if (status == "Verified") GreenSuccess else Gold, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Filled.Verified, contentDescription = null, tint = pillFg, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text(name, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-                    StatusPill(status, if (status == "Verified") GreenLight else Color(0xFFFFF3D6),
-                        if (status == "Verified") GreenSuccess else Gold)
+                    Column(Modifier.weight(1f)) {
+                        Text(doc.name, fontWeight = FontWeight.SemiBold, color = TextDark)
+                        if (doc.fileName.isNotBlank()) {
+                            Text(doc.fileName, fontSize = 11.sp, color = TextGray)
+                        }
+                    }
+                    StatusPill(doc.status, pillBg, pillFg)
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlineButton(
+                    if (doc.status == "Verified") "Replace Document" else "Upload Document",
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    pendingDoc = doc.name
+                    // Accept images and PDFs; system picker honours the mime hint.
+                    picker.launch("*/*")
                 }
             }
         }
-        PrimaryButton("Upload New Document") { toast(ctx, "Opening document upload…") }
     }
 }
 
@@ -129,7 +176,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
         Field("Bank Name", vm.bankName) { vm.bankName = it }
         Field("Account Number", vm.bankAccount) { vm.bankAccount = it }
         Field("IFSC Code", vm.bankIfsc) { vm.bankIfsc = it }
-        PrimaryButton("Update Bank Details") { toast(ctx, "Bank details updated (re-verification required)") }
+        PrimaryButton("Update Bank Details") { vm.saveBank(); toast(ctx, "Bank details updated (re-verification required)") }
     }
 }
 
@@ -160,6 +207,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             LabeledRow("Shift End", vm.shiftEnd)
         }
         PrimaryButton("Save Availability") {
+            vm.saveAvailability()
             val active = vm.availableDays.count { it.value }
             toast(ctx, "Availability saved • $active days/week")
         }
@@ -185,6 +233,7 @@ fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
         PrimaryButton("Save Preferences") {
+            vm.savePreferences()
             val n = vm.jobPreferences.count { it.value }
             toast(ctx, "Preferences saved • $n job types enabled")
         }
@@ -195,13 +244,13 @@ fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
     DetailScaffold("Notification Settings", nav) {
         Card {
-            NotifRow("New job alerts", vm.notifNewJobs) { vm.notifNewJobs = it }
+            NotifRow("New job alerts", vm.notifNewJobs) { vm.notifNewJobs = it; vm.saveNotifications() }
             Divider(color = Divider)
-            NotifRow("Payment updates", vm.notifPayments) { vm.notifPayments = it }
+            NotifRow("Payment updates", vm.notifPayments) { vm.notifPayments = it; vm.saveNotifications() }
             Divider(color = Divider)
-            NotifRow("Ratings & feedback", vm.notifRatings) { vm.notifRatings = it }
+            NotifRow("Ratings & feedback", vm.notifRatings) { vm.notifRatings = it; vm.saveNotifications() }
             Divider(color = Divider)
-            NotifRow("Promotions & offers", vm.notifPromotions) { vm.notifPromotions = it }
+            NotifRow("Promotions & offers", vm.notifPromotions) { vm.notifPromotions = it; vm.saveNotifications() }
         }
     }
 }
@@ -268,7 +317,7 @@ fun AboutScreen(nav: NavHostController) {
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text("HomeHelp Pro", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 17.sp)
-                    Text("Version 1.3", fontSize = 12.sp, color = TextGray)
+                    Text("Version 1.5", fontSize = 12.sp, color = TextGray)
                 }
             }
         }

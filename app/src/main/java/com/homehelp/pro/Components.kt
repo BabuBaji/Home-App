@@ -36,14 +36,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** White rounded card container. */
+/** White rounded card container with a hairline border (flat, professional). */
 @Composable
 fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Composable () -> Unit) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = Color.White,
-        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, Divider),
+        shadowElevation = 0.dp,
     ) {
         Column(Modifier.padding(padding.value)) { content() }
     }
@@ -51,28 +52,36 @@ fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Compos
 
 enum class Dp16(val value: androidx.compose.ui.unit.Dp) { S(12.dp), M(16.dp) }
 
-/** Simple top header with optional back button. */
+/** Simple top header with optional back button and a hairline separator below. */
 @Composable
 fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(Color.White)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (onBack != null) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = TextDark,
-                modifier = Modifier.size(24.dp).clickable { onBack() },
-            )
-            Spacer(Modifier.width(12.dp))
+    Column(Modifier.fillMaxWidth().background(Color.White)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onBack != null) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TextDark,
+                    modifier = Modifier.size(24.dp).clickable { onBack() },
+                )
+                Spacer(Modifier.width(12.dp))
+            }
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+            if (trailing != null) trailing() else Spacer(Modifier.width(24.dp))
         }
-        Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-        if (trailing != null) trailing() else Spacer(Modifier.width(24.dp))
+        HairlineDivider()
     }
+}
+
+/** 1px hairline divider used to separate surfaces on the white UI. */
+@Composable
+fun HairlineDivider(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(1.dp).background(Divider))
 }
 
 @Composable

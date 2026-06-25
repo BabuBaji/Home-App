@@ -11,8 +11,8 @@ android {
         applicationId = "com.homehelp.pro"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     buildTypes {
@@ -54,4 +54,16 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("org.osmdroid:osmdroid-android:6.1.18")
+
+    // Google Maps (Jetpack Compose) — renders genuine Google Maps tiles. Needs an API key
+    // declared as com.google.android.geo.API_KEY meta-data in AndroidManifest.xml.
+    implementation("com.google.maps.android:maps-compose:4.4.1")
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
+
+    // Networking — talks to the HomeHelp backend API
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 }

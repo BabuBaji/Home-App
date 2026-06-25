@@ -102,7 +102,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
             Text("Demo OTP: any 4 digits", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             Spacer(Modifier.height(16.dp))
             PrimaryButton("Verify & Continue", enabled = otp.length == 4) {
-                vm.login()
+                vm.login(phone, otp)
                 nav.navigate(Routes.HOME) {
                     popUpTo(Routes.LOGIN) { inclusive = true }
                 }
@@ -133,13 +133,16 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Menu, contentDescription = null, tint = TextDark, modifier = Modifier.size(24.dp))
-            Text("Home", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Column(Modifier.fillMaxWidth().background(Color.White)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Menu, contentDescription = null, tint = TextDark, modifier = Modifier.size(24.dp))
+                Text("Home", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+                Spacer(Modifier.size(24.dp))
+            }
+            HairlineDivider()
         }
 
         Column(
@@ -174,6 +177,10 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     vm.requestJob()
                     nav.navigate(Routes.NEW_JOB)
                 }
+            }
+
+            OutlineButton("🗺️  View Hyderabad Map", modifier = Modifier.fillMaxWidth()) {
+                nav.navigate(Routes.HYDERABAD_MAP)
             }
 
             // Today's summary

@@ -53,6 +53,7 @@ object Routes {
     const val NEW_JOB = "newjob"
     const val JOB_DETAILS = "jobdetails"
     const val ON_THE_WAY = "ontheway"
+    const val HYDERABAD_MAP = "hyderabad_map"
     const val START_SERVICE = "startservice"
     const val IN_PROGRESS = "inprogress"
     const val JOB_COMPLETED = "jobcompleted"
@@ -102,6 +103,7 @@ fun AppRoot() {
             composable(Routes.NEW_JOB) { NewJobScreen(vm, nav) }
             composable(Routes.JOB_DETAILS) { JobDetailsScreen(vm, nav) }
             composable(Routes.ON_THE_WAY) { OnTheWayScreen(vm, nav) }
+            composable(Routes.HYDERABAD_MAP) { HyderabadMapScreen(nav) }
             composable(Routes.START_SERVICE) { StartServiceScreen(vm, nav) }
             composable(Routes.IN_PROGRESS) { InProgressScreen(vm, nav) }
             composable(Routes.JOB_COMPLETED) { JobCompletedScreen(vm, nav) }
@@ -119,6 +121,8 @@ fun AppRoot() {
 
 @Composable
 private fun BottomBar(nav: NavHostController, current: String?) {
+  androidx.compose.foundation.layout.Column {
+    HairlineDivider()
     NavigationBar(containerColor = Color.White) {
         tabs.forEach { tab ->
             NavigationBarItem(
@@ -144,4 +148,5 @@ private fun BottomBar(nav: NavHostController, current: String?) {
             )
         }
     }
+  }
 }

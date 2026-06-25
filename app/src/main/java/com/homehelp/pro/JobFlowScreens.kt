@@ -272,7 +272,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${job.distanceKm} km away", fontSize = 13.sp, color = TextGray, modifier = Modifier.weight(1f))
                     OutlineButton("Navigate", modifier = Modifier.width(130.dp)) {
-                        launchNavigation(ctx, job.lat, job.lng, job.customerName)
+                        launchNavigation(ctx, job.lat, job.lng, job.customerName, myLat, myLng)
                     }
                 }
             }
@@ -298,8 +298,8 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 Text("Estimated Arrival", fontSize = 12.sp, color = TextGray)
                 Text("09:15 AM", fontWeight = FontWeight.SemiBold, color = TextDark)
             }
-            PrimaryButton("Start Turn-by-Turn Navigation") {
-                launchNavigation(ctx, job.lat, job.lng, job.customerName)
+            PrimaryButton("Navigate with Google Maps") {
+                launchNavigation(ctx, job.lat, job.lng, job.customerName, myLat, myLng)
             }
         }
         Box(Modifier.background(Color.White).padding(16.dp)) {
@@ -310,20 +310,50 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
-/** Hands off to the device's Google Maps turn-by-turn navigation; falls back to any maps/geo handler. */
-private fun launchNavigation(ctx: Context, lat: Double, lng: Double, label: String) {
-    val navIntent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$lat,$lng"))
+/**
+ * Opens Google Maps driving navigation to the customer.
+ *
+ * Tries, in order: (1) Google Maps turn-by-turn (`google.navigation:`), (2) Google Maps
+ * directions from the worker's current GPS to the destination, (3) any installed maps app via
+ * `geo:`, (4) the directions URL in a browser. Each step degrades gracefully if the prior is absent.
+ */
+private fun launchNavigation(
+    ctx: Context,
+    destLat: Double,
+    destLng: Double,
+    label: String,
+    originLat: Double? = null,
+    originLng: Double? = null,
+) {
+    // 1) Turn-by-turn navigation in the Google Maps app, driving mode.
+    val navIntent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$destLat,$destLng&mode=d"))
         .setPackage("com.google.android.apps.maps")
-    try {
-        ctx.startActivity(navIntent)
-        return
-    } catch (_: Exception) {
+    try { ctx.startActivity(navIntent); return } catch (_: Exception) { }
+
+    // Google Maps directions URL (origin -> destination, driving).
+    val dirUrl = buildString {
+        append("https://www.google.com/maps/dir/?api=1")
+        if (originLat != null && originLng != null) append("&origin=$originLat,$originLng")
+        append("&destination=$destLat,$destLng&travelmode=driving")
     }
-    val geoIntent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)"))
+
+    // 2) Directions in the Google Maps app.
     try {
-        ctx.startActivity(geoIntent)
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dirUrl)).setPackage("com.google.android.apps.maps"))
+        return
+    } catch (_: Exception) { }
+
+    // 3) Any maps app that handles geo:.
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$destLat,$destLng?q=$destLat,$destLng($label)")))
+        return
+    } catch (_: Exception) { }
+
+    // 4) Fall back to a browser.
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dirUrl)))
     } catch (_: Exception) {
-        toast(ctx, "No maps app available to navigate")
+        toast(ctx, "No maps or browser app available to navigate")
     }
 }
 
