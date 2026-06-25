@@ -1,65 +1,39 @@
 // Rich, Snabbit-style service catalogue: durations, inclusions, reviews, coupons.
 
-export const CATEGORIES = ['Cleaning', 'Kitchen', 'Bathroom', 'Laundry', 'Deep Cleaning', 'Beauty', 'Repairs', 'Appliance', 'Care', 'Outdoor']
+export const CATEGORIES = ['Cleaning', 'Kitchen', 'Bathroom', 'Laundry', 'Deep Cleaning', 'Care']
 
 // base = starting price for the shortest (60 min) slot (INR). available toggled in DB.
 // `image` is a photo for the Snabbit-style tile (falls back to the emoji if it fails to load).
 export const SERVICES_SEED = [
-  ['cleaning',   'House Cleaning',     '🧹', 129, 'Cleaning',      1],
-  ['dusting',    'Dusting & Wiping',   '🧽', 129, 'Cleaning',      1],
-  ['bathroom',   'Bathroom Cleaning',  '🚿', 149, 'Bathroom',      1],
-  ['laundry',    'Laundry & Ironing',  '🧺', 129, 'Laundry',       1],
-  ['dishwashing','Cleaning Dishes',    '🍽️', 119, 'Kitchen',       1],
-  ['kitchen',    'Kitchen Cleaning',   '🍳', 149, 'Kitchen',       1],
-  ['sofa',       'Sofa Cleaning',      '🛋️', 299, 'Deep Cleaning', 1],
-  ['carpet',     'Carpet Cleaning',    '🧶', 249, 'Deep Cleaning', 1],
-  ['window',     'Window Cleaning',    '🪟', 149, 'Cleaning',      1],
-  ['fridge',     'Fridge Cleaning',    '🧊', 199, 'Kitchen',       1],
-  ['deep',       'Deep Cleaning',      '✨', 299, 'Deep Cleaning', 1],
-  ['cooking',    'Cooking Help',       '🍲', 199, 'Care',          1],
-  ['babycare',   'Baby Care',          '🍼', 249, 'Care',          1],
-  ['eldercare',  'Elderly Care',       '🧓', 249, 'Care',          1],
-  ['petcare',    'Pet Care',           '🐾', 199, 'Care',          1],
-  ['beauty',     'Beauty at Home',     '💅', 249, 'Beauty',        1],
-  ['salon',      'Salon for Men',      '💈', 199, 'Beauty',        1],
-  ['ac',         'AC Service & Repair','❄️', 399, 'Appliance',     1],
-  ['appliance',  'Appliance Repair',   '🛠️', 199, 'Appliance',     1],
-  ['plumbing',   'Plumbing',           '🔧', 149, 'Repairs',       1],
-  ['electrical', 'Electrical',         '💡', 149, 'Repairs',       1],
-  ['carpentry',  'Carpentry',          '🪚', 199, 'Repairs',       1],
-  ['painting',   'Painting',           '🎨', 299, 'Repairs',       1],
-  ['pestcontrol','Pest Control',       '🐜', 499, 'Outdoor',       1],
-  ['gardening',  'Gardening',          '🌿', 199, 'Outdoor',       1],
+  ['cleaning',   'House Cleaning',    '🧹', 129, 'Cleaning',      1],
+  ['deep',       'Deep Cleaning',     '✨', 299, 'Deep Cleaning', 1],
+  ['kitchen',    'Kitchen Cleaning',  '🍳', 149, 'Kitchen',       1],
+  ['bathroom',   'Bathroom Cleaning', '🚿', 149, 'Bathroom',      1],
+  ['dishwashing','Utensil Cleaning',  '🍽️', 119, 'Kitchen',       1],
+  ['laundry',    'Laundry',           '🧺', 129, 'Laundry',       1],
+  ['ironing',    'Ironing',           '👔', 99,  'Laundry',       1],
+  ['cooking',    'Cooking',           '🍲', 199, 'Care',          1],
+  ['dusting',    'Maid Service',      '🧽', 199, 'Cleaning',      1],
+  ['babycare',   'Babysitting',       '🍼', 249, 'Care',          1],
+  ['eldercare',  'Elder Care',        '🧓', 249, 'Care',          1],
 ]
 
-// Photos for the home tiles (Unsplash; tiles fall back to a tinted emoji if offline).
-const IMG = (id) => `https://images.unsplash.com/photo-${id}?w=400&q=70&auto=format&fit=crop`
+// Hand-picked photos — each image was visually verified to match its service.
+// Unsplash for the premium shots; one loremflickr photo for ironing (the only
+// reliably-correct source found for it). Tiles fall back to a tinted emoji if offline.
+const IMG = (id) => `https://images.unsplash.com/photo-${id}?w=1080&q=80&auto=format&fit=crop`
 export const SERVICE_IMAGES = {
-  cleaning:    IMG('1628177142898-93e36e4e3a50'),
-  dusting:     IMG('1527515637462-cff94eecc1ac'),
-  bathroom:    IMG('1604709177225-055f99402ea3'),
-  laundry:     IMG('1604335399105-a0c585fd81a1'),
-  dishwashing: IMG('1556911220-bff31c812dba'),
-  kitchen:     IMG('1556909114-f6e7ad7d3136'),
-  sofa:        IMG('1555041469-a586c61ea9bc'),
-  carpet:      IMG('1505693416388-ac5ce068fe85'),
-  window:      IMG('1556912173-3bb406ef7e77'),
-  fridge:      IMG('1584269600464-37b1b58a9fe7'),
-  deep:        IMG('1581578731548-c64695cc6952'),
-  cooking:     IMG('1466637574441-749b8f19452f'),
-  babycare:    IMG('1492725764893-90b379c2b6e7'),
-  eldercare:   IMG('1576765608535-5f04d1e3f289'),
-  petcare:     IMG('1450778869180-41d0601e046e'),
-  beauty:      IMG('1596755389378-c31d21fd1273'),
-  salon:       IMG('1503951914875-452162b0f3f1'),
-  ac:          IMG('1635048424329-a9bfb146d7aa'),
-  appliance:   IMG('1581092918056-0c4c3acd3789'),
-  plumbing:    IMG('1607472586893-edb57bdc0e39'),
-  electrical:  IMG('1565608087341-404b25492fee'),
-  carpentry:   IMG('1504148455328-c376907d081c'),
-  painting:    IMG('1589939705384-5185137a7f0f'),
-  pestcontrol: IMG('1558618666-fcd25c85cd64'),
-  gardening:   IMG('1416879595882-3373a0480b5b'),
+  cleaning:    IMG('1584820927498-cfe5211fd8bf'), // gloves on — house cleaning
+  deep:        IMG('1581578731548-c64695cc6952'), // woman deep-cleaning a window
+  kitchen:     IMG('1565538810643-b5bdb714032a'), // clean modern kitchen
+  bathroom:    IMG('1620626011761-996317b8d101'), // clean modern bathroom
+  dishwashing: IMG('1581622558663-b2e33377dfb2'), // dishwasher with clean plates
+  laundry:     IMG('1545173168-9f1947eebb7f'),    // laundromat washing machines
+  ironing:     'https://loremflickr.com/800/800/ironing,clothes?lock=42', // iron on a board
+  cooking:     IMG('1556910103-1c02745aae4d'),    // people cooking together
+  dusting:     IMG('1563453392212-326f5e854473'), // glove + spray — maid service
+  babycare:    IMG('1555252333-9f8e92e65df9'),    // baby — babysitting
+  eldercare:   IMG('1576765608535-5f04d1e3f289'), // caregiver with an elderly woman
 }
 
 // Snabbit-style duration ladder. price = base + add; original is the struck-through
@@ -94,9 +68,9 @@ const DETAILS = {
     excludes: ['Cleaning ceilings or high areas', 'Using unstable stools or ladders', 'Moving heavy furniture', 'Exterior grills/windows', 'Stain removal or restoration'],
   },
   dusting: {
-    desc: 'Dust and wipe shelves, counters, decor and sills for a fresh, fingerprint-free home.',
-    includes: ['Dusting shelves and furniture', 'Wipe counters, tables & decor', 'Clean window sills/grills', 'Remove accessible cobwebs', 'Clean appliance exteriors'],
-    excludes: ['Dusting ceilings or high areas', 'Using unstable stools or ladders', 'No chandeliers or fragile items', 'No exterior grills/windows', 'Stain removal or restoration'],
+    desc: 'Reliable maid help for everyday home upkeep — sweeping, mopping, dusting and tidying by a trained, verified helper.',
+    includes: ['Sweeping & mopping floors', 'Dusting shelves, furniture & decor', 'Wipe counters & tabletops', 'Tidying and arranging rooms', 'Clean appliance exteriors'],
+    excludes: ['Cooking or utensil washing', 'Cleaning ceilings or high areas', 'Using unstable stools or ladders', 'Moving heavy furniture', 'Stain removal or restoration'],
   },
   dishwashing: {
     desc: 'Get all your utensils washed, dried and stacked neatly. Perfect after parties or busy days.',
@@ -104,9 +78,14 @@ const DETAILS = {
     excludes: ['Dishwasher loading', 'Utensil polishing', 'Stain removal or restoration'],
   },
   laundry: {
-    desc: 'Sorting, machine wash, drying and crisp ironing of your clothes. Hassle-free laundry at home.',
-    includes: ['Sorting by color/fabric', 'Machine wash & dry', 'Ironing of garments', 'Neat folding/hanging'],
-    excludes: ['Dry cleaning', 'Starching', 'Hand-wash delicates (on request)'],
+    desc: 'Sorting, machine wash, drying and neat folding of your clothes. Hassle-free laundry at home.',
+    includes: ['Sorting by color/fabric', 'Machine wash & dry', 'Neat folding/hanging', 'Sink/area tidy-up'],
+    excludes: ['Ironing (book separately)', 'Dry cleaning', 'Starching', 'Hand-wash delicates (on request)'],
+  },
+  ironing: {
+    desc: 'Crisp, wrinkle-free ironing of your everyday garments, neatly folded or hung — by a trained helper.',
+    includes: ['Ironing/pressing of garments', 'Steam press as needed', 'Neat folding & hanging', 'Sorting by fabric'],
+    excludes: ['Dry cleaning', 'Starching (on request)', 'Delicate silk/embroidery (on request)'],
   },
   bathroom: {
     desc: 'Deep scrub of tiles, fittings, toilet and floor for a sparkling, germ-free bathroom.',
@@ -315,12 +294,12 @@ export const CANCEL_REASONS = [
   'Pro is taking too long', 'Want to change date/time', 'Other',
 ]
 
-export const PLATFORM_FEE = 20
-export const TAX_RATE = 0.05 // 5% GST
+export const PLATFORM_FEE = 0
+export const TAX_RATE = 0 // platform fee & taxes removed — total payable = item total − discount
 
 export function priceBreakdown(subtotal, discount = 0) {
-  const fee = subtotal > 0 ? PLATFORM_FEE : 0
-  const tax = Math.round(subtotal * TAX_RATE)
+  const fee = 0
+  const tax = 0
   const total = Math.max(0, subtotal + fee + tax - discount)
   return { subtotal, fee, tax, discount, total }
 }

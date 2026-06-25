@@ -38,7 +38,7 @@ export default function Cart() {
 
         <div className="card pad mt">
           <div className="kv"><span className="k">Subtotal</span><span className="v">₹{subtotal}</span></div>
-          <p className="muted sm" style={{ marginTop: 4 }}>Taxes, fees &amp; coupons applied at summary.</p>
+          <p className="muted sm" style={{ marginTop: 4 }}>Coupons applied at summary.</p>
         </div>
       </div>
 
