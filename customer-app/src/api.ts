@@ -8,6 +8,11 @@ export function setToken(t: string) { token = t; localStorage.setItem('hh_token'
 export function clearToken() { token = ''; localStorage.removeItem('hh_token') }
 export function getToken() { return token }
 
+/* cache the signed-in user so the app hydrates instantly on launch (no network wait) */
+export function saveUser(u: User) { try { localStorage.setItem('hh_user', JSON.stringify(u)) } catch { /* ignore */ } }
+export function loadUser(): User | null { try { return JSON.parse(localStorage.getItem('hh_user') || 'null') } catch { return null } }
+export function clearUser() { localStorage.removeItem('hh_user') }
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(API_BASE + path, {
     ...opts,
@@ -48,7 +53,9 @@ export const deleteAddressApi = (id: number) => req<Address[]>(`/api/addresses/$
 
 /* payment gateway */
 export const fetchPaymentMethods = () => req<{ methods: PaymentGroup[] }>('/api/payment/methods')
-export const createOrder = (amount: number) => req<{ orderId: string; amount: number; currency: string }>('/api/payment/order', { method: 'POST', body: JSON.stringify({ amount }) })
+export const fetchPaymentConfig = () => req<{ provider: 'razorpay' | 'mock'; keyId: string | null }>('/api/payment/config')
+export const createOrder = (amount: number) => req<{ provider: 'razorpay' | 'mock'; orderId: string; amount: number; currency: string; keyId?: string }>('/api/payment/order', { method: 'POST', body: JSON.stringify({ amount }) })
+export const verifyPayment = (p: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => req<{ ok: boolean; txnId: string }>('/api/payment/verify', { method: 'POST', body: JSON.stringify(p) })
 export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
 
 /* wallet */

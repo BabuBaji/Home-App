@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import type { CartItem, User } from './types'
-import { clearToken, setToken } from './api'
+import { clearToken, setToken, saveUser, loadUser, clearUser } from './api'
 
 interface Store {
   user: User | null
@@ -29,7 +29,7 @@ interface Store {
 const Ctx = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [user, setUserState] = useState<User | null>(null)
+  const [user, setUserState] = useState<User | null>(loadUser())
   const [cart, setCart] = useState<CartItem[]>([])
   const [bookingType, setBookingType] = useState<'instant' | 'schedule'>('instant')
   const [date, setDate] = useState('16 May 2025')
@@ -39,8 +39,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [addressLine, setAddressLine] = useState('')
   const [note, setNote] = useState('')
 
-  const signIn = useCallback((t: string, u: User) => { setToken(t); setUserState(u) }, [])
-  const signOut = useCallback(() => { clearToken(); setUserState(null); setCart([]) }, [])
+  const signIn = useCallback((t: string, u: User) => { setToken(t); saveUser(u); setUserState(u) }, [])
+  const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]) }, [])
+  const setUser = useCallback((u: User) => { saveUser(u); setUserState(u) }, [])
 
   const addToCart = (i: CartItem) => setCart((p) => [...p.filter((x) => x.id !== i.id), i])
   const removeFromCart = (id: string) => setCart((p) => p.filter((x) => x.id !== id))
@@ -51,7 +52,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={{
-      user, signIn, signOut, setUser: setUserState,
+      user, signIn, signOut, setUser,
       cart, addToCart, removeFromCart, inCart, clearCart,
       bookingType, setBookingType, date, setDate, time, setTime,
       payment, setPayment, coupon, setCoupon, addressLine, setAddressLine, note, setNote,

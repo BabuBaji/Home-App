@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this file to 'payment.config.json' (same folder) and paste your Razorpay keys. payment.config.json is gitignored. Get keys at https://dashboard.razorpay.com/app/keys (use Test Mode keys first). Restart the server after editing.",
+  "keyId": "rzp_test_xxxxxxxxxxxxxx",
+  "keySecret": "your_test_key_secret_here"
+}

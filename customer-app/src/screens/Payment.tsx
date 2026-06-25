@@ -2,7 +2,22 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Header, FooterCTA, useToast } from '../components/UI'
 import { useStore } from '../store'
-import { createBookingApi, fetchQuote } from '../api'
+import { createBookingApi, fetchQuote, fetchPaymentConfig, createOrder, verifyPayment } from '../api'
+
+// Load Razorpay's checkout script once, on demand.
+let rzpLoading: Promise<boolean> | null = null
+function loadRazorpay(): Promise<boolean> {
+  if ((window as any).Razorpay) return Promise.resolve(true)
+  if (rzpLoading) return rzpLoading
+  rzpLoading = new Promise((resolve) => {
+    const s = document.createElement('script')
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    s.onload = () => resolve(true)
+    s.onerror = () => { rzpLoading = null; resolve(false) }
+    document.body.appendChild(s)
+  })
+  return rzpLoading
+}
 
 const METHODS = [
   { id: 'upi', name: 'UPI', sub: 'GPay, PhonePe, Paytm', icon: 'UPI', group: 'rec' },
@@ -14,26 +29,69 @@ const METHODS = [
 export default function Payment() {
   const nav = useNavigate()
   const toast = useToast()
-  const { cart, bookingType, date, time, addressLine, coupon, payment, setPayment, note, clearCart } = useStore()
+  const { cart, bookingType, date, time, addressLine, coupon, payment, setPayment, note, clearCart, user } = useStore()
   const [total, setTotal] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  const [provider, setProvider] = useState<'razorpay' | 'mock'>('mock')
 
   useEffect(() => {
     fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), coupon || undefined)
       .then((q) => setTotal(q.total)).catch(() => {})
+    fetchPaymentConfig().then((c) => setProvider(c.provider)).catch(() => {})
   }, [])
 
+  const bookingPayload = (extra: Record<string, unknown> = {}) => ({
+    items: cart.map((x) => ({ id: x.id, durationId: x.durationId })),
+    type: bookingType, payment, coupon, note, address: addressLine,
+    date: bookingType === 'schedule' ? date : null, time: bookingType === 'schedule' ? time : null,
+    ...extra,
+  })
+
   async function pay() {
+    if (total == null) return
+    const online = payment !== 'cash' && payment !== 'wallet'
+    if (provider === 'razorpay' && online) return payWithRazorpay()
+    // cash / wallet / mock → book directly (server marks paid or pending)
     setBusy(true)
     try {
-      const b = await createBookingApi({
-        items: cart.map((x) => ({ id: x.id, durationId: x.durationId })),
-        type: bookingType, payment, coupon, note, address: addressLine,
-        date: bookingType === 'schedule' ? date : null, time: bookingType === 'schedule' ? time : null,
-      })
+      const b = await createBookingApi(bookingPayload())
       toast(payment === 'cash' ? 'Booking confirmed!' : 'Payment successful!')
       clearCart()
       setTimeout(() => nav(`/track/${b.id}`, { replace: true }), 700)
+    } catch (e) { toast((e as Error).message); setBusy(false) }
+  }
+
+  async function payWithRazorpay() {
+    setBusy(true)
+    try {
+      if (!(await loadRazorpay())) { toast('Could not load payment gateway'); setBusy(false); return }
+      const order = await createOrder(total!)
+      const rzp = new (window as any).Razorpay({
+        key: order.keyId,
+        order_id: order.orderId,
+        amount: total! * 100,
+        currency: 'INR',
+        name: 'HomeHelp',
+        description: cart.map((x) => x.name).join(', ').slice(0, 80) || 'Service booking',
+        prefill: { name: user?.name || '', contact: user?.phone || '', email: user?.email || '' },
+        theme: { color: '#5b51e8' },
+        handler: async (resp: any) => {
+          try {
+            await verifyPayment({
+              razorpay_order_id: resp.razorpay_order_id,
+              razorpay_payment_id: resp.razorpay_payment_id,
+              razorpay_signature: resp.razorpay_signature,
+            })
+            const b = await createBookingApi(bookingPayload({ paymentId: resp.razorpay_payment_id }))
+            toast('Payment successful!')
+            clearCart()
+            setTimeout(() => nav(`/track/${b.id}`, { replace: true }), 700)
+          } catch (e) { toast((e as Error).message); setBusy(false) }
+        },
+        modal: { ondismiss: () => setBusy(false) },
+      })
+      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || 'Payment failed'); setBusy(false) })
+      rzp.open()
     } catch (e) { toast((e as Error).message); setBusy(false) }
   }
 

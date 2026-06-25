@@ -14,3 +14,6 @@ android/app/src/main/assets/public
 
 # backend db
 server/homehelp.db
+
+# payment secrets (Razorpay keys) — never commit
+server/payment.config.json

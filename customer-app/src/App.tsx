@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken } from './api'
+import { fetchMe, getToken, loadUser } from './api'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
@@ -31,23 +31,25 @@ import Addresses from './screens/Addresses'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
-  const [booting, setBooting] = useState(true)
   const [minTime, setMinTime] = useState(false)
+  // Returning users hydrate instantly from cache → no wait. Only a logged-in
+  // user with no cached profile yet needs to wait for the first /me call.
+  const [booted, setBooted] = useState(() => !(getToken() && !loadUser()))
 
   useEffect(() => {
-    const t = setTimeout(() => setMinTime(true), 2100) // let the welcome animation play
-    if (!getToken()) { setBooting(false); return () => clearTimeout(t) }
-    fetchMe().then(({ user }) => { signIn(getToken(), user); setUser(user) }).catch(() => {}).finally(() => setBooting(false))
-    return () => clearTimeout(t)
+    const t = setTimeout(() => setMinTime(true), 1700)       // let the welcome animation play fully
+    const cap = setTimeout(() => setBooted(true), 2500)      // never hang on a slow network
+    if (getToken()) fetchMe().then(({ user }) => { signIn(getToken(), user); setUser(user) }).catch(() => {}).finally(() => setBooted(true))
+    return () => { clearTimeout(t); clearTimeout(cap) }
   }, [])
 
-  const showSplash = booting || !minTime
+  const showSplash = !minTime || !booted
 
   return (
     <ToastHost>
       <div className="device">
         <Splash visible={showSplash} />
-        {!booting && (
+        {(
           <Routes>
             <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
             <Route element={<Guard authed={!!user} />}>

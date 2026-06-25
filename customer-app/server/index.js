@@ -13,6 +13,19 @@ import {
   getFavourites, addFavourite, removeFavourite,
 } from './db.js'
 import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
+import crypto from 'node:crypto'
+import { readFileSync } from 'node:fs'
+
+/* ---------- Razorpay config ----------
+   Keys are read from server/payment.config.json (gitignored) or env vars.
+   With no keys present, payments fall back to MOCK mode so the app still runs. */
+let RZP = { keyId: process.env.RAZORPAY_KEY_ID || '', keySecret: process.env.RAZORPAY_KEY_SECRET || '' }
+try {
+  const c = JSON.parse(readFileSync(new URL('./payment.config.json', import.meta.url), 'utf8'))
+  RZP = { keyId: c.keyId || RZP.keyId, keySecret: c.keySecret || RZP.keySecret }
+} catch { /* no config file → mock mode */ }
+const RZP_LIVE = !!(RZP.keyId && RZP.keySecret)
+const verifiedPayments = new Map() // razorpay_payment_id -> { amount, at }
 
 const app = express()
 app.use(cors())
@@ -28,6 +41,31 @@ function publicUser(u) {
   return { id: u.id, phone: u.phone, name: u.name, email: u.email, provider: u.provider, avatar: u.avatar, country: u.country, city: u.city, location: u.location, wallet: u.wallet, rating: u.rating }
 }
 function decodeJwt(t) { try { return JSON.parse(Buffer.from(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) } catch { return null } }
+
+/* ---------- scheduled bookings: OTP + expert dispatch open 1 hour before the slot ----------
+   For a future "schedule" booking the check-in OTP is withheld and the expert is not
+   dispatched until OTP_LEAD_MS before the chosen date/time. Instant bookings are always open. */
+const OTP_LEAD_MS = 60 * 60 * 1000
+const MON = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 }
+function scheduledStartMs(b) {
+  if (!b || b.type !== 'schedule' || !b.date || !b.time) return null
+  const dm = /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/.exec(String(b.date).trim())
+  const tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(b.time).trim())
+  if (!dm || !tm || !(dm[2] in MON)) return null
+  let hr = Number(tm[1]) % 12; if (/pm/i.test(tm[3])) hr += 12
+  return new Date(Number(dm[3]), MON[dm[2]], Number(dm[1]), hr, Number(tm[2]), 0, 0).getTime()
+}
+function serviceWindowOpen(b) {
+  const start = scheduledStartMs(b)
+  return start == null ? true : Date.now() >= start - OTP_LEAD_MS
+}
+// Adds scheduling fields and withholds the OTP until its release window for the client.
+function publicBooking(b) {
+  if (!b) return b
+  const start = scheduledStartMs(b)
+  const open = start == null ? true : Date.now() >= start - OTP_LEAD_MS
+  return { ...b, scheduled_at: start, otp_released: open, service_otp: open ? b.service_otp : null }
+}
 
 // Authoritative pricing from the catalogue. items: [{id, durationId}]
 function priceItems(rawItems) {
@@ -99,23 +137,62 @@ app.get('/api/home', (_q, res) => res.json({
 }))
 app.get('/api/referral', (_q, res) => res.json(REFERRAL))
 
-/* ---------- payment gateway (mock) ---------- */
+/* ---------- payments (Razorpay, with mock fallback) ---------- */
 const orders = new Map()
 app.get('/api/payment/methods', (_q, res) => res.json({ methods: PAYMENT_METHODS }))
-app.post('/api/payment/order', auth, (req, res) => {
+
+// Tells the client which flow to use and exposes the PUBLIC key id (never the secret).
+app.get('/api/payment/config', (_q, res) =>
+  res.json({ provider: RZP_LIVE ? 'razorpay' : 'mock', keyId: RZP_LIVE ? RZP.keyId : null }))
+
+// Create an order. Real Razorpay order when keys are present; otherwise a mock order.
+app.post('/api/payment/order', auth, async (req, res) => {
   const amount = Math.max(0, Math.round(Number(req.body?.amount) || 0))
   if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' })
+  if (RZP_LIVE) {
+    try {
+      const r = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Basic ' + Buffer.from(`${RZP.keyId}:${RZP.keySecret}`).toString('base64'),
+        },
+        body: JSON.stringify({ amount: amount * 100, currency: 'INR', receipt: 'rcpt_' + Date.now() }),
+      })
+      const o = await r.json()
+      if (!r.ok) return res.status(502).json({ error: o?.error?.description || 'Gateway order failed' })
+      return res.json({ provider: 'razorpay', orderId: o.id, amount, currency: 'INR', keyId: RZP.keyId })
+    } catch (e) {
+      return res.status(502).json({ error: 'Could not reach payment gateway' })
+    }
+  }
+  // mock
   const orderId = 'ORD' + Math.floor(100000 + Math.random() * 899999)
   orders.set(orderId, { amount, user: req.user.id, paid: false })
-  res.json({ orderId, amount, currency: 'INR' })
+  res.json({ provider: 'mock', orderId, amount, currency: 'INR' })
 })
+
+// Verify a completed Razorpay payment via HMAC signature (authentic & tamper-proof).
+app.post('/api/payment/verify', auth, (req, res) => {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {}
+  if (!RZP_LIVE) return res.status(400).json({ error: 'Razorpay not configured' })
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature)
+    return res.status(400).json({ error: 'Missing payment fields' })
+  const expected = crypto.createHmac('sha256', RZP.keySecret)
+    .update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex')
+  if (expected !== razorpay_signature) return res.status(400).json({ error: 'Payment verification failed' })
+  verifiedPayments.set(String(razorpay_payment_id), { at: Date.now() })
+  res.json({ ok: true, txnId: razorpay_payment_id })
+})
+
+// Legacy mock charge (still used when no keys are configured).
 app.post('/api/payment/charge', auth, (req, res) => {
+  if (RZP_LIVE) return res.status(400).json({ error: 'Use the Razorpay checkout flow' })
   const method = String(req.body?.method || 'phonepe')
   const order = orders.get(String(req.body?.orderId || ''))
   const amount = order ? order.amount : Math.max(0, Math.round(Number(req.body?.amount) || 0))
   if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' })
   if (method === 'wallet' && req.user.wallet < amount) return res.status(402).json({ error: 'Insufficient wallet balance' })
-  // simulate gateway authorisation
   const txnId = 'TXN' + Math.floor(10000000 + Math.random() * 89999999)
   if (order) order.paid = true
   res.json({ status: 'paid', txnId, method, amount })
@@ -186,11 +263,11 @@ app.post('/api/tickets', auth, (req, res) => {
 })
 
 /* ---------- bookings ---------- */
-app.get('/api/bookings', auth, (req, res) => res.json(getBookings(req.user.id)))
+app.get('/api/bookings', auth, (req, res) => res.json(getBookings(req.user.id).map(publicBooking)))
 app.get('/api/bookings/:id', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  res.json(b)
+  res.json(publicBooking(b))
 })
 app.post('/api/bookings', auth, (req, res) => {
   const body = req.body || {}
@@ -204,7 +281,15 @@ app.post('/api/bookings', auth, (req, res) => {
   const payment = body.payment || 'phonepe'
   const isCash = payment === 'cash'
   const isWallet = payment === 'wallet'
-  const paymentStatus = isCash ? 'pending' : 'paid'
+  let paymentStatus = isCash ? 'pending' : 'paid'
+  // With real Razorpay configured, an online booking is only "paid" once we've
+  // verified the gateway payment (the client passes the verified paymentId).
+  if (RZP_LIVE && !isCash && !isWallet) {
+    const pid = String(body.paymentId || '')
+    if (!verifiedPayments.has(pid)) return res.status(402).json({ error: 'Payment not verified' })
+    verifiedPayments.delete(pid) // single use
+    paymentStatus = 'paid'
+  }
 
   const booking = createBooking({
     ref: ref(), user_id: req.user.id, type: body.type || 'instant', freq: body.freq, note: body.note,
@@ -216,7 +301,7 @@ app.post('/api/bookings', auth, (req, res) => {
   // Only the in-app wallet reduces the balance; external gateway methods (UPI/card/
   // netbanking) are settled outside, so we just record them as paid.
   if (isWallet) addTransaction(req.user.id, 'debit', `Booking Payment ${booking.ref}`, pb.total, booking.ref)
-  res.status(201).json(booking)
+  res.status(201).json(publicBooking(booking))
 })
 
 /* ---------- real-time tracking ----------
@@ -248,11 +333,14 @@ function startTracking(id) {
 app.post('/api/bookings/:id/track', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  // A future scheduled booking waits — the expert is only dispatched 1 hour before the slot.
+  if (!serviceWindowOpen(b)) return res.json({ ok: false, scheduled: true, ...publicBooking(b) })
   startTracking(b.id); res.json({ ok: true })
 })
 app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  if (!serviceWindowOpen(b)) return res.status(409).json({ error: 'This scheduled service has not started yet' })
   if (String(req.body?.otp) !== b.service_otp) return res.status(401).json({ error: 'Incorrect OTP' })
   const u = setBookingStarted(b.id) // status -> in_progress + stamp started_at
   io.to(room(b.id)).emit('booking:update', u); res.json(u)

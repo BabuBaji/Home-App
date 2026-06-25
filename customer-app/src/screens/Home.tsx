@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Bell, MapPin, Gift, User, Wallet, Heart, ChevronDown, Clock, Zap } from 'lucide-react'
+import { Search, Bell, MapPin, Gift, User, ChevronDown, Clock, Zap } from 'lucide-react'
 import { BottomNav } from '../components/UI'
 import { useStore } from '../store'
 import { fetchServices, fetchBookings, fetchHome, fetchMe, fetchFavourites, addFavouriteApi, removeFavouriteApi } from '../api'
@@ -81,7 +81,7 @@ export default function Home() {
             <span className="sn-eta"><Zap size={13} /> {eta} mins</span>
             <div className="sn-hc-title">Instant <span className="chev">›</span></div>
             <div className="sn-hc-sub">Get now</div>
-            <img className="sn-expert" alt="" src="https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?w=260&q=75&auto=format&fit=crop"
+            <img className="sn-expert" alt="" loading="lazy" decoding="async" src="https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?w=260&q=75&auto=format&fit=crop"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
           </button>
         </div>
@@ -100,7 +100,7 @@ export default function Home() {
 
         {/* category filters */}
         <div className="cat-row">
-          {['All', ...(favs.length ? ['♥ Saved'] : []), ...cats].map((c) => (
+          {['All', ...cats].map((c) => (
             <button key={c} className={`pill ${cat === c ? 'active' : ''}`} onClick={() => setCat(c)}>{c}</button>
           ))}
         </div>
@@ -113,15 +113,16 @@ export default function Home() {
             <button key={s.id} className={`sn-tile ${!s.available ? 'off' : ''}`} onClick={() => nav(`/service/${s.id}`)}>
               <div className="sn-thumb">
                 {s.image
-                  ? <img alt="" loading="lazy" src={s.image} onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display = 'none'; (t.nextElementSibling as HTMLElement).style.display = 'grid' }} />
+                  ? <img alt="" loading="lazy" decoding="async" src={s.image} onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display = 'none'; (t.nextElementSibling as HTMLElement).style.display = 'grid' }} />
                   : null}
                 <span className="sn-thumb-emoji" style={{ display: s.image ? 'none' : 'grid' }}>{s.icon}</span>
-                <span className={`sn-fav ${favs.includes(s.id) ? 'on' : ''}`} onClick={(e) => toggleFav(e, s.id)}>
-                  <Heart size={15} fill={favs.includes(s.id) ? 'currentColor' : 'none'} />
-                </span>
+                <span className="sn-scrim" />
                 {!s.available && <span className="sn-soon">Soon</span>}
+                <div className="sn-tile-info">
+                  <span className="sn-tile-name">{s.name}</span>
+                  <span className="sn-tile-price">from ₹{s.price}</span>
+                </div>
               </div>
-              <span className="sn-tile-name">{s.name}</span>
             </button>
           ))}
           {filtered.length === 0 && <p className="muted" style={{ gridColumn: '1/-1', padding: 20, textAlign: 'center' }}>No services found.</p>}

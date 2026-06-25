@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header, FooterCTA, Loading, useToast } from '../components/UI'
+import LiveMap from '../components/LiveMap'
 import { fetchBooking, trackBooking, getSocket, verifyServiceOtp, completeBooking } from '../api'
 import type { Booking } from '../types'
 
@@ -27,7 +28,8 @@ export default function Track() {
     fetchBooking(bid).then((data) => {
       setB(data)
       const s = getSocket(); s.emit('booking:join', bid)
-      if (data.status === 'confirmed') trackBooking(bid).catch(() => {})
+      // A future scheduled booking waits — don't dispatch the expert until its window opens.
+      if (data.status === 'confirmed' && data.otp_released !== false) trackBooking(bid).catch(() => {})
     }).catch(() => toast('Could not load booking'))
     const s = getSocket()
     const onUpd = (u: Booking) => { if (u.id === bid) setB((p) => ({ ...p, ...u })) }
@@ -47,7 +49,13 @@ export default function Track() {
     completed: { t: 'Service Completed', s: 'Hope you had a great experience!' },
     cancelled: { t: 'Booking Cancelled', s: b.refund ? `₹${b.refund} refunded to wallet` : 'Booking was cancelled', cls: 'red' },
   }
-  const h = heads[b.status]
+  // future scheduled booking still waiting for its 1-hour-before window
+  const schedStart = b.scheduled_at ?? null
+  const scheduledWaiting = b.status === 'confirmed' && b.otp_released === false && schedStart != null
+  const otpReleaseAt = schedStart != null ? schedStart - 60 * 60 * 1000 : null
+  const h = scheduledWaiting
+    ? { t: 'Booking Scheduled', s: 'Your expert will be dispatched near your slot', cls: undefined as string | undefined }
+    : heads[b.status]
   const serving = b.status === 'in_progress' || b.status === 'completed'
   const posLeft = b.pos ? `${8 + b.pos.lng * 70}%` : '10%'
   const posTop = b.pos ? `${18 + b.pos.lat * 55}%` : '20%'
@@ -83,6 +91,17 @@ export default function Track() {
       <div className="content pad-cta">
         <div className="track-status"><h2 className={h.cls}>{h.t}</h2><p>{h.s}</p></div>
 
+        {scheduledWaiting && (
+          <div className="card sched-card">
+            <div className="sched-row">
+              <span className="sched-ic">🗓️</span>
+              <div><div className="sched-t">{b.date} · {b.time}</div><div className="sched-s">{b.duration || '60 min'} visit · no need to wait here</div></div>
+            </div>
+            <div className="sched-otp">🔐 Your <b>start OTP</b> will be sent <b>1 hour before</b> — in {until(otpReleaseAt!)}</div>
+            <div className="sched-foot">⏳ Service begins in {until(schedStart!)}</div>
+          </div>
+        )}
+
         <div className="steps mini">
           {STEPS.map((st, i) => (
             <div key={st} style={{ display: 'contents' }}>
@@ -94,20 +113,13 @@ export default function Track() {
           ))}
         </div>
 
-        {b.status !== 'cancelled' && (
-          <div className="map">
-            <svg viewBox="0 0 360 200" preserveAspectRatio="none"><path d="M 36 50 C 130 60,150 150,250 150 S 300 170,320 168" stroke="#0ea5a4" strokeWidth="4" fill="none" strokeLinecap="round" strokeDasharray={b.status === 'arrived' ? '8 8' : '0'} /></svg>
-            {!serving && <div className="pro-pin" style={{ left: posLeft, top: posTop }}>🛵</div>}
-            {serving && <div className="serving-zone">🧹</div>}
-            <div className="home-pin">🏠</div>
-          </div>
-        )}
+        {b.status !== 'cancelled' && !scheduledWaiting && <LiveMap booking={b} />}
 
         {(b.status === 'on_the_way' || b.status === 'worker_assigned') && <div className="eta-bar"><div>📍 {b.dist ?? 2.4} km away</div><div>🕐 {b.eta ?? 12} mins</div></div>}
         {b.status === 'arrived' && <div className="eta-bar"><div>📍 Arrived</div><div>🕐 Just now</div></div>}
         {serving && <div className="eta-bar"><div>🧹 {b.status === 'completed' ? 'Completed' : 'In progress'}</div><div>🕐 ~{b.eta ?? 28} min</div></div>}
 
-        {b.status !== 'cancelled' && (
+        {b.status !== 'cancelled' && !scheduledWaiting && (
           <div className="card pro-card">
             <div className="ava">👩🏻</div>
             <div><div className="pn">{b.pro_name}</div><div className="pr">🏅 Verified Expert · ⭐ {b.pro_rating}</div></div>
@@ -129,7 +141,7 @@ export default function Track() {
           <div className="otp-box">
             <div className="ot">📋 Start Service OTP</div>
             <p className="muted sm">Share this OTP with your expert to begin</p>
-            <div className="otp-digits">{b.service_otp.split('').map((d, i) => <span key={i}>{d}</span>)}</div>
+            <div className="otp-digits">{(b.service_otp ?? '').split('').map((d, i) => <span key={i}>{d}</span>)}</div>
             <div className="otp-entry-wrap">
               <p className="muted sm">Expert enters it here to start the service</p>
               <input className="otp-entry" value={otpInput} inputMode="numeric" placeholder="• • • •"
@@ -162,4 +174,14 @@ export default function Track() {
       </FooterCTA>
     </div>
   )
+}
+
+// Compact "time remaining" until a future timestamp (re-rendered by the 1s heartbeat).
+function until(ms: number) {
+  const s = Math.max(0, Math.floor((ms - Date.now()) / 1000))
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m} min`
+  return 'under a minute'
 }

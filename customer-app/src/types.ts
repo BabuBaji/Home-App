@@ -101,7 +101,9 @@ export interface Booking {
   coupon?: string
   total: number
   status: BookingStatus
-  service_otp: string
+  service_otp: string | null
+  scheduled_at?: number | null   // ms epoch of the scheduled slot (null for instant)
+  otp_released?: boolean         // false while a future scheduled booking is still waiting
   started_at?: string | null
   pro_name: string
   pro_rating: number

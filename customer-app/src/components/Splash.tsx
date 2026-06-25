@@ -34,8 +34,8 @@ export default function Splash({ visible }: { visible: boolean }) {
               <g className="spx-house">
                 <path d="M110 56 L44 110 V178 a8 8 0 0 0 8 8 H168 a8 8 0 0 0 8 -8 V110 Z" fill="#fff" />
                 <path d="M110 50 L34 116 a9 9 0 0 0 12 14 L110 74 L174 130 a9 9 0 0 0 12 -14 Z" fill="#fff" />
-                <rect x="98" y="132" width="30" height="54" rx="6" fill="#0ea5a4" />
-                <rect x="64" y="120" width="26" height="26" rx="5" fill="#0ea5a4" />
+                <rect x="98" y="132" width="30" height="54" rx="6" fill="#5b51e8" />
+                <rect x="64" y="120" width="26" height="26" rx="5" fill="#5b51e8" />
               </g>
               <path className="spx-spark" d="M156 78 c4 16 7 19 23 23 c-16 4 -19 7 -23 23 c-4 -16 -7 -19 -23 -23 c16 -4 19 -7 23 -23 Z" fill="#ff7a59" />
             </svg>
