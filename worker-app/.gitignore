@@ -12,20 +12,14 @@ captures/
 # Local config (machine-specific)
 local.properties
 
-# Build output / binaries
-*.apk
-HomeHelp-debug.apk
-
 # Keystore / secrets
 *.jks
 *.keystore
 
-# Node
-node_modules/
-
-# OS / editor
+# OS
 .DS_Store
 Thumbs.db
 
-# Office temp files
-~$*
+# Node backend
+node_modules/
+backend/node_modules/
