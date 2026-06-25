@@ -13,6 +13,7 @@ import {
   getFavourites, addFavourite, removeFavourite,
 } from './db.js'
 import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
+import { createAdminRouter } from './admin.js'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -32,6 +33,7 @@ app.use(cors())
 app.use(express.json({ limit: '6mb' })) // allow review photo data-URLs
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
+app.use('/api/admin', createAdminRouter(io)) // admin panel API (workers, settings, dashboard, …)
 const room = (id) => `booking:${id}`
 const now = () => new Date()
 const otp4 = () => String(Math.floor(1000 + Math.random() * 9000))
