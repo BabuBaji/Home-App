@@ -14,6 +14,7 @@ import {
 } from './db.js'
 import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
 import { createAdminRouter } from './admin.js'
+import { createWorkerRouter } from './worker.js'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -34,6 +35,7 @@ app.use(express.json({ limit: '6mb' })) // allow review photo data-URLs
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 app.use('/api/admin', createAdminRouter(io)) // admin panel API (workers, settings, dashboard, …)
+app.use('/worker', createWorkerRouter(io))   // HomeHelp Pro worker app API (shares the bookings DB)
 const room = (id) => `booking:${id}`
 const now = () => new Date()
 const otp4 = () => String(Math.floor(1000 + Math.random() * 9000))
@@ -312,6 +314,11 @@ const sims = new Map()
 function startTracking(id) {
   if (sims.has(id)) return
   const b = getBooking(id); if (!b) return
+  // Integrated mode: once a real worker (HomeHelp Pro app) has engaged this booking
+  // the status is no longer 'confirmed' — the worker drives every update, so the
+  // built-in simulator must stand down to avoid fighting it. The sim only runs as a
+  // fallback when no worker has picked the job up yet.
+  if (b.status !== 'confirmed') return
   setBookingStatus(id, 'worker_assigned')
   io.to(room(id)).emit('booking:update', { ...getBooking(id), dist: 2.4, eta: 12, pos: { lat: 0.10, lng: 0.12 } })
   let t = 0
@@ -337,7 +344,11 @@ app.post('/api/bookings/:id/track', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   // A future scheduled booking waits — the expert is only dispatched 1 hour before the slot.
   if (!serviceWindowOpen(b)) return res.json({ ok: false, scheduled: true, ...publicBooking(b) })
-  startTracking(b.id); res.json({ ok: true })
+  // Integrated mode: a real worker (HomeHelp Pro app) drives every status change and
+  // pushes booking:update events itself, so we no longer run the auto-simulator here —
+  // the booking stays 'confirmed' and visible to the worker until a worker accepts it.
+  // (startTracking is kept as a fallback for standalone/demo use without a worker.)
+  res.json({ ok: true })
 })
 app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))

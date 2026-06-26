@@ -178,6 +178,12 @@ export function createBooking(b) {
 }
 export function getBooking(id) { return rowToBooking(db.prepare('SELECT * FROM bookings WHERE id=?').get(id)) }
 export function getBookings(uid) { return db.prepare('SELECT * FROM bookings WHERE user_id=? ORDER BY id DESC').all(uid).map(rowToBooking) }
+// Open jobs for the worker app: confirmed bookings not yet picked up by any expert, newest first.
+export function getOpenBookings() { return db.prepare("SELECT * FROM bookings WHERE status='confirmed' ORDER BY id DESC").all().map(rowToBooking) }
+export function setBookingPro(id, name, rating) {
+  db.prepare('UPDATE bookings SET pro_name=?, pro_rating=? WHERE id=?').run(name, rating, id)
+  return getBooking(id)
+}
 export function setBookingStatus(id, status) { db.prepare('UPDATE bookings SET status=? WHERE id=?').run(status, id); return getBooking(id) }
 export function setBookingStarted(id) {
   db.prepare('UPDATE bookings SET status=?, started_at=? WHERE id=?').run('in_progress', now(), id)

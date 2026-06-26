@@ -1,6 +1,7 @@
 package com.homehelp.pro
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,13 +22,16 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -127,11 +131,68 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
             "Terms & Conditions & Privacy Policy",
             color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
         )
+        Spacer(Modifier.height(16.dp))
+        ServerSettings()
     }
+}
+
+/** Login-screen affordance: shows the current backend and opens the editor. */
+@Composable
+fun ServerSettings() {
+    var show by remember { mutableStateOf(false) }
+    var current by remember { mutableStateOf(com.homehelp.pro.network.RetrofitClient.serverUrl()) }
+
+    Text(
+        "⚙  Server: $current",
+        color = TextGray, fontSize = 11.sp, textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().clickable { show = true }.padding(4.dp),
+    )
+
+    if (show) ServerSettingsDialog(onDismiss = { show = false }, onSaved = { current = it })
+}
+
+/** Reusable dialog to point the app at a different backend address without a rebuild. */
+@Composable
+fun ServerSettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit = {}) {
+    var input by remember { mutableStateOf(com.homehelp.pro.network.RetrofitClient.serverUrl()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Backend server") },
+        text = {
+            Column {
+                Text(
+                    "Address of the PC running the HomeHelp backend. Phone and PC must be on the same Wi-Fi.",
+                    fontSize = 13.sp, color = TextGray,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    placeholder = { Text("http://192.168.0.112:4000") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                com.homehelp.pro.network.RetrofitClient.setServerUrl(input)
+                onSaved(com.homehelp.pro.network.RetrofitClient.serverUrl())
+                onDismiss()
+            }) { Text("Save", color = Purple) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextGray) } },
+    )
 }
 
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
+    // A real customer booking arrives asynchronously; only open the New Job card
+    // once the backend has actually handed us one.
+    LaunchedEffect(vm.jobStatus) {
+        if (vm.jobStatus == JobStatus.REQUESTED) nav.navigate(Routes.NEW_JOB)
+    }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Column(Modifier.fillMaxWidth().background(Color.White)) {
             Row(
@@ -173,9 +234,11 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             }
 
             if (vm.isOnline) {
-                PrimaryButton("🔔  Simulate New Job Request") {
-                    vm.requestJob()
-                    nav.navigate(Routes.NEW_JOB)
+                PrimaryButton(if (vm.requestingJob) "Checking for jobs…" else "🔔  Check for New Jobs") {
+                    if (!vm.requestingJob) vm.requestJob()
+                }
+                vm.lastJobMessage?.let { msg ->
+                    Text(msg, fontSize = 13.sp, color = TextGray)
                 }
             }
 

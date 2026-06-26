@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { requestOtp, verifyOtp, googleAuth } from '../api'
 import { useToast } from '../components/UI'
+import ServerSettings from '../components/ServerSettings'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 
@@ -124,6 +125,8 @@ export default function Login() {
             <button className="btn-text full" onClick={() => { setStep('phone'); setOtp('') }}>← Change number</button>
           </>
         )}
+
+        <ServerSettings />
       </div>
     </div>
   )

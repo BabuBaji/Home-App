@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
@@ -155,6 +156,8 @@ private fun BookingCard(b: Booking) {
 
 @Composable
 fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
+    var showServer by remember { mutableStateOf(false) }
+    if (showServer) ServerSettingsDialog(onDismiss = { showServer = false })
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         BellHeader("Profile")
         Column(
@@ -195,7 +198,8 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 MenuItem(Icons.Filled.Tune, "Preferences") { nav.navigate(Routes.P_PREFERENCES) }
                 MenuItem(Icons.Filled.Notifications, "Notification Settings") { nav.navigate(Routes.P_NOTIFICATIONS) }
                 MenuItem(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { nav.navigate(Routes.P_HELP) }
-                MenuItem(Icons.Filled.Info, "About Us", divider = false) { nav.navigate(Routes.P_ABOUT) }
+                MenuItem(Icons.Filled.Info, "About Us") { nav.navigate(Routes.P_ABOUT) }
+                MenuItem(Icons.Filled.Dns, "Server Settings", divider = false) { showServer = true }
             }
             Surface(
                 Modifier.fillMaxWidth().clickable {

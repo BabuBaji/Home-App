@@ -33,6 +33,8 @@ import androidx.navigation.compose.rememberNavController
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Load any saved backend address (set via the login screen's "Server settings").
+        com.homehelp.pro.network.RetrofitClient.init(this)
         // osmdroid requires a unique user-agent or OSM tile servers return 403.
         org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
         setContent {

@@ -1,7 +1,17 @@
 import { io, type Socket } from 'socket.io-client'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
-export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+// Backend base URL. A runtime override saved in localStorage (set via the login
+// screen's "Server settings") wins over the value baked in at build time, so the
+// app can follow the dev machine to a new IP without a rebuild.
+const storedApi = (() => { try { return localStorage.getItem('hh_api') || '' } catch { return '' } })()
+export const API_BASE = (storedApi || import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+export function getApiBase() { return API_BASE }
+/** Persist a new backend URL (caller should reload the app so it takes effect everywhere). */
+export function setApiBase(url: string) {
+  const u = (url || '').trim().replace(/\/$/, '')
+  try { if (u) localStorage.setItem('hh_api', u); else localStorage.removeItem('hh_api') } catch { /* ignore */ }
+}
 
 let token = localStorage.getItem('hh_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }

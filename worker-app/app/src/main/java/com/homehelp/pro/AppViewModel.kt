@@ -71,7 +71,8 @@ data class DocItem(val name: String, val status: String, val fileName: String = 
 
 class AppViewModel : ViewModel() {
 
-    private val api = RetrofitClient.api
+    // Use a getter so a server-URL change (re)builds the client and we pick it up immediately.
+    private val api get() = RetrofitClient.api
 
     /** True once we've successfully reached the backend at least once this session. */
     var backendConnected by mutableStateOf(false)
@@ -84,6 +85,12 @@ class AppViewModel : ViewModel() {
         private set
     var activeJob by mutableStateOf<Job?>(null)
         private set
+
+    /** True while a job request is in flight. */
+    var requestingJob by mutableStateOf(false)
+        private set
+    /** User-facing note after a job request (e.g. "no bookings yet"). Null when there's nothing to say. */
+    var lastJobMessage by mutableStateOf<String?>(null)
 
     // Live dashboard / wallet figures
     var todayEarnings by mutableIntStateOf(650)
@@ -140,23 +147,6 @@ class AppViewModel : ViewModel() {
         DocItem("Police Verification", "Verified"),
         DocItem("Address Proof", "Pending"),
     )
-
-    // A rotating pool of incoming jobs so the workflow feels real on repeat runs.
-    private val jobPool = listOf(
-        Job("JOB1201", "Priya Sharma", "PS", "+91 98765 43210", 4.7,
-            listOf("Utensil Wash", "Mopping", "Dusting"), "16 May 2025, 09:00 AM", 2,
-            "221B, Baker Street, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 1.8, 297, "4721", 19.0596, 72.8295),
-        Job("JOB1202", "Rohan Verma", "RV", "+91 99203 11882", 4.5,
-            listOf("Bathroom Cleaning", "Laundry"), "16 May 2025, 11:30 AM", 2,
-            "14, Lokhandwala Complex, Andheri West, Mumbai - 400053", "Andheri West, Mumbai", 2.3, 349, "5630", 19.1364, 72.8296),
-        Job("JOB1203", "Sneha Iyer", "SI", "+91 98191 55470", 4.8,
-            listOf("Sweeping", "Mopping", "Dusting"), "16 May 2025, 02:00 PM", 2,
-            "Hill Road, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 2.0, 249, "8125", 19.0550, 72.8260),
-        Job("JOB1204", "Arjun Nair", "AN", "+91 90045 77310", 4.6,
-            listOf("Kitchen Cleaning", "Utensil Wash"), "16 May 2025, 04:30 PM", 3,
-            "Hiranandani Gardens, Powai, Mumbai - 400076", "Powai, Mumbai", 3.1, 399, "6204", 19.1176, 72.9060),
-    )
-    private var jobIndex by mutableIntStateOf(0)
 
     // ---- networking helpers ----
     /** Fire a backend call without blocking the UI; failures degrade to offline mode. */
@@ -227,12 +217,32 @@ class AppViewModel : ViewModel() {
 
     fun goOnline(v: Boolean) { isOnline = v }
 
+    /**
+     * Pull the next real customer booking from the backend and present it as the
+     * active job. If there are no pending bookings we surface a hint instead of
+     * showing a blank job card.
+     */
     fun requestJob() {
-        activeJob = jobPool[jobIndex % jobPool.size]
-        jobIndex++
-        jobStatus = JobStatus.REQUESTED
-        // Mirror the request on the backend (keeps server lifecycle in sync).
-        sync { api.requestJob() }
+        requestingJob = true
+        lastJobMessage = null
+        viewModelScope.launch {
+            try {
+                val r = api.requestJob()
+                backendConnected = true
+                val job = r.job
+                if (job != null) {
+                    activeJob = job
+                    jobStatus = JobStatus.REQUESTED
+                } else {
+                    lastJobMessage = "No new bookings yet. Place an order in the customer app, then tap again."
+                }
+            } catch (e: Exception) {
+                backendConnected = false
+                lastJobMessage = "Can't reach the server — make sure the backend is running."
+            } finally {
+                requestingJob = false
+            }
+        }
     }
 
     fun acceptJob() {

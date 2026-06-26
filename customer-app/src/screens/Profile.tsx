@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Header, BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { fetchMe, fetchBookings, fetchCoupons } from '../api'
+import ServerSettings from '../components/ServerSettings'
 import type { Address, Coupon } from '../types'
 
 export default function Profile() {
@@ -73,6 +74,8 @@ export default function Profile() {
           <div className="acc-item" onClick={() => toast('Opening T&C')}><span className="ai">📄</span><span className="at">Terms & Conditions</span><span className="chev">›</span></div>
           <div className="acc-item danger" onClick={logout}><span className="ai">⏻</span><span className="at">Logout</span><span className="chev">›</span></div>
         </div>
+
+        <ServerSettings />
 
         <div className="stat-grid">
           <div><div className="sn">{stats.total}</div><div className="sl">Bookings</div></div>
