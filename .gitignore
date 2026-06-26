@@ -1,13 +1,31 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio / IDE
+.idea/
+*.iml
+captures/
+.cxx/
+
+# Local config (machine-specific)
+local.properties
+
 # Build output / binaries
 *.apk
 HomeHelp-debug.apk
+
+# Keystore / secrets
+*.jks
+*.keystore
 
 # Node
 node_modules/
 
 # OS / editor
-Thumbs.db
 .DS_Store
+Thumbs.db
 
 # Office temp files
 ~$*
