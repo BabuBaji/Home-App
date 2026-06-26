@@ -6,16 +6,16 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 
 interface ApiService {
-    @GET("api/health")
+    @GET("api/worker/health")
     suspend fun health(): Map<String, Any>
 
-    @POST("api/auth/request-otp")
+    @POST("api/worker/auth/request-otp")
     suspend fun requestOtp(@Body body: AuthRequest): Map<String, Any>
 
-    @POST("api/auth/verify")
+    @POST("api/worker/auth/verify")
     suspend fun verify(@Body body: AuthRequest): BootstrapResponse
 
-    @GET("api/bootstrap")
+    @GET("api/worker/bootstrap")
     suspend fun bootstrap(): BootstrapResponse
 
     // ---- worker profile ----
@@ -41,37 +41,40 @@ interface ApiService {
     suspend fun uploadDocument(@Body body: UploadDocBody): DocumentsResponse
 
     // ---- job lifecycle ----
-    @POST("api/jobs/request")
+    @GET("api/worker/jobs/available")
+    suspend fun jobsAvailable(): Map<String, Any>
+
+    @POST("api/worker/jobs/request")
     suspend fun requestJob(): RequestJobResponse
 
-    @POST("api/jobs/accept")
+    @POST("api/worker/jobs/accept")
     suspend fun acceptJob(): StatusResponse
 
-    @POST("api/jobs/reject")
+    @POST("api/worker/jobs/reject")
     suspend fun rejectJob(): StatusResponse
 
-    @POST("api/jobs/on-the-way")
+    @POST("api/worker/jobs/on-the-way")
     suspend fun onTheWay(): StatusResponse
 
-    @POST("api/jobs/arrived")
+    @POST("api/worker/jobs/arrived")
     suspend fun arrived(): StatusResponse
 
-    @POST("api/jobs/verify-otp")
+    @POST("api/worker/jobs/verify-otp")
     suspend fun verifyOtp(@Body body: OtpBody): StatusResponse
 
-    @POST("api/jobs/end")
-    suspend fun endService(): StatusResponse
+    @POST("api/worker/jobs/end")
+    suspend fun endService(@Body body: EndBody): StatusResponse
 
-    @POST("api/jobs/settle")
+    @POST("api/worker/jobs/settle")
     suspend fun settle(): SettleResponse
 
-    @POST("api/jobs/cancel")
+    @POST("api/worker/jobs/cancel")
     suspend fun cancel(@Body body: ReasonBody): StatusResponse
 
     // ---- wallet ----
-    @POST("api/wallet/withdraw")
+    @POST("api/worker/wallet/withdraw")
     suspend fun withdraw(@Body body: AmountBody): WalletOpResponse
 
-    @POST("api/wallet/add")
+    @POST("api/worker/wallet/add")
     suspend fun addMoney(@Body body: AmountBody): WalletOpResponse
 }

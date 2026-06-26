@@ -13,6 +13,7 @@ import com.homehelp.pro.network.AuthRequest
 import com.homehelp.pro.network.AvailabilityBody
 import com.homehelp.pro.network.BankBody
 import com.homehelp.pro.network.BootstrapResponse
+import com.homehelp.pro.network.EndBody
 import com.homehelp.pro.network.NotificationsBody
 import com.homehelp.pro.network.OtpBody
 import com.homehelp.pro.network.PreferencesBody
@@ -20,6 +21,7 @@ import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
 import com.homehelp.pro.network.UploadDocBody
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -85,6 +87,13 @@ class AppViewModel : ViewModel() {
     var activeJob by mutableStateOf<Job?>(null)
         private set
 
+    // Wall-clock stamps for the actual time the worker spent on the job (start → end),
+    // shown on the Job Completed screen and mirrored to the customer/admin.
+    var serviceStartMs by mutableStateOf(0L)
+        private set
+    var serviceEndMs by mutableStateOf(0L)
+        private set
+
     // Live dashboard / wallet figures
     var todayEarnings by mutableIntStateOf(650)
         private set
@@ -141,23 +150,6 @@ class AppViewModel : ViewModel() {
         DocItem("Address Proof", "Pending"),
     )
 
-    // A rotating pool of incoming jobs so the workflow feels real on repeat runs.
-    private val jobPool = listOf(
-        Job("JOB1201", "Priya Sharma", "PS", "+91 98765 43210", 4.7,
-            listOf("Utensil Wash", "Mopping", "Dusting"), "16 May 2025, 09:00 AM", 2,
-            "221B, Baker Street, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 1.8, 297, "4721", 19.0596, 72.8295),
-        Job("JOB1202", "Rohan Verma", "RV", "+91 99203 11882", 4.5,
-            listOf("Bathroom Cleaning", "Laundry"), "16 May 2025, 11:30 AM", 2,
-            "14, Lokhandwala Complex, Andheri West, Mumbai - 400053", "Andheri West, Mumbai", 2.3, 349, "5630", 19.1364, 72.8296),
-        Job("JOB1203", "Sneha Iyer", "SI", "+91 98191 55470", 4.8,
-            listOf("Sweeping", "Mopping", "Dusting"), "16 May 2025, 02:00 PM", 2,
-            "Hill Road, Bandra West, Mumbai - 400050", "Bandra West, Mumbai", 2.0, 249, "8125", 19.0550, 72.8260),
-        Job("JOB1204", "Arjun Nair", "AN", "+91 90045 77310", 4.6,
-            listOf("Kitchen Cleaning", "Utensil Wash"), "16 May 2025, 04:30 PM", 3,
-            "Hiranandani Gardens, Powai, Mumbai - 400076", "Powai, Mumbai", 3.1, 399, "6204", 19.1176, 72.9060),
-    )
-    private var jobIndex by mutableIntStateOf(0)
-
     // ---- networking helpers ----
     /** Fire a backend call without blocking the UI; failures degrade to offline mode. */
     private fun sync(block: suspend () -> Unit) {
@@ -174,6 +166,8 @@ class AppViewModel : ViewModel() {
 
     /** Apply the server's full state snapshot onto local observable state. */
     private fun applyBootstrap(b: BootstrapResponse) {
+        // Remember the auth token so every later call is attached to this worker.
+        b.token?.let { RetrofitClient.token = it }
         b.worker?.let { w ->
             workerName = w.name
             workerPhone = w.phone
@@ -225,14 +219,60 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun goOnline(v: Boolean) { isOnline = v }
+    /** True when a real customer booking is waiting — drives the "New Job Request" notification. */
+    var hasIncomingJob by mutableStateOf(false)
+        private set
+    private var pollingStarted = false
 
-    fun requestJob() {
-        activeJob = jobPool[jobIndex % jobPool.size]
-        jobIndex++
-        jobStatus = JobStatus.REQUESTED
-        // Mirror the request on the backend (keeps server lifecycle in sync).
-        sync { api.requestJob() }
+    fun goOnline(v: Boolean) {
+        isOnline = v
+        if (v) startJobPolling() else hasIncomingJob = false
+    }
+
+    // While online and idle, poll the backend for a real waiting booking. When one
+    // appears, raise the in-app notification flag the Home screen reacts to.
+    private fun startJobPolling() {
+        if (pollingStarted) return
+        pollingStarted = true
+        viewModelScope.launch {
+            while (true) {
+                if (isOnline && activeJob == null) {
+                    try {
+                        val r = api.jobsAvailable()
+                        hasIncomingJob = (r["available"] == true)
+                        backendConnected = true
+                    } catch (e: Exception) { backendConnected = false }
+                } else if (!isOnline) {
+                    hasIncomingJob = false
+                }
+                delay(5000)
+            }
+        }
+    }
+
+    /**
+     * Pull the next REAL customer booking. Calls back with true if one was opened,
+     * false if there are no pending jobs (no demo/fake jobs are ever shown).
+     */
+    fun requestJob(onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                val r = api.requestJob()
+                backendConnected = true
+                if (r.job != null) {
+                    activeJob = r.job
+                    jobStatus = JobStatus.REQUESTED
+                    hasIncomingJob = false
+                    onResult(true)
+                } else {
+                    hasIncomingJob = false
+                    onResult(false)
+                }
+            } catch (e: Exception) {
+                backendConnected = false
+                onResult(false)
+            }
+        }
     }
 
     fun acceptJob() {
@@ -261,14 +301,17 @@ class AppViewModel : ViewModel() {
         val job = activeJob ?: return false
         return if (input == job.otp) {
             jobStatus = JobStatus.IN_PROGRESS
+            serviceStartMs = System.currentTimeMillis()
+            serviceEndMs = 0L
             sync { api.verifyOtp(OtpBody(input)) }
             true
         } else false
     }
 
-    fun endService() {
+    fun endService(photo: String? = null) {
         jobStatus = JobStatus.COMPLETED
-        sync { api.endService() }
+        serviceEndMs = System.currentTimeMillis()
+        sync { api.endService(EndBody(photo)) }
     }
 
     /** Finish & submit -> credit earnings + wallet, push to history, reset lifecycle. */

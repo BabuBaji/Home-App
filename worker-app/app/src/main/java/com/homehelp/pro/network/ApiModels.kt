@@ -84,6 +84,7 @@ data class WalletOpResponse(
 // ---- request bodies ----
 data class AuthRequest(val phone: String, val otp: String? = null)
 data class OtpBody(val otp: String)
+data class EndBody(val photo: String? = null)
 data class AmountBody(val amount: Int)
 data class ReasonBody(val reason: String)
 data class ProfileBody(val name: String, val phone: String, val email: String, val city: String)

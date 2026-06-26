@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client'
+import { getCurrentPosition } from './geo'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
@@ -67,7 +68,13 @@ export const fetchTickets = () => req<Ticket[]>('/api/tickets')
 export const createTicket = (category: string, message: string) => req<Ticket>('/api/tickets', { method: 'POST', body: JSON.stringify({ category, message }) })
 
 /* bookings */
-export const createBookingApi = (payload: any) => req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify(payload) })
+// Attach the customer's live GPS so the assigned worker sees their real location on the
+// map. Best-effort — if the fix isn't available the booking still goes through.
+export const createBookingApi = async (payload: any) => {
+  let coords: { lat?: number; lng?: number } = {}
+  if (payload.lat == null) { try { coords = await getCurrentPosition() } catch { /* no fix — server falls back */ } }
+  return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
+}
 export const fetchBookings = () => req<Booking[]>('/api/bookings')
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })

@@ -14,6 +14,8 @@ import {
 } from './db.js'
 import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
 import { createAdminRouter } from './admin.js'
+import { createWorkerRouter } from './worker.js'
+import { setBookingCoords } from './worker-db.js'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -34,6 +36,7 @@ app.use(express.json({ limit: '6mb' })) // allow review photo data-URLs
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 app.use('/api/admin', createAdminRouter(io)) // admin panel API (workers, settings, dashboard, …)
+app.use('/api/worker', createWorkerRouter(io)) // worker app API (HomeHelp Pro) — shares bookings/DB/socket
 const room = (id) => `booking:${id}`
 const now = () => new Date()
 const otp4 = () => String(Math.floor(1000 + Math.random() * 9000))
@@ -293,13 +296,15 @@ app.post('/api/bookings', auth, (req, res) => {
     paymentStatus = 'paid'
   }
 
-  const booking = createBooking({
+  let booking = createBooking({
     ref: ref(), user_id: req.user.id, type: body.type || 'instant', freq: body.freq, note: body.note,
     date: body.date, time: body.time, address, payment, payment_status: paymentStatus,
     items: q.items, duration: q.items[0]?.durationLabel,
     subtotal: pb.subtotal, fee: pb.fee, tax: pb.tax, discount: pb.discount, coupon, total: pb.total,
     status: 'confirmed', service_otp: otp4(),
   })
+  // Capture the customer's live location so the assigned worker can see it on their map.
+  if (body.lat != null && body.lng != null) { setBookingCoords(booking.id, body.lat, body.lng); booking = getBooking(booking.id) }
   // Only the in-app wallet reduces the balance; external gateway methods (UPI/card/
   // netbanking) are settled outside, so we just record them as paid.
   if (isWallet) addTransaction(req.user.id, 'debit', `Booking Payment ${booking.ref}`, pb.total, booking.ref)
@@ -337,6 +342,12 @@ app.post('/api/bookings/:id/track', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   // A future scheduled booking waits — the expert is only dispatched 1 hour before the slot.
   if (!serviceWindowOpen(b)) return res.json({ ok: false, scheduled: true, ...publicBooking(b) })
+  // Unified with the HomeHelp Pro worker app: a REAL worker drives the live status
+  // (assigned → on the way → arrived → in progress). The customer just subscribes to the
+  // booking room and reflects the worker's updates over socket.io. The old simulated
+  // "Anjali Verma" dispatch is only used as a fallback when no worker app is in play
+  // (set SIMULATE_DISPATCH=1 to re-enable it for the standalone customer demo).
+  if (b.worker_id || process.env.SIMULATE_DISPATCH !== '1') return res.json({ ok: true, live: true })
   startTracking(b.id); res.json({ ok: true })
 })
 app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
