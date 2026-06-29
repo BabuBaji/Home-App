@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header, FooterCTA, useToast } from '../components/UI'
-import { reviewBooking } from '../api'
+import { reviewBooking, fetchBooking } from '../api'
 
 const TAGS = [
   { id: 'punct', label: 'Punctuality', icon: '⏱' }, { id: 'prof', label: 'Professionalism', icon: '🧑‍💼' },
@@ -17,8 +17,25 @@ export default function Rate() {
   const [text, setText] = useState('Great service! Very punctual and professional.')
   const [tags, setTags] = useState<string[]>([])
   const [photo, setPhoto] = useState<string>('')
+  const [workPhoto, setWorkPhoto] = useState<string>('')
+  const [svc, setSvc] = useState<{ endedAt?: string; took?: string }>({})
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Show the expert's proof-of-work photo + the actual time the service took.
+  useEffect(() => {
+    fetchBooking(Number(id)).then((b) => {
+      setWorkPhoto(b.work_photo || '')
+      if (b.started_at && b.completed_at) {
+        const sec = Math.max(0, Math.round((new Date(b.completed_at).getTime() - new Date(b.started_at).getTime()) / 1000))
+        const m = Math.floor(sec / 60), s = sec % 60
+        setSvc({
+          endedAt: new Date(b.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          took: m > 0 ? `${m} min ${s}s` : `${s}s`,
+        })
+      }
+    }).catch(() => {})
+  }, [id])
 
   const toggle = (t: string) => setTags((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t])
 
@@ -40,6 +57,18 @@ export default function Rate() {
       <Header title="Rate Your Experience" />
       <div className="content pad-cta">
         <div className="rate-hero">👩🏻‍🔧✨</div>
+        {svc.endedAt && (
+          <div className="card" style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center', padding: '12px 8px', marginBottom: 12 }}>
+            <div><div className="muted sm">Service ended</div><strong>{svc.endedAt}</strong></div>
+            <div><div className="muted sm">Time taken</div><strong style={{ color: '#0F7B43' }}>{svc.took}</strong></div>
+          </div>
+        )}
+        {workPhoto && (
+          <div className="photo-prev" style={{ marginBottom: 12 }}>
+            <img src={workPhoto} alt="Expert's completed-work photo" />
+            <div className="char-count">📷 Expert's proof of work</div>
+          </div>
+        )}
         <h2 className="rate-q">How was your experience?</h2>
         <div className="stars">{[1, 2, 3, 4, 5].map((n) => <span key={n} className={n <= rating ? 'on' : ''} onClick={() => setRating(n)}>★</span>)}</div>
 

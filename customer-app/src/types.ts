@@ -105,6 +105,10 @@ export interface Booking {
   scheduled_at?: number | null   // ms epoch of the scheduled slot (null for instant)
   otp_released?: boolean         // false while a future scheduled booking is still waiting
   started_at?: string | null
+  completed_at?: string | null   // when the worker ended the service (for actual duration)
+  work_photo?: string | null     // worker's proof-of-work photo captured at completion
+  cust_lat?: number | null
+  cust_lng?: number | null
   pro_name: string
   pro_rating: number
   rating?: number

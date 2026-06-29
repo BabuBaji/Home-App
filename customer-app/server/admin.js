@@ -11,6 +11,17 @@ import {
   listComplaints, createComplaint, updateComplaint,
   logAudit, listAudit,
 } from './admin-db.js'
+import {
+  walletSummary, earningsBreakup, deductionsList, walletHistory, withdrawalsList, advancesList,
+  recordIncome, recordDeduction, holdAmount, releaseHold, releasePending,
+  approveWithdrawal, rejectWithdrawal, approveAdvance, rejectAdvance,
+  generatePayslip, buildPayslip,
+} from './worker-wallet-db.js'
+import { bankKycDto, setWorkerBankStatus } from './worker-db.js'
+import { retryPayout } from './worker-wallet-db.js'
+import {
+  financeReports, paymentsList, settlementsList, payoutsList, ledgerForWorker, ledgerAll, workerWisePayout,
+} from './payments-db.js'
 
 const now = () => new Date()
 const iso = () => now().toISOString()
@@ -147,6 +158,114 @@ export function createAdminRouter(io) {
   r.get('/workers/:id', admin, (req, res) => { const w = getWorker(Number(req.params.id)); return w ? res.json(w) : res.status(404).json({ error: 'Not found' }) })
   r.patch('/workers/:id', admin, require('manager'), (req, res) => { const w = updateWorker(Number(req.params.id), req.body || {}); logAudit(req.admin.email, 'worker:update', w?.name); return w ? res.json(w) : res.status(404).json({ error: 'Not found' }) })
   r.delete('/workers/:id', admin, require('admin'), (req, res) => { deleteWorker(Number(req.params.id)); logAudit(req.admin.email, 'worker:delete', req.params.id); res.json({ ok: true }) })
+
+  /* ---------- worker wallet controls ---------- */
+  // Full wallet view for one worker (dashboard + breakup + deductions + history + queues).
+  const walletView = (wid) => ({
+    summary: walletSummary(wid), earningsBreakup: earningsBreakup(wid), deductions: deductionsList(wid),
+    history: walletHistory(wid, 200), withdrawals: withdrawalsList(wid), advances: advancesList(wid),
+    bank: bankKycDto(wid), ledger: ledgerForWorker(wid, 200),
+  })
+  r.get('/workers/:id/wallet', admin, (req, res) => res.json(walletView(Number(req.params.id))))
+
+  /* ---------- finance panel: payments, settlements, payouts, ledger, reports ---------- */
+  r.get('/finance/reports', admin, (_q, res) => res.json(financeReports()))
+  r.get('/finance/payments', admin, (req, res) => res.json(paymentsList({ status: String(req.query.status || 'all') })))
+  r.get('/finance/settlements', admin, (_q, res) => res.json(settlementsList()))
+  r.get('/finance/payouts', admin, (req, res) => res.json(payoutsList({ status: String(req.query.status || 'all') })))
+  r.get('/finance/ledger', admin, (req, res) => res.json(req.query.worker ? ledgerForWorker(Number(req.query.worker), 500) : ledgerAll(500)))
+  r.get('/finance/worker-payout', admin, (_q, res) => res.json(workerWisePayout()))
+  // Retry a failed/reversed payout (re-debits available + re-dispatches to the provider).
+  r.post('/finance/payouts/:withdrawalId/retry', admin, require('manager'), (req, res) => {
+    const out = retryPayout(Number(req.params.withdrawalId))
+    if (out?.error) return res.status(400).json({ error: out.error })
+    logAudit(req.admin.email, 'payout:retry', req.params.withdrawalId)
+    res.json({ ok: true })
+  })
+  // CSV exports for finance reconciliation.
+  r.get('/finance/payments.csv', admin, (_q, res) => {
+    const rows = paymentsList({ limit: 5000 })
+    const head = 'PaymentID,BookingID,CustomerID,Amount,Mode,Gateway,Status,PaidAt'
+    const body = rows.map((p) => [p.paymentId, p.bookingId, p.customerId, p.amount, p.mode, p.gateway, p.status, p.paidAt || ''].join(',')).join('\n')
+    res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename="payments.csv"')
+    res.send(`${head}\n${body}\n`)
+  })
+  r.get('/finance/payouts.csv', admin, (_q, res) => {
+    const rows = payoutsList({ limit: 5000 })
+    const head = 'PayoutID,WithdrawalID,WorkerID,Amount,Provider,Mode,Status,Destination,CreatedAt'
+    const body = rows.map((p) => [p.payoutId, p.withdrawalId, p.workerId, p.amount, p.provider, p.mode, p.status, p.destination, p.createdAt].join(',')).join('\n')
+    res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename="payouts.csv"')
+    res.send(`${head}\n${body}\n`)
+  })
+
+  // Bank & KYC verification — approve/reject a worker's bank account.
+  r.post('/workers/:id/bank/approve', admin, require('manager'), (req, res) => {
+    const wid = Number(req.params.id)
+    const out = setWorkerBankStatus(wid, 'Approved')
+    if (!out) return res.status(404).json({ error: 'Worker not found' })
+    logAudit(req.admin.email, 'bank:approve', wid)
+    res.json({ ok: true, ...walletView(wid) })
+  })
+  r.post('/workers/:id/bank/reject', admin, require('manager'), (req, res) => {
+    const wid = Number(req.params.id)
+    const out = setWorkerBankStatus(wid, 'Rejected', req.body?.reason || 'Details could not be verified')
+    if (!out) return res.status(404).json({ error: 'Worker not found' })
+    logAudit(req.admin.email, 'bank:reject', wid)
+    res.json({ ok: true, ...walletView(wid) })
+  })
+
+  const num = (v) => parseInt(v, 10)
+  const walletAction = (handler, audit) => (req, res) => {
+    const wid = Number(req.params.id)
+    const out = handler(wid, req)
+    if (out?.error) return res.status(400).json({ error: out.error })
+    logAudit(req.admin.email, audit, wid)
+    res.json({ ok: true, ...walletView(wid) })
+  }
+
+  // Add bonus / incentive (credit) and penalty / charge (debit) — both fully transparent.
+  r.post('/workers/:id/wallet/bonus', admin, require('manager'),
+    walletAction((wid, req) => recordIncome(wid, req.body?.category || 'Performance Bonus', num(req.body?.amount),
+      { label: req.body?.label || req.body?.reason || '', bucket: req.body?.bucket || 'available' }) || { ok: true }, 'wallet:bonus'))
+  r.post('/workers/:id/wallet/penalty', admin, require('manager'),
+    walletAction((wid, req) => recordDeduction(wid, req.body?.category || 'Penalty', num(req.body?.amount),
+      { label: req.body?.reason || req.body?.label || '' }) || { ok: true }, 'wallet:penalty'))
+
+  // Hold / release payment, and clear Pending -> Available after quality check.
+  r.post('/workers/:id/wallet/hold', admin, require('manager'),
+    walletAction((wid, req) => holdAmount(wid, num(req.body?.amount), req.body?.reason || 'Quality check'), 'wallet:hold'))
+  r.post('/workers/:id/wallet/release-hold', admin, require('manager'),
+    walletAction((wid, req) => releaseHold(wid, num(req.body?.amount), req.body?.reason || 'Hold released'), 'wallet:release-hold'))
+  r.post('/workers/:id/wallet/release-pending', admin, require('manager'),
+    walletAction((wid, req) => releasePending(wid, num(req.body?.amount)), 'wallet:release-pending'))
+
+  // Approve / reject a withdrawal request.
+  r.post('/workers/:id/wallet/withdrawals/:wd/approve', admin, require('manager'),
+    walletAction((wid, req) => approveWithdrawal(num(req.params.wd)), 'wallet:withdraw-approve'))
+  r.post('/workers/:id/wallet/withdrawals/:wd/reject', admin, require('manager'),
+    walletAction((wid, req) => rejectWithdrawal(num(req.params.wd), req.body?.reason), 'wallet:withdraw-reject'))
+
+  // Approve / reject a salary advance (approval credits + starts recovery).
+  r.post('/workers/:id/wallet/advances/:adv/approve', admin, require('manager'),
+    walletAction((wid, req) => approveAdvance(num(req.params.adv)), 'wallet:advance-approve'))
+  r.post('/workers/:id/wallet/advances/:adv/reject', admin, require('manager'),
+    walletAction((wid, req) => rejectAdvance(num(req.params.adv), req.body?.reason), 'wallet:advance-reject'))
+
+  // Generate a monthly payslip; export a CSV wallet report across all workers.
+  r.post('/workers/:id/wallet/payslip', admin, require('manager'), (req, res) => {
+    const wid = Number(req.params.id)
+    const slip = generatePayslip(wid, req.body?.month)
+    logAudit(req.admin.email, 'wallet:payslip', wid)
+    res.json({ ok: true, payslip: slip })
+  })
+  r.get('/wallet/report.csv', admin, (req, res) => {
+    const rows = db.prepare('SELECT id,name,balance,pending,hold,withdrawn,advance_outstanding,earnings FROM workers ORDER BY id').all()
+    const head = 'WorkerID,Name,Available,Pending,Hold,TotalWithdrawn,AdvanceOutstanding,TotalEarned'
+    const body = rows.map((w) => [w.id, `"${(w.name || '').replace(/"/g, '""')}"`, w.balance || 0, w.pending || 0, w.hold || 0, w.withdrawn || 0, w.advance_outstanding || 0, w.earnings || 0].join(',')).join('\n')
+    res.setHeader('Content-Type', 'text/csv')
+    res.setHeader('Content-Disposition', 'attachment; filename="wallet-report.csv"')
+    res.send(`${head}\n${body}\n`)
+  })
 
   /* ---------- bookings ---------- */
   r.get('/bookings', admin, (req, res) => {

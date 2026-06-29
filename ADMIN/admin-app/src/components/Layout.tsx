@@ -13,6 +13,7 @@ const NAV = [
     { to: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { to: '/customers', label: 'Customers', Icon: Users },
     { to: '/workers', label: 'Workers (Pros)', Icon: HardHat },
+    { to: '/worker-wallet', label: 'Worker Wallet', Icon: Wallet },
     { to: '/bookings', label: 'Bookings', Icon: CalendarDays },
     { to: '/services', label: 'Services', Icon: Sparkles },
     { to: '/pricing', label: 'Pricing', Icon: Tag },
@@ -35,7 +36,7 @@ const NAV = [
 ]
 
 const TITLES: Record<string, string> = {
-  dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', bookings: 'Bookings',
+  dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Worker Wallet', bookings: 'Bookings',
   services: 'Services', pricing: 'Pricing', payments: 'Payments', refunds: 'Refunds',
   complaints: 'Complaints', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', settings: 'Settings', admins: 'Admin Users',

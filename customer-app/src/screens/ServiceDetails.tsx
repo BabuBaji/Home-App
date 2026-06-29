@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Loading, useToast } from '../components/UI'
 import { useStore } from '../store'
+import { ServiceHeroImg, ServiceMedallion } from '../serviceArt'
 import { fetchService, fetchServices } from '../api'
 import type { ServiceDetail, Service } from '../types'
 
@@ -33,9 +34,7 @@ export default function ServiceDetails() {
       <div className="content pad-cta no-pad">
         {/* hero */}
         <div className="sd2-hero">
-          {s.image
-            ? <img className="sd2-img" alt="" src={s.image} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-            : <div className="sd2-img sd2-emoji">{s.icon}</div>}
+          <ServiceHeroImg service={s} />
           <div className="sd2-fade" />
           <div className="sd2-meta">
             <span className="sd2-eta">⚡ Arrives in 5 min</span>
@@ -55,8 +54,8 @@ export default function ServiceDetails() {
           <div className="svc-chips">
             {services.map((x) => (
               <button key={x.id} className={`svc-chip ${x.id === s!.id ? 'sel' : ''}`} onClick={() => nav(`/service/${x.id}`, { replace: true })}>
-                <span className="svc-chip-th">
-                  {x.image ? <img alt="" src={x.image} onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} /> : <span>{x.icon}</span>}
+                <span className="svc-chip-th" style={{ position: 'relative' }}>
+                  <ServiceMedallion service={x} size={42} />
                 </span>
                 <span className="svc-chip-name">{x.name}</span>
               </button>

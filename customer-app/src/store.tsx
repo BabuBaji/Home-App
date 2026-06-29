@@ -34,7 +34,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [bookingType, setBookingType] = useState<'instant' | 'schedule'>('instant')
   const [date, setDate] = useState('16 May 2025')
   const [time, setTime] = useState('09:00 AM')
-  const [payment, setPayment] = useState('upi')
+  const [payment, setPayment] = useState('phonepe')
   const [coupon, setCoupon] = useState('')
   const [addressLine, setAddressLine] = useState('')
   const [note, setNote] = useState('')

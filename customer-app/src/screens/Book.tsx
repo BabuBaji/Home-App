@@ -53,7 +53,7 @@ export default function Book() {
   }
   function clearCoupon() { setCoupon(''); setCode('') }
 
-  async function onPaid(method: string, _txnId: string) {
+  async function onPaid(method: string, txnId: string) {
     if (placing) return
     setPlacing(true)
     try {
@@ -61,6 +61,7 @@ export default function Book() {
         items: [{ id: s!.id, durationId: dur!.id }],
         type: instant ? 'instant' : 'schedule',
         payment: method, coupon: coupon || undefined,
+        paymentId: txnId, // Razorpay payment id (verified server-side before the booking is accepted)
         ...(instant ? {} : { date: day, time: slot }),
       })
       nav(`/confirmed/${b.id}`, { replace: true })

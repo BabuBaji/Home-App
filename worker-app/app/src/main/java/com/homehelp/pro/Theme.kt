@@ -5,20 +5,20 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// Clean white professional palette with a teal brand accent.
-// Names kept stable so every screen recolors in place.
-val Purple = Color(0xFF0E9F8E)        // primary — teal
-val PurpleDark = Color(0xFF0B7E70)    // primary pressed / dark teal
-val PurpleLight = Color(0xFFEAF6F4)   // primary tint — banners, indicators (very light teal)
-val GreenSuccess = Color(0xFF15A06B)  // success / online — emerald
-val GreenLight = Color(0xFFEAF7F0)    // success tint
-val Gold = Color(0xFFE0A106)          // accent — amber (ratings, pending, warnings)
+// Advanced Light Premium palette — indigo-violet brand on white, matching the customer & admin
+// apps. Names kept stable so every screen recolors in place (no layout/flow changes).
+val Purple = Color(0xFF5B51E8)        // primary — indigo-violet
+val PurpleDark = Color(0xFF4840C4)    // primary pressed / dark indigo
+val PurpleLight = Color(0xFFE7E3FD)   // primary tint — banners, indicators (light violet)
+val GreenSuccess = Color(0xFF16A34A)  // success / online
+val GreenLight = Color(0xFFE7F7EE)    // success tint
+val Gold = Color(0xFFF59E0B)          // accent — amber (ratings, pending, warnings)
 val ScreenBg = Color(0xFFFFFFFF)      // app background — pure white
 val CardBg = Color(0xFFFFFFFF)
-val TextDark = Color(0xFF111827)      // headings — neutral near-black slate
-val TextGray = Color(0xFF6B7280)      // secondary text — neutral slate
-val RedCancel = Color(0xFFDC2626)
-val Divider = Color(0xFFE7EAEE)       // hairline borders / separators
+val TextDark = Color(0xFF14152B)      // headings — near-black navy ink
+val TextGray = Color(0xFF6E6E76)      // secondary text — muted
+val RedCancel = Color(0xFFE23B3B)
+val Divider = Color(0xFFECECED)       // hairline borders / separators
 
 private val Scheme = lightColorScheme(
     primary = Purple,

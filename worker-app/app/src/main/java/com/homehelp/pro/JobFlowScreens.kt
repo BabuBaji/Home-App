@@ -4,8 +4,11 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.location.LocationManager
 import android.net.Uri
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -447,7 +450,28 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
     var elapsed by remember { mutableIntStateOf(0) }
-    var photoAdded by remember { mutableStateOf(false) }
+
+    // Live-camera proof of work: capture a photo, attach it to the job, end the service,
+    // then move on. The customer app receives the completion (+ photo) and opens its
+    // review/feedback page automatically.
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp ->
+        if (bmp != null) {
+            vm.endService(bitmapToDataUrl(bmp))
+            toast(ctx, "Proof photo uploaded · service ended")
+            nav.navigate(Routes.JOB_COMPLETED)
+        } else {
+            toast(ctx, "A photo is required to end the service")
+        }
+    }
+    val cameraPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) cameraLauncher.launch(null) else toast(ctx, "Camera permission is needed to capture the proof photo")
+    }
+    fun captureAndEnd() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+            cameraLauncher.launch(null)
+        else cameraPerm.launch(Manifest.permission.CAMERA)
+    }
+
     LaunchedEffect(Unit) {
         while (true) { delay(1000); elapsed++ }
     }
@@ -492,17 +516,24 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             SafetyCard()
-            OutlineButton(if (photoAdded) "✓ Photo Uploaded" else "📷  Upload Photo (Optional)", modifier = Modifier.fillMaxWidth()) {
-                photoAdded = true
-                toast(ctx, "Photo attached to job")
-            }
+            Text(
+                "📷 Tap “End Service” to take a live proof-of-work photo. The customer gets it and is asked to rate the service.",
+                fontSize = 12.sp, color = TextGray,
+            )
         }
         Box(Modifier.background(Color.White).padding(16.dp)) {
-            PrimaryButton("End Service") {
-                vm.endService(); nav.navigate(Routes.JOB_COMPLETED)
+            PrimaryButton("📷  End Service & Capture Photo") {
+                captureAndEnd()
             }
         }
     }
+}
+
+/** JPEG-encode a captured camera bitmap as a data URL the backend stores as proof of work. */
+private fun bitmapToDataUrl(bmp: Bitmap): String {
+    val out = ByteArrayOutputStream()
+    bmp.compress(Bitmap.CompressFormat.JPEG, 70, out)
+    return "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
 }
 
 @Composable
@@ -528,7 +559,19 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(4.dp))
                 LabeledRow("Services", job.services.joinToString(", "))
                 Divider(color = Divider)
-                LabeledRow("Duration", "${job.durationHours} Hours")
+                LabeledRow("Booked Duration", "${job.durationHours} Hours")
+                Divider(color = Divider)
+                // Actual on-site time (start → end) and the moment the service ended.
+                val durMs = (vm.serviceEndMs - vm.serviceStartMs).coerceAtLeast(0)
+                val mins = durMs / 60000
+                val secs = (durMs / 1000) % 60
+                val taken = if (vm.serviceStartMs == 0L) "—" else if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
+                val endedAt = if (vm.serviceEndMs > 0L)
+                    java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(vm.serviceEndMs))
+                else "—"
+                LabeledRow("Time Taken (actual)", taken, valueColor = GreenSuccess)
+                Divider(color = Divider)
+                LabeledRow("Ended At", endedAt)
                 Divider(color = Divider)
                 LabeledRow("Earnings", "₹${job.earnings}", valueColor = GreenSuccess)
             }
