@@ -1,0 +1,266 @@
+{
+  "worker": {
+    "name": "Rahul Kumar",
+    "phone": "+91 90000 12345",
+    "email": "rahul.kumar@email.com",
+    "city": "Mumbai",
+    "jobsCompleted": 128,
+    "rating": 4.7,
+    "bankName": "HDFC Bank",
+    "bankAccount": "xxxx xxxx 1234",
+    "bankIfsc": "HDFC0001234",
+    "bankHolder": "Rahul Kumar",
+    "shiftStart": "08:00 AM",
+    "shiftEnd": "08:00 PM",
+    "availableDays": {
+      "Mon": true,
+      "Tue": true,
+      "Wed": true,
+      "Thu": true,
+      "Fri": true,
+      "Sat": true,
+      "Sun": false
+    },
+    "jobPreferences": {
+      "Utensil Wash": true,
+      "Mopping": true,
+      "Sweeping": true,
+      "Dusting": true,
+      "Bathroom Cleaning": true,
+      "Laundry": false,
+      "Kitchen Cleaning": true
+    },
+    "notifNewJobs": true,
+    "notifPayments": true,
+    "notifPromotions": false,
+    "notifRatings": true
+  },
+  "wallet": {
+    "balance": 8450,
+    "totalEarned": 15680,
+    "withdrawnTotal": 7230,
+    "pendingAmount": 1200,
+    "todayEarnings": 650,
+    "todayJobs": 4
+  },
+  "jobPool": [
+    {
+      "id": "JOB1201",
+      "customerName": "Priya Sharma",
+      "initials": "PS",
+      "customerPhone": "+91 98765 43210",
+      "customerRating": 4.7,
+      "services": [
+        "Utensil Wash",
+        "Mopping",
+        "Dusting"
+      ],
+      "dateTime": "16 May 2025, 09:00 AM",
+      "durationHours": 2,
+      "address": "221B, Baker Street, Bandra West, Mumbai - 400050",
+      "area": "Bandra West, Mumbai",
+      "distanceKm": 1.8,
+      "earnings": 297,
+      "otp": "4721",
+      "lat": 19.0596,
+      "lng": 72.8295
+    },
+    {
+      "id": "JOB1202",
+      "customerName": "Rohan Verma",
+      "initials": "RV",
+      "customerPhone": "+91 99203 11882",
+      "customerRating": 4.5,
+      "services": [
+        "Bathroom Cleaning",
+        "Laundry"
+      ],
+      "dateTime": "16 May 2025, 11:30 AM",
+      "durationHours": 2,
+      "address": "14, Lokhandwala Complex, Andheri West, Mumbai - 400053",
+      "area": "Andheri West, Mumbai",
+      "distanceKm": 2.3,
+      "earnings": 349,
+      "otp": "5630",
+      "lat": 19.1364,
+      "lng": 72.8296
+    },
+    {
+      "id": "JOB1203",
+      "customerName": "Sneha Iyer",
+      "initials": "SI",
+      "customerPhone": "+91 98191 55470",
+      "customerRating": 4.8,
+      "services": [
+        "Sweeping",
+        "Mopping",
+        "Dusting"
+      ],
+      "dateTime": "16 May 2025, 02:00 PM",
+      "durationHours": 2,
+      "address": "Hill Road, Bandra West, Mumbai - 400050",
+      "area": "Bandra West, Mumbai",
+      "distanceKm": 2,
+      "earnings": 249,
+      "otp": "8125",
+      "lat": 19.055,
+      "lng": 72.826
+    },
+    {
+      "id": "JOB1204",
+      "customerName": "Arjun Nair",
+      "initials": "AN",
+      "customerPhone": "+91 90045 77310",
+      "customerRating": 4.6,
+      "services": [
+        "Kitchen Cleaning",
+        "Utensil Wash"
+      ],
+      "dateTime": "16 May 2025, 04:30 PM",
+      "durationHours": 3,
+      "address": "Hiranandani Gardens, Powai, Mumbai - 400076",
+      "area": "Powai, Mumbai",
+      "distanceKm": 3.1,
+      "earnings": 399,
+      "otp": "6204",
+      "lat": 19.1176,
+      "lng": 72.906
+    }
+  ],
+  "documents": [
+    {
+      "name": "Aadhaar Card",
+      "status": "Verified",
+      "fileName": ""
+    },
+    {
+      "name": "PAN Card",
+      "status": "Verified",
+      "fileName": ""
+    },
+    {
+      "name": "Passport Size Photo",
+      "status": "Pending",
+      "fileName": ""
+    }
+  ],
+  "jobIndex": 0,
+  "activeJob": null,
+  "jobStatus": "NONE",
+  "bookings": [
+    {
+      "service": "Utensil Wash, Mopping, Dusting",
+      "customerName": "Priya Sharma",
+      "address": "Bandra West, Mumbai",
+      "timeInfo": "16 May 2025, 09:00 AM • 2 hours • 1.8 km",
+      "amount": 297,
+      "status": "Upcoming"
+    },
+    {
+      "service": "Bathroom Cleaning, Laundry",
+      "customerName": "Rohan Verma",
+      "address": "Andheri West, Mumbai",
+      "timeInfo": "17 May 2025, 10:30 AM • 2.3 km",
+      "amount": 349,
+      "status": "Upcoming"
+    },
+    {
+      "service": "Sweeping, Mopping, Dusting",
+      "customerName": "Sneha Iyer",
+      "address": "Bandra West, Mumbai",
+      "timeInfo": "18 May 2025, 08:00 AM • 2.0 km",
+      "amount": 249,
+      "status": "Upcoming"
+    },
+    {
+      "service": "Bathroom Cleaning, Laundry",
+      "customerName": "Amit Shah",
+      "address": "Khar West, Mumbai",
+      "timeInfo": "15 May 2025, 02:00 PM • 1.5 hours",
+      "amount": 199,
+      "status": "Completed"
+    },
+    {
+      "service": "Kitchen Cleaning",
+      "customerName": "Kavya Menon",
+      "address": "Santacruz West, Mumbai",
+      "timeInfo": "14 May 2025, 04:00 PM",
+      "amount": 199,
+      "status": "Cancelled"
+    }
+  ],
+  "earnings": [
+    {
+      "date": "16 May 2025",
+      "amount": 650,
+      "paid": true
+    },
+    {
+      "date": "15 May 2025",
+      "amount": 810,
+      "paid": true
+    },
+    {
+      "date": "14 May 2025",
+      "amount": 540,
+      "paid": true
+    },
+    {
+      "date": "13 May 2025",
+      "amount": 620,
+      "paid": true
+    },
+    {
+      "date": "12 May 2025",
+      "amount": 430,
+      "paid": true
+    },
+    {
+      "date": "11 May 2025",
+      "amount": 590,
+      "paid": true
+    },
+    {
+      "date": "10 May 2025",
+      "amount": 710,
+      "paid": true
+    }
+  ],
+  "walletTxns": [
+    {
+      "title": "Job Payment",
+      "subtitle": "16 May 2025, 11:00 AM",
+      "amount": 297,
+      "status": "Success",
+      "isCredit": true
+    },
+    {
+      "title": "Withdraw to Bank",
+      "subtitle": "A/c No. xxxx1234",
+      "amount": 2700,
+      "status": "Success",
+      "isCredit": false
+    },
+    {
+      "title": "Job Payment",
+      "subtitle": "12 May 2025, 06:30 PM",
+      "amount": 349,
+      "status": "Success",
+      "isCredit": true
+    },
+    {
+      "title": "Incentive",
+      "subtitle": "Performance Bonus",
+      "amount": 50,
+      "status": "Success",
+      "isCredit": true
+    },
+    {
+      "title": "Pending Amount",
+      "subtitle": "16 May 2025, 05:00 PM",
+      "amount": 1200,
+      "status": "Pending",
+      "isCredit": true
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "homehelp-customer-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,web -c magenta,cyan \"npm:server\" \"vite\"",
+    "web": "vite",
+    "server": "node --no-warnings server/index.js",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/app-launcher": "^6.0.4",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/geolocation": "^6.1.1",
+    "@capacitor/status-bar": "^6.0.3",
+    "@fontsource/inter": "^5.2.8",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^1.21.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.1",
+    "@types/leaflet": "^1.9.21",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "concurrently": "^9.2.3",
+    "puppeteer-core": "^25.2.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.6"
+  }
+}
