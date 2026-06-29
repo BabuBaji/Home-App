@@ -1,257 +1,304 @@
-// Worker-app REST API, mounted at /worker on the customer backend.
-//
-// This is the bridge that makes the two apps one product: it serves the exact
-// JSON shapes the HomeHelp Pro (worker) Android app expects, but the JOB lifecycle
-// reads and writes the SAME `bookings` table the customer app uses. When a worker
-// accepts / progresses / completes a job here, we push `booking:update` events over
-// the shared Socket.IO instance to the customer's live Track screen.
-//
-// Worker profile + wallet are kept in memory (single demo worker); only the job
-// flow needs to be shared with the customer side.
-import express from 'express'
+// Worker REST API — mounted at /api/worker by index.js. This is what unifies the
+// HomeHelp Pro worker app onto the shared backend: a worker's "new job request" is
+// a real customer booking, and every lifecycle action (accept → on the way →
+// arrived → start (OTP) → end → settle) updates the SAME bookings row, so the
+// customer app (live over socket.io) and the admin dispatch board stay in sync.
+import { Router } from 'express'
+import { db } from './db.js'
+import { getBooking, setBookingStatus, setBookingStarted, setPaymentStatus } from './db.js'
 import {
-  getUser, getOpenBookings, getBooking,
-  setBookingStatus, setBookingStarted, setPaymentStatus, setBookingPro, cancelBookingRow,
-} from './db.js'
+  findOrCreateWorker, getWorkerRow, workerDto, walletDto, workerEarnings, workerTxns, workerDocuments,
+  updateWorkerProfile, updateWorkerBank, updateWorkerAvailability, updateWorkerPreferences, updateWorkerNotifications,
+  uploadWorkerDocument, walletAdd, walletWithdraw, settleBookingForWorker, workerShare, setWorkPhoto,
+} from './worker-db.js'
+import {
+  walletSummary, earningsBreakup, deductionsList, walletHistory, withdrawalsList, advancesList,
+  requestWithdrawOtp, createWithdrawal, advanceEligibility, requestAdvance,
+  buildPayslip, generatePayslip, payslipsList, notificationsList, markNotificationsRead,
+  tallyIncome, recoverAdvanceOnEarning, withdrawalReceipt,
+} from './worker-wallet-db.js'
 
 const room = (id) => `booking:${id}`
 
-function seedWorker() {
-  return {
-    name: 'Rahul Kumar', phone: '+91 90000 12345', email: 'rahul.kumar@email.com', city: 'Mumbai',
-    jobsCompleted: 128, rating: 4.7,
-    bankName: 'HDFC Bank', bankAccount: 'xxxx xxxx 1234', bankIfsc: 'HDFC0001234', bankHolder: 'Rahul Kumar',
-    shiftStart: '08:00 AM', shiftEnd: '08:00 PM',
-    availableDays: { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: true, Sun: false },
-    jobPreferences: {
-      'Utensil Wash': true, 'Mopping': true, 'Sweeping': true, 'Dusting': true,
-      'Bathroom Cleaning': true, 'Laundry': false, 'Kitchen Cleaning': true,
-    },
-    notifNewJobs: true, notifPayments: true, notifPromotions: false, notifRatings: true,
-  }
+// Booking status -> the Kotlin JobStatus enum name the worker app expects.
+const STATUS_TO_ENUM = {
+  worker_assigned: 'ACCEPTED', on_the_way: 'ON_THE_WAY', arrived: 'ARRIVED',
+  in_progress: 'IN_PROGRESS', completed: 'COMPLETED',
 }
-function seedWallet() {
-  return { balance: 8450, totalEarned: 15680, withdrawnTotal: 7230, pendingAmount: 1200, todayEarnings: 650, todayJobs: 4 }
-}
+const ACTIVE_STATUSES = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+
+// Bookings a worker has skipped this server session (so "request" rotates).
+const rejected = new Map() // workerId -> Set(bookingId)
+const skipSet = (id) => { if (!rejected.has(id)) rejected.set(id, new Set()); return rejected.get(id) }
 
 export function createWorkerRouter(io) {
-  const router = express.Router()
+  const r = Router()
 
-  const state = {
-    worker: seedWorker(),
-    wallet: seedWallet(),
-    documents: [
-      { name: 'Aadhaar Card', status: 'Verified', fileName: '' },
-      { name: 'PAN Card', status: 'Verified', fileName: '' },
-      { name: 'Police Verification', status: 'Verified', fileName: '' },
-      { name: 'Address Proof', status: 'Pending', fileName: '' },
-    ],
-    bookings: [],   // worker-shaped history (completed / cancelled jobs)
-    earnings: [],
-    walletTxns: [
-      { title: 'Job Payment', subtitle: '16 May 2025, 11:00 AM', amount: 297, status: 'Success', isCredit: true },
-      { title: 'Withdraw to Bank', subtitle: 'A/c No. xxxx1234', amount: 2700, status: 'Success', isCredit: false },
-    ],
-    activeBookingId: null, // the DB booking this worker is currently handling
-    jobStatus: 'NONE',
-  }
+  /* ---------- mappers over the shared customer tables ---------- */
+  const customer = (uid) => db.prepare('SELECT name,phone,rating FROM users WHERE id=?').get(uid) || {}
+  const initials = (name) => String(name || 'C').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()
 
-  // ---- map a customer booking (+ its customer) onto the worker app's Job DTO ----
-  function shortArea(addr) {
-    if (!addr) return ''
-    const parts = String(addr).split(',').map((s) => s.trim()).filter(Boolean)
-    return parts.length >= 2 ? parts.slice(-2).join(', ') : addr
-  }
-  function bookingToJob(b) {
-    const u = getUser(b.user_id) || {}
-    const name = (u.name && u.name.trim()) || 'Customer'
-    const initials = name.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()
-    const services = Array.isArray(b.items) ? b.items.map((i) => i.name) : []
-    const dateTime = b.type === 'schedule' && b.date ? `${b.date}, ${b.time || ''}`.trim() : 'Now • Instant'
-    const m = /(\d+)\s*h/.exec(b.duration || '')
+  // A customer booking row, shaped as the worker app's Job model.
+  function jobFromBooking(b) {
+    const c = customer(b.user_id)
     return {
-      id: b.ref || ('JOB' + b.id),
-      customerName: name,
-      initials,
-      customerPhone: u.phone || '',
-      customerRating: u.rating || 5.0,
-      services,
-      dateTime,
-      durationHours: m ? Number(m[1]) : 2,
-      address: b.address || '',
-      area: shortArea(b.address),
-      distanceKm: +(1 + (b.id % 40) / 10).toFixed(1),
-      earnings: b.subtotal || b.total || 0, // worker payout = service value (pre fee/tax)
-      otp: b.service_otp,                    // the shared check-in OTP the customer sees
-      lat: 19.0760, lng: 72.8777,
+      id: b.ref,
+      customerName: c.name || 'Customer',
+      initials: initials(c.name),
+      customerPhone: c.phone || '',
+      customerRating: c.rating || 5.0,
+      services: b.items.map((i) => i.name),
+      dateTime: [b.date, b.time].filter(Boolean).join(', ') || new Date(b.created).toLocaleString(),
+      durationHours: Math.max(1, parseInt(b.duration, 10) || 2),
+      address: b.address,
+      area: (b.address || '').split(',').slice(-2).join(',').trim() || b.address,
+      distanceKm: +(1 + (b.id % 30) / 10).toFixed(1),
+      earnings: workerShare(b.total),
+      otp: b.service_otp,
+      // Real customer coordinates when the customer app shared them at booking time;
+      // otherwise fall back near the booking's city centre (Hyderabad) so the map still renders.
+      lat: b.cust_lat ?? (17.4448 + (b.id % 10) * 0.002),
+      lng: b.cust_lng ?? (78.3498 + (b.id % 10) * 0.002),
     }
   }
 
-  function activeJobDto() {
-    const b = state.activeBookingId ? getBooking(state.activeBookingId) : null
-    return b ? bookingToJob(b) : null
-  }
-  function bootstrap() {
+  // A worker's handled booking, shaped as the worker app's Booking (history) model.
+  function historyFromBooking(b) {
+    const c = customer(b.user_id)
+    const status = b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : 'Upcoming'
     return {
-      worker: state.worker, wallet: state.wallet, jobStatus: state.jobStatus,
-      activeJob: activeJobDto(),
-      bookings: state.bookings, earnings: state.earnings, walletTxns: state.walletTxns,
-      documents: state.documents,
+      service: b.items.map((i) => i.name).join(', '),
+      customerName: c.name || 'Customer',
+      address: b.address,
+      timeInfo: [b.date, b.time].filter(Boolean).join(', ') || new Date(b.created).toLocaleDateString(),
+      amount: workerShare(b.total),
+      status,
     }
   }
-  function emitBooking(id, extra = {}) {
-    const b = getBooking(id)
-    if (b) io.to(room(id)).emit('booking:update', { ...b, ...extra })
+
+  const activeBooking = (wid) => {
+    const row = db.prepare(`SELECT id FROM bookings WHERE worker_id=? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(',')}) ORDER BY id DESC LIMIT 1`)
+      .get(wid, ...ACTIVE_STATUSES)
+    return row ? getBooking(row.id) : null
   }
-  // Resolve the active booking or send a 409; returns null when there is none.
-  function requireActive(res) {
-    const b = state.activeBookingId ? getBooking(state.activeBookingId) : null
-    if (!b) { state.activeBookingId = null; res.status(409).json({ ok: false, error: 'No active job' }); return null }
-    return b
+  const settleableBooking = (wid) => {
+    const row = db.prepare("SELECT id FROM bookings WHERE worker_id=? AND status='completed' AND settled=0 ORDER BY id DESC LIMIT 1").get(wid)
+    return row ? getBooking(row.id) : null
+  }
+  const historyBookings = (wid) =>
+    db.prepare('SELECT id FROM bookings WHERE worker_id=? ORDER BY id DESC').all(wid).map((row) => historyFromBooking(getBooking(row.id)))
+
+  function bootstrap(wid) {
+    const w = getWorkerRow(wid)
+    const active = activeBooking(wid)
+    return {
+      worker: workerDto(w),
+      wallet: walletDto(w),
+      walletSummary: walletSummary(wid),
+      jobStatus: active ? (STATUS_TO_ENUM[active.status] || 'NONE') : 'NONE',
+      activeJob: active ? jobFromBooking(active) : null,
+      bookings: historyBookings(wid),
+      earnings: workerEarnings(wid),
+      walletTxns: workerTxns(wid),
+      documents: workerDocuments(wid),
+    }
   }
 
-  // ---- health & auth ----
-  router.get('/api/health', (_q, r) => r.json({ ok: true, service: 'homehelp-worker', time: new Date().toISOString() }))
-  router.post('/api/auth/request-otp', (req, res) => res.json({ ok: true, devOtp: '1234', message: `OTP sent to ${req.body?.phone || ''}` }))
-  router.post('/api/auth/verify', (req, res) => {
+  const emitBooking = (b) => b && io?.to(room(b.id)).emit('booking:update', b)
+
+  /* ---------- auth ---------- */
+  function auth(req, res, next) {
+    const token = (req.headers.authorization || '').replace('Bearer ', '')
+    const id = token.startsWith('worker-') ? Number(token.slice(7)) : NaN
+    const w = getWorkerRow(id)
+    if (!w) return res.status(401).json({ ok: false, error: 'Not authenticated' })
+    req.worker = w
+    next()
+  }
+
+  r.get('/health', (_q, res) => res.json({ ok: true, service: 'homehelp-worker', time: new Date().toISOString() }))
+
+  // Demo OTP — any phone, any 4-digit code (mirrors the customer/admin demo auth).
+  r.post('/auth/request-otp', (req, res) => res.json({ ok: true, devOtp: '1234', message: `OTP sent to ${req.body?.phone || ''}` }))
+  r.post('/auth/verify', (req, res) => {
     const { phone, otp } = req.body || {}
     if (!otp || String(otp).length < 4) return res.status(400).json({ ok: false, error: 'Invalid OTP' })
-    res.json({ ok: true, token: 'worker-' + (phone || 'demo'), ...bootstrap() })
+    const w = findOrCreateWorker(phone || 'worker')
+    res.json({ ok: true, token: 'worker-' + w.id, ...bootstrap(w.id) })
   })
-  router.get('/api/bootstrap', (_q, res) => res.json(bootstrap()))
 
-  // ---- worker profile ----
-  router.get('/api/worker', (_q, res) => res.json(state.worker))
-  router.put('/api/worker/profile', (req, res) => { ['name', 'phone', 'email', 'city'].forEach((k) => { if (req.body[k] != null) state.worker[k] = req.body[k] }); res.json(state.worker) })
-  router.put('/api/worker/bank', (req, res) => { ['bankHolder', 'bankName', 'bankAccount', 'bankIfsc'].forEach((k) => { if (req.body[k] != null) state.worker[k] = req.body[k] }); res.json(state.worker) })
-  router.put('/api/worker/availability', (req, res) => {
-    if (req.body.availableDays) state.worker.availableDays = req.body.availableDays
-    if (req.body.shiftStart != null) state.worker.shiftStart = req.body.shiftStart
-    if (req.body.shiftEnd != null) state.worker.shiftEnd = req.body.shiftEnd
-    res.json(state.worker)
-  })
-  router.put('/api/worker/preferences', (req, res) => { if (req.body.jobPreferences) state.worker.jobPreferences = req.body.jobPreferences; res.json(state.worker) })
-  router.put('/api/worker/notifications', (req, res) => { ['notifNewJobs', 'notifPayments', 'notifPromotions', 'notifRatings'].forEach((k) => { if (req.body[k] != null) state.worker[k] = req.body[k] }); res.json(state.worker) })
-  router.get('/api/worker/documents', (_q, res) => res.json(state.documents))
-  router.post('/api/worker/documents/upload', (req, res) => {
+  r.get('/bootstrap', auth, (req, res) => res.json(bootstrap(req.worker.id)))
+
+  /* ---------- profile ---------- */
+  r.put('/profile', auth, (req, res) => res.json(updateWorkerProfile(req.worker.id, req.body || {})))
+  r.put('/bank', auth, (req, res) => res.json(updateWorkerBank(req.worker.id, req.body || {})))
+  r.put('/availability', auth, (req, res) => res.json(updateWorkerAvailability(req.worker.id, req.body || {})))
+  r.put('/preferences', auth, (req, res) => res.json(updateWorkerPreferences(req.worker.id, req.body || {})))
+  r.put('/notifications', auth, (req, res) => res.json(updateWorkerNotifications(req.worker.id, req.body || {})))
+
+  /* ---------- documents ---------- */
+  r.get('/documents', auth, (req, res) => res.json(workerDocuments(req.worker.id)))
+  r.post('/documents/upload', auth, (req, res) => {
     const { name, fileName } = req.body || {}
     if (!name) return res.status(400).json({ ok: false, error: 'Document name required' })
-    let d = state.documents.find((x) => x.name === name)
-    if (!d) { d = { name, status: 'Under Review', fileName: fileName || '' }; state.documents.push(d) }
-    else { d.status = 'Under Review'; d.fileName = fileName || d.fileName || '' }
-    res.json({ ok: true, documents: state.documents })
+    res.json({ ok: true, documents: uploadWorkerDocument(req.worker.id, name, fileName) })
   })
 
-  // ---- job lifecycle (backed by the shared bookings table) ----
-  // Pull the newest unassigned customer booking and present it to the worker.
-  router.post('/api/jobs/request', (_q, res) => {
-    const open = getOpenBookings().filter((b) => b.id !== state.activeBookingId)
-    const b = open[0]
-    if (!b) return res.json({ job: null, jobStatus: 'NONE' })
-    state.activeBookingId = b.id
-    state.jobStatus = 'REQUESTED'
-    res.json({ job: bookingToJob(b), jobStatus: 'REQUESTED' })
+  /* ---------- job lifecycle (real customer bookings) ---------- */
+  // Lightweight check the worker app polls while online: is there a real customer
+  // booking waiting? Non-destructive (does not offer/assign anything).
+  r.get('/jobs/available', auth, (req, res) => {
+    const skip = skipSet(req.worker.id)
+    const placeholders = skip.size ? ` AND id NOT IN (${[...skip].map(() => '?').join(',')})` : ''
+    const row = db.prepare(`SELECT COUNT(*) n FROM bookings WHERE status='confirmed' AND worker_id IS NULL${placeholders}`).get(...skip)
+    res.json({ available: row.n > 0, count: row.n })
   })
 
-  router.post('/api/jobs/accept', (_q, res) => {
-    const b = requireActive(res); if (!b) return
-    setBookingPro(b.id, state.worker.name, state.worker.rating)
-    setBookingStatus(b.id, 'worker_assigned')
-    state.jobStatus = 'ACCEPTED'
-    emitBooking(b.id)
-    res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: activeJobDto() })
+  // Offer the next unassigned, confirmed booking this worker hasn't skipped.
+  r.post('/jobs/request', auth, (req, res) => {
+    const skip = skipSet(req.worker.id)
+    const placeholders = skip.size ? ` AND id NOT IN (${[...skip].map(() => '?').join(',')})` : ''
+    const row = db.prepare(`SELECT id FROM bookings WHERE status='confirmed' AND worker_id IS NULL${placeholders} ORDER BY id ASC LIMIT 1`)
+      .get(...skip)
+    if (!row) return res.json({ job: null, jobStatus: 'NONE' })
+    db.prepare('UPDATE workers SET offered_booking=? WHERE id=?').run(row.id, req.worker.id)
+    res.json({ job: jobFromBooking(getBooking(row.id)), jobStatus: 'REQUESTED' })
   })
-  router.post('/api/jobs/on-the-way', (_q, res) => {
-    const b = requireActive(res); if (!b) return
-    setBookingStatus(b.id, 'on_the_way')
-    state.jobStatus = 'ON_THE_WAY'
-    emitBooking(b.id, { dist: 2.4, eta: 12, pos: { lat: 0.10, lng: 0.12 } })
-    res.json({ ok: true, jobStatus: 'ON_THE_WAY', activeJob: activeJobDto() })
+
+  // Claim the offered booking: assign this worker + advance to worker_assigned.
+  r.post('/jobs/accept', auth, (req, res) => {
+    const w = getWorkerRow(req.worker.id)
+    const offered = w.offered_booking && getBooking(w.offered_booking)
+    if (!offered || offered.status !== 'confirmed' || offered.worker_id) return res.status(409).json({ ok: false, error: 'Job no longer available' })
+    db.prepare("UPDATE bookings SET worker_id=?, pro_name=?, pro_rating=?, status='worker_assigned' WHERE id=?")
+      .run(w.id, w.name, w.rating, offered.id)
+    db.prepare('UPDATE workers SET offered_booking=NULL WHERE id=?').run(w.id)
+    const b = getBooking(offered.id); emitBooking(b)
+    res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: jobFromBooking(b) })
   })
-  router.post('/api/jobs/arrived', (_q, res) => {
-    const b = requireActive(res); if (!b) return
-    setBookingStatus(b.id, 'arrived')
-    state.jobStatus = 'ARRIVED'
-    emitBooking(b.id, { dist: 0, eta: 0 })
-    res.json({ ok: true, jobStatus: 'ARRIVED', activeJob: activeJobDto() })
-  })
-  router.post('/api/jobs/verify-otp', (req, res) => {
-    const b = requireActive(res); if (!b) return
-    if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
-    setBookingStarted(b.id) // -> in_progress + started_at
-    state.jobStatus = 'IN_PROGRESS'
-    emitBooking(b.id)
-    res.json({ ok: true, jobStatus: 'IN_PROGRESS', activeJob: activeJobDto() })
-  })
-  router.post('/api/jobs/end', (_q, res) => {
-    const b = requireActive(res); if (!b) return
-    setBookingStatus(b.id, 'completed')
-    if (b.payment === 'cash') setPaymentStatus(b.id, 'paid')
-    state.jobStatus = 'COMPLETED'
-    emitBooking(b.id)
-    res.json({ ok: true, jobStatus: 'COMPLETED', activeJob: activeJobDto() })
-  })
-  router.post('/api/jobs/reject', (_q, res) => {
-    state.activeBookingId = null
-    state.jobStatus = 'NONE'
+
+  r.post('/jobs/reject', auth, (req, res) => {
+    const w = getWorkerRow(req.worker.id)
+    if (w.offered_booking) { skipSet(w.id).add(w.offered_booking); db.prepare('UPDATE workers SET offered_booking=NULL WHERE id=?').run(w.id) }
     res.json({ ok: true, jobStatus: 'NONE' })
   })
-  // Finish & settle -> credit worker wallet, append worker history, free the slot.
-  router.post('/api/jobs/settle', (_q, res) => {
-    const b = state.activeBookingId ? getBooking(state.activeBookingId) : null
-    if (b) {
-      const job = bookingToJob(b)
-      if (b.status !== 'completed') {
-        setBookingStatus(b.id, 'completed')
-        if (b.payment === 'cash') setPaymentStatus(b.id, 'paid')
-        emitBooking(b.id)
-      }
-      state.wallet.todayEarnings += job.earnings
-      state.wallet.todayJobs += 1
-      state.wallet.balance += job.earnings
-      state.wallet.totalEarned += job.earnings
-      state.bookings.unshift({ service: job.services.join(', '), customerName: job.customerName, address: job.area, timeInfo: `${job.dateTime} • ${job.durationHours} hours`, amount: job.earnings, status: 'Completed' })
-      state.earnings.unshift({ date: `Today • ${job.id}`, amount: job.earnings, paid: true })
-      state.walletTxns.unshift({ title: 'Job Payment', subtitle: `${job.id} • ${job.customerName}`, amount: job.earnings, status: 'Success', isCredit: true })
-    }
-    state.activeBookingId = null
-    state.jobStatus = 'NONE'
-    res.json({ ok: true, wallet: state.wallet, bookings: state.bookings, earnings: state.earnings, walletTxns: state.walletTxns })
-  })
-  router.post('/api/jobs/cancel', (req, res) => {
-    const b = state.activeBookingId ? getBooking(state.activeBookingId) : null
-    const reason = (req.body && req.body.reason) || 'Cancelled'
-    if (b) {
-      const job = bookingToJob(b)
-      cancelBookingRow(b.id, reason, 0, 0)
-      emitBooking(b.id)
-      state.bookings.unshift({ service: job.services.join(', '), customerName: job.customerName, address: job.area, timeInfo: `${job.dateTime} • ${reason}`, amount: job.earnings, status: 'Cancelled' })
-    }
-    state.activeBookingId = null
-    state.jobStatus = 'NONE'
-    res.json({ ok: true, bookings: state.bookings })
+
+  // Advance the worker's active booking to a new status (+ notify the customer).
+  function advance(req, res, status) {
+    const b = activeBooking(req.worker.id)
+    if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
+    const u = setBookingStatus(b.id, status); emitBooking(u)
+    res.json({ ok: true, jobStatus: STATUS_TO_ENUM[status] || status, activeJob: jobFromBooking(u) })
+  }
+  r.post('/jobs/on-the-way', auth, (req, res) => advance(req, res, 'on_the_way'))
+  r.post('/jobs/arrived', auth, (req, res) => advance(req, res, 'arrived'))
+
+  // Start service: the OTP the worker enters must match the customer's booking OTP.
+  r.post('/jobs/verify-otp', auth, (req, res) => {
+    const b = activeBooking(req.worker.id)
+    if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
+    if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
+    const u = setBookingStarted(b.id); emitBooking(u)
+    res.json({ ok: true, jobStatus: 'IN_PROGRESS', activeJob: jobFromBooking(u) })
   })
 
-  // ---- collections & wallet ----
-  router.get('/api/bookings', (_q, res) => res.json(state.bookings))
-  router.get('/api/earnings', (_q, res) => res.json(state.earnings))
-  router.get('/api/wallet', (_q, res) => res.json({ wallet: state.wallet, walletTxns: state.walletTxns }))
-  router.post('/api/wallet/withdraw', (req, res) => {
-    const amount = parseInt(req.body?.amount, 10)
-    if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
-    if (amount > state.wallet.balance) return res.json({ ok: false, error: 'Amount exceeds available balance' })
-    state.wallet.balance -= amount
-    state.wallet.withdrawnTotal += amount
-    state.walletTxns.unshift({ title: 'Withdraw to Bank', subtitle: 'A/c No. xxxx1234', amount, status: 'Success', isCredit: false })
-    res.json({ ok: true, wallet: state.wallet, walletTxns: state.walletTxns })
-  })
-  router.post('/api/wallet/add', (req, res) => {
-    const amount = parseInt(req.body?.amount, 10)
-    if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
-    state.wallet.balance += amount
-    state.walletTxns.unshift({ title: 'Added to Wallet', subtitle: 'UPI • Instant', amount, status: 'Success', isCredit: true })
-    res.json({ ok: true, wallet: state.wallet, walletTxns: state.walletTxns })
+  // End service. The worker attaches a live proof-of-work photo, which we store on the
+  // booking; the customer app sees status=completed (+ the photo) and jumps to the
+  // review/feedback page automatically.
+  r.post('/jobs/end', auth, (req, res) => {
+    const b = activeBooking(req.worker.id)
+    if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
+    if (req.body?.photo) setWorkPhoto(b.id, req.body.photo)
+    let u = setBookingStatus(b.id, 'completed')
+    if (b.payment === 'cash') u = setPaymentStatus(b.id, 'paid')
+    emitBooking(u)
+    res.json({ ok: true, jobStatus: 'COMPLETED', activeJob: jobFromBooking(u) })
   })
 
-  return router
+  // Finish: the worker has completed the job + uploaded proof. Earnings are NOT credited
+  // here — per the flow, the money is credited (into Pending, then QC -> Available) only
+  // when the CUSTOMER confirms completion (review/confirm) on their app. This endpoint just
+  // finalises the worker's lifecycle and returns the latest wallet snapshot.
+  r.post('/jobs/settle', auth, (req, res) => {
+    const w = getWorkerRow(req.worker.id)
+    res.json({
+      ok: true, wallet: walletDto(w), walletSummary: walletSummary(w.id),
+      bookings: historyBookings(w.id), earnings: workerEarnings(w.id), walletTxns: workerTxns(w.id),
+    })
+  })
+
+  // Worker drops the job mid-flow → release the booking back into the dispatch pool.
+  r.post('/jobs/cancel', auth, (req, res) => {
+    const b = activeBooking(req.worker.id)
+    if (b) {
+      db.prepare("UPDATE bookings SET worker_id=NULL, status='confirmed' WHERE id=?").run(b.id)
+      skipSet(req.worker.id).add(b.id)
+      emitBooking(getBooking(b.id))
+    }
+    res.json({ ok: true, jobStatus: 'NONE' })
+  })
+
+  /* ---------- wallet ---------- */
+  r.post('/wallet/add', auth, (req, res) => {
+    const amount = parseInt(req.body?.amount, 10)
+    if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
+    const w = walletAdd(req.worker.id, amount)
+    res.json({ ok: true, wallet: walletDto(w), walletTxns: workerTxns(w.id) })
+  })
+  r.post('/wallet/withdraw', auth, (req, res) => {
+    // Backwards-compatible quick withdraw (no OTP) — kept for the old Add-Money flow.
+    const amount = parseInt(req.body?.amount, 10)
+    if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
+    const out = walletWithdraw(req.worker.id, amount)
+    if (out.error) return res.json({ ok: false, error: out.error })
+    res.json({ ok: true, wallet: walletDto(out.worker), walletTxns: workerTxns(out.worker.id) })
+  })
+
+  /* ---------- wallet module: dashboard, breakup, deductions, history ---------- */
+  const id = (req) => req.worker.id
+  const walletState = (wid) => ({
+    walletSummary: walletSummary(wid), earningsBreakup: earningsBreakup(wid),
+    deductions: deductionsList(wid), history: walletHistory(wid),
+    withdrawals: withdrawalsList(wid), advances: advancesList(wid),
+  })
+
+  r.get('/wallet/summary', auth, (req, res) => res.json(walletSummary(id(req))))
+  r.get('/wallet/state', auth, (req, res) => res.json(walletState(id(req))))
+  r.get('/wallet/earnings-breakup', auth, (req, res) => res.json(earningsBreakup(id(req))))
+  r.get('/wallet/deductions', auth, (req, res) => res.json(deductionsList(id(req))))
+  r.get('/wallet/history', auth, (req, res) => res.json(walletHistory(id(req))))
+  r.get('/wallet/withdrawals', auth, (req, res) => res.json(withdrawalsList(id(req))))
+  r.get('/wallet/withdrawals/:wd/receipt', auth, (req, res) => {
+    const rec = withdrawalReceipt(id(req), parseInt(req.params.wd, 10))
+    return rec ? res.json(rec) : res.status(404).json({ ok: false, error: 'Receipt not found' })
+  })
+  r.get('/wallet/advances', auth, (req, res) => res.json(advancesList(id(req))))
+
+  /* ---------- withdrawal (OTP-gated, Bank/UPI) ---------- */
+  r.post('/wallet/withdraw/request-otp', auth, (req, res) => res.json(requestWithdrawOtp()))
+  r.post('/wallet/withdraw/request', auth, (req, res) => {
+    const { amount, method, otp } = req.body || {}
+    const out = createWithdrawal(id(req), parseInt(amount, 10), method, otp)
+    if (out.error) return res.json({ ok: false, error: out.error })
+    res.json({ ok: true, ...walletState(id(req)) })
+  })
+
+  /* ---------- salary advance ---------- */
+  r.get('/wallet/advance/eligibility', auth, (req, res) => res.json(advanceEligibility(id(req))))
+  r.post('/wallet/advance/request', auth, (req, res) => {
+    const out = requestAdvance(id(req), parseInt(req.body?.amount, 10))
+    if (out.error) return res.json({ ok: false, error: out.error })
+    res.json({ ok: true, ...walletState(id(req)) })
+  })
+
+  /* ---------- payslip ---------- */
+  r.get('/wallet/payslip', auth, (req, res) => res.json(buildPayslip(id(req), req.query?.month)))
+  r.get('/wallet/payslips', auth, (req, res) => res.json(payslipsList(id(req))))
+  r.post('/wallet/payslip/generate', auth, (req, res) => res.json(generatePayslip(id(req), req.body?.month)))
+
+  /* ---------- notifications ---------- */
+  r.get('/wallet/notifications', auth, (req, res) => res.json(notificationsList(id(req))))
+  r.post('/wallet/notifications/read', auth, (req, res) => res.json(markNotificationsRead(id(req))))
+
+  return r
 }

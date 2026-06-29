@@ -38,7 +38,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -234,11 +236,40 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             }
 
             if (vm.isOnline) {
-                PrimaryButton(if (vm.requestingJob) "Checking for jobs…" else "🔔  Check for New Jobs") {
-                    if (!vm.requestingJob) vm.requestJob()
-                }
-                vm.lastJobMessage?.let { msg ->
-                    Text(msg, fontSize = 13.sp, color = TextGray)
+                val ctx = LocalContext.current
+                if (vm.hasIncomingJob) {
+                    // A real customer has booked — show the New Job Request notification.
+                    Box(
+                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(16.dp))
+                            .clickable {
+                                vm.requestJob { found ->
+                                    if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
+                                }
+                            }
+                            .padding(18.dp),
+                    ) {
+                        Column {
+                            Text("🔔  New Job Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                            Text("A customer needs your service — tap to view", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                        }
+                    }
+                } else {
+                    // Online and idle — waiting for a real booking (no fake/demo jobs).
+                    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(16.dp)).padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🟢", fontSize = 18.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Waiting for job requests…", color = TextDark, fontWeight = FontWeight.SemiBold)
+                                Text("You'll be notified when a customer books", color = TextGray, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                    OutlineButton("🔄  Check for Jobs", modifier = Modifier.fillMaxWidth()) {
+                        vm.requestJob { found ->
+                            if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "No new job requests right now")
+                        }
+                    }
                 }
             }
 

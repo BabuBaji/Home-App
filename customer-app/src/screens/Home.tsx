@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Search, Bell, MapPin, Gift, User, ChevronDown, Clock, Zap } from 'lucide-react'
 import { BottomNav } from '../components/UI'
 import { useStore } from '../store'
+import { ServiceThumb } from '../serviceArt'
 import { fetchServices, fetchBookings, fetchHome, fetchMe, fetchFavourites, addFavouriteApi, removeFavouriteApi } from '../api'
 import type { Service, Booking, HomeContent, Address } from '../types'
 
@@ -112,10 +113,7 @@ export default function Home() {
           {filtered.map((s) => (
             <button key={s.id} className={`sn-tile ${!s.available ? 'off' : ''}`} onClick={() => nav(`/service/${s.id}`)}>
               <div className="sn-thumb">
-                {s.image
-                  ? <img alt="" loading="lazy" decoding="async" src={s.image} onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display = 'none'; (t.nextElementSibling as HTMLElement).style.display = 'grid' }} />
-                  : null}
-                <span className="sn-thumb-emoji" style={{ display: s.image ? 'none' : 'grid' }}>{s.icon}</span>
+                <ServiceThumb service={s} medallion={58} />
                 {!s.available && <span className="sn-soon">Soon</span>}
               </div>
               <span className="sn-tile-name">{s.name}</span>

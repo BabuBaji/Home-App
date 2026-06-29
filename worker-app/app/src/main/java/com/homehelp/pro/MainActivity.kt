@@ -25,10 +25,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +53,13 @@ object Routes {
     const val BOOKINGS = "bookings"
     const val EARNINGS = "earnings"
     const val WALLET = "wallet"
+    const val WITHDRAW = "wallet_withdraw"
+    const val SALARY_ADVANCE = "wallet_advance"
+    const val WALLET_HISTORY = "wallet_history"
+    const val EARNINGS_BREAKUP = "wallet_breakup"
+    const val DEDUCTIONS = "wallet_deductions"
+    const val PAYSLIP = "wallet_payslip"
+    const val WITHDRAW_RECEIPT = "wallet_receipt"
     const val PROFILE = "profile"
     const val NEW_JOB = "newjob"
     const val JOB_DETAILS = "jobdetails"
@@ -100,7 +109,17 @@ fun AppRoot() {
             composable(Routes.HOME) { HomeScreen(vm, nav) }
             composable(Routes.BOOKINGS) { BookingsScreen(vm) }
             composable(Routes.EARNINGS) { EarningsScreen(vm) }
-            composable(Routes.WALLET) { WalletScreen(vm) }
+            composable(Routes.WALLET) { WalletScreen(vm, nav) }
+            composable(Routes.WITHDRAW) { WithdrawScreen(vm, nav) }
+            composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
+            composable(Routes.WALLET_HISTORY) { WalletHistoryScreen(vm, nav) }
+            composable(Routes.EARNINGS_BREAKUP) { EarningsBreakupScreen(vm, nav) }
+            composable(Routes.DEDUCTIONS) { DeductionsScreen(vm, nav) }
+            composable(Routes.PAYSLIP) { PayslipScreen(vm, nav) }
+            composable(
+                route = "${Routes.WITHDRAW_RECEIPT}/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.IntType }),
+            ) { back -> WithdrawalReceiptScreen(vm, nav, back.arguments?.getInt("id") ?: 0) }
             composable(Routes.PROFILE) { ProfileScreen(vm, nav) }
             composable(Routes.NEW_JOB) { NewJobScreen(vm, nav) }
             composable(Routes.JOB_DETAILS) { JobDetailsScreen(vm, nav) }

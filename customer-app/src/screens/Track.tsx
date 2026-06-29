@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header, FooterCTA, Loading, useToast } from '../components/UI'
 import LiveMap from '../components/LiveMap'
-import { fetchBooking, trackBooking, getSocket, verifyServiceOtp, completeBooking } from '../api'
+import { fetchBooking, trackBooking, getSocket, completeBooking } from '../api'
 import type { Booking } from '../types'
 
 const STEPS = ['Confirmed', 'Assigned', 'On Way', 'Arrived', 'Started', 'Done']
@@ -15,7 +15,6 @@ export default function Track() {
   const toast = useToast()
   const [b, setB] = useState<Booking | null>(null)
   const [busy, setBusy] = useState(false)
-  const [otpInput, setOtpInput] = useState('')
   const [, force] = useState(0)
 
   // 1-second heartbeat so the live service timer re-renders
@@ -33,9 +32,19 @@ export default function Track() {
     }).catch(() => toast('Could not load booking'))
     const s = getSocket()
     const onUpd = (u: Booking) => { if (u.id === bid) setB((p) => ({ ...p, ...u })) }
+    // On (re)connect — e.g. after a dropped link or a server restart — rejoin the
+    // booking room and refetch, so the live status/timer never gets stuck.
+    const onConnect = () => { s.emit('booking:join', bid); fetchBooking(bid).then((d) => setB((p) => ({ ...p, ...d }))).catch(() => {}) }
     s.on('booking:update', onUpd)
-    return () => { s.off('booking:update', onUpd); s.emit('booking:leave', bid) }
+    s.on('connect', onConnect)
+    return () => { s.off('booking:update', onUpd); s.off('connect', onConnect); s.emit('booking:leave', bid) }
   }, [bid])
+
+  // When the worker ends the service (photo uploaded), the booking flips to completed —
+  // take the customer straight to the review/feedback page.
+  useEffect(() => {
+    if (b?.status === 'completed') { const t = setTimeout(() => nav(`/rate/${bid}`, { replace: true }), 700); return () => clearTimeout(t) }
+  }, [b?.status])
 
   if (!b) return <div className="screen"><Header title="Track" /><Loading /></div>
 
@@ -64,7 +73,12 @@ export default function Track() {
   const DUR_MIN: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
   const targetMin = DUR_MIN[b.items[0]?.durationId] ?? 60
   const startedMs = b.started_at ? new Date(b.started_at).getTime() : Date.now()
-  const elapsedSec = b.status === 'completed' ? targetMin * 60 : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+  const completedMs = b.completed_at ? new Date(b.completed_at).getTime() : null
+  // Completed → show the REAL time the worker spent (completed_at − started_at);
+  // fall back to the booked time only if timestamps are missing.
+  const elapsedSec = b.status === 'completed'
+    ? (b.started_at && completedMs ? Math.max(0, Math.round((completedMs - startedMs) / 1000)) : targetMin * 60)
+    : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
   const targetSec = targetMin * 60
   const remainingSec = Math.max(0, targetSec - elapsedSec)
   const pct = Math.min(100, (elapsedSec / targetSec) * 100)
@@ -74,12 +88,6 @@ export default function Track() {
     return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`
   }
 
-  async function verify() {
-    if (otpInput.length !== 4) return toast('Enter the 4-digit OTP')
-    setBusy(true)
-    try { setB(await verifyServiceOtp(bid, otpInput)); toast('OTP verified · service started') }
-    catch (e) { toast((e as Error).message) } finally { setBusy(false) }
-  }
   async function complete() { setBusy(true); try { await completeBooking(bid); nav(`/rate/${bid}`, { replace: true }) } catch (e) { toast((e as Error).message); setBusy(false) } }
 
   const phone = '+919876500000'
@@ -140,13 +148,9 @@ export default function Track() {
         {b.status === 'arrived' && (
           <div className="otp-box">
             <div className="ot">📋 Start Service OTP</div>
-            <p className="muted sm">Share this OTP with your expert to begin</p>
+            <p className="muted sm">Read this code out to your expert — they enter it to start the service</p>
             <div className="otp-digits">{(b.service_otp ?? '').split('').map((d, i) => <span key={i}>{d}</span>)}</div>
-            <div className="otp-entry-wrap">
-              <p className="muted sm">Expert enters it here to start the service</p>
-              <input className="otp-entry" value={otpInput} inputMode="numeric" placeholder="• • • •"
-                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-            </div>
+            <p className="muted sm">⏳ Waiting for {b.pro_name} to start the service…</p>
           </div>
         )}
         {(b.status === 'in_progress' || b.status === 'completed') && (
@@ -167,7 +171,7 @@ export default function Track() {
             <button className="btn-ghost danger-ghost" onClick={() => nav(`/cancel/${bid}`)}>Cancel</button>
           </div>
         )}
-        {b.status === 'arrived' && <button className="btn full" onClick={verify} disabled={busy || otpInput.length !== 4}>{busy ? 'Verifying…' : 'Verify OTP & Start Service'}</button>}
+        {b.status === 'arrived' && <button className="btn full" disabled>Waiting for expert to start…</button>}
         {b.status === 'in_progress' && <button className="btn full" onClick={complete} disabled={busy}>Mark Service Completed</button>}
         {(b.status === 'completed') && <button className="btn full" onClick={() => nav(`/rate/${bid}`)}>Rate your experience</button>}
         {(b.status === 'cancelled') && <button className="btn full" onClick={() => nav('/bookings', { replace: true })}>Go to My Bookings</button>}

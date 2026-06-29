@@ -51,8 +51,10 @@ db.exec(`
   );
 `)
 
-// Migration: timestamp for when the service actually started (OTP verified).
+// Migration: timestamps for when the service actually started (OTP verified) and
+// finished — so we can show the real time the worker spent, not just the booked duration.
 try { db.exec('ALTER TABLE bookings ADD COLUMN started_at TEXT') } catch { /* column already exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN completed_at TEXT') } catch { /* column already exists */ }
 
 export { CATEGORIES }
 
@@ -178,13 +180,13 @@ export function createBooking(b) {
 }
 export function getBooking(id) { return rowToBooking(db.prepare('SELECT * FROM bookings WHERE id=?').get(id)) }
 export function getBookings(uid) { return db.prepare('SELECT * FROM bookings WHERE user_id=? ORDER BY id DESC').all(uid).map(rowToBooking) }
-// Open jobs for the worker app: confirmed bookings not yet picked up by any expert, newest first.
-export function getOpenBookings() { return db.prepare("SELECT * FROM bookings WHERE status='confirmed' ORDER BY id DESC").all().map(rowToBooking) }
-export function setBookingPro(id, name, rating) {
-  db.prepare('UPDATE bookings SET pro_name=?, pro_rating=? WHERE id=?').run(name, rating, id)
+export function setBookingStatus(id, status) {
+  // Stamp the finish time the first time a booking is marked completed, so the actual
+  // service duration (completed_at − started_at) can be shown alongside the booked time.
+  if (status === 'completed') db.prepare('UPDATE bookings SET status=?, completed_at=COALESCE(completed_at, ?) WHERE id=?').run(status, now(), id)
+  else db.prepare('UPDATE bookings SET status=? WHERE id=?').run(status, id)
   return getBooking(id)
 }
-export function setBookingStatus(id, status) { db.prepare('UPDATE bookings SET status=? WHERE id=?').run(status, id); return getBooking(id) }
 export function setBookingStarted(id) {
   db.prepare('UPDATE bookings SET status=?, started_at=? WHERE id=?').run('in_progress', now(), id)
   return getBooking(id)

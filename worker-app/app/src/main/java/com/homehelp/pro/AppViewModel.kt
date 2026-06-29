@@ -8,18 +8,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.homehelp.pro.network.AdvanceBody
+import com.homehelp.pro.network.AdvanceEligibilityDto
+import com.homehelp.pro.network.AdvanceEntry
 import com.homehelp.pro.network.AmountBody
 import com.homehelp.pro.network.AuthRequest
 import com.homehelp.pro.network.AvailabilityBody
 import com.homehelp.pro.network.BankBody
 import com.homehelp.pro.network.BootstrapResponse
+import com.homehelp.pro.network.BreakupItem
+import com.homehelp.pro.network.DeductionEntry
+import com.homehelp.pro.network.EndBody
+import com.homehelp.pro.network.LedgerEntry
+import com.homehelp.pro.network.NotificationItem
 import com.homehelp.pro.network.NotificationsBody
 import com.homehelp.pro.network.OtpBody
+import com.homehelp.pro.network.PayslipDto
 import com.homehelp.pro.network.PreferencesBody
 import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
 import com.homehelp.pro.network.UploadDocBody
+import com.homehelp.pro.network.WalletStateResponse
+import com.homehelp.pro.network.WalletSummaryDto
+import com.homehelp.pro.network.WithdrawBody
+import com.homehelp.pro.network.WithdrawalEntry
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -71,8 +85,7 @@ data class DocItem(val name: String, val status: String, val fileName: String = 
 
 class AppViewModel : ViewModel() {
 
-    // Use a getter so a server-URL change (re)builds the client and we pick it up immediately.
-    private val api get() = RetrofitClient.api
+    private val api = RetrofitClient.api
 
     /** True once we've successfully reached the backend at least once this session. */
     var backendConnected by mutableStateOf(false)
@@ -86,11 +99,12 @@ class AppViewModel : ViewModel() {
     var activeJob by mutableStateOf<Job?>(null)
         private set
 
-    /** True while a job request is in flight. */
-    var requestingJob by mutableStateOf(false)
+    // Wall-clock stamps for the actual time the worker spent on the job (start → end),
+    // shown on the Job Completed screen and mirrored to the customer/admin.
+    var serviceStartMs by mutableStateOf(0L)
         private set
-    /** User-facing note after a job request (e.g. "no bookings yet"). Null when there's nothing to say. */
-    var lastJobMessage by mutableStateOf<String?>(null)
+    var serviceEndMs by mutableStateOf(0L)
+        private set
 
     // Live dashboard / wallet figures
     var todayEarnings by mutableIntStateOf(650)
@@ -107,6 +121,35 @@ class AppViewModel : ViewModel() {
     var pendingAmount by mutableIntStateOf(1200)
         private set
 
+    // ---- wallet module: balances, periods, queues ----
+    var holdBalance by mutableIntStateOf(0)
+        private set
+    var weekEarnings by mutableIntStateOf(0)
+        private set
+    var monthEarnings by mutableIntStateOf(0)
+        private set
+    var advanceOutstanding by mutableIntStateOf(0)
+        private set
+    var nextPayout by mutableStateOf("—")
+        private set
+
+    val earningsBreakup = mutableStateListOf<BreakupItem>()
+    val deductionSummary = mutableStateListOf<BreakupItem>()
+    val deductionDetail = mutableStateListOf<DeductionEntry>()
+    var deductionTotal by mutableIntStateOf(0)
+        private set
+    val walletHistory = mutableStateListOf<LedgerEntry>()
+    val withdrawals = mutableStateListOf<WithdrawalEntry>()
+    val advances = mutableStateListOf<AdvanceEntry>()
+    val notifications = mutableStateListOf<NotificationItem>()
+    var unreadNotifications by mutableIntStateOf(0)
+        private set
+
+    var advanceEligibility by mutableStateOf<AdvanceEligibilityDto?>(null)
+        private set
+    var payslip by mutableStateOf<PayslipDto?>(null)
+        private set
+
     // ---- editable profile state (Profile sub-screens) ----
     var workerName by mutableStateOf("Rahul Kumar")
     var workerPhone by mutableStateOf("+91 90000 12345")
@@ -121,6 +164,12 @@ class AppViewModel : ViewModel() {
     var bankAccount by mutableStateOf("xxxx xxxx 1234")
     var bankIfsc by mutableStateOf("HDFC0001234")
     var bankHolder by mutableStateOf("Rahul Kumar")
+    var bankUpi by mutableStateOf("")
+    var bankStatus by mutableStateOf("Approved")   // Not Added / Pending Verification / Approved / Rejected
+        private set
+    var bankRemarks by mutableStateOf("")
+        private set
+    val bankApproved: Boolean get() = bankStatus == "Approved"
 
     val availableDays = mutableStateMapOf(
         "Mon" to true, "Tue" to true, "Wed" to true,
@@ -164,6 +213,8 @@ class AppViewModel : ViewModel() {
 
     /** Apply the server's full state snapshot onto local observable state. */
     private fun applyBootstrap(b: BootstrapResponse) {
+        // Remember the auth token so every later call is attached to this worker.
+        b.token?.let { RetrofitClient.token = it }
         b.worker?.let { w ->
             workerName = w.name
             workerPhone = w.phone
@@ -175,6 +226,9 @@ class AppViewModel : ViewModel() {
             bankAccount = w.bankAccount
             bankIfsc = w.bankIfsc
             bankHolder = w.bankHolder
+            bankUpi = w.bankUpi
+            bankStatus = w.bankStatus
+            bankRemarks = w.bankRemarks
             shiftStart = w.shiftStart
             shiftEnd = w.shiftEnd
             if (w.availableDays.isNotEmpty()) {
@@ -196,6 +250,7 @@ class AppViewModel : ViewModel() {
             todayEarnings = wl.todayEarnings
             todayJobs = wl.todayJobs
         }
+        b.walletSummary?.let { applyWalletSummary(it) }
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
         if (b.walletTxns.isNotEmpty()) { walletTxns.clear(); walletTxns.addAll(b.walletTxns) }
@@ -215,32 +270,58 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun goOnline(v: Boolean) { isOnline = v }
+    /** True when a real customer booking is waiting — drives the "New Job Request" notification. */
+    var hasIncomingJob by mutableStateOf(false)
+        private set
+    private var pollingStarted = false
+
+    fun goOnline(v: Boolean) {
+        isOnline = v
+        if (v) startJobPolling() else hasIncomingJob = false
+    }
+
+    // While online and idle, poll the backend for a real waiting booking. When one
+    // appears, raise the in-app notification flag the Home screen reacts to.
+    private fun startJobPolling() {
+        if (pollingStarted) return
+        pollingStarted = true
+        viewModelScope.launch {
+            while (true) {
+                if (isOnline && activeJob == null) {
+                    try {
+                        val r = api.jobsAvailable()
+                        hasIncomingJob = (r["available"] == true)
+                        backendConnected = true
+                    } catch (e: Exception) { backendConnected = false }
+                } else if (!isOnline) {
+                    hasIncomingJob = false
+                }
+                delay(5000)
+            }
+        }
+    }
 
     /**
-     * Pull the next real customer booking from the backend and present it as the
-     * active job. If there are no pending bookings we surface a hint instead of
-     * showing a blank job card.
+     * Pull the next REAL customer booking. Calls back with true if one was opened,
+     * false if there are no pending jobs (no demo/fake jobs are ever shown).
      */
-    fun requestJob() {
-        requestingJob = true
-        lastJobMessage = null
+    fun requestJob(onResult: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             try {
                 val r = api.requestJob()
                 backendConnected = true
-                val job = r.job
-                if (job != null) {
-                    activeJob = job
+                if (r.job != null) {
+                    activeJob = r.job
                     jobStatus = JobStatus.REQUESTED
+                    hasIncomingJob = false
+                    onResult(true)
                 } else {
-                    lastJobMessage = "No new bookings yet. Place an order in the customer app, then tap again."
+                    hasIncomingJob = false
+                    onResult(false)
                 }
             } catch (e: Exception) {
                 backendConnected = false
-                lastJobMessage = "Can't reach the server — make sure the backend is running."
-            } finally {
-                requestingJob = false
+                onResult(false)
             }
         }
     }
@@ -271,38 +352,33 @@ class AppViewModel : ViewModel() {
         val job = activeJob ?: return false
         return if (input == job.otp) {
             jobStatus = JobStatus.IN_PROGRESS
+            serviceStartMs = System.currentTimeMillis()
+            serviceEndMs = 0L
             sync { api.verifyOtp(OtpBody(input)) }
             true
         } else false
     }
 
-    fun endService() {
+    fun endService(photo: String? = null) {
         jobStatus = JobStatus.COMPLETED
-        sync { api.endService() }
+        serviceEndMs = System.currentTimeMillis()
+        sync { api.endService(EndBody(photo)) }
     }
 
-    /** Finish & submit -> credit earnings + wallet, push to history, reset lifecycle. */
+    /** Finish & submit. Earnings are credited only after the CUSTOMER confirms the job on
+     *  their app (System verifies -> Pending -> quality check -> Available), so we do NOT
+     *  credit balances optimistically here — we just push to history, reset the lifecycle,
+     *  and reconcile wallet figures from the server. */
     fun finishAndSettle() {
         val job = activeJob ?: return
-        todayEarnings += job.earnings
-        todayJobs += 1
-        walletBalance += job.earnings
-        totalEarned += job.earnings
         bookings.add(0, Booking(job.services.joinToString(", "), job.customerName, job.area,
             "${job.dateTime} • ${job.durationHours} hours", job.earnings, "Completed"))
-        earnings.add(0, EarningEntry("Today • ${job.id}", job.earnings))
-        walletTxns.add(0, WalletTxn("Job Payment", "${job.id} • ${job.customerName}", job.earnings, "Success", true))
         activeJob = null
         jobStatus = JobStatus.NONE
-        // Persist the settlement server-side, then reconcile with the authoritative totals.
+        // Reconcile with the authoritative server totals (earnings stay 0 until the customer confirms).
         sync {
             val r = api.settle()
-            r.wallet?.let { wl ->
-                walletBalance = wl.balance
-                totalEarned = wl.totalEarned
-                todayEarnings = wl.todayEarnings
-                todayJobs = wl.todayJobs
-            }
+            r.walletSummary?.let { applyWalletSummary(it) }
         }
     }
 
@@ -337,10 +413,94 @@ class AppViewModel : ViewModel() {
         return null
     }
 
+    // ---- wallet module ----
+    private fun applyWalletSummary(s: WalletSummaryDto) {
+        walletBalance = s.available
+        pendingAmount = s.pending
+        holdBalance = s.hold
+        todayEarnings = s.todayEarnings
+        weekEarnings = s.weekEarnings
+        monthEarnings = s.monthEarnings
+        withdrawnTotal = s.totalWithdrawn
+        advanceOutstanding = s.advanceOutstanding
+        nextPayout = s.nextPayout
+    }
+
+    private fun applyWalletState(r: WalletStateResponse) {
+        r.walletSummary?.let { applyWalletSummary(it) }
+        if (r.earningsBreakup.isNotEmpty()) { earningsBreakup.clear(); earningsBreakup.addAll(r.earningsBreakup) }
+        r.deductions?.let { d ->
+            deductionSummary.clear(); deductionSummary.addAll(d.summary)
+            deductionDetail.clear(); deductionDetail.addAll(d.detail)
+            deductionTotal = d.total
+        }
+        if (r.history.isNotEmpty()) { walletHistory.clear(); walletHistory.addAll(r.history) }
+        withdrawals.clear(); withdrawals.addAll(r.withdrawals)
+        advances.clear(); advances.addAll(r.advances)
+    }
+
+    /** Pull the whole wallet snapshot (dashboard, breakup, deductions, history, queues). */
+    fun refreshWallet() = sync { applyWalletState(api.walletState()) }
+
+    fun refreshNotifications() = sync {
+        val n = api.walletNotifications()
+        notifications.clear(); notifications.addAll(n.items); unreadNotifications = n.unread
+    }
+    fun markNotificationsRead() = sync {
+        val n = api.markNotificationsRead()
+        notifications.clear(); notifications.addAll(n.items); unreadNotifications = n.unread
+    }
+
+    /** Step 1 of withdrawal: ask the backend to "send" an OTP. Returns the dev OTP for the demo. */
+    fun requestWithdrawOtp(onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try { onResult(api.requestWithdrawOtp().devOtp); backendConnected = true }
+            catch (e: Exception) { backendConnected = false; onResult(null) }
+        }
+    }
+
+    /** Step 2: submit the withdrawal. onResult(null) on success, else an error message. */
+    fun submitWithdrawal(amount: Int, method: String, otp: String, onResult: (String?) -> Unit) {
+        if (amount <= 0) { onResult("Enter a valid amount"); return }
+        if (amount > walletBalance) { onResult("Amount exceeds available balance"); return }
+        viewModelScope.launch {
+            try {
+                val r = api.requestWithdrawal(WithdrawBody(amount, method, otp))
+                backendConnected = true
+                if (r.ok) { applyWalletState(r); onResult(null) } else onResult(r.error ?: "Withdrawal failed")
+            } catch (e: Exception) { backendConnected = false; onResult("Network error — please retry") }
+        }
+    }
+
+    fun loadAdvanceEligibility() = sync { advanceEligibility = api.advanceEligibility() }
+
+    fun submitAdvance(amount: Int, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val r = api.requestAdvance(AdvanceBody(amount))
+                backendConnected = true
+                if (r.ok) { applyWalletState(r); onResult(null) } else onResult(r.error ?: "Request failed")
+            } catch (e: Exception) { backendConnected = false; onResult("Network error — please retry") }
+        }
+    }
+
+    fun loadPayslip() = sync { payslip = api.payslip() }
+
+    var withdrawalReceipt by mutableStateOf<com.homehelp.pro.network.WithdrawalReceiptDto?>(null)
+        private set
+    fun loadWithdrawalReceipt(id: Int) = sync { withdrawalReceipt = api.withdrawalReceipt(id) }
+    /** Id of the most recent withdrawal (for jumping straight to its receipt). */
+    val lastWithdrawalId: Int get() = withdrawals.firstOrNull()?.id ?: 0
+
     // ---- profile persistence (called from the Save buttons) ----
     fun saveProfile() = sync { api.updateProfile(ProfileBody(workerName, workerPhone, workerEmail, workerCity)) }
 
-    fun saveBank() = sync { api.updateBank(BankBody(bankHolder, bankName, bankAccount, bankIfsc)) }
+    fun saveBank(chequePhoto: String = "") = sync {
+        val w = api.updateBank(BankBody(bankHolder, bankName, bankAccount, bankIfsc, bankUpi, chequePhoto))
+        bankStatus = w.bankStatus
+        bankRemarks = w.bankRemarks
+        bankUpi = w.bankUpi
+    }
 
     fun saveAvailability() = sync {
         api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))

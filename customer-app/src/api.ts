@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client'
+import { getCurrentPosition } from './geo'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
 // Backend base URL. A runtime override saved in localStorage (set via the login
@@ -63,7 +64,10 @@ export const deleteAddressApi = (id: number) => req<Address[]>(`/api/addresses/$
 
 /* payment gateway */
 export const fetchPaymentMethods = () => req<{ methods: PaymentGroup[] }>('/api/payment/methods')
-export const fetchPaymentConfig = () => req<{ provider: 'razorpay' | 'mock'; keyId: string | null }>('/api/payment/config')
+export const fetchPaymentConfig = () => req<{ provider: 'razorpay' | 'mock'; keyId: string | null; upiVpa: string; payeeName: string; upiMode: 'demo' | 'live' }>('/api/payment/config')
+// Create a finance payment order (orderId is used as the UPI transaction reference).
+export const createPaymentsOrder = (amount: number, mode: string, bookingId?: number) =>
+  req<{ ok: boolean; orderId: string; paymentId: string; amount: number; mode: string; status: string }>('/api/payments/order', { method: 'POST', body: JSON.stringify({ amount, mode, bookingId }) })
 export const createOrder = (amount: number) => req<{ provider: 'razorpay' | 'mock'; orderId: string; amount: number; currency: string; keyId?: string }>('/api/payment/order', { method: 'POST', body: JSON.stringify({ amount }) })
 export const verifyPayment = (p: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => req<{ ok: boolean; txnId: string }>('/api/payment/verify', { method: 'POST', body: JSON.stringify(p) })
 export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
@@ -77,7 +81,13 @@ export const fetchTickets = () => req<Ticket[]>('/api/tickets')
 export const createTicket = (category: string, message: string) => req<Ticket>('/api/tickets', { method: 'POST', body: JSON.stringify({ category, message }) })
 
 /* bookings */
-export const createBookingApi = (payload: any) => req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify(payload) })
+// Attach the customer's live GPS so the assigned worker sees their real location on the
+// map. Best-effort — if the fix isn't available the booking still goes through.
+export const createBookingApi = async (payload: any) => {
+  let coords: { lat?: number; lng?: number } = {}
+  if (payload.lat == null) { try { coords = await getCurrentPosition() } catch { /* no fix — server falls back */ } }
+  return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
+}
 export const fetchBookings = () => req<Booking[]>('/api/bookings')
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })

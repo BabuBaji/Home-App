@@ -10,6 +10,28 @@ const TABS = [
 ]
 const STATUSES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress', 'completed', 'cancelled']
 
+// Status banner styling for the Manage modal — "completed" shows the proof photo + review,
+// anything else surfaces the live stage (in progress, on the way, etc.).
+const STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
+  confirmed: { label: '🕓 Awaiting worker', bg: '#FFF4E5', fg: '#B26A00' },
+  worker_assigned: { label: '👷 Expert assigned', bg: '#EEF0FF', fg: '#4338CA' },
+  on_the_way: { label: '🚗 On the way to customer', bg: '#EEF0FF', fg: '#4338CA' },
+  arrived: { label: '📍 Expert arrived', bg: '#EEF0FF', fg: '#4338CA' },
+  in_progress: { label: '🧹 Service in progress', bg: '#E6F7EE', fg: '#0F7B43' },
+  completed: { label: '✅ Service completed', bg: '#E6F7EE', fg: '#0F7B43' },
+  cancelled: { label: '❌ Booking cancelled', bg: '#FDECEC', fg: '#C62828' },
+}
+
+// Human-readable elapsed time between two ISO timestamps (the worker's real on-site duration).
+function actualDuration(startedAt?: string, endedAt?: string): string | null {
+  if (!startedAt || !endedAt) return null
+  const sec = Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000))
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m} min ${s}s`
+  return `${s}s`
+}
+
 export default function Bookings() {
   const toast = useToast()
   const [rows, setRows] = useState<AdminBooking[] | null>(null)
@@ -90,6 +112,48 @@ function BookingModal({ id, onClose, onChange, toast }: { id: number; onClose: (
             </table>
           </div>
           <p className="muted" style={{ fontSize: 13 }}><strong>Address:</strong> {b.address}</p>
+
+          {/* Live service stage */}
+          {(() => { const m = STATUS_META[b.status] || { label: b.status, bg: '#eee', fg: '#333' }; return (
+            <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 10, background: m.bg, color: m.fg, fontWeight: 600 }}>
+              {m.label}
+              {b.started_at && <span style={{ fontWeight: 400, marginLeft: 8 }}>· started {shortDate(b.started_at)}</span>}
+            </div>
+          ) })()}
+
+          {/* Booked (estimated) vs actual time the worker spent on site */}
+          {(b.started_at || b.duration) && (
+            <div className="stat-row" style={{ marginTop: 12 }}>
+              <div className="stat"><div className="stat-body"><span className="stat-label">Booked time</span><strong className="stat-value" style={{ fontSize: 16 }}>{b.duration || b.items?.[0]?.durationLabel || '—'}</strong><span className="stat-sub">estimated</span></div></div>
+              <div className="stat"><div className="stat-body"><span className="stat-label">Actual time taken</span><strong className="stat-value" style={{ fontSize: 16, color: b.completed_at ? '#0F7B43' : undefined }}>{actualDuration(b.started_at, b.completed_at) || (b.started_at ? 'in progress…' : 'not started')}</strong><span className="stat-sub">{b.completed_at ? 'worker on-site' : 'live'}</span></div></div>
+            </div>
+          )}
+
+          {/* Proof-of-work photo captured by the worker at completion */}
+          {b.work_photo && (
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>📷 Proof of work — by {b.pro_name}</h4>
+              <img src={b.work_photo} alt="Proof of work" style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 10, border: '1px solid #eee' }} />
+            </div>
+          )}
+
+          {/* Customer rating & review (shown once the customer has rated) */}
+          {b.rating ? (
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>Customer review</h4>
+              <div style={{ fontSize: 20, letterSpacing: 2 }}>
+                <span style={{ color: '#F5A623' }}>{'★'.repeat(b.rating)}</span>
+                <span style={{ color: '#ddd' }}>{'★'.repeat(Math.max(0, 5 - b.rating))}</span>
+                <span className="muted" style={{ fontSize: 13, marginLeft: 8 }}>{b.rating}/5</span>
+              </div>
+              {b.review && <p style={{ margin: '6px 0 0' }}>{b.review}</p>}
+              {b.photo && <img src={b.photo} alt="Customer photo" style={{ maxWidth: 180, borderRadius: 8, marginTop: 8, border: '1px solid #eee' }} />}
+            </div>
+          ) : b.status === 'completed' ? (
+            <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>Service completed — awaiting customer review.</p>
+          ) : (
+            <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>Proof photo &amp; review appear here once the service is completed.</p>
+          )}
 
           {editable && (
             <div className="form-grid" style={{ marginTop: 14 }}>
