@@ -11,6 +11,12 @@ import {
   updateWorkerProfile, updateWorkerBank, updateWorkerAvailability, updateWorkerPreferences, updateWorkerNotifications,
   uploadWorkerDocument, walletAdd, walletWithdraw, settleBookingForWorker, workerShare, setWorkPhoto,
 } from './worker-db.js'
+import {
+  walletSummary, earningsBreakup, deductionsList, walletHistory, withdrawalsList, advancesList,
+  requestWithdrawOtp, createWithdrawal, advanceEligibility, requestAdvance,
+  buildPayslip, generatePayslip, payslipsList, notificationsList, markNotificationsRead,
+  tallyIncome, recoverAdvanceOnEarning, withdrawalReceipt,
+} from './worker-wallet-db.js'
 
 const room = (id) => `booking:${id}`
 
@@ -88,6 +94,7 @@ export function createWorkerRouter(io) {
     return {
       worker: workerDto(w),
       wallet: walletDto(w),
+      walletSummary: walletSummary(wid),
       jobStatus: active ? (STATUS_TO_ENUM[active.status] || 'NONE') : 'NONE',
       activeJob: active ? jobFromBooking(active) : null,
       bookings: historyBookings(wid),
@@ -208,12 +215,16 @@ export function createWorkerRouter(io) {
     res.json({ ok: true, jobStatus: 'COMPLETED', activeJob: jobFromBooking(u) })
   })
 
-  // Settle: credit the worker their share of the completed booking.
+  // Finish: the worker has completed the job + uploaded proof. Earnings are NOT credited
+  // here — per the flow, the money is credited (into Pending, then QC -> Available) only
+  // when the CUSTOMER confirms completion (review/confirm) on their app. This endpoint just
+  // finalises the worker's lifecycle and returns the latest wallet snapshot.
   r.post('/jobs/settle', auth, (req, res) => {
-    const b = settleableBooking(req.worker.id)
-    if (b) settleBookingForWorker(req.worker.id, b)
     const w = getWorkerRow(req.worker.id)
-    res.json({ ok: true, wallet: walletDto(w), bookings: historyBookings(w.id), earnings: workerEarnings(w.id), walletTxns: workerTxns(w.id) })
+    res.json({
+      ok: true, wallet: walletDto(w), walletSummary: walletSummary(w.id),
+      bookings: historyBookings(w.id), earnings: workerEarnings(w.id), walletTxns: workerTxns(w.id),
+    })
   })
 
   // Worker drops the job mid-flow → release the booking back into the dispatch pool.
@@ -235,12 +246,59 @@ export function createWorkerRouter(io) {
     res.json({ ok: true, wallet: walletDto(w), walletTxns: workerTxns(w.id) })
   })
   r.post('/wallet/withdraw', auth, (req, res) => {
+    // Backwards-compatible quick withdraw (no OTP) — kept for the old Add-Money flow.
     const amount = parseInt(req.body?.amount, 10)
     if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
     const out = walletWithdraw(req.worker.id, amount)
     if (out.error) return res.json({ ok: false, error: out.error })
     res.json({ ok: true, wallet: walletDto(out.worker), walletTxns: workerTxns(out.worker.id) })
   })
+
+  /* ---------- wallet module: dashboard, breakup, deductions, history ---------- */
+  const id = (req) => req.worker.id
+  const walletState = (wid) => ({
+    walletSummary: walletSummary(wid), earningsBreakup: earningsBreakup(wid),
+    deductions: deductionsList(wid), history: walletHistory(wid),
+    withdrawals: withdrawalsList(wid), advances: advancesList(wid),
+  })
+
+  r.get('/wallet/summary', auth, (req, res) => res.json(walletSummary(id(req))))
+  r.get('/wallet/state', auth, (req, res) => res.json(walletState(id(req))))
+  r.get('/wallet/earnings-breakup', auth, (req, res) => res.json(earningsBreakup(id(req))))
+  r.get('/wallet/deductions', auth, (req, res) => res.json(deductionsList(id(req))))
+  r.get('/wallet/history', auth, (req, res) => res.json(walletHistory(id(req))))
+  r.get('/wallet/withdrawals', auth, (req, res) => res.json(withdrawalsList(id(req))))
+  r.get('/wallet/withdrawals/:wd/receipt', auth, (req, res) => {
+    const rec = withdrawalReceipt(id(req), parseInt(req.params.wd, 10))
+    return rec ? res.json(rec) : res.status(404).json({ ok: false, error: 'Receipt not found' })
+  })
+  r.get('/wallet/advances', auth, (req, res) => res.json(advancesList(id(req))))
+
+  /* ---------- withdrawal (OTP-gated, Bank/UPI) ---------- */
+  r.post('/wallet/withdraw/request-otp', auth, (req, res) => res.json(requestWithdrawOtp()))
+  r.post('/wallet/withdraw/request', auth, (req, res) => {
+    const { amount, method, otp } = req.body || {}
+    const out = createWithdrawal(id(req), parseInt(amount, 10), method, otp)
+    if (out.error) return res.json({ ok: false, error: out.error })
+    res.json({ ok: true, ...walletState(id(req)) })
+  })
+
+  /* ---------- salary advance ---------- */
+  r.get('/wallet/advance/eligibility', auth, (req, res) => res.json(advanceEligibility(id(req))))
+  r.post('/wallet/advance/request', auth, (req, res) => {
+    const out = requestAdvance(id(req), parseInt(req.body?.amount, 10))
+    if (out.error) return res.json({ ok: false, error: out.error })
+    res.json({ ok: true, ...walletState(id(req)) })
+  })
+
+  /* ---------- payslip ---------- */
+  r.get('/wallet/payslip', auth, (req, res) => res.json(buildPayslip(id(req), req.query?.month)))
+  r.get('/wallet/payslips', auth, (req, res) => res.json(payslipsList(id(req))))
+  r.post('/wallet/payslip/generate', auth, (req, res) => res.json(generatePayslip(id(req), req.body?.month)))
+
+  /* ---------- notifications ---------- */
+  r.get('/wallet/notifications', auth, (req, res) => res.json(notificationsList(id(req))))
+  r.post('/wallet/notifications/read', auth, (req, res) => res.json(markNotificationsRead(id(req))))
 
   return r
 }

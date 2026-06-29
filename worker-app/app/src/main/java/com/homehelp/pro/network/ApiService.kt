@@ -4,6 +4,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Path
 
 interface ApiService {
     @GET("api/worker/health")
@@ -71,10 +72,56 @@ interface ApiService {
     @POST("api/worker/jobs/cancel")
     suspend fun cancel(@Body body: ReasonBody): StatusResponse
 
-    // ---- wallet ----
+    // ---- wallet (legacy quick ops) ----
     @POST("api/worker/wallet/withdraw")
     suspend fun withdraw(@Body body: AmountBody): WalletOpResponse
 
     @POST("api/worker/wallet/add")
     suspend fun addMoney(@Body body: AmountBody): WalletOpResponse
+
+    // ---- wallet module ----
+    @GET("api/worker/wallet/state")
+    suspend fun walletState(): WalletStateResponse
+
+    @GET("api/worker/wallet/summary")
+    suspend fun walletSummary(): WalletSummaryDto
+
+    @GET("api/worker/wallet/earnings-breakup")
+    suspend fun earningsBreakup(): List<BreakupItem>
+
+    @GET("api/worker/wallet/deductions")
+    suspend fun deductions(): DeductionsDto
+
+    @GET("api/worker/wallet/history")
+    suspend fun walletHistory(): List<LedgerEntry>
+
+    @GET("api/worker/wallet/withdrawals")
+    suspend fun withdrawals(): List<WithdrawalEntry>
+
+    @GET("api/worker/wallet/withdrawals/{id}/receipt")
+    suspend fun withdrawalReceipt(@Path("id") id: Int): WithdrawalReceiptDto
+
+    @GET("api/worker/wallet/advances")
+    suspend fun advances(): List<AdvanceEntry>
+
+    @POST("api/worker/wallet/withdraw/request-otp")
+    suspend fun requestWithdrawOtp(): OtpResponse
+
+    @POST("api/worker/wallet/withdraw/request")
+    suspend fun requestWithdrawal(@Body body: WithdrawBody): WalletStateResponse
+
+    @GET("api/worker/wallet/advance/eligibility")
+    suspend fun advanceEligibility(): AdvanceEligibilityDto
+
+    @POST("api/worker/wallet/advance/request")
+    suspend fun requestAdvance(@Body body: AdvanceBody): WalletStateResponse
+
+    @GET("api/worker/wallet/payslip")
+    suspend fun payslip(): PayslipDto
+
+    @GET("api/worker/wallet/notifications")
+    suspend fun walletNotifications(): NotificationsResponse
+
+    @POST("api/worker/wallet/notifications/read")
+    suspend fun markNotificationsRead(): NotificationsResponse
 }

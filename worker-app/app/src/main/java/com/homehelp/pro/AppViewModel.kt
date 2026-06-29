@@ -8,19 +8,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.homehelp.pro.network.AdvanceBody
+import com.homehelp.pro.network.AdvanceEligibilityDto
+import com.homehelp.pro.network.AdvanceEntry
 import com.homehelp.pro.network.AmountBody
 import com.homehelp.pro.network.AuthRequest
 import com.homehelp.pro.network.AvailabilityBody
 import com.homehelp.pro.network.BankBody
 import com.homehelp.pro.network.BootstrapResponse
+import com.homehelp.pro.network.BreakupItem
+import com.homehelp.pro.network.DeductionEntry
 import com.homehelp.pro.network.EndBody
+import com.homehelp.pro.network.LedgerEntry
+import com.homehelp.pro.network.NotificationItem
 import com.homehelp.pro.network.NotificationsBody
 import com.homehelp.pro.network.OtpBody
+import com.homehelp.pro.network.PayslipDto
 import com.homehelp.pro.network.PreferencesBody
 import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
 import com.homehelp.pro.network.UploadDocBody
+import com.homehelp.pro.network.WalletStateResponse
+import com.homehelp.pro.network.WalletSummaryDto
+import com.homehelp.pro.network.WithdrawBody
+import com.homehelp.pro.network.WithdrawalEntry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -109,6 +121,35 @@ class AppViewModel : ViewModel() {
     var pendingAmount by mutableIntStateOf(1200)
         private set
 
+    // ---- wallet module: balances, periods, queues ----
+    var holdBalance by mutableIntStateOf(0)
+        private set
+    var weekEarnings by mutableIntStateOf(0)
+        private set
+    var monthEarnings by mutableIntStateOf(0)
+        private set
+    var advanceOutstanding by mutableIntStateOf(0)
+        private set
+    var nextPayout by mutableStateOf("—")
+        private set
+
+    val earningsBreakup = mutableStateListOf<BreakupItem>()
+    val deductionSummary = mutableStateListOf<BreakupItem>()
+    val deductionDetail = mutableStateListOf<DeductionEntry>()
+    var deductionTotal by mutableIntStateOf(0)
+        private set
+    val walletHistory = mutableStateListOf<LedgerEntry>()
+    val withdrawals = mutableStateListOf<WithdrawalEntry>()
+    val advances = mutableStateListOf<AdvanceEntry>()
+    val notifications = mutableStateListOf<NotificationItem>()
+    var unreadNotifications by mutableIntStateOf(0)
+        private set
+
+    var advanceEligibility by mutableStateOf<AdvanceEligibilityDto?>(null)
+        private set
+    var payslip by mutableStateOf<PayslipDto?>(null)
+        private set
+
     // ---- editable profile state (Profile sub-screens) ----
     var workerName by mutableStateOf("Rahul Kumar")
     var workerPhone by mutableStateOf("+91 90000 12345")
@@ -123,6 +164,12 @@ class AppViewModel : ViewModel() {
     var bankAccount by mutableStateOf("xxxx xxxx 1234")
     var bankIfsc by mutableStateOf("HDFC0001234")
     var bankHolder by mutableStateOf("Rahul Kumar")
+    var bankUpi by mutableStateOf("")
+    var bankStatus by mutableStateOf("Approved")   // Not Added / Pending Verification / Approved / Rejected
+        private set
+    var bankRemarks by mutableStateOf("")
+        private set
+    val bankApproved: Boolean get() = bankStatus == "Approved"
 
     val availableDays = mutableStateMapOf(
         "Mon" to true, "Tue" to true, "Wed" to true,
@@ -179,6 +226,9 @@ class AppViewModel : ViewModel() {
             bankAccount = w.bankAccount
             bankIfsc = w.bankIfsc
             bankHolder = w.bankHolder
+            bankUpi = w.bankUpi
+            bankStatus = w.bankStatus
+            bankRemarks = w.bankRemarks
             shiftStart = w.shiftStart
             shiftEnd = w.shiftEnd
             if (w.availableDays.isNotEmpty()) {
@@ -200,6 +250,7 @@ class AppViewModel : ViewModel() {
             todayEarnings = wl.todayEarnings
             todayJobs = wl.todayJobs
         }
+        b.walletSummary?.let { applyWalletSummary(it) }
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
         if (b.walletTxns.isNotEmpty()) { walletTxns.clear(); walletTxns.addAll(b.walletTxns) }
@@ -314,28 +365,20 @@ class AppViewModel : ViewModel() {
         sync { api.endService(EndBody(photo)) }
     }
 
-    /** Finish & submit -> credit earnings + wallet, push to history, reset lifecycle. */
+    /** Finish & submit. Earnings are credited only after the CUSTOMER confirms the job on
+     *  their app (System verifies -> Pending -> quality check -> Available), so we do NOT
+     *  credit balances optimistically here — we just push to history, reset the lifecycle,
+     *  and reconcile wallet figures from the server. */
     fun finishAndSettle() {
         val job = activeJob ?: return
-        todayEarnings += job.earnings
-        todayJobs += 1
-        walletBalance += job.earnings
-        totalEarned += job.earnings
         bookings.add(0, Booking(job.services.joinToString(", "), job.customerName, job.area,
             "${job.dateTime} • ${job.durationHours} hours", job.earnings, "Completed"))
-        earnings.add(0, EarningEntry("Today • ${job.id}", job.earnings))
-        walletTxns.add(0, WalletTxn("Job Payment", "${job.id} • ${job.customerName}", job.earnings, "Success", true))
         activeJob = null
         jobStatus = JobStatus.NONE
-        // Persist the settlement server-side, then reconcile with the authoritative totals.
+        // Reconcile with the authoritative server totals (earnings stay 0 until the customer confirms).
         sync {
             val r = api.settle()
-            r.wallet?.let { wl ->
-                walletBalance = wl.balance
-                totalEarned = wl.totalEarned
-                todayEarnings = wl.todayEarnings
-                todayJobs = wl.todayJobs
-            }
+            r.walletSummary?.let { applyWalletSummary(it) }
         }
     }
 
@@ -370,10 +413,94 @@ class AppViewModel : ViewModel() {
         return null
     }
 
+    // ---- wallet module ----
+    private fun applyWalletSummary(s: WalletSummaryDto) {
+        walletBalance = s.available
+        pendingAmount = s.pending
+        holdBalance = s.hold
+        todayEarnings = s.todayEarnings
+        weekEarnings = s.weekEarnings
+        monthEarnings = s.monthEarnings
+        withdrawnTotal = s.totalWithdrawn
+        advanceOutstanding = s.advanceOutstanding
+        nextPayout = s.nextPayout
+    }
+
+    private fun applyWalletState(r: WalletStateResponse) {
+        r.walletSummary?.let { applyWalletSummary(it) }
+        if (r.earningsBreakup.isNotEmpty()) { earningsBreakup.clear(); earningsBreakup.addAll(r.earningsBreakup) }
+        r.deductions?.let { d ->
+            deductionSummary.clear(); deductionSummary.addAll(d.summary)
+            deductionDetail.clear(); deductionDetail.addAll(d.detail)
+            deductionTotal = d.total
+        }
+        if (r.history.isNotEmpty()) { walletHistory.clear(); walletHistory.addAll(r.history) }
+        withdrawals.clear(); withdrawals.addAll(r.withdrawals)
+        advances.clear(); advances.addAll(r.advances)
+    }
+
+    /** Pull the whole wallet snapshot (dashboard, breakup, deductions, history, queues). */
+    fun refreshWallet() = sync { applyWalletState(api.walletState()) }
+
+    fun refreshNotifications() = sync {
+        val n = api.walletNotifications()
+        notifications.clear(); notifications.addAll(n.items); unreadNotifications = n.unread
+    }
+    fun markNotificationsRead() = sync {
+        val n = api.markNotificationsRead()
+        notifications.clear(); notifications.addAll(n.items); unreadNotifications = n.unread
+    }
+
+    /** Step 1 of withdrawal: ask the backend to "send" an OTP. Returns the dev OTP for the demo. */
+    fun requestWithdrawOtp(onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try { onResult(api.requestWithdrawOtp().devOtp); backendConnected = true }
+            catch (e: Exception) { backendConnected = false; onResult(null) }
+        }
+    }
+
+    /** Step 2: submit the withdrawal. onResult(null) on success, else an error message. */
+    fun submitWithdrawal(amount: Int, method: String, otp: String, onResult: (String?) -> Unit) {
+        if (amount <= 0) { onResult("Enter a valid amount"); return }
+        if (amount > walletBalance) { onResult("Amount exceeds available balance"); return }
+        viewModelScope.launch {
+            try {
+                val r = api.requestWithdrawal(WithdrawBody(amount, method, otp))
+                backendConnected = true
+                if (r.ok) { applyWalletState(r); onResult(null) } else onResult(r.error ?: "Withdrawal failed")
+            } catch (e: Exception) { backendConnected = false; onResult("Network error — please retry") }
+        }
+    }
+
+    fun loadAdvanceEligibility() = sync { advanceEligibility = api.advanceEligibility() }
+
+    fun submitAdvance(amount: Int, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val r = api.requestAdvance(AdvanceBody(amount))
+                backendConnected = true
+                if (r.ok) { applyWalletState(r); onResult(null) } else onResult(r.error ?: "Request failed")
+            } catch (e: Exception) { backendConnected = false; onResult("Network error — please retry") }
+        }
+    }
+
+    fun loadPayslip() = sync { payslip = api.payslip() }
+
+    var withdrawalReceipt by mutableStateOf<com.homehelp.pro.network.WithdrawalReceiptDto?>(null)
+        private set
+    fun loadWithdrawalReceipt(id: Int) = sync { withdrawalReceipt = api.withdrawalReceipt(id) }
+    /** Id of the most recent withdrawal (for jumping straight to its receipt). */
+    val lastWithdrawalId: Int get() = withdrawals.firstOrNull()?.id ?: 0
+
     // ---- profile persistence (called from the Save buttons) ----
     fun saveProfile() = sync { api.updateProfile(ProfileBody(workerName, workerPhone, workerEmail, workerCity)) }
 
-    fun saveBank() = sync { api.updateBank(BankBody(bankHolder, bankName, bankAccount, bankIfsc)) }
+    fun saveBank(chequePhoto: String = "") = sync {
+        val w = api.updateBank(BankBody(bankHolder, bankName, bankAccount, bankIfsc, bankUpi, chequePhoto))
+        bankStatus = w.bankStatus
+        bankRemarks = w.bankRemarks
+        bankUpi = w.bankUpi
+    }
 
     fun saveAvailability() = sync {
         api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))

@@ -48,6 +48,29 @@ export const createWorker = (body: Record<string, unknown>) => req<Worker>('/wor
 export const updateWorker = (id: number, body: Record<string, unknown>) => req<Worker>(`/workers/${id}`, patch(body))
 export const deleteWorker = (id: number) => req<{ ok: boolean }>(`/workers/${id}`, { method: 'DELETE' })
 
+/* worker wallet */
+export const fetchWorkerWallet = (id: number) => req<any>(`/workers/${id}/wallet`)
+export const walletBonus = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/bonus`, post('', body))
+export const walletPenalty = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/penalty`, post('', body))
+export const walletHold = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/hold`, post('', body))
+export const walletReleaseHold = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/release-hold`, post('', body))
+export const walletReleasePending = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/release-pending`, post('', body))
+export const approveWithdrawal = (id: number, wd: number) => req<any>(`/workers/${id}/wallet/withdrawals/${wd}/approve`, post(''))
+export const rejectWithdrawal = (id: number, wd: number, reason: string) => req<any>(`/workers/${id}/wallet/withdrawals/${wd}/reject`, post('', { reason }))
+export const approveAdvance = (id: number, adv: number) => req<any>(`/workers/${id}/wallet/advances/${adv}/approve`, post(''))
+export const rejectAdvance = (id: number, adv: number, reason: string) => req<any>(`/workers/${id}/wallet/advances/${adv}/reject`, post('', { reason }))
+export const generateWorkerPayslip = (id: number, month?: string) => req<any>(`/workers/${id}/wallet/payslip`, post('', { month }))
+export const approveWorkerBank = (id: number) => req<any>(`/workers/${id}/bank/approve`, post(''))
+export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/workers/${id}/bank/reject`, post('', { reason }))
+export async function downloadWalletReport() {
+  const res = await fetch(API_BASE + '/api/admin/wallet/report.csv', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+  if (!res.ok) throw new Error('Could not export report')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = 'wallet-report.csv'; a.click()
+  URL.revokeObjectURL(url)
+}
+
 /* bookings */
 export const fetchBookings = (status = 'all', q = '') => req<AdminBooking[]>(`/bookings?status=${status}&q=${encodeURIComponent(q)}`)
 export const fetchBooking = (id: number) => req<any>(`/bookings/${id}`)

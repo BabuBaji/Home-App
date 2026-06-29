@@ -1,39 +1,110 @@
 // Rich, Snabbit-style service catalogue: durations, inclusions, reviews, coupons.
 
-export const CATEGORIES = ['Cleaning', 'Kitchen', 'Bathroom', 'Laundry', 'Deep Cleaning', 'Care']
+export const CATEGORIES = ['Cleaning', 'Bathroom', 'Kitchen', 'Laundry', 'Appliances', 'Repairs', 'Home', 'Care']
 
 // base = starting price for the shortest (60 min) slot (INR). available toggled in DB.
-// `image` is a photo for the Snabbit-style tile (falls back to the emoji if it fails to load).
+// Tiles render the on-brand illustration pack (serviceArt.tsx); the emoji is the Cart fallback.
 export const SERVICES_SEED = [
-  ['cleaning',   'House Cleaning',    '🧹', 129, 'Cleaning',      1],
-  ['deep',       'Deep Cleaning',     '✨', 299, 'Deep Cleaning', 1],
-  ['kitchen',    'Kitchen Cleaning',  '🍳', 149, 'Kitchen',       1],
-  ['bathroom',   'Bathroom Cleaning', '🚿', 149, 'Bathroom',      1],
-  ['dishwashing','Utensil Cleaning',  '🍽️', 119, 'Kitchen',       1],
-  ['laundry',    'Laundry',           '🧺', 129, 'Laundry',       1],
-  ['ironing',    'Ironing',           '👔', 99,  'Laundry',       1],
-  ['cooking',    'Cooking',           '🍲', 199, 'Care',          1],
-  ['dusting',    'Maid Service',      '🧽', 199, 'Cleaning',      1],
-  ['babycare',   'Babysitting',       '🍼', 249, 'Care',          1],
-  ['eldercare',  'Elder Care',        '🧓', 249, 'Care',          1],
+  // Cleaning
+  ['cleaning',     'Home Cleaning',         '🧹', 129, 'Cleaning',   1],
+  ['deep',         'Deep Cleaning',         '✨', 299, 'Cleaning',   1],
+  ['sofa',         'Sofa Cleaning',         '🛋️', 199, 'Cleaning',   1],
+  ['carpet',       'Carpet Cleaning',       '🧶', 199, 'Cleaning',   1],
+  ['window',       'Window Cleaning',       '🪟', 149, 'Cleaning',   1],
+  ['floor',        'Floor Cleaning',        '🧼', 129, 'Cleaning',   1],
+  ['dusting',      'Dusting',               '🧽', 119, 'Cleaning',   1],
+  ['sanitization', 'Home Sanitization',     '🦠', 299, 'Cleaning',   1],
+  ['office',       'Office Cleaning',       '🏢', 399, 'Cleaning',   1],
+  ['commercial',   'Commercial Cleaning',   '🏬', 599, 'Cleaning',   1],
+  // Bathroom
+  ['bathroom',     'Bathroom Cleaning',     '🚿', 149, 'Bathroom',   1],
+  // Kitchen
+  ['kitchen',      'Kitchen Cleaning',      '🍳', 149, 'Kitchen',    1],
+  ['dishwashing',  'Dish Washing',          '🍽️', 119, 'Kitchen',    1],
+  // Laundry
+  ['laundry',      'Laundry',               '🧺', 129, 'Laundry',    1],
+  ['ironing',      'Ironing',               '👔', 99,  'Laundry',    1],
+  // Appliances
+  ['ac',           'AC Service',            '❄️', 499, 'Appliances', 1],
+  ['fridge',       'Refrigerator Repair',   '🧊', 299, 'Appliances', 1],
+  ['washingrepair','Washing Machine Repair','🌀', 349, 'Appliances', 1],
+  ['tv',           'TV Installation',       '📺', 399, 'Appliances', 1],
+  ['purifier',     'Water Purifier Service','💧', 349, 'Appliances', 1],
+  ['geyser',       'Geyser Service',        '🔥', 349, 'Appliances', 1],
+  ['appliance',    'Appliance Repair',      '🔧', 299, 'Appliances', 1],
+  // Repairs & Home services
+  ['electrical',   'Electrical Services',   '⚡', 199, 'Repairs',    1],
+  ['plumbing',     'Plumbing',              '🚰', 199, 'Repairs',    1],
+  ['carpentry',    'Carpentry',             '🪚', 249, 'Repairs',    1],
+  ['painting',     'Painting',              '🎨', 499, 'Repairs',    1],
+  ['furniture',    'Furniture Assembly',    '🪑', 299, 'Repairs',    1],
+  ['cctv',         'CCTV Installation',     '📹', 599, 'Repairs',    1],
+  ['pest',         'Pest Control',          '🐜', 399, 'Repairs',    1],
+  ['inspection',   'Home Inspection',       '📋', 499, 'Repairs',    1],
+  ['handyman',     'Handyman',              '🧰', 199, 'Repairs',    1],
+  // Home / On-demand
+  ['moving',       'Moving & Packing',      '📦', 999, 'Home',       1],
+  ['courier',      'Courier Pickup',        '🚚', 99,  'Home',       1],
+  ['grocery',      'Grocery Assistance',    '🛒', 149, 'Home',       1],
+  ['driver',       'Driver on Demand',      '🚗', 299, 'Home',       1],
+  // Care
+  ['cooking',      'Cooking',               '🍲', 199, 'Care',       1],
+  ['eldercare',    'Elder Care',            '🧓', 249, 'Care',       1],
+  ['babycare',     'Child Care',            '🍼', 249, 'Care',       1],
+  ['petcare',      'Pet Care',              '🐶', 249, 'Care',       1],
+  ['gardening',    'Gardening',             '🌱', 249, 'Care',       1],
 ]
 
-// Hand-picked photos — each image was visually verified to match its service.
-// Unsplash for the premium shots; one loremflickr photo for ironing (the only
-// reliably-correct source found for it). Tiles fall back to a tinted emoji if offline.
+// Real, search-matched Unsplash photos — one accurate, on-topic shot per service (Snabbit-style
+// tiles). If a photo ever fails to load, the tile falls back to the on-brand illustration.
 const IMG = (id) => `https://images.unsplash.com/photo-${id}?w=1080&q=80&auto=format&fit=crop`
 export const SERVICE_IMAGES = {
-  cleaning:    IMG('1584820927498-cfe5211fd8bf'), // gloves on — house cleaning
-  deep:        IMG('1581578731548-c64695cc6952'), // woman deep-cleaning a window
-  kitchen:     IMG('1565538810643-b5bdb714032a'), // clean modern kitchen
-  bathroom:    IMG('1620626011761-996317b8d101'), // clean modern bathroom
-  dishwashing: IMG('1581622558663-b2e33377dfb2'), // dishwasher with clean plates
-  laundry:     IMG('1545173168-9f1947eebb7f'),    // laundromat washing machines
-  ironing:     'https://loremflickr.com/800/800/ironing,clothes?lock=42', // iron on a board
-  cooking:     IMG('1556910103-1c02745aae4d'),    // people cooking together
-  dusting:     IMG('1563453392212-326f5e854473'), // glove + spray — maid service
-  babycare:    IMG('1555252333-9f8e92e65df9'),    // baby — babysitting
-  eldercare:   IMG('1576765608535-5f04d1e3f289'), // caregiver with an elderly woman
+  // Cleaning
+  cleaning:      IMG('1584820927498-cfe5211fd8bf'), // person cleaning a floor
+  deep:          IMG('1581578731548-c64695cc6952'), // deep-cleaning a window
+  sofa:          IMG('1555041469-a586c61ea9bc'),    // fabric sofa / couch
+  carpet:        IMG('1686178827149-6d55c72d81df'), // vacuuming a carpet
+  window:        IMG('1527352774566-e4916e36c645'), // window pane
+  floor:         IMG('1740657254989-42fe9c3b8cce'), // mopping the floor
+  dusting:       IMG('1563453392212-326f5e854473'), // glove + spray dusting
+  sanitization:  IMG('1550963295-019d8a8a61c5'),    // disinfectant spray bottle
+  office:        IMG('1627905646269-7f034dcc5738'), // office workspace
+  commercial:    IMG('1761689502577-0013be84f1bf'), // cleaning a glass building
+  // Bathroom / Kitchen / Laundry
+  bathroom:      IMG('1620626011761-996317b8d101'), // clean modern bathroom
+  kitchen:       IMG('1565538810643-b5bdb714032a'), // clean modern kitchen
+  dishwashing:   IMG('1581622558663-b2e33377dfb2'), // washing dishes
+  laundry:       IMG('1545173168-9f1947eebb7f'),    // washing machines
+  ironing:       IMG('1489274495757-95c7c837b101'), // steam iron on board
+  // Appliances
+  ac:            IMG('1718203862467-c33159fdc504'), // air conditioner unit
+  fridge:        IMG('1721613877687-c9099b698faa'), // refrigerator
+  washingrepair: IMG('1626806819282-2c1dc01a5e0c'), // front-load washer
+  tv:            IMG('1612965607446-25e1332775ae'), // wall-mounted TV
+  purifier:      IMG('1669211659110-3f3db4119b65'), // water purifier
+  geyser:        IMG('1594233078955-e1f73a02ebb2'), // wall water heater
+  appliance:     IMG('1759434775823-40d8b9577a41'), // appliance repair
+  // Repairs & home services
+  electrical:    IMG('1682345262055-8f95f3c513ea'), // electrician with wires
+  plumbing:      IMG('1676210134188-4c05dd172f89'), // plumber repairing a pipe
+  carpentry:     IMG('1659930087003-2d64e33181f7'), // carpenter cutting wood
+  painting:      IMG('1562259949-e8e7689d7828'),    // painting a wall with roller
+  furniture:     IMG('1772338537689-056082f100a9'), // furniture assembly
+  cctv:          IMG('1496368077930-c1e31b4e5b44'), // surveillance cameras
+  pest:          IMG('1749030415358-f533ad412767'), // pest-control sprayer
+  inspection:    IMG('1523705480679-b5d0cc17a656'), // inspection clipboard
+  handyman:      IMG('1567361808960-dec9cb578182'), // toolbox / tools
+  // Home / on-demand
+  moving:        IMG('1730154838368-c37b1fdebcf6'), // moving boxes
+  courier:       IMG('1566576721346-d4a3b4eaeb55'), // delivery package handover
+  grocery:       IMG('1588964895597-cfccd6e2dbf9'), // grocery box of vegetables
+  driver:        IMG('1449965408869-eaa3f722e40d'), // driver in a car
+  // Care
+  cooking:       IMG('1556910103-1c02745aae4d'),    // cooking in a kitchen
+  eldercare:     IMG('1576765608535-5f04d1e3f289'), // caregiver with an elder
+  babycare:      IMG('1555252333-9f8e92e65df9'),    // child care
+  petcare:       IMG('1516366434321-728a48e6b7bf'), // dog / pet
+  gardening:     IMG('1515150144380-bca9f1650ed9'), // watering plants
 }
 
 // Snabbit-style duration ladder. price = base + add; original is the struck-through

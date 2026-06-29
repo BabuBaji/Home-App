@@ -10,15 +10,16 @@ import java.util.concurrent.TimeUnit
  * Single Retrofit instance pointing at the shared HomeHelp backend (the same server
  * the customer and admin apps use). The worker API lives under the api/worker route.
  *
- * BASE_URL = http://10.0.2.2:4000 works on the Android emulator (host loopback).
- * On a physical device connected over USB we run `adb reverse tcp:4000 tcp:4000`,
- * which makes the phone's own localhost forward to the PC — so 127.0.0.1 resolves
- * the same way. 10.0.2.2 is emulator-only, so we default to localhost which the
- * adb-reverse tunnel serves on real hardware.
+ * On a physical phone over Wi-Fi, point this at the PC's LAN IP (same network).
+ * Update the IP if your PC's address changes (the customer/admin apps auto-detect
+ * it at build time via build-apk.ps1; this native app is set here).
+ *   - Wi-Fi (real phone):  http://<PC-LAN-IP>:4000/   e.g. http://192.168.0.109:4000/
+ *   - Emulator:            http://10.0.2.2:4000/        (host loopback)
+ *   - USB + adb reverse:   http://127.0.0.1:4000/       (run: adb reverse tcp:4000 tcp:4000)
  */
 object RetrofitClient {
-    // adb reverse maps device 127.0.0.1:4000 -> PC 127.0.0.1:4000 (shared backend port)
-    const val BASE_URL = "http://127.0.0.1:4000/"
+    // Shared HomeHelp backend on the PC's Wi-Fi LAN IP (phone must be on the same Wi-Fi).
+    const val BASE_URL = "http://192.168.0.109:4000/"
 
     /** Bearer token issued by /api/worker/auth/verify; attached to every later call. */
     @Volatile

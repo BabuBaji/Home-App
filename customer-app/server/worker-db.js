@@ -18,6 +18,10 @@ const WORKER_COLUMNS = [
   "bank_name TEXT NOT NULL DEFAULT ''",
   "bank_account TEXT NOT NULL DEFAULT ''",
   "bank_ifsc TEXT NOT NULL DEFAULT ''",
+  "bank_upi TEXT NOT NULL DEFAULT ''",
+  "bank_status TEXT NOT NULL DEFAULT ''",   // '' = Not Added, then Pending Verification / Approved / Rejected
+  "bank_cheque TEXT NOT NULL DEFAULT ''",   // optional cancelled-cheque / passbook photo (data URL)
+  "bank_remarks TEXT NOT NULL DEFAULT ''",
   "shift_start TEXT NOT NULL DEFAULT '08:00 AM'",
   "shift_end TEXT NOT NULL DEFAULT '08:00 PM'",
   "available_days TEXT NOT NULL DEFAULT '{}'",
@@ -115,6 +119,10 @@ function seedDemoWorker() {
 }
 seedDemoWorker()
 
+// Grandfather any worker who already had bank details before KYC existed -> Approved,
+// so they (and the demo worker) can withdraw. Only touches not-yet-set rows; idempotent.
+try { db.prepare("UPDATE workers SET bank_status='Approved' WHERE bank_account!='' AND (bank_status='' OR bank_status IS NULL)").run() } catch { /* column not ready */ }
+
 /* ---------- helpers ---------- */
 const digits = (p) => String(p || '').replace(/\D/g, '')
 function parseJson(s, fallback) { try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : fallback } catch { return fallback } }
@@ -156,6 +164,7 @@ export function workerDto(w) {
     name: w.name || '', phone: w.phone || '', email: w.email || '', city: w.city || '',
     jobsCompleted: w.jobs || 0, rating: w.rating || 0,
     bankName: w.bank_name || '', bankAccount: w.bank_account || '', bankIfsc: w.bank_ifsc || '', bankHolder: w.bank_holder || '',
+    bankUpi: w.bank_upi || '', bankStatus: w.bank_status || 'Not Added', bankRemarks: w.bank_remarks || '',
     shiftStart: w.shift_start || '', shiftEnd: w.shift_end || '',
     availableDays: parseJson(w.available_days, DEFAULT_DAYS), jobPreferences: parseJson(w.job_prefs, DEFAULT_PREFS),
     notifNewJobs: !!w.notif_new_jobs, notifPayments: !!w.notif_payments,
@@ -188,11 +197,30 @@ export function updateWorkerProfile(id, b) {
     .run(b.name ?? w.name, b.phone ?? w.phone, b.email ?? w.email, b.city ?? w.city, id)
   return workerDto(getWorkerRow(id))
 }
+// Worker saves/updates their bank account -> goes back to Pending Verification so an
+// admin must re-approve before they can withdraw again (a changed account is a risk).
 export function updateWorkerBank(id, b) {
   const w = getWorkerRow(id); if (!w) return null
-  db.prepare('UPDATE workers SET bank_holder=?, bank_name=?, bank_account=?, bank_ifsc=? WHERE id=?')
-    .run(b.bankHolder ?? w.bank_holder, b.bankName ?? w.bank_name, b.bankAccount ?? w.bank_account, b.bankIfsc ?? w.bank_ifsc, id)
+  db.prepare(`UPDATE workers SET bank_holder=?, bank_name=?, bank_account=?, bank_ifsc=?, bank_upi=?, bank_cheque=?,
+    bank_status='Pending Verification', bank_remarks='' WHERE id=?`)
+    .run(b.bankHolder ?? w.bank_holder, b.bankName ?? w.bank_name, b.bankAccount ?? w.bank_account,
+      b.bankIfsc ?? w.bank_ifsc, b.bankUpi ?? w.bank_upi, b.chequePhoto ?? w.bank_cheque, id)
   return workerDto(getWorkerRow(id))
+}
+
+/* ---------- bank KYC (admin verification) ---------- */
+export function bankKycDto(id) {
+  const w = getWorkerRow(id); if (!w) return null
+  return {
+    holder: w.bank_holder || '', bankName: w.bank_name || '', account: w.bank_account || '',
+    ifsc: w.bank_ifsc || '', upi: w.bank_upi || '', status: w.bank_status || 'Not Added',
+    cheque: w.bank_cheque || '', remarks: w.bank_remarks || '',
+  }
+}
+export function setWorkerBankStatus(id, status, remarks = '') {
+  const w = getWorkerRow(id); if (!w) return null
+  db.prepare('UPDATE workers SET bank_status=?, bank_remarks=? WHERE id=?').run(status, remarks, id)
+  return bankKycDto(id)
 }
 export function updateWorkerAvailability(id, b) {
   const w = getWorkerRow(id); if (!w) return null

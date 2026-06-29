@@ -215,66 +215,6 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
-@Composable
-fun WalletScreen(vm: AppViewModel) {
-    val ctx = LocalContext.current
-    var dialog by remember { mutableStateOf("") } // "", "withdraw", "add"
-
-    if (dialog == "withdraw") {
-        AmountDialog("Withdraw to Bank", "Withdraw", onDismiss = { dialog = "" }) { amt ->
-            val err = vm.withdraw(amt)
-            toast(ctx, err ?: "₹$amt withdrawal initiated")
-            if (err == null) dialog = ""
-        }
-    } else if (dialog == "add") {
-        AmountDialog("Add Money", "Add", onDismiss = { dialog = "" }) { amt ->
-            val err = vm.addMoney(amt)
-            toast(ctx, err ?: "₹$amt added to wallet")
-            if (err == null) dialog = ""
-        }
-    }
-
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        BellHeader("Wallet")
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Box(Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp)).padding(18.dp)) {
-                Column {
-                    Text("Available Balance", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
-                    Text("₹${vm.walletBalance}", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("View Balance Details ›", color = Color.White, fontSize = 12.sp)
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                WalletAction(Icons.Filled.ArrowUpward, "Withdraw") { dialog = "withdraw" }
-                WalletAction(Icons.Filled.AddCircleOutline, "Add Money") { dialog = "add" }
-                WalletAction(Icons.Filled.History, "History") { toast(ctx, "Showing full transaction history") }
-                WalletAction(Icons.Filled.CardGiftcard, "Summary") { toast(ctx, "Earnings summary") }
-            }
-            Card {
-                SectionTitle("Balance Summary")
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    SummaryMini("₹${vm.totalEarned}", "Total", TextDark)
-                    SummaryMini("₹${vm.withdrawnTotal}", "Withdrawn", GreenSuccess)
-                    SummaryMini("₹${vm.pendingAmount}", "Pending", Gold)
-                }
-            }
-            Card {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Recent Transactions", fontWeight = FontWeight.SemiBold, color = TextDark)
-                    Text("View All", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
-                Spacer(Modifier.height(8.dp))
-                vm.walletTxns.forEach { t -> TxnRow(t) }
-            }
-        }
-    }
-}
-
 // ---- helpers ----
 
 @Composable

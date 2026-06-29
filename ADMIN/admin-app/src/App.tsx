@@ -9,6 +9,7 @@ import Login from './screens/Login'
 import Dashboard from './screens/Dashboard'
 import Customers from './screens/Customers'
 import Workers from './screens/Workers'
+import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
 import Pricing from './screens/Pricing'
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/dashboard" element={<Page><Dashboard /></Page>} />
           <Route path="/customers" element={<Page><Customers /></Page>} />
           <Route path="/workers" element={<Page><Workers /></Page>} />
+          <Route path="/worker-wallet" element={<Page><WorkerWallet /></Page>} />
           <Route path="/bookings" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
           <Route path="/pricing" element={<Page><Pricing /></Page>} />

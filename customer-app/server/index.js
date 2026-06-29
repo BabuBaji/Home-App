@@ -16,6 +16,10 @@ import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_
 import { createAdminRouter } from './admin.js'
 import { createWorkerRouter } from './worker.js'
 import { setBookingCoords } from './worker-db.js'
+import { confirmWorkerSettlement } from './worker-wallet-db.js'
+import { createPaymentsRouter } from './payments.js'
+import { recordExternalPayment, createPayment } from './payments-db.js'
+import { getSetting } from './admin-db.js'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -23,20 +27,27 @@ import { readFileSync } from 'node:fs'
    Keys are read from server/payment.config.json (gitignored) or env vars.
    With no keys present, payments fall back to MOCK mode so the app still runs. */
 let RZP = { keyId: process.env.RAZORPAY_KEY_ID || '', keySecret: process.env.RAZORPAY_KEY_SECRET || '' }
+// Payee VPA the customer pays INTO (company UPI handle). Money is company-first.
+// upiMode: 'demo' = show an in-app UPI pay screen (no real money, no valid VPA needed);
+//          'live' = deep-link into the real UPI app (needs a real, registered upiVpa).
+let UPI = { vpa: process.env.UPI_VPA || 'homehelp@upi', payeeName: process.env.UPI_PAYEE_NAME || 'HomeHelp Services', mode: process.env.UPI_MODE || 'demo' }
 try {
   const c = JSON.parse(readFileSync(new URL('./payment.config.json', import.meta.url), 'utf8'))
   RZP = { keyId: c.keyId || RZP.keyId, keySecret: c.keySecret || RZP.keySecret }
+  UPI = { vpa: c.upiVpa || UPI.vpa, payeeName: c.payeeName || UPI.payeeName, mode: c.upiMode || UPI.mode }
 } catch { /* no config file → mock mode */ }
 const RZP_LIVE = !!(RZP.keyId && RZP.keySecret)
 const verifiedPayments = new Map() // razorpay_payment_id -> { amount, at }
 
 const app = express()
 app.use(cors())
-app.use(express.json({ limit: '6mb' })) // allow review photo data-URLs
+// Keep the raw body so gateway/payout webhooks can verify HMAC signatures over the exact bytes.
+app.use(express.json({ limit: '6mb', verify: (req, _res, buf) => { req.rawBody = buf } }))
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 app.use('/api/admin', createAdminRouter(io)) // admin panel API (workers, settings, dashboard, …)
 app.use('/api/worker', createWorkerRouter(io)) // worker app API (HomeHelp Pro) — shares bookings/DB/socket
+app.use('/api/payments', createPaymentsRouter(io)) // payment + payout gateway webhooks (signed, idempotent)
 const room = (id) => `booking:${id}`
 const now = () => new Date()
 const otp4 = () => String(Math.floor(1000 + Math.random() * 9000))
@@ -148,7 +159,13 @@ app.get('/api/payment/methods', (_q, res) => res.json({ methods: PAYMENT_METHODS
 
 // Tells the client which flow to use and exposes the PUBLIC key id (never the secret).
 app.get('/api/payment/config', (_q, res) =>
-  res.json({ provider: RZP_LIVE ? 'razorpay' : 'mock', keyId: RZP_LIVE ? RZP.keyId : null }))
+  res.json({
+    provider: RZP_LIVE ? 'razorpay' : 'mock', keyId: RZP_LIVE ? RZP.keyId : null,
+    // UPI payee so the app can deep-link into PhonePe/GPay/Paytm with the amount prefilled.
+    upiVpa: getSetting('upi_vpa', '') || UPI.vpa,
+    payeeName: getSetting('upi_payee_name', '') || UPI.payeeName,
+    upiMode: getSetting('upi_mode', '') || UPI.mode, // 'demo' | 'live'
+  }))
 
 // Create an order. Real Razorpay order when keys are present; otherwise a mock order.
 app.post('/api/payment/order', auth, async (req, res) => {
@@ -188,6 +205,18 @@ app.post('/api/payment/verify', auth, (req, res) => {
   if (expected !== razorpay_signature) return res.status(400).json({ error: 'Payment verification failed' })
   verifiedPayments.set(String(razorpay_payment_id), { at: Date.now() })
   res.json({ ok: true, txnId: razorpay_payment_id })
+})
+
+// Create a payment order (spec: "Backend creates payment order"). Returns an orderId the
+// client opens in the UPI/QR/card/netbanking gateway; the booking is only marked paid when
+// the SIGNED gateway webhook arrives (POST /api/payments/webhook) — never from the frontend.
+app.post('/api/payments/order', auth, (req, res) => {
+  const amount = parseInt(req.body?.amount, 10)
+  if (!amount || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount' })
+  const mode = String(req.body?.mode || 'upi') // upi_intent | upi_qr | upi_id | card | netbanking | wallet
+  const orderId = 'order_' + crypto.randomBytes(8).toString('hex')
+  const p = createPayment({ bookingId: req.body?.bookingId || null, customerId: req.user.id, amount, mode, gateway: 'razorpay', orderId, idempotencyKey: req.body?.idempotencyKey || '' })
+  res.json({ ok: true, orderId, paymentId: `PM${String(p.id).padStart(7, '0')}`, amount, mode, status: 'CREATED' })
 })
 
 // Legacy mock charge (still used when no keys are configured).
@@ -287,9 +316,11 @@ app.post('/api/bookings', auth, (req, res) => {
   const isCash = payment === 'cash'
   const isWallet = payment === 'wallet'
   let paymentStatus = isCash ? 'pending' : 'paid'
-  // With real Razorpay configured, an online booking is only "paid" once we've
-  // verified the gateway payment (the client passes the verified paymentId).
-  if (RZP_LIVE && !isCash && !isWallet) {
+  // UPI-direct (deep-link straight into PhonePe/GPay/Paytm) is confirmed in-app, so it carries no
+  // Razorpay paymentId. Only the Razorpay-routed methods (cards / net banking) need gateway
+  // verification — those go through Checkout and pass a verified paymentId.
+  const upiDirect = ['phonepe', 'gpay', 'paytm', 'bhim', 'upi'].includes(payment)
+  if (RZP_LIVE && !isCash && !isWallet && !upiDirect) {
     const pid = String(body.paymentId || '')
     if (!verifiedPayments.has(pid)) return res.status(402).json({ error: 'Payment not verified' })
     verifiedPayments.delete(pid) // single use
@@ -308,6 +339,12 @@ app.post('/api/bookings', auth, (req, res) => {
   // Only the in-app wallet reduces the balance; external gateway methods (UPI/card/
   // netbanking) are settled outside, so we just record them as paid.
   if (isWallet) addTransaction(req.user.id, 'debit', `Booking Payment ${booking.ref}`, pb.total, booking.ref)
+  // Record the customer payment in the finance ledger (online/wallet are paid up-front;
+  // cash is recorded at settlement time when the worker collects). Company-first: this money
+  // belongs to the platform account until the booking is settled to the worker.
+  if (paymentStatus === 'paid') {
+    try { recordExternalPayment({ bookingId: booking.id, customerId: req.user.id, amount: pb.total, mode: isWallet ? 'wallet' : payment, gateway: isWallet ? 'wallet' : 'razorpay', paymentId: body.paymentId || '' }) } catch { /* finance optional */ }
+  }
   res.status(201).json(publicBooking(booking))
 })
 
@@ -363,6 +400,8 @@ app.post('/api/bookings/:id/complete', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   let u = setBookingStatus(b.id, 'completed')
   if (b.payment === 'cash') u = setPaymentStatus(b.id, 'paid')
+  // Customer confirms the job is done -> system verifies and credits the worker (Pending -> QC).
+  confirmWorkerSettlement(getBooking(b.id))
   io.to(room(b.id)).emit('booking:update', u); res.json(u)
 })
 app.post('/api/bookings/:id/reschedule', auth, (req, res) => {
@@ -385,7 +424,10 @@ app.post('/api/bookings/:id/cancel', auth, (req, res) => {
 app.post('/api/bookings/:id/review', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  res.json(setBookingReview(b.id, Number(req.body?.rating) || 5, req.body?.review, req.body?.photo))
+  const reviewed = setBookingReview(b.id, Number(req.body?.rating) || 5, req.body?.review, req.body?.photo)
+  // Submitting the review is the customer's confirmation -> settle the worker if not already done.
+  confirmWorkerSettlement(getBooking(b.id))
+  res.json(reviewed)
 })
 
 /* ---------- socket ---------- */
