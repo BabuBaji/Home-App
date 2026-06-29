@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Loading, useToast } from '../components/UI'
 import { useStore } from '../store'
-import { ServiceHeroImg, ServiceMedallion } from '../serviceArt'
+import { ServiceHeroImg, ServiceThumb } from '../serviceArt'
 import { fetchService, fetchServices } from '../api'
 import type { ServiceDetail, Service } from '../types'
 
 export default function ServiceDetails() {
   const { id } = useParams()
   const nav = useNavigate()
+  const loc = useLocation()
   const toast = useToast()
+  const goBack = () => { if (loc.key === 'default') nav('/home'); else nav(-1) }
   const { setBookingType } = useStore()
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [services, setServices] = useState<Service[]>([])
@@ -28,26 +30,42 @@ export default function ServiceDetails() {
     nav(`/book/${s!.id}`)
   }
 
+  function share() {
+    const url = window.location.href
+    const n = navigator as any
+    if (n.share) { n.share({ title: s!.name, url }).catch(() => {}) }
+    else if (n.clipboard) { n.clipboard.writeText(url); toast('Link copied') }
+  }
+
+  const orig = s.durations?.[0]?.original
+
   return (
     <div className="screen">
-      <button className="sheet-back overlay" onClick={() => nav(-1)}>✕</button>
       <div className="content pad-cta no-pad">
-        {/* hero */}
+        {/* hero image (clean, no text overlay) */}
         <div className="sd2-hero">
           <ServiceHeroImg service={s} />
-          <div className="sd2-fade" />
-          <div className="sd2-meta">
-            <span className="sd2-eta">⚡ Arrives in 5 min</span>
-            <h1 className="sd2-name">{s.name}</h1>
-            <div className="sd2-row">
-              <span className="sd2-rate">⭐ {s.rating} <span className="dim">({s.reviewsCount})</span></span>
-              <span className="sd2-dot">·</span>
-              <span className="sd2-price">from ₹{s.price}</span>
-            </div>
-          </div>
+          <button className="sd2-iconbtn back" onClick={goBack} aria-label="Back">←</button>
+          <button className="sd2-iconbtn share" onClick={share} aria-label="Share">↗</button>
         </div>
 
         <div className="sd2-body">
+          {/* name + price */}
+          <h1 className="sd2-name">{s.name}</h1>
+          <div className="sd2-price-row">
+            <span className="sd2-price">₹{s.price}</span>
+            {orig && orig > s.price && <span className="sd2-orig">₹{orig}</span>}
+          </div>
+
+          {/* rating */}
+          <div className="sd2-rate-row">
+            <span className="sd2-star">★</span>
+            <span className="sd2-rate-val">{s.rating}</span>
+            <span className="sd2-rate-count">({s.reviewsCount.toLocaleString()} ratings)</span>
+          </div>
+
+          {/* headline + description */}
+          {s.headline && <h2 className="sd2-headline">{s.headline}</h2>}
           {s.description && <p className="sd2-desc">{s.description}</p>}
 
           {/* other services */}
@@ -55,29 +73,29 @@ export default function ServiceDetails() {
             {services.map((x) => (
               <button key={x.id} className={`svc-chip ${x.id === s!.id ? 'sel' : ''}`} onClick={() => nav(`/service/${x.id}`, { replace: true })}>
                 <span className="svc-chip-th" style={{ position: 'relative' }}>
-                  <ServiceMedallion service={x} size={42} />
+                  <ServiceThumb service={x} medallion={28} />
                 </span>
                 <span className="svc-chip-name">{x.name}</span>
               </button>
             ))}
           </div>
 
-          {/* trained to */}
-          <div className="info-card">
-            <h3 className="incl-head"><span className="hi ok">✓</span> The expert is trained to</h3>
+          {/* includes */}
+          <section className="incl-sec">
+            <h3 className="incl-head">Includes</h3>
             <ul className="incl-list ok">
               {s.includes.map((i) => <li key={i}><span className="ic ok">✓</span>{i}</li>)}
             </ul>
-          </div>
+          </section>
 
-          {/* not included */}
+          {/* does not include */}
           {s.excludes.length > 0 && (
-            <div className="info-card">
-              <h3 className="incl-head"><span className="hi no">✕</span> What is not included</h3>
+            <section className="incl-sec">
+              <h3 className="incl-head">Does not include</h3>
               <ul className="incl-list no">
                 {s.excludes.map((i) => <li key={i}><span className="ic no">✕</span>{i}</li>)}
               </ul>
-            </div>
+            </section>
           )}
 
           {/* equipment note */}

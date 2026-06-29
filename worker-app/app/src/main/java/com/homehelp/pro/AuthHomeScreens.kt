@@ -17,21 +17,39 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
@@ -134,13 +152,22 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
 
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = { HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },
+    ) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Column(Modifier.fillMaxWidth().background(Color.White)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Menu, contentDescription = null, tint = TextDark, modifier = Modifier.size(24.dp))
+                Icon(
+                    Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark,
+                    modifier = Modifier.size(24.dp).clickable { scope.launch { drawerState.open() } },
+                )
                 Text("Home", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
                 Spacer(Modifier.size(24.dp))
             }
@@ -169,7 +196,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     Switch(
                         checked = vm.isOnline,
                         onCheckedChange = { vm.goOnline(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = GreenSuccess, checkedThumbColor = Color.White),
+                        colors = SwitchDefaults.colors(checkedTrackColor = Purple, checkedThumbColor = Color.White),
                     )
                 }
             }
@@ -179,7 +206,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 if (vm.hasIncomingJob) {
                     // A real customer has booked — show the New Job Request notification.
                     Box(
-                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(16.dp))
+                        Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp))
                             .clickable {
                                 vm.requestJob { found ->
                                     if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
@@ -252,6 +279,48 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.height(8.dp))
         }
     }
+    }
+}
+
+// Slide-out menu opened by the Home top-bar hamburger. Quick links to the profile
+// sub-screens plus logout — each closes the drawer first, then navigates.
+@Composable
+private fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
+    ModalDrawerSheet(drawerContainerColor = Color.White) {
+        Column(Modifier.background(PurpleLight).fillMaxWidth().padding(20.dp)) {
+            Text(vm.workerName.ifBlank { "HomeHelp Pro" }, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark)
+            Text(vm.workerPhone.ifBlank { "Partner" }, fontSize = 13.sp, color = TextGray)
+        }
+        Spacer(Modifier.height(8.dp))
+
+        fun go(route: String) { close(); nav.navigate(route) }
+        DrawerLink(Icons.Filled.Person, "My Profile") { go(Routes.PROFILE) }
+        DrawerLink(Icons.Filled.Home, "Personal Info") { go(Routes.P_PERSONAL) }
+        DrawerLink(Icons.Filled.Description, "Documents") { go(Routes.P_DOCUMENTS) }
+        DrawerLink(Icons.Filled.AccountBalance, "Bank Details") { go(Routes.P_BANK) }
+        DrawerLink(Icons.Filled.CalendarMonth, "Availability") { go(Routes.P_AVAILABILITY) }
+        DrawerLink(Icons.Filled.Tune, "Preferences") { go(Routes.P_PREFERENCES) }
+        DrawerLink(Icons.Filled.Notifications, "Notification Settings") { go(Routes.P_NOTIFICATIONS) }
+        DrawerLink(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { go(Routes.P_HELP) }
+        DrawerLink(Icons.Filled.Info, "About Us") { go(Routes.P_ABOUT) }
+        Spacer(Modifier.height(8.dp)); HairlineDivider(); Spacer(Modifier.height(8.dp))
+        DrawerLink(Icons.Filled.Logout, "Logout", tint = RedCancel) {
+            close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun DrawerLink(icon: ImageVector, label: String, tint: Color = Purple, onClick: () -> Unit) {
+    NavigationDrawerItem(
+        icon = { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp)) },
+        label = { Text(label, color = if (tint == RedCancel) RedCancel else TextDark, fontWeight = FontWeight.Medium) },
+        selected = false,
+        onClick = onClick,
+        colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.White),
+        modifier = Modifier.padding(horizontal = 12.dp),
+    )
 }
 
 @Composable

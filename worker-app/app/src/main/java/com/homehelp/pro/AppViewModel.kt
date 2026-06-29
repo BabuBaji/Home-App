@@ -33,8 +33,10 @@ import com.homehelp.pro.network.WalletStateResponse
 import com.homehelp.pro.network.WalletSummaryDto
 import com.homehelp.pro.network.WithdrawBody
 import com.homehelp.pro.network.WithdrawalEntry
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Job lifecycle state machine — single source of truth for the workflow.
@@ -193,8 +195,7 @@ class AppViewModel : ViewModel() {
     val documents = mutableStateListOf(
         DocItem("Aadhaar Card", "Verified"),
         DocItem("PAN Card", "Verified"),
-        DocItem("Police Verification", "Verified"),
-        DocItem("Address Proof", "Pending"),
+        DocItem("Passport Size Photo", "Pending"),
     )
 
     // ---- networking helpers ----
@@ -202,6 +203,9 @@ class AppViewModel : ViewModel() {
     private fun sync(block: suspend () -> Unit) {
         viewModelScope.launch {
             try {
+                // Resolve the live backend URL from the public config before any call
+                // (cheap no-op after the first success), so the app reaches the current host.
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
                 block()
                 backendConnected = true
             } catch (e: Exception) {
@@ -213,8 +217,9 @@ class AppViewModel : ViewModel() {
 
     /** Apply the server's full state snapshot onto local observable state. */
     private fun applyBootstrap(b: BootstrapResponse) {
-        // Remember the auth token so every later call is attached to this worker.
-        b.token?.let { RetrofitClient.token = it }
+        // Remember the auth token so every later call is attached to this worker, and
+        // persist it so the session survives the app process being killed/backgrounded.
+        b.token?.let { RetrofitClient.token = it; Session.token = it }
         b.worker?.let { w ->
             workerName = w.name
             workerPhone = w.phone
@@ -263,11 +268,33 @@ class AppViewModel : ViewModel() {
     // ---- lifecycle transitions ----
     fun login(phone: String = "", otp: String = "") {
         isLoggedIn = true
+        Session.phone = phone.ifBlank { "9000012345" }
         // Authenticate against the backend and hydrate state from the server.
         sync {
             val b = api.verify(AuthRequest(phone = phone.ifBlank { "9000012345" }, otp = otp.ifBlank { "1234" }))
             applyBootstrap(b)
         }
+    }
+
+    /** Restore a persisted session on app launch so the worker stays logged in across
+     *  process death. Re-hydrates from the backend using the saved token. */
+    fun restoreSession() {
+        val saved = Session.token
+        if (saved.isNullOrBlank()) return
+        RetrofitClient.token = saved
+        isLoggedIn = true
+        sync {
+            val b = api.bootstrap()
+            applyBootstrap(b)
+        }
+    }
+
+    /** Clear the session and return to the login screen. */
+    fun logout() {
+        Session.clear()
+        RetrofitClient.token = null
+        isLoggedIn = false
+        isOnline = false
     }
 
     /** True when a real customer booking is waiting — drives the "New Job Request" notification. */

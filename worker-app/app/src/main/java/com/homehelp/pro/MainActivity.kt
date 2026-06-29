@@ -35,6 +35,8 @@ import androidx.navigation.navArgument
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Restore any persisted login so the worker stays signed in across app restarts.
+        Session.init(applicationContext)
         // osmdroid requires a unique user-agent or OSM tile servers return 403.
         org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
         setContent {
@@ -94,13 +96,17 @@ fun AppRoot() {
     val route = backStack?.destination?.route
     val showBottomBar = route in tabs.map { it.route }
 
+    // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
+    val startDestination = if (Session.isLoggedIn) Routes.HOME else Routes.LOGIN
+
     Scaffold(
         containerColor = ScreenBg,
         bottomBar = { if (showBottomBar) BottomBar(nav, route) },
     ) { padding ->
         NavHost(
             navController = nav,
-            startDestination = Routes.LOGIN,
+            startDestination = startDestination,
             modifier = Modifier.padding(padding).background(ScreenBg),
         ) {
             composable(Routes.LOGIN) { LoginScreen(vm, nav) }

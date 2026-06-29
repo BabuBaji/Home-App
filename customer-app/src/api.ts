@@ -2,7 +2,21 @@ import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
-export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+// Backend base URL. Resolved at startup from a small public config file so the apps
+// can be repointed at a new tunnel/host WITHOUT rebuilding the APK. Falls back to the
+// URL baked at build time (LAN IP via build-apk.ps1) if the config can't be fetched.
+const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json'
+export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
+export async function initApiBase(): Promise<void> {
+  try {
+    const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    if (r.ok) {
+      const j = await r.json()
+      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+    }
+  } catch { /* keep the baked fallback */ }
+}
 
 let token = localStorage.getItem('hh_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }
