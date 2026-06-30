@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  */
 object RetrofitClient {
     // Shared HomeHelp backend on the PC's Wi-Fi LAN IP (phone must be on the same Wi-Fi).
-    const val BASE_URL = "http://192.168.0.109:4000/"
+    const val BASE_URL = "http://127.0.0.1:4000/"
 
     /** Bearer token issued by /api/worker/auth/verify; attached to every later call. */
     @Volatile
