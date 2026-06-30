@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser } from './api'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen } from './api'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
@@ -43,6 +43,10 @@ export default function App() {
     if (getToken()) fetchMe().then(({ user }) => { signIn(getToken(), user); setUser(user) }).catch(() => {}).finally(() => setBooted(true))
     return () => { clearTimeout(t); clearTimeout(cap) }
   }, [])
+
+  // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
+  // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
+  useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
 
   const showSplash = !minTime || !booted
 
