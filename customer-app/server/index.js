@@ -15,7 +15,7 @@ import {
 import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
 import { createAdminRouter } from './admin.js'
 import { createWorkerRouter } from './worker.js'
-import { setBookingCoords, anyActiveWorkerForServices, workerPublicProfile } from './worker-db.js'
+import { setBookingCoords, anyActiveWorkerForServices, workerPublicProfile, workerLastLocation, distanceKm } from './worker-db.js'
 import { confirmWorkerSettlement } from './worker-wallet-db.js'
 import { createPaymentsRouter } from './payments.js'
 import { recordExternalPayment, createPayment } from './payments-db.js'
@@ -308,7 +308,16 @@ app.get('/api/bookings/:id', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   const serviceAvailable = anyActiveWorkerForServices((b.items || []).map((i) => i.name))
   const pro = b.worker_id ? workerPublicProfile(b.worker_id) : null
-  res.json({ ...publicBooking(b), serviceAvailable, pro })
+  // Real distance + ETA from the worker's last-known GPS so the route/ETA is ready on load.
+  let travel = {}
+  if (b.worker_id) {
+    const wp = workerLastLocation(b.worker_id)
+    if (wp && b.cust_lat != null && b.cust_lng != null) {
+      const d = distanceKm(wp.lat, wp.lng, b.cust_lat, b.cust_lng)
+      if (d != null) travel = { pos: { lat: wp.lat, lng: wp.lng }, dist: +d.toFixed(1), eta: Math.max(1, Math.round(d * 2.5)) }
+    }
+  }
+  res.json({ ...publicBooking(b), serviceAvailable, pro, ...travel })
 })
 app.post('/api/bookings', auth, (req, res) => {
   const body = req.body || {}

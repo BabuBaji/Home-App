@@ -333,6 +333,18 @@ export function setBookingCoords(id, lat, lng) {
 try { db.exec('ALTER TABLE workers ADD COLUMN last_lat REAL') } catch { /* exists */ }
 try { db.exec('ALTER TABLE workers ADD COLUMN last_lng REAL') } catch { /* exists */ }
 
+// Indexes for the dispatch + profile hot paths so the app stays fast under heavy usage
+// (many concurrent customers/bookings/workers). All idempotent.
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_bookings_dispatch    ON bookings(status, worker_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_worker_stat ON bookings(worker_id, status);
+    CREATE INDEX IF NOT EXISTS idx_bookings_worker_user ON bookings(worker_id, user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_bookings_user        ON bookings(user_id);
+    CREATE INDEX IF NOT EXISTS idx_workers_status       ON workers(status);
+  `)
+} catch { /* ignore */ }
+
 // The worker app reports its live GPS while travelling so the customer map can show
 // the real expert position + a live ETA. We also stash it on the worker for dispatch.
 export function setWorkerPos(id, lat, lng) {

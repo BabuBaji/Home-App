@@ -115,9 +115,20 @@ export function createWorkerRouter(io) {
   // Push live booking updates to the customer's Track screen — and attach the assigned
   // worker's public profile so the customer sees the expert (rating, jobs, reviews, phone)
   // the instant they accept, not only on a manual refresh.
+  // Build the booking's live travel info (worker position + real distance + ETA) from the
+  // worker's last-known GPS, so the customer sees an accurate ETA + route the moment the
+  // worker accepts — not a made-up number.
+  const travelInfo = (b) => {
+    if (!b?.worker_id) return {}
+    const wp = workerLastLocation(b.worker_id)
+    if (!wp || b.cust_lat == null || b.cust_lng == null) return {}
+    const dist = distanceKm(wp.lat, wp.lng, b.cust_lat, b.cust_lng)
+    if (dist == null) return {}
+    return { pos: { lat: wp.lat, lng: wp.lng }, dist: +dist.toFixed(1), eta: Math.max(1, Math.round(dist * 2.5)) }
+  }
   const emitBooking = (b) => {
     if (!b) return
-    const payload = b.worker_id ? { ...b, pro: workerPublicProfile(b.worker_id) } : b
+    const payload = b.worker_id ? { ...b, pro: workerPublicProfile(b.worker_id), ...travelInfo(b) } : b
     io?.to(room(b.id)).emit('booking:update', payload)
   }
 
@@ -226,10 +237,13 @@ export function createWorkerRouter(io) {
   r.post('/jobs/accept', auth, (req, res) => {
     const w = getWorkerRow(req.worker.id)
     const offered = w.offered_booking && getBooking(w.offered_booking)
-    if (!offered || offered.status !== 'confirmed' || offered.worker_id) return res.status(409).json({ ok: false, error: 'Job no longer available' })
-    db.prepare("UPDATE bookings SET worker_id=?, pro_name=?, pro_rating=?, status='worker_assigned' WHERE id=?")
-      .run(w.id, w.name, w.rating, offered.id)
     db.prepare('UPDATE workers SET offered_booking=NULL WHERE id=?').run(w.id)
+    if (!offered) return res.status(409).json({ ok: false, error: 'Job no longer available' })
+    // Atomic claim — the same booking can be offered to several workers at once; the
+    // conditional UPDATE means exactly ONE accept succeeds (SQLite serialises writes).
+    const info = db.prepare("UPDATE bookings SET worker_id=?, pro_name=?, pro_rating=?, status='worker_assigned' WHERE id=? AND worker_id IS NULL AND status='confirmed'")
+      .run(w.id, w.name, w.rating, offered.id)
+    if (info.changes === 0) return res.status(409).json({ ok: false, error: 'Job already taken by another expert' })
     const b = getBooking(offered.id); emitBooking(b)
     logActivity({ actorType: 'worker', actorId: w.id, actorName: w.name, action: 'job.accept', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${w.name} accepted the job`, meta: { status: 'worker_assigned' } })
     res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: jobFromBooking(b) })

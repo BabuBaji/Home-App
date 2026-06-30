@@ -97,6 +97,8 @@ export default function Track() {
   const phone = '+919876500000'
   const proPhone = b.pro?.phone || phone // the assigned worker's real number (else support line)
   const waMsg = encodeURIComponent(`Hi, regarding my HomeHelp booking ${b.ref}`)
+  // Expected arrival clock time = now + ETA minutes (Rapido-style).
+  const arriveBy = (mins: number) => new Date(Date.now() + mins * 60000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 
   return (
     <div className="screen">
@@ -140,16 +142,29 @@ export default function Track() {
 
         {b.status !== 'cancelled' && !scheduledWaiting && !noWorker && <LiveMap booking={b} />}
 
-        {(b.status === 'on_the_way' || b.status === 'worker_assigned') && <div className="eta-bar"><div>📍 {b.dist ?? 2.4} km away</div><div>🕐 {b.eta ?? 12} mins</div></div>}
-        {b.status === 'arrived' && <div className="eta-bar"><div>📍 Arrived</div><div>🕐 Just now</div></div>}
-        {serving && <div className="eta-bar"><div>🧹 {b.status === 'completed' ? 'Completed' : 'In progress'}</div><div>🕐 ~{b.eta ?? 28} min</div></div>}
+        {(b.status === 'on_the_way' || b.status === 'worker_assigned') && (
+          b.eta != null ? (
+            <div className="card" style={{ background: '#eef0ff', border: '1px solid #d7d3f7', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 26 }}>🛵</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 16, color: '#4840c4' }}>Arriving in ~{b.eta} min</div>
+                <div className="muted sm">Reaches you by <b>{arriveBy(b.eta)}</b>{b.dist != null ? ` · ${b.dist} km away` : ''}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="eta-bar"><div>🛵 {b.status === 'on_the_way' ? 'On the way' : 'Expert assigned'}</div><div>Finding the best route…</div></div>
+          )
+        )}
+        {b.status === 'arrived' && <div className="eta-bar"><div>📍 Arrived</div><div>🕐 At your location</div></div>}
+        {serving && <div className="eta-bar"><div>🧹 {b.status === 'completed' ? 'Completed' : 'In progress'}</div><div>🕐 {b.status === 'completed' ? 'Done' : 'Service running'}</div></div>}
 
         {b.status !== 'cancelled' && !scheduledWaiting && !noWorker && (
           <div className="card pro-card">
             <div className="ava">👩🏻</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="pn">{b.pro?.name || b.pro_name}</div>
-              <div className="pr">⭐ {b.pro?.rating ?? b.pro_rating} · {(b.pro?.servicesDone ?? 0).toLocaleString('en-IN')} jobs done · {b.pro?.reviewsCount ?? 0} reviews</div>
+              <div className="pr">⭐ {b.pro?.rating ?? b.pro_rating} · <b>{(b.pro?.servicesDone ?? 0).toLocaleString('en-IN')} services done</b> · {b.pro?.reviewsCount ?? 0} reviews</div>
+              {b.pro?.services && b.pro.services.length > 0 && <div className="pr" style={{ marginTop: 2 }}>🧰 {b.pro.services.join(' · ')}</div>}
               {b.pro?.phone && <div className="pr" style={{ marginTop: 2 }}>📞 {b.pro.phone}</div>}
             </div>
             <div className="pro-actions">
