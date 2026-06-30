@@ -20,6 +20,7 @@ import { confirmWorkerSettlement } from './worker-wallet-db.js'
 import { createPaymentsRouter } from './payments.js'
 import { recordExternalPayment, createPayment } from './payments-db.js'
 import { getSetting } from './admin-db.js'
+import { logActivity } from './activity-db.js'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -114,6 +115,7 @@ app.post('/api/auth/verify-otp', (req, res) => {
   if (String(req.body?.otp || '') !== otpStore.get(phone)) return res.status(401).json({ error: 'Invalid OTP' })
   otpStore.delete(phone)
   const u = findOrCreateUser(phone)
+  logActivity({ actorType: 'customer', actorId: u.id, actorName: u.name, action: 'customer.login', entityType: 'customer', entityId: u.id, detail: `Signed in (${phone})` })
   res.json({ token: 'demo-' + u.id, user: publicUser(u) })
 })
 app.post('/api/auth/google', (req, res) => {
@@ -122,6 +124,7 @@ app.post('/api/auth/google', (req, res) => {
   else if (req.body?.demo) p = { email: 'rahul.sharma@gmail.com', name: 'Rahul Sharma' }
   else return res.status(400).json({ error: 'Missing Google credential' })
   const u = findOrCreateGoogleUser(p)
+  logActivity({ actorType: 'customer', actorId: u.id, actorName: u.name, action: 'customer.login', entityType: 'customer', entityId: u.id, detail: `Signed in with Google (${u.email || ''})` })
   res.json({ token: 'demo-' + u.id, user: publicUser(u) })
 })
 
@@ -293,7 +296,9 @@ app.get('/api/support/reasons', (_q, res) => res.json({ cancelReasons: CANCEL_RE
 app.get('/api/tickets', auth, (req, res) => res.json(getTickets(req.user.id)))
 app.post('/api/tickets', auth, (req, res) => {
   if (!req.body?.message) return res.status(400).json({ error: 'Describe your issue' })
-  res.status(201).json(createTicket(req.user.id, req.body.category || 'General', req.body.message))
+  const t = createTicket(req.user.id, req.body.category || 'General', req.body.message)
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'support.ticket', entityType: 'ticket', entityId: t?.id, ref: t?.ref, detail: `Raised ticket: ${req.body.category || 'General'}` })
+  res.status(201).json(t)
 })
 
 /* ---------- bookings ---------- */
@@ -345,6 +350,8 @@ app.post('/api/bookings', auth, (req, res) => {
   if (paymentStatus === 'paid') {
     try { recordExternalPayment({ bookingId: booking.id, customerId: req.user.id, amount: pb.total, mode: isWallet ? 'wallet' : payment, gateway: isWallet ? 'wallet' : 'razorpay', paymentId: body.paymentId || '' }) } catch { /* finance optional */ }
   }
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.create', entityType: 'booking', entityId: booking.id, ref: booking.ref, detail: `Booked ${q.items.map((i) => i.name).join(', ')} · ₹${pb.total}`, meta: { total: pb.total, payment, payment_status: paymentStatus, items: q.items.map((i) => i.name) } })
+  if (paymentStatus === 'paid') logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'payment.success', entityType: 'booking', entityId: booking.id, ref: booking.ref, detail: `Paid ₹${pb.total} via ${payment}`, meta: { amount: pb.total, mode: isWallet ? 'wallet' : payment } })
   res.status(201).json(publicBooking(booking))
 })
 
@@ -393,6 +400,7 @@ app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
   if (!serviceWindowOpen(b)) return res.status(409).json({ error: 'This scheduled service has not started yet' })
   if (String(req.body?.otp) !== b.service_otp) return res.status(401).json({ error: 'Incorrect OTP' })
   const u = setBookingStarted(b.id) // status -> in_progress + stamp started_at
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)', meta: { status: 'in_progress' } })
   io.to(room(b.id)).emit('booking:update', u); res.json(u)
 })
 app.post('/api/bookings/:id/complete', auth, (req, res) => {
@@ -402,6 +410,7 @@ app.post('/api/bookings/:id/complete', auth, (req, res) => {
   if (b.payment === 'cash') u = setPaymentStatus(b.id, 'paid')
   // Customer confirms the job is done -> system verifies and credits the worker (Pending -> QC).
   confirmWorkerSettlement(getBooking(b.id))
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.complete', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Customer confirmed completion', meta: { status: 'completed' } })
   io.to(room(b.id)).emit('booking:update', u); res.json(u)
 })
 app.post('/api/bookings/:id/reschedule', auth, (req, res) => {
@@ -418,6 +427,7 @@ app.post('/api/bookings/:id/cancel', auth, (req, res) => {
   const refundable = b.payment === 'cash' ? 0 : Math.max(0, b.total - fee)
   const u = cancelBookingRow(b.id, req.body?.reason || 'Not specified', fee, refundable)
   if (refundable > 0) { addTransaction(req.user.id, 'credit', `Refund ${b.ref}`, refundable, b.ref); setPaymentStatus(b.id, 'refunded') }
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.cancel', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Cancelled: ${req.body?.reason || 'Not specified'}`, meta: { fee, refund: refundable } })
   io.to(room(b.id)).emit('booking:update', getBooking(b.id))
   res.json(getBooking(b.id))
 })
@@ -425,6 +435,7 @@ app.post('/api/bookings/:id/review', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   const reviewed = setBookingReview(b.id, Number(req.body?.rating) || 5, req.body?.review, req.body?.photo)
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.review', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Rated ${Number(req.body?.rating) || 5}★`, meta: { rating: Number(req.body?.rating) || 5 } })
   // Submitting the review is the customer's confirmation -> settle the worker if not already done.
   confirmWorkerSettlement(getBooking(b.id))
   res.json(reviewed)

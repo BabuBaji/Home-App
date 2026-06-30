@@ -61,6 +61,10 @@ data class Job(
     val otp: String,
     val lat: Double,
     val lng: Double,
+    // Server timestamp (ISO-8601, UTC) when the service started. The live timer is
+    // anchored to this so the worker app and customer app show the SAME elapsed time.
+    val startedAt: String? = null,
+    val completedAt: String? = null,
 )
 
 data class Booking(

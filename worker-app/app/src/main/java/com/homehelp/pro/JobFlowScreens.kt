@@ -51,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -445,11 +446,31 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+// Parse an ISO-8601 UTC instant (e.g. "2026-06-30T06:18:05.510Z") to epoch millis.
+// minSdk 24 → use SimpleDateFormat (java.time.Instant needs API 26 / desugaring).
+private fun parseIsoMillis(s: String?): Long? {
+    if (s.isNullOrBlank()) return null
+    for (pattern in arrayOf("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'")) {
+        try {
+            val fmt = java.text.SimpleDateFormat(pattern, java.util.Locale.US)
+            fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            return fmt.parse(s)?.time
+        } catch (_: Exception) { /* try next pattern */ }
+    }
+    return null
+}
+
 @Composable
 fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
-    var elapsed by remember { mutableIntStateOf(0) }
+    // Anchor the timer to the SERVER start time so it matches the customer app exactly.
+    // Fall back to the local start stamp, then to "now", if the server time is missing.
+    val startMs = remember(job.startedAt, vm.serviceStartMs) {
+        parseIsoMillis(job.startedAt) ?: vm.serviceStartMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+    }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val elapsed = ((nowMs - startMs) / 1000L).toInt().coerceAtLeast(0)
 
     // Live-camera proof of work: capture a photo, attach it to the job, end the service,
     // then move on. The customer app receives the completion (+ photo) and opens its
@@ -473,7 +494,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     LaunchedEffect(Unit) {
-        while (true) { delay(1000); elapsed++ }
+        while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
     }
     val hh = elapsed / 3600
     val mm = (elapsed % 3600) / 60
