@@ -7,9 +7,12 @@ import { Router } from 'express'
 import { db } from './db.js'
 import { getBooking, setBookingStatus, setBookingStarted, setPaymentStatus } from './db.js'
 import {
-  findOrCreateWorker, getWorkerRow, workerDto, walletDto, workerEarnings, workerTxns, workerDocuments,
+  findOrCreateWorker, findWorkerByPhone, getWorkerRow, workerDto, walletDto, workerEarnings, workerTxns, workerDocuments,
   updateWorkerProfile, updateWorkerBank, updateWorkerAvailability, updateWorkerPreferences, updateWorkerNotifications,
   uploadWorkerDocument, walletAdd, walletWithdraw, settleBookingForWorker, workerShare, setWorkPhoto,
+  setWorkerPos, distanceKm, workerServiceSet,
+  setWorkerLastLocation, workerLastLocation, workerServedCustomer, countActiveWorkersForServices,
+  workerPublicProfile,
 } from './worker-db.js'
 import {
   walletSummary, earningsBreakup, deductionsList, walletHistory, withdrawalsList, advancesList,
@@ -109,7 +112,14 @@ export function createWorkerRouter(io) {
     }
   }
 
-  const emitBooking = (b) => b && io?.to(room(b.id)).emit('booking:update', b)
+  // Push live booking updates to the customer's Track screen — and attach the assigned
+  // worker's public profile so the customer sees the expert (rating, jobs, reviews, phone)
+  // the instant they accept, not only on a manual refresh.
+  const emitBooking = (b) => {
+    if (!b) return
+    const payload = b.worker_id ? { ...b, pro: workerPublicProfile(b.worker_id) } : b
+    io?.to(room(b.id)).emit('booking:update', payload)
+  }
 
   /* ---------- auth ---------- */
   function auth(req, res, next) {
@@ -128,7 +138,11 @@ export function createWorkerRouter(io) {
   r.post('/auth/verify', (req, res) => {
     const { phone, otp } = req.body || {}
     if (!otp || String(otp).length < 4) return res.status(400).json({ ok: false, error: 'Invalid OTP' })
-    const w = findOrCreateWorker(phone || 'worker')
+    // Gate: only a worker the admin has onboarded AND marked active may log in. Unknown or
+    // pending/suspended/inactive numbers are refused — no auto-creation here.
+    const w = findWorkerByPhone(phone)
+    if (!w) return res.status(403).json({ ok: false, error: 'This number is not registered. Please contact the admin to onboard you.' })
+    if (w.status !== 'active') return res.status(403).json({ ok: false, error: `Your account is ${w.status}. Please ask the admin to activate it.` })
     logActivity({ actorType: 'worker', actorId: w.id, actorName: w.name, action: 'worker.login', entityType: 'worker', entityId: w.id, detail: `Worker signed in (${phone || ''})` })
     res.json({ ok: true, token: 'worker-' + w.id, ...bootstrap(w.id) })
   })
@@ -152,24 +166,60 @@ export function createWorkerRouter(io) {
   })
 
   /* ---------- job lifecycle (real customer bookings) ---------- */
-  // Lightweight check the worker app polls while online: is there a real customer
-  // booking waiting? Non-destructive (does not offer/assign anything).
+  // A booking is only offered to a worker who actually provides one of its services.
+  const parseI = (s) => { try { return JSON.parse(s) } catch { return [] } }
+  const bookingMatchesWorker = (svc, b) => {
+    if (svc.size === 0) return false   // a worker with no assigned services is offered nothing
+    const items = Array.isArray(b.items) ? b.items : parseI(b.items)
+    return items.some((i) => svc.has(String(i.name || '').toLowerCase().trim()))
+  }
+  // How long a booking is "held" for a fresh worker before anyone matching can take it,
+  // so a repeat-visit booking never starves if the alternate worker never comes online.
+  const ROTATE_GRACE_MIN = 2
+
+  // Candidate bookings (confirmed, unassigned, not skipped) this worker is qualified for,
+  // applying: service match → avoid repeat worker for a customer (unless no alternative or
+  // grace elapsed) → prefer the nearest customer (~3 km).
+  const matchingBookings = (worker) => {
+    const skip = skipSet(worker.id)
+    const svc = workerServiceSet(worker)
+    if (svc.size === 0) return []
+    const myPos = workerLastLocation(worker.id)
+    const rows = db.prepare("SELECT id, items, user_id, created, cust_lat, cust_lng FROM bookings WHERE status='confirmed' AND worker_id IS NULL ORDER BY id ASC").all()
+    const candidates = []
+    for (const b of rows) {
+      if (skip.has(b.id) || !bookingMatchesWorker(svc, b)) continue
+      // Avoid sending the same worker back to a customer they already served — hold the job
+      // for a different worker. Assign anyway if no other worker offers it, or it has waited.
+      const ageMin = (Date.now() - new Date(b.created).getTime()) / 60000
+      if (ageMin < ROTATE_GRACE_MIN && workerServedCustomer(worker.id, b.user_id)) {
+        const names = (Array.isArray(b.items) ? b.items : parseI(b.items)).map((i) => i.name)
+        if (countActiveWorkersForServices(names, worker.id) > 0) continue
+      }
+      const dist = myPos ? distanceKm(myPos.lat, myPos.lng, b.cust_lat, b.cust_lng) : null
+      candidates.push({ b, dist })
+    }
+    // Nearest customer first (unknown distance last), then oldest booking.
+    candidates.sort((a, c) => {
+      const ad = a.dist == null ? Infinity : a.dist, cd = c.dist == null ? Infinity : c.dist
+      return ad !== cd ? ad - cd : a.b.id - c.b.id
+    })
+    return candidates.map((x) => x.b)
+  }
+
+  // Lightweight check the worker app polls while online: is there a real customer booking
+  // waiting THAT MATCHES THIS WORKER'S SERVICES? Non-destructive (offers/assigns nothing).
   r.get('/jobs/available', auth, (req, res) => {
-    const skip = skipSet(req.worker.id)
-    const placeholders = skip.size ? ` AND id NOT IN (${[...skip].map(() => '?').join(',')})` : ''
-    const row = db.prepare(`SELECT COUNT(*) n FROM bookings WHERE status='confirmed' AND worker_id IS NULL${placeholders}`).get(...skip)
-    res.json({ available: row.n > 0, count: row.n })
+    const n = matchingBookings(req.worker).length
+    res.json({ available: n > 0, count: n })
   })
 
-  // Offer the next unassigned, confirmed booking this worker hasn't skipped.
+  // Offer the next matching, unassigned booking this worker hasn't skipped.
   r.post('/jobs/request', auth, (req, res) => {
-    const skip = skipSet(req.worker.id)
-    const placeholders = skip.size ? ` AND id NOT IN (${[...skip].map(() => '?').join(',')})` : ''
-    const row = db.prepare(`SELECT id FROM bookings WHERE status='confirmed' AND worker_id IS NULL${placeholders} ORDER BY id ASC LIMIT 1`)
-      .get(...skip)
-    if (!row) return res.json({ job: null, jobStatus: 'NONE' })
-    db.prepare('UPDATE workers SET offered_booking=? WHERE id=?').run(row.id, req.worker.id)
-    res.json({ job: jobFromBooking(getBooking(row.id)), jobStatus: 'REQUESTED' })
+    const match = matchingBookings(req.worker)[0]
+    if (!match) return res.json({ job: null, jobStatus: 'NONE' })
+    db.prepare('UPDATE workers SET offered_booking=? WHERE id=?').run(match.id, req.worker.id)
+    res.json({ job: jobFromBooking(getBooking(match.id)), jobStatus: 'REQUESTED' })
   })
 
   // Claim the offered booking: assign this worker + advance to worker_assigned.
@@ -201,6 +251,25 @@ export function createWorkerRouter(io) {
   }
   r.post('/jobs/on-the-way', auth, (req, res) => advance(req, res, 'on_the_way'))
   r.post('/jobs/arrived', auth, (req, res) => advance(req, res, 'arrived'))
+
+  // The worker app posts its live GPS while travelling. We store it, work out the real
+  // distance + ETA to the customer, and push the worker's true position to the customer's
+  // live map (booking room) so they can watch the expert approach with an accurate ETA.
+  r.post('/jobs/location', auth, (req, res) => {
+    const b = activeBooking(req.worker.id)
+    const lat = Number(req.body?.lat), lng = Number(req.body?.lng)
+    if (!b || !isFinite(lat) || !isFinite(lng)) return res.json({ ok: false })
+    setWorkerPos(b.id, lat, lng)
+    setWorkerLastLocation(req.worker.id, lat, lng)   // remember for proximity-based dispatch
+    const dist = distanceKm(lat, lng, b.cust_lat, b.cust_lng)
+    const eta = dist != null ? Math.max(1, Math.round(dist * 2.5)) : null // ~24 km/h city avg
+    io?.to(room(b.id)).emit('booking:update', {
+      id: b.id, status: b.status, pos: { lat, lng },
+      dist: dist != null ? +dist.toFixed(1) : undefined,
+      eta: eta != null ? eta : undefined,
+    })
+    res.json({ ok: true, dist: dist != null ? +dist.toFixed(1) : null, eta })
+  })
 
   // Start service: the OTP the worker enters must match the customer's booking OTP.
   r.post('/jobs/verify-otp', auth, (req, res) => {

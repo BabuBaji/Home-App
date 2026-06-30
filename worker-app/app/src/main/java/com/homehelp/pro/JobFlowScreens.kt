@@ -164,7 +164,7 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header("Job Details", onBack = { nav.popBackStack() }, trailing = {
             Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
-                modifier = Modifier.size(22.dp).clickable { toast(ctx, "Calling ${job.customerName}…") })
+                modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
         })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -227,6 +227,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 myLat = loc.latitude
                 myLng = loc.longitude
                 myLocation = "%.5f, %.5f".format(loc.latitude, loc.longitude)
+                vm.reportLocation(loc.latitude, loc.longitude)   // share live position with the customer
             } else {
                 myLocation = "Acquiring GPS fix…"
             }
@@ -246,11 +247,25 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
             permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
     }
+    // Keep streaming the live position to the customer while we're on the way.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(6000)
+            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) readLocation()
+        }
+    }
+
+    // Real distance + ETA from the worker's current GPS to the customer.
+    val distKm = if (myLat != null && myLng != null) haversineKm(myLat!!, myLng!!, job.lat, job.lng) else null
+    val etaMin = distKm?.let { kotlin.math.max(1, kotlin.math.round(it * 2.5).toInt()) }
+    val arrivalClock = etaMin?.let {
+        java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US).format(java.util.Date(System.currentTimeMillis() + it * 60000L))
+    } ?: "—"
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header("On The Way", onBack = { nav.popBackStack() }, trailing = {
             Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
-                modifier = Modifier.size(22.dp).clickable { toast(ctx, "Calling ${job.customerName}…") })
+                modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
         })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -274,7 +289,10 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${job.distanceKm} km away", fontSize = 13.sp, color = TextGray, modifier = Modifier.weight(1f))
+                    Text(
+                        if (distKm != null) "%.1f km away · ~%d min".format(distKm, etaMin) else "${job.distanceKm} km away",
+                        fontSize = 13.sp, color = TextGray, modifier = Modifier.weight(1f),
+                    )
                     OutlineButton("Navigate", modifier = Modifier.width(130.dp)) {
                         launchNavigation(ctx, job.lat, job.lng, job.customerName, myLat, myLng)
                     }
@@ -291,16 +309,25 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
             Card {
                 Text("Customer", fontSize = 12.sp, color = TextGray)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(job.customerName, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text(job.customerName, fontWeight = FontWeight.SemiBold, color = TextDark)
+                        Text(
+                            job.customerPhone.ifBlank { "No number" }, fontSize = 13.sp, color = Purple,
+                            modifier = Modifier.clickable { dialNumber(ctx, job.customerPhone) },
+                        )
+                    }
                     Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
-                        modifier = Modifier.size(22.dp).clickable { toast(ctx, "Calling ${job.customerName}…") })
+                        modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
                     Spacer(Modifier.width(16.dp))
                     Icon(Icons.Filled.Chat, contentDescription = "Chat", tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })
                 }
                 Spacer(Modifier.height(8.dp))
+                Text("Service Address", fontSize = 12.sp, color = TextGray)
+                Text(job.address, fontSize = 13.sp, color = TextDark)
+                Spacer(Modifier.height(8.dp))
                 Text("Estimated Arrival", fontSize = 12.sp, color = TextGray)
-                Text("09:15 AM", fontWeight = FontWeight.SemiBold, color = TextDark)
+                Text(arrivalClock, fontWeight = FontWeight.SemiBold, color = TextDark)
             }
             PrimaryButton("Navigate with Google Maps") {
                 launchNavigation(ctx, job.lat, job.lng, job.customerName, myLat, myLng)
@@ -321,6 +348,14 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
  * directions from the worker's current GPS to the destination, (3) any installed maps app via
  * `geo:`, (4) the directions URL in a browser. Each step degrades gracefully if the prior is absent.
  */
+// Open the phone dialer pre-filled with the customer's number (no CALL permission needed).
+private fun dialNumber(ctx: Context, phone: String?) {
+    val p = phone?.trim().orEmpty()
+    if (p.isEmpty()) { toast(ctx, "No phone number on file"); return }
+    try { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$p"))) }
+    catch (_: Exception) { toast(ctx, "Could not open dialer") }
+}
+
 private fun launchNavigation(
     ctx: Context,
     destLat: Double,
@@ -431,7 +466,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.height(12.dp))
             Text("Don't get the OTP?", color = TextGray, fontSize = 13.sp)
             Text("Call Customer", color = Purple, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { toast(ctx, "Calling ${job.customerName}…") })
+                modifier = Modifier.clickable { dialNumber(ctx, job.customerPhone) })
             Spacer(Modifier.height(16.dp))
             PrimaryButton("Start Service", enabled = otp.length == 4) {
                 if (vm.verifyOtpAndStart(otp)) nav.navigate(Routes.IN_PROGRESS) else error = true
@@ -444,6 +479,15 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             )
         }
     }
+}
+
+// Great-circle distance in km between two lat/lng points (for live distance + ETA).
+private fun haversineKm(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
+    val r = 6371.0
+    val sLat = Math.sin(Math.toRadians(bLat - aLat) / 2)
+    val sLng = Math.sin(Math.toRadians(bLng - aLng) / 2)
+    val s = sLat * sLat + Math.cos(Math.toRadians(aLat)) * Math.cos(Math.toRadians(bLat)) * sLng * sLng
+    return 2 * r * Math.asin(Math.sqrt(s))
 }
 
 // Parse an ISO-8601 UTC instant (e.g. "2026-06-30T06:18:05.510Z") to epoch millis.
@@ -530,7 +574,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(12.dp))
                     Text(job.customerName, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
                     Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
-                        modifier = Modifier.size(22.dp).clickable { toast(ctx, "Calling ${job.customerName}…") })
+                        modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
                     Spacer(Modifier.width(16.dp))
                     Icon(Icons.Filled.Chat, contentDescription = "Chat", tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })

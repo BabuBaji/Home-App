@@ -136,7 +136,11 @@ export function workerShare(total) {
 export function findWorkerByPhone(phone) {
   const tail = digits(phone).slice(-10)
   if (!tail) return null
-  return db.prepare('SELECT * FROM workers').all().find((w) => digits(w.phone).slice(-10) === tail) || null
+  const matches = db.prepare('SELECT * FROM workers').all().filter((w) => digits(w.phone).slice(-10) === tail)
+  if (!matches.length) return null
+  // If the same number has more than one row (e.g. a stale auto-created "New Pro" plus an
+  // admin-onboarded profile), prefer the ACTIVE one so login isn't blocked by a duplicate.
+  return matches.find((w) => w.status === 'active') || matches[matches.length - 1]
 }
 // A worker logs in with their phone. If an admin already onboarded this number
 // (Workers → Add) we match that row; otherwise we create a pending worker they can
@@ -161,6 +165,45 @@ export function findOrCreateWorker(phone) {
   return w
 }
 export function getWorkerRow(id) { return db.prepare('SELECT * FROM workers WHERE id=?').get(id) }
+
+// The worker's public profile the CUSTOMER sees once a worker is assigned: name, phone (to
+// call), rating, how many jobs done, and recent reviews.
+export function workerPublicProfile(workerId) {
+  const w = getWorkerRow(workerId)
+  if (!w) return null
+  const done = db.prepare("SELECT COUNT(*) n FROM bookings WHERE worker_id=? AND status='completed'").get(workerId).n
+  const agg = db.prepare('SELECT AVG(rating) a, COUNT(rating) c FROM bookings WHERE worker_id=? AND rating IS NOT NULL').get(workerId)
+  const reviews = db.prepare(`SELECT b.rating, b.review, b.created, u.name customer
+    FROM bookings b JOIN users u ON u.id=b.user_id
+    WHERE b.worker_id=? AND b.review IS NOT NULL AND b.review!='' ORDER BY b.id DESC LIMIT 5`).all(workerId)
+  let services = []
+  try { services = JSON.parse(w.services || '[]') } catch { services = [] }
+  return {
+    id: w.id, name: w.name, phone: w.phone, avatar: w.avatar || null,
+    rating: agg.a ? +Number(agg.a).toFixed(1) : (w.rating || 5),
+    servicesDone: done || w.jobs || 0,
+    reviewsCount: agg.c || 0,
+    services,
+    reviews: reviews.map((r) => ({ rating: r.rating, review: r.review, customer: r.customer, created: r.created })),
+  }
+}
+
+// Service-matched dispatch: parse a worker's offered services into a lower-cased set.
+export function workerServiceSet(w) {
+  try { return new Set((JSON.parse(w?.services || '[]') || []).map((s) => String(s).toLowerCase().trim())) } catch { return new Set() }
+}
+// True if at least one ACTIVE worker offers any of the given service names. Used to tell
+// the customer "no service found" when nobody can fulfil their booking.
+export function anyActiveWorkerForServices(names) {
+  const want = new Set((names || []).map((n) => String(n).toLowerCase().trim()).filter(Boolean))
+  if (want.size === 0) return false
+  const rows = db.prepare("SELECT services FROM workers WHERE status='active'").all()
+  return rows.some((w) => {
+    const set = workerServiceSet(w)
+    for (const s of set) if (want.has(s)) return true
+    return false
+  })
+}
 
 /* ---------- mappers (DB row -> the shapes the Kotlin app deserializes) ---------- */
 export function workerDto(w) {
@@ -279,9 +322,50 @@ export function walletWithdraw(id, amount) {
 }
 
 /* ---------- booking location + proof-of-work photo ---------- */
+try { db.exec('ALTER TABLE bookings ADD COLUMN worker_lat REAL') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN worker_lng REAL') } catch { /* exists */ }
+
 export function setBookingCoords(id, lat, lng) {
   if (lat == null || lng == null) return
   db.prepare('UPDATE bookings SET cust_lat=?, cust_lng=? WHERE id=?').run(Number(lat), Number(lng), id)
+}
+// Remember each worker's most-recent position so we can prefer nearby workers for new jobs.
+try { db.exec('ALTER TABLE workers ADD COLUMN last_lat REAL') } catch { /* exists */ }
+try { db.exec('ALTER TABLE workers ADD COLUMN last_lng REAL') } catch { /* exists */ }
+
+// The worker app reports its live GPS while travelling so the customer map can show
+// the real expert position + a live ETA. We also stash it on the worker for dispatch.
+export function setWorkerPos(id, lat, lng) {
+  if (lat == null || lng == null) return
+  db.prepare('UPDATE bookings SET worker_lat=?, worker_lng=? WHERE id=?').run(Number(lat), Number(lng), id)
+}
+export function setWorkerLastLocation(workerId, lat, lng) {
+  if (lat == null || lng == null) return
+  db.prepare('UPDATE workers SET last_lat=?, last_lng=? WHERE id=?').run(Number(lat), Number(lng), workerId)
+}
+export function workerLastLocation(workerId) {
+  const w = db.prepare('SELECT last_lat, last_lng FROM workers WHERE id=?').get(workerId)
+  return (w && w.last_lat != null && w.last_lng != null) ? { lat: w.last_lat, lng: w.last_lng } : null
+}
+// Has this worker previously served this customer (so we can rotate to someone else)?
+export function workerServedCustomer(workerId, userId) {
+  return !!db.prepare("SELECT 1 FROM bookings WHERE worker_id=? AND user_id=? AND status IN ('completed','in_progress','arrived','on_the_way') LIMIT 1")
+    .get(workerId, userId)
+}
+// How many OTHER active workers (besides excludeId) offer any of these services?
+export function countActiveWorkersForServices(names, excludeId = null) {
+  const want = new Set((names || []).map((n) => String(n).toLowerCase().trim()).filter(Boolean))
+  if (want.size === 0) return 0
+  const rows = db.prepare("SELECT id, services FROM workers WHERE status='active'").all()
+  return rows.filter((w) => w.id !== excludeId && [...workerServiceSet(w)].some((s) => want.has(s))).length
+}
+// Haversine distance in km between two lat/lng points.
+export function distanceKm(aLat, aLng, bLat, bLng) {
+  if ([aLat, aLng, bLat, bLng].some((v) => v == null || !isFinite(v))) return null
+  const R = 6371, toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng)
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(s))
 }
 export function setWorkPhoto(id, photo) {
   db.prepare('UPDATE bookings SET work_photo=? WHERE id=?').run(photo || null, id)

@@ -62,9 +62,13 @@ export default function Track() {
   const schedStart = b.scheduled_at ?? null
   const scheduledWaiting = b.status === 'confirmed' && b.otp_released === false && schedStart != null
   const otpReleaseAt = schedStart != null ? schedStart - 60 * 60 * 1000 : null
-  const h = scheduledWaiting
-    ? { t: 'Booking Scheduled', s: 'Your expert will be dispatched near your slot', cls: undefined as string | undefined }
-    : heads[b.status]
+  // No active worker provides this service → tell the customer instead of "assigning…".
+  const noWorker = b.status === 'confirmed' && b.serviceAvailable === false
+  const h = noWorker
+    ? { t: 'No Service Found', s: 'No worker is available for this service in your area yet.', cls: 'red' as string | undefined }
+    : scheduledWaiting
+      ? { t: 'Booking Scheduled', s: 'Your expert will be dispatched near your slot', cls: undefined as string | undefined }
+      : heads[b.status]
   const serving = b.status === 'in_progress' || b.status === 'completed'
   const posLeft = b.pos ? `${8 + b.pos.lng * 70}%` : '10%'
   const posTop = b.pos ? `${18 + b.pos.lat * 55}%` : '20%'
@@ -91,6 +95,7 @@ export default function Track() {
   async function complete() { setBusy(true); try { await completeBooking(bid); nav(`/rate/${bid}`, { replace: true }) } catch (e) { toast((e as Error).message); setBusy(false) } }
 
   const phone = '+919876500000'
+  const proPhone = b.pro?.phone || phone // the assigned worker's real number (else support line)
   const waMsg = encodeURIComponent(`Hi, regarding my HomeHelp booking ${b.ref}`)
 
   return (
@@ -98,6 +103,18 @@ export default function Track() {
       <Header title="Track Your Expert" />
       <div className="content pad-cta">
         <div className="track-status"><h2 className={h.cls}>{h.t}</h2><p>{h.s}</p></div>
+
+        {noWorker && (
+          <div className="card" style={{ border: '1px solid #f3c0c0', background: '#fff5f5' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 22 }}>🚫</span>
+              <div>
+                <div style={{ fontWeight: 700, color: '#c0392b', marginBottom: 2 }}>No worker found for this service</div>
+                <div className="muted sm">No active expert currently offers “{b.items?.[0]?.name || 'this service'}”. We’ll auto-assign one the moment a matching expert is available. You can also cancel for a full refund.</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {scheduledWaiting && (
           <div className="card sched-card">
@@ -121,20 +138,39 @@ export default function Track() {
           ))}
         </div>
 
-        {b.status !== 'cancelled' && !scheduledWaiting && <LiveMap booking={b} />}
+        {b.status !== 'cancelled' && !scheduledWaiting && !noWorker && <LiveMap booking={b} />}
 
         {(b.status === 'on_the_way' || b.status === 'worker_assigned') && <div className="eta-bar"><div>📍 {b.dist ?? 2.4} km away</div><div>🕐 {b.eta ?? 12} mins</div></div>}
         {b.status === 'arrived' && <div className="eta-bar"><div>📍 Arrived</div><div>🕐 Just now</div></div>}
         {serving && <div className="eta-bar"><div>🧹 {b.status === 'completed' ? 'Completed' : 'In progress'}</div><div>🕐 ~{b.eta ?? 28} min</div></div>}
 
-        {b.status !== 'cancelled' && !scheduledWaiting && (
+        {b.status !== 'cancelled' && !scheduledWaiting && !noWorker && (
           <div className="card pro-card">
             <div className="ava">👩🏻</div>
-            <div><div className="pn">{b.pro_name}</div><div className="pr">🏅 Verified Expert · ⭐ {b.pro_rating}</div></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="pn">{b.pro?.name || b.pro_name}</div>
+              <div className="pr">⭐ {b.pro?.rating ?? b.pro_rating} · {(b.pro?.servicesDone ?? 0).toLocaleString('en-IN')} jobs done · {b.pro?.reviewsCount ?? 0} reviews</div>
+              {b.pro?.phone && <div className="pr" style={{ marginTop: 2 }}>📞 {b.pro.phone}</div>}
+            </div>
             <div className="pro-actions">
-              <a className="circle-btn" href={`tel:${phone}`}>📞</a>
+              <a className="circle-btn" href={`tel:${proPhone}`} aria-label="Call worker">📞</a>
               <button className="circle-btn" onClick={() => toast('Chat opening…')}>💬</button>
-              <a className="circle-btn wa" href={`https://wa.me/${phone.replace('+', '')}?text=${waMsg}`} target="_blank">🟢</a>
+              <a className="circle-btn wa" href={`https://wa.me/${proPhone.replace(/[^0-9]/g, '')}?text=${waMsg}`} target="_blank">🟢</a>
+            </div>
+          </div>
+        )}
+
+        {!noWorker && b.pro?.reviews && b.pro.reviews.length > 0 && (
+          <div className="card">
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>What customers say about {b.pro.name.split(' ')[0]}</div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {b.pro.reviews.slice(0, 3).map((r, i) => (
+                <div key={i} style={{ borderTop: i ? '1px solid #f0eef9' : 'none', paddingTop: i ? 10 : 0 }}>
+                  <div style={{ fontSize: 13 }}>{'⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)))}</div>
+                  {r.review && <div style={{ fontSize: 13, color: '#444', margin: '2px 0' }}>“{r.review}”</div>}
+                  <div className="muted sm">— {r.customer}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
