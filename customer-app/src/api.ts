@@ -2,7 +2,21 @@ import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
-export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+// Backend base URL. Resolved at startup from a small public config file so the apps
+// can be repointed at a new tunnel/host WITHOUT rebuilding the APK. Falls back to the
+// URL baked at build time (LAN IP via build-apk.ps1) if the config can't be fetched.
+const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json'
+export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
+export async function initApiBase(): Promise<void> {
+  try {
+    const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    if (r.ok) {
+      const j = await r.json()
+      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+    }
+  } catch { /* keep the baked fallback */ }
+}
 
 let token = localStorage.getItem('hh_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }
@@ -70,12 +84,34 @@ export const addMoney = (amount: number) => req<{ balance: number }>('/api/walle
 export const fetchTickets = () => req<Ticket[]>('/api/tickets')
 export const createTicket = (category: string, message: string) => req<Ticket>('/api/tickets', { method: 'POST', body: JSON.stringify({ category, message }) })
 
+/* live location — captured once when the app opens, cached so bookings/maps use it
+   instantly without re-prompting, and persisted to the user's profile so the assigned
+   worker and the admin can see where the customer is. */
+let lastPos: { lat: number; lng: number; ts: number } | null = (() => {
+  try { return JSON.parse(localStorage.getItem('hh_geo') || 'null') } catch { return null }
+})()
+export function getCachedPosition() { return lastPos }
+const POS_FRESH_MS = 30 * 60 * 1000 // treat a fix as current for 30 min
+export async function captureLocationOnOpen(): Promise<void> {
+  try {
+    const pos = await getCurrentPosition()
+    lastPos = { ...pos, ts: Date.now() }
+    try { localStorage.setItem('hh_geo', JSON.stringify(lastPos)) } catch { /* ignore */ }
+    // Store on the user's profile (best-effort) so worker/admin see the live location.
+    if (token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
+  } catch { /* permission denied / no fix — keep any previous fix */ }
+}
+
 /* bookings */
-// Attach the customer's live GPS so the assigned worker sees their real location on the
-// map. Best-effort — if the fix isn't available the booking still goes through.
+// Attach the customer's GPS so the assigned worker sees their real location on the map.
+// Prefer the fix captured when the app opened; fall back to a fresh read, then the server.
 export const createBookingApi = async (payload: any) => {
   let coords: { lat?: number; lng?: number } = {}
-  if (payload.lat == null) { try { coords = await getCurrentPosition() } catch { /* no fix — server falls back */ } }
+  if (payload.lat == null) {
+    const cached = getCachedPosition()
+    if (cached && Date.now() - cached.ts < POS_FRESH_MS) coords = { lat: cached.lat, lng: cached.lng }
+    else { try { coords = await getCurrentPosition() } catch { /* server falls back */ } }
+  }
   return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
 }
 export const fetchBookings = () => req<Booking[]>('/api/bookings')

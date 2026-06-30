@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser } from './api'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen } from './api'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
@@ -43,11 +44,16 @@ export default function App() {
     return () => { clearTimeout(t); clearTimeout(cap) }
   }, [])
 
+  // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
+  // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
+  useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+
   const showSplash = !minTime || !booted
 
   return (
     <ToastHost>
       <div className="device">
+        <BackButtonHandler />
         <Splash visible={showSplash} />
         {(
           <Routes>
@@ -84,6 +90,31 @@ export default function App() {
       </div>
     </ToastHost>
   )
+}
+
+// Wire the Android hardware/gesture back button to React Router. Without this the
+// WebView's own back fails on SPA pushState navigation and Android exits the app.
+// On the root tabs (home/login) back exits; otherwise it navigates one step back,
+// falling back to /home when there is no in-app history to pop.
+function BackButtonHandler() {
+  const nav = useNavigate()
+  const loc = useLocation()
+  const locRef = useRef(loc)
+  locRef.current = loc
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let remove: (() => void) | undefined
+    import('@capacitor/app').then(({ App: CapApp }) => {
+      CapApp.addListener('backButton', () => {
+        const { pathname, key } = locRef.current
+        if (pathname === '/home' || pathname === '/login') CapApp.exitApp()
+        else if (key === 'default') nav('/home')
+        else nav(-1)
+      }).then((h) => { remove = () => h.remove() })
+    })
+    return () => { remove?.() }
+  }, [])
+  return null
 }
 
 function Guard({ authed }: { authed: boolean }) {

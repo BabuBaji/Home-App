@@ -17,6 +17,7 @@ import {
   buildPayslip, generatePayslip, payslipsList, notificationsList, markNotificationsRead,
   tallyIncome, recoverAdvanceOnEarning, withdrawalReceipt,
 } from './worker-wallet-db.js'
+import { logActivity } from './activity-db.js'
 
 const room = (id) => `booking:${id}`
 
@@ -59,6 +60,10 @@ export function createWorkerRouter(io) {
       // otherwise fall back near the booking's city centre (Hyderabad) so the map still renders.
       lat: b.cust_lat ?? (17.4448 + (b.id % 10) * 0.002),
       lng: b.cust_lng ?? (78.3498 + (b.id % 10) * 0.002),
+      // Server timestamp the service actually started — both apps anchor the live timer
+      // to THIS so the worker and customer always show the same elapsed time.
+      startedAt: b.started_at || null,
+      completedAt: b.completed_at || null,
     }
   }
 
@@ -124,6 +129,7 @@ export function createWorkerRouter(io) {
     const { phone, otp } = req.body || {}
     if (!otp || String(otp).length < 4) return res.status(400).json({ ok: false, error: 'Invalid OTP' })
     const w = findOrCreateWorker(phone || 'worker')
+    logActivity({ actorType: 'worker', actorId: w.id, actorName: w.name, action: 'worker.login', entityType: 'worker', entityId: w.id, detail: `Worker signed in (${phone || ''})` })
     res.json({ ok: true, token: 'worker-' + w.id, ...bootstrap(w.id) })
   })
 
@@ -131,7 +137,7 @@ export function createWorkerRouter(io) {
 
   /* ---------- profile ---------- */
   r.put('/profile', auth, (req, res) => res.json(updateWorkerProfile(req.worker.id, req.body || {})))
-  r.put('/bank', auth, (req, res) => res.json(updateWorkerBank(req.worker.id, req.body || {})))
+  r.put('/bank', auth, (req, res) => { logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (pending verification)' }); res.json(updateWorkerBank(req.worker.id, req.body || {})) })
   r.put('/availability', auth, (req, res) => res.json(updateWorkerAvailability(req.worker.id, req.body || {})))
   r.put('/preferences', auth, (req, res) => res.json(updateWorkerPreferences(req.worker.id, req.body || {})))
   r.put('/notifications', auth, (req, res) => res.json(updateWorkerNotifications(req.worker.id, req.body || {})))
@@ -141,6 +147,7 @@ export function createWorkerRouter(io) {
   r.post('/documents/upload', auth, (req, res) => {
     const { name, fileName } = req.body || {}
     if (!name) return res.status(400).json({ ok: false, error: 'Document name required' })
+    logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.document', entityType: 'worker', entityId: req.worker.id, detail: `Uploaded document: ${name}` })
     res.json({ ok: true, documents: uploadWorkerDocument(req.worker.id, name, fileName) })
   })
 
@@ -174,12 +181,13 @@ export function createWorkerRouter(io) {
       .run(w.id, w.name, w.rating, offered.id)
     db.prepare('UPDATE workers SET offered_booking=NULL WHERE id=?').run(w.id)
     const b = getBooking(offered.id); emitBooking(b)
+    logActivity({ actorType: 'worker', actorId: w.id, actorName: w.name, action: 'job.accept', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${w.name} accepted the job`, meta: { status: 'worker_assigned' } })
     res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: jobFromBooking(b) })
   })
 
   r.post('/jobs/reject', auth, (req, res) => {
     const w = getWorkerRow(req.worker.id)
-    if (w.offered_booking) { skipSet(w.id).add(w.offered_booking); db.prepare('UPDATE workers SET offered_booking=NULL WHERE id=?').run(w.id) }
+    if (w.offered_booking) { skipSet(w.id).add(w.offered_booking); db.prepare('UPDATE workers SET offered_booking=NULL WHERE id=?').run(w.id); logActivity({ actorType: 'worker', actorId: w.id, actorName: w.name, action: 'job.reject', entityType: 'booking', entityId: w.offered_booking, detail: `${w.name} declined the job` }) }
     res.json({ ok: true, jobStatus: 'NONE' })
   })
 
@@ -188,6 +196,7 @@ export function createWorkerRouter(io) {
     const b = activeBooking(req.worker.id)
     if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
     const u = setBookingStatus(b.id, status); emitBooking(u)
+    logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.status', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Status → ${status.replace(/_/g, ' ')}`, meta: { status } })
     res.json({ ok: true, jobStatus: STATUS_TO_ENUM[status] || status, activeJob: jobFromBooking(u) })
   }
   r.post('/jobs/on-the-way', auth, (req, res) => advance(req, res, 'on_the_way'))
@@ -199,6 +208,7 @@ export function createWorkerRouter(io) {
     if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
     if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
     const u = setBookingStarted(b.id); emitBooking(u)
+    logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)', meta: { status: 'in_progress' } })
     res.json({ ok: true, jobStatus: 'IN_PROGRESS', activeJob: jobFromBooking(u) })
   })
 
@@ -212,6 +222,7 @@ export function createWorkerRouter(io) {
     let u = setBookingStatus(b.id, 'completed')
     if (b.payment === 'cash') u = setPaymentStatus(b.id, 'paid')
     emitBooking(u)
+    logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.complete', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Job completed${req.body?.photo ? ' (proof photo attached)' : ''}`, meta: { status: 'completed', photo: !!req.body?.photo } })
     res.json({ ok: true, jobStatus: 'COMPLETED', activeJob: jobFromBooking(u) })
   })
 
@@ -234,6 +245,7 @@ export function createWorkerRouter(io) {
       db.prepare("UPDATE bookings SET worker_id=NULL, status='confirmed' WHERE id=?").run(b.id)
       skipSet(req.worker.id).add(b.id)
       emitBooking(getBooking(b.id))
+      logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.drop', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${req.worker.name} dropped the job (returned to pool)` })
     }
     res.json({ ok: true, jobStatus: 'NONE' })
   })
@@ -280,6 +292,7 @@ export function createWorkerRouter(io) {
     const { amount, method, otp } = req.body || {}
     const out = createWithdrawal(id(req), parseInt(amount, 10), method, otp)
     if (out.error) return res.json({ ok: false, error: out.error })
+    logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'wallet.withdraw', entityType: 'wallet', entityId: req.worker.id, detail: `Requested withdrawal ₹${parseInt(amount, 10)} via ${method || 'bank'}`, meta: { amount: parseInt(amount, 10), method } })
     res.json({ ok: true, ...walletState(id(req)) })
   })
 
@@ -288,6 +301,7 @@ export function createWorkerRouter(io) {
   r.post('/wallet/advance/request', auth, (req, res) => {
     const out = requestAdvance(id(req), parseInt(req.body?.amount, 10))
     if (out.error) return res.json({ ok: false, error: out.error })
+    logActivity({ actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'wallet.advance', entityType: 'wallet', entityId: req.worker.id, detail: `Requested salary advance ₹${parseInt(req.body?.amount, 10)}`, meta: { amount: parseInt(req.body?.amount, 10) } })
     res.json({ ok: true, ...walletState(id(req)) })
   })
 

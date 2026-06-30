@@ -40,7 +40,7 @@ export default function Cancel() {
         <div className="card pad">
           {REASONS.map((r) => (
             <label key={r} className="reason-row">
-              <span className="radio">{reason === r ? '✓' : ''}</span>
+              <span className={`radio ${reason === r ? 'on' : ''}`}>{reason === r ? '✓' : ''}</span>
               <span className="grow">{r}</span>
               <input type="radio" name="reason" checked={reason === r} onChange={() => setReason(r)} hidden />
             </label>
@@ -57,7 +57,7 @@ export default function Cancel() {
         </div>
       </div>
       <FooterCTA>
-        <button className="btn full danger-btn" onClick={confirm} disabled={busy}>{busy ? 'Cancelling…' : 'Confirm Cancellation'}</button>
+        <button className="btn full" onClick={confirm} disabled={busy}>{busy ? 'Cancelling…' : 'Confirm Cancellation'}</button>
         <button className="btn-text full" onClick={() => nav(-1)}>Keep my booking</button>
       </FooterCTA>
     </div>

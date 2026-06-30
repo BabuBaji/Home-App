@@ -75,8 +75,7 @@ const DEFAULT_PREFS = {
 const DEFAULT_DOCS = [
   { name: 'Aadhaar Card', status: 'Pending' },
   { name: 'PAN Card', status: 'Pending' },
-  { name: 'Police Verification', status: 'Pending' },
-  { name: 'Address Proof', status: 'Pending' },
+  { name: 'Passport Size Photo', status: 'Pending' },
 ]
 
 function seedDocuments(workerId, docs = DEFAULT_DOCS) {
@@ -103,8 +102,7 @@ function seedDemoWorker() {
   seedDocuments(id, [
     { name: 'Aadhaar Card', status: 'Verified' },
     { name: 'PAN Card', status: 'Verified' },
-    { name: 'Police Verification', status: 'Verified' },
-    { name: 'Address Proof', status: 'Pending' },
+    { name: 'Passport Size Photo', status: 'Pending' },
   ])
   const ie = db.prepare('INSERT INTO worker_earnings (worker_id,date,amount,paid,created) VALUES (?,?,?,?,?)')
   ;[['16 May 2025', 650], ['15 May 2025', 810], ['14 May 2025', 540], ['13 May 2025', 620],

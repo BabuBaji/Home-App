@@ -1,110 +1,38 @@
 // Rich, Snabbit-style service catalogue: durations, inclusions, reviews, coupons.
 
-export const CATEGORIES = ['Cleaning', 'Bathroom', 'Kitchen', 'Laundry', 'Appliances', 'Repairs', 'Home', 'Care']
+export const CATEGORIES = ['Cleaning']
 
 // base = starting price for the shortest (60 min) slot (INR). available toggled in DB.
-// Tiles render the on-brand illustration pack (serviceArt.tsx); the emoji is the Cart fallback.
+// Tiles render the clean icon-on-white pack (serviceArt.tsx); the emoji is the Cart fallback.
+// Home-cleaning catalogue only.
 export const SERVICES_SEED = [
-  // Cleaning
-  ['cleaning',     'Home Cleaning',         '🧹', 129, 'Cleaning',   1],
-  ['deep',         'Deep Cleaning',         '✨', 299, 'Cleaning',   1],
-  ['sofa',         'Sofa Cleaning',         '🛋️', 199, 'Cleaning',   1],
-  ['carpet',       'Carpet Cleaning',       '🧶', 199, 'Cleaning',   1],
-  ['window',       'Window Cleaning',       '🪟', 149, 'Cleaning',   1],
-  ['floor',        'Floor Cleaning',        '🧼', 129, 'Cleaning',   1],
-  ['dusting',      'Dusting',               '🧽', 119, 'Cleaning',   1],
-  ['sanitization', 'Home Sanitization',     '🦠', 299, 'Cleaning',   1],
-  ['office',       'Office Cleaning',       '🏢', 399, 'Cleaning',   1],
-  ['commercial',   'Commercial Cleaning',   '🏬', 599, 'Cleaning',   1],
-  // Bathroom
-  ['bathroom',     'Bathroom Cleaning',     '🚿', 149, 'Bathroom',   1],
-  // Kitchen
-  ['kitchen',      'Kitchen Cleaning',      '🍳', 149, 'Kitchen',    1],
-  ['dishwashing',  'Dish Washing',          '🍽️', 119, 'Kitchen',    1],
-  // Laundry
-  ['laundry',      'Laundry',               '🧺', 129, 'Laundry',    1],
-  ['ironing',      'Ironing',               '👔', 99,  'Laundry',    1],
-  // Appliances
-  ['ac',           'AC Service',            '❄️', 499, 'Appliances', 1],
-  ['fridge',       'Refrigerator Repair',   '🧊', 299, 'Appliances', 1],
-  ['washingrepair','Washing Machine Repair','🌀', 349, 'Appliances', 1],
-  ['tv',           'TV Installation',       '📺', 399, 'Appliances', 1],
-  ['purifier',     'Water Purifier Service','💧', 349, 'Appliances', 1],
-  ['geyser',       'Geyser Service',        '🔥', 349, 'Appliances', 1],
-  ['appliance',    'Appliance Repair',      '🔧', 299, 'Appliances', 1],
-  // Repairs & Home services
-  ['electrical',   'Electrical Services',   '⚡', 199, 'Repairs',    1],
-  ['plumbing',     'Plumbing',              '🚰', 199, 'Repairs',    1],
-  ['carpentry',    'Carpentry',             '🪚', 249, 'Repairs',    1],
-  ['painting',     'Painting',              '🎨', 499, 'Repairs',    1],
-  ['furniture',    'Furniture Assembly',    '🪑', 299, 'Repairs',    1],
-  ['cctv',         'CCTV Installation',     '📹', 599, 'Repairs',    1],
-  ['pest',         'Pest Control',          '🐜', 399, 'Repairs',    1],
-  ['inspection',   'Home Inspection',       '📋', 499, 'Repairs',    1],
-  ['handyman',     'Handyman',              '🧰', 199, 'Repairs',    1],
-  // Home / On-demand
-  ['moving',       'Moving & Packing',      '📦', 999, 'Home',       1],
-  ['courier',      'Courier Pickup',        '🚚', 99,  'Home',       1],
-  ['grocery',      'Grocery Assistance',    '🛒', 149, 'Home',       1],
-  ['driver',       'Driver on Demand',      '🚗', 299, 'Home',       1],
-  // Care
-  ['cooking',      'Cooking',               '🍲', 199, 'Care',       1],
-  ['eldercare',    'Elder Care',            '🧓', 249, 'Care',       1],
-  ['babycare',     'Child Care',            '🍼', 249, 'Care',       1],
-  ['petcare',      'Pet Care',              '🐶', 249, 'Care',       1],
-  ['gardening',    'Gardening',             '🌱', 249, 'Care',       1],
+  ['mopping',      'Sweeping & Mopping',        '🧹', 129, 'Cleaning', 1],
+  ['dusting',      'Dusting Furniture',         '🪶', 119, 'Cleaning', 1],
+  ['dishwashing',  'Dishwashing',               '🍽️', 119, 'Cleaning', 1],
+  ['bathroom',     'Bathroom Cleaning',         '🚿', 149, 'Cleaning', 1],
+  ['kitchen',      'Kitchen Cleaning',          '🍳', 149, 'Cleaning', 1],
+  ['laundry',      'Laundry Washing & Folding', '🧺', 129, 'Cleaning', 1],
+  ['window',       'Window Cleaning',           '🪟', 149, 'Cleaning', 1],
+  ['fan',          'Fan Cleaning',              '🌀', 99,  'Cleaning', 1],
+  ['bedmaking',    'Bed Making',                '🛏️', 99,  'Cleaning', 1],
+  ['garbage',      'Garbage Disposal',          '🗑️', 79,  'Cleaning', 1],
+  ['organization', 'Basic Home Organization',   '🗄️', 149, 'Cleaning', 1],
 ]
 
-// Real, search-matched Unsplash photos — one accurate, on-topic shot per service (Snabbit-style
-// tiles). If a photo ever fails to load, the tile falls back to the on-brand illustration.
-const IMG = (id) => `https://images.unsplash.com/photo-${id}?w=1080&q=80&auto=format&fit=crop`
+// Service photos: all bundled locally in /public/services (offline-safe, works in the APK).
+// Falls back to the vector icon if one fails to load.
 export const SERVICE_IMAGES = {
-  // Cleaning
-  cleaning:      IMG('1584820927498-cfe5211fd8bf'), // person cleaning a floor
-  deep:          IMG('1581578731548-c64695cc6952'), // deep-cleaning a window
-  sofa:          IMG('1555041469-a586c61ea9bc'),    // fabric sofa / couch
-  carpet:        IMG('1686178827149-6d55c72d81df'), // vacuuming a carpet
-  window:        IMG('1527352774566-e4916e36c645'), // window pane
-  floor:         IMG('1740657254989-42fe9c3b8cce'), // mopping the floor
-  dusting:       IMG('1563453392212-326f5e854473'), // glove + spray dusting
-  sanitization:  IMG('1550963295-019d8a8a61c5'),    // disinfectant spray bottle
-  office:        IMG('1627905646269-7f034dcc5738'), // office workspace
-  commercial:    IMG('1761689502577-0013be84f1bf'), // cleaning a glass building
-  // Bathroom / Kitchen / Laundry
-  bathroom:      IMG('1620626011761-996317b8d101'), // clean modern bathroom
-  kitchen:       IMG('1565538810643-b5bdb714032a'), // clean modern kitchen
-  dishwashing:   IMG('1581622558663-b2e33377dfb2'), // washing dishes
-  laundry:       IMG('1545173168-9f1947eebb7f'),    // washing machines
-  ironing:       IMG('1489274495757-95c7c837b101'), // steam iron on board
-  // Appliances
-  ac:            IMG('1718203862467-c33159fdc504'), // air conditioner unit
-  fridge:        IMG('1721613877687-c9099b698faa'), // refrigerator
-  washingrepair: IMG('1626806819282-2c1dc01a5e0c'), // front-load washer
-  tv:            IMG('1612965607446-25e1332775ae'), // wall-mounted TV
-  purifier:      IMG('1669211659110-3f3db4119b65'), // water purifier
-  geyser:        IMG('1594233078955-e1f73a02ebb2'), // wall water heater
-  appliance:     IMG('1759434775823-40d8b9577a41'), // appliance repair
-  // Repairs & home services
-  electrical:    IMG('1682345262055-8f95f3c513ea'), // electrician with wires
-  plumbing:      IMG('1676210134188-4c05dd172f89'), // plumber repairing a pipe
-  carpentry:     IMG('1659930087003-2d64e33181f7'), // carpenter cutting wood
-  painting:      IMG('1562259949-e8e7689d7828'),    // painting a wall with roller
-  furniture:     IMG('1772338537689-056082f100a9'), // furniture assembly
-  cctv:          IMG('1496368077930-c1e31b4e5b44'), // surveillance cameras
-  pest:          IMG('1749030415358-f533ad412767'), // pest-control sprayer
-  inspection:    IMG('1523705480679-b5d0cc17a656'), // inspection clipboard
-  handyman:      IMG('1567361808960-dec9cb578182'), // toolbox / tools
-  // Home / on-demand
-  moving:        IMG('1730154838368-c37b1fdebcf6'), // moving boxes
-  courier:       IMG('1566576721346-d4a3b4eaeb55'), // delivery package handover
-  grocery:       IMG('1588964895597-cfccd6e2dbf9'), // grocery box of vegetables
-  driver:        IMG('1449965408869-eaa3f722e40d'), // driver in a car
-  // Care
-  cooking:       IMG('1556910103-1c02745aae4d'),    // cooking in a kitchen
-  eldercare:     IMG('1576765608535-5f04d1e3f289'), // caregiver with an elder
-  babycare:      IMG('1555252333-9f8e92e65df9'),    // child care
-  petcare:       IMG('1516366434321-728a48e6b7bf'), // dog / pet
-  gardening:     IMG('1515150144380-bca9f1650ed9'), // watering plants
+  mopping:      '/services/mopping.jpg',      // person vacuuming / mopping the floor
+  dusting:      '/services/dusting.jpg',      // dusting furniture (gloves + cloth)
+  dishwashing:  '/services/dishwashing.jpg',  // washing utensils at the sink
+  bathroom:     '/services/bathroom.jpg',     // gloved sink scrub, bright white bathroom
+  kitchen:      '/services/kitchen.jpg',      // wiping the stovetop
+  laundry:      '/services/laundry.jpg',      // loading the washing machine
+  window:       '/services/window.jpg',       // window cleaning
+  fan:          '/services/fan.jpg',          // cleaner dusting a ceiling fan
+  bedmaking:    '/services/bedmaking.jpg',    // neatly made bed with fresh linen
+  garbage:      '/services/garbage.jpg',      // household waste / bin bag
+  organization: '/services/organization.jpg', // organized wardrobe / shelves
 }
 
 // Snabbit-style duration ladder. price = base + add; original is the struck-through
@@ -138,10 +66,15 @@ const DETAILS = {
     ],
     excludes: ['Cleaning ceilings or high areas', 'Using unstable stools or ladders', 'Moving heavy furniture', 'Exterior grills/windows', 'Stain removal or restoration'],
   },
+  mopping: {
+    desc: 'Thorough sweeping and wet mopping of all your floors for a spotless, fresh-smelling home.',
+    includes: ['Sweep all floors & corners', 'Wet mop with floor cleaner', 'Spot-clean marks & spills', 'Clean under reachable furniture', 'Empty dustpan & tidy up'],
+    excludes: ['Moving heavy furniture', 'Marble polishing or buffing', 'Cleaning ceilings or high areas', 'Stain removal or restoration'],
+  },
   dusting: {
-    desc: 'Reliable maid help for everyday home upkeep — sweeping, mopping, dusting and tidying by a trained, verified helper.',
-    includes: ['Sweeping & mopping floors', 'Dusting shelves, furniture & decor', 'Wipe counters & tabletops', 'Tidying and arranging rooms', 'Clean appliance exteriors'],
-    excludes: ['Cooking or utensil washing', 'Cleaning ceilings or high areas', 'Using unstable stools or ladders', 'Moving heavy furniture', 'Stain removal or restoration'],
+    desc: 'Careful dusting and wiping of furniture, shelves and décor to keep your home fresh and dust-free.',
+    includes: ['Dust shelves, furniture & décor', 'Wipe counters & tabletops', 'Clean appliance exteriors', 'Dust frames & showpieces', 'Tidy and arrange surfaces'],
+    excludes: ['Moving heavy furniture', 'Cleaning ceilings or high areas', 'Using unstable stools or ladders', 'Stain removal or restoration'],
   },
   dishwashing: {
     desc: 'Get all your utensils washed, dried and stacked neatly. Perfect after parties or busy days.',
@@ -208,6 +141,26 @@ const DETAILS = {
     includes: ['Glass cleaning both sides (reachable)', 'Sill & track wipe', 'Grill dusting', 'Frame wipe'],
     excludes: ['Exterior high-rise glass', 'Ladders above 6ft', 'Broken glass repair'],
   },
+  fan: {
+    desc: 'Dust and wipe your ceiling and table fans so they run clean and dust-free.',
+    includes: ['Dust & wipe fan blades', 'Clean motor housing exterior', 'Wipe reachable mounts', 'Clear cobwebs around the fan'],
+    excludes: ['Electrical repair or wiring', 'Dismantling the fan', 'Heights above safe reach', 'Using unstable ladders'],
+  },
+  bedmaking: {
+    desc: 'Fresh bed making and tidy bedroom linen — neatly changed, tucked and arranged.',
+    includes: ['Change & tuck bed sheets', 'Fluff & arrange pillows', 'Fold or arrange blankets', 'Tidy the bedside area'],
+    excludes: ['Laundry/washing of linen', 'Mattress deep cleaning', 'Stain removal or restoration'],
+  },
+  garbage: {
+    desc: 'Collect, bag and dispose of household garbage and reset clean bin liners.',
+    includes: ['Collect waste from all bins', 'Bag & tie securely', 'Dispose at the collection point', 'Fit fresh bin liners', 'Wipe bin exterior'],
+    excludes: ['Hazardous or chemical waste', 'Construction debris', 'Bulk/furniture disposal', 'Deep bin scrubbing'],
+  },
+  organization: {
+    desc: 'Declutter and neatly arrange your wardrobes, shelves and everyday spaces.',
+    includes: ['Organise wardrobes & shelves', 'Fold & arrange clothes', 'Declutter tabletops & drawers', 'Arrange everyday items neatly', 'Tidy living spaces'],
+    excludes: ['Deep cleaning of surfaces', 'Moving heavy furniture', 'Discarding items without consent'],
+  },
   fridge: {
     desc: 'Inside-out cleaning and sanitising of your refrigerator, shelves and trays.',
     includes: ['Empty & wipe all shelves', 'Sanitise interior', 'Defrost (if needed)', 'Exterior polish'],
@@ -265,6 +218,21 @@ const DETAILS = {
   },
 }
 
+// Marketing headline shown above the description on the detail page (Pronto/UC style).
+const HEADLINES = {
+  mopping:      'Spotless Floors, Every Single Day',
+  dusting:      'A Fresh, Dust-Free Home',
+  dishwashing:  'Sparkling Utensils Without The Scrubbing',
+  bathroom:     'A Sparkling, Germ-Free Bathroom',
+  kitchen:      'A Clean Kitchen, Ready To Cook',
+  laundry:      'Fresh, Neatly Folded Laundry',
+  window:       'Crystal-Clear, Streak-Free Windows',
+  fan:          'Dust-Free Fans That Run Clean',
+  bedmaking:    'A Neatly Made Bed, Every Time',
+  garbage:      'Hassle-Free Garbage Disposal',
+  organization: 'An Organized, Clutter-Free Home',
+}
+
 const SAMPLE_REVIEWS = [
   { name: 'Priya S.', rating: 5, text: 'Expert arrived in 12 minutes and did a fantastic job!', date: '2 days ago' },
   { name: 'Amit K.', rating: 5, text: 'Very professional and thorough. Highly recommend.', date: '5 days ago' },
@@ -295,6 +263,7 @@ export function detailsFor(id, base) {
   const d = DETAILS[id] || { desc: '', includes: [], excludes: [] }
   return {
     description: d.desc,
+    headline: HEADLINES[id] || '',
     image: SERVICE_IMAGES[id] || null,
     includes: d.includes,
     excludes: d.excludes,

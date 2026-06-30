@@ -22,9 +22,19 @@ import { retryPayout } from './worker-wallet-db.js'
 import {
   financeReports, paymentsList, settlementsList, payoutsList, ledgerForWorker, ledgerAll, workerWisePayout,
 } from './payments-db.js'
+import { listActivity, bookingTimeline, activityStats, logActivity } from './activity-db.js'
 
 const now = () => new Date()
 const iso = () => now().toISOString()
+
+// Admin-only migrations: broadcast history + ticket replies (run once on load).
+db.exec(`CREATE TABLE IF NOT EXISTS broadcasts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL DEFAULT 'announcement',
+  title TEXT NOT NULL, body TEXT, audience TEXT NOT NULL DEFAULT 'all',
+  channel TEXT NOT NULL DEFAULT 'in-app', sent INTEGER NOT NULL DEFAULT 0,
+  admin TEXT, created TEXT NOT NULL
+)`)
+try { db.exec('ALTER TABLE tickets ADD COLUMN response TEXT') } catch { /* exists */ }
 
 export function createAdminRouter(io) {
   const r = Router()
@@ -150,6 +160,16 @@ export function createAdminRouter(io) {
       .run(id, type, req.body?.note || 'Admin adjustment', Math.abs(amount), newBal, iso())
     logAudit(req.admin.email, 'wallet:adjust', `#${id} ${amount > 0 ? '+' : ''}${amount}`)
     res.json({ balance: newBal })
+  })
+
+  r.post('/customers', admin, require('manager'), (req, res) => {
+    const b = req.body || {}
+    if (!b.name && !b.phone) return res.status(400).json({ error: 'Name or phone is required' })
+    if (b.phone && db.prepare('SELECT 1 FROM users WHERE phone=?').get(String(b.phone))) return res.status(409).json({ error: 'Phone already registered' })
+    const info = db.prepare("INSERT INTO users (phone,name,email,provider,country,city,wallet,rating,status,created) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run(b.phone || null, b.name || 'Guest User', b.email || '', 'admin', b.country || 'India', b.city || null, Math.max(0, Number(b.wallet) || 0), 5.0, 'active', iso())
+    logAudit(req.admin.email, 'customer:create', b.name || b.phone)
+    res.status(201).json({ ok: true, id: info.lastInsertRowid })
   })
 
   /* ---------- workers (pros) ---------- */
@@ -297,6 +317,8 @@ export function createAdminRouter(io) {
     const updated = db.prepare('SELECT * FROM bookings WHERE id=?').get(id)
     io?.to(`booking:${id}`).emit('booking:update', { ...updated, items: parseItems(updated.items) })
     logAudit(req.admin.email, 'booking:update', b.ref)
+    const change = req.body?.pro_name ? `Assigned ${req.body.pro_name}` : `Status → ${(req.body?.status || updated.status).replace(/_/g, ' ')}`
+    logActivity({ actorType: 'admin', actorName: req.admin.email, action: 'booking.admin_update', entityType: 'booking', entityId: id, ref: b.ref, detail: change, meta: { status: updated.status, pro_name: updated.pro_name } })
     res.json({ ...updated, items: parseItems(updated.items) })
   })
 
@@ -385,18 +407,32 @@ export function createAdminRouter(io) {
   })
   r.patch('/tickets/:id', admin, (req, res) => {
     const id = Number(req.params.id)
-    if (!db.prepare('SELECT 1 FROM tickets WHERE id=?').get(id)) return res.status(404).json({ error: 'Not found' })
-    db.prepare('UPDATE tickets SET status=? WHERE id=?').run(req.body?.status || 'Resolved', id)
-    logAudit(req.admin.email, 'ticket:update', `#${id}`)
+    const t = db.prepare('SELECT * FROM tickets WHERE id=?').get(id)
+    if (!t) return res.status(404).json({ error: 'Not found' })
+    const status = req.body?.status || t.status || 'Resolved'
+    const response = req.body?.response ?? t.response ?? null
+    db.prepare('UPDATE tickets SET status=?, response=? WHERE id=?').run(status, response, id)
+    logAudit(req.admin.email, 'ticket:update', `#${id} → ${status}`)
     res.json(db.prepare('SELECT * FROM tickets WHERE id=?').get(id))
   })
 
-  /* ---------- notifications broadcast ---------- */
+  /* ---------- notifications broadcast + history ---------- */
+  r.get('/notifications', admin, (req, res) => {
+    res.json(db.prepare('SELECT * FROM broadcasts ORDER BY id DESC LIMIT 100').all())
+  })
   r.post('/notifications/broadcast', admin, require('manager'), (req, res) => {
-    const payload = { id: 'admin-' + Date.now(), type: req.body?.type || 'announcement', title: req.body?.title || 'Announcement', body: req.body?.body || '', time: iso() }
+    const sent = db.prepare('SELECT COUNT(*) n FROM users').get().n
+    const type = req.body?.type || 'announcement'
+    const title = req.body?.title || 'Announcement'
+    const body = req.body?.body || ''
+    const audience = req.body?.audience || 'all'
+    const channel = req.body?.channel || 'in-app'
+    db.prepare('INSERT INTO broadcasts (type,title,body,audience,channel,sent,admin,created) VALUES (?,?,?,?,?,?,?,?)')
+      .run(type, title, body, audience, channel, sent, req.admin.email, iso())
+    const payload = { id: 'admin-' + Date.now(), type, title, body, time: iso() }
     io?.emit('admin:notification', payload)
-    logAudit(req.admin.email, 'notify:broadcast', payload.title)
-    res.json({ ok: true, sent: db.prepare('SELECT COUNT(*) n FROM users').get().n, payload })
+    logAudit(req.admin.email, 'notify:broadcast', title)
+    res.json({ ok: true, sent, payload })
   })
 
   /* ---------- settings (incl. backend API keys) ---------- */
@@ -441,6 +477,22 @@ export function createAdminRouter(io) {
     res.json({ series, statusSplit, topWorkers })
   })
   r.get('/audit', admin, (req, res) => res.json(listAudit(40)))
+
+  /* ---------- unified activity monitor (customer + worker + admin) ---------- */
+  // Every significant action across both apps is logged to activity_log; this is the
+  // admin's single window to monitor everything that happens, live.
+  r.get('/activity', admin, (req, res) => res.json(listActivity({
+    actorType: String(req.query.actorType || 'all'),
+    action: String(req.query.action || 'all'),
+    entityType: String(req.query.entityType || 'all'),
+    entityId: req.query.entityId,
+    q: String(req.query.q || ''),
+    since: req.query.since ? String(req.query.since) : undefined,
+    limit: Math.min(500, Number(req.query.limit) || 100),
+    offset: Number(req.query.offset) || 0,
+  })))
+  r.get('/activity/stats', admin, (req, res) => res.json(activityStats(Number(req.query.days) || 7)))
+  r.get('/bookings/:id/timeline', admin, (req, res) => res.json(bookingTimeline(Number(req.params.id))))
 
   return r
 }

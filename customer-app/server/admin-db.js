@@ -243,7 +243,13 @@ export function updateComplaint(id, patch) {
 /* ---------- audit log ---------- */
 export function logAudit(admin, action, target) {
   db.prepare('INSERT INTO audit_log (admin,action,target,created) VALUES (?,?,?,?)').run(admin, action, target || null, now())
+  // Mirror into the unified cross-app activity feed so the admin's actions appear
+  // alongside customer + worker events. Lazy import avoids a load-order cycle.
+  try { activityHook?.({ actorType: 'admin', actorName: admin, action: 'admin.' + action, detail: target || null }) } catch { /* ignore */ }
 }
+// Wired up by activity-db.js after both modules load (breaks the import cycle).
+let activityHook = null
+export function _setActivityHook(fn) { activityHook = fn }
 export function listAudit(limit = 30) {
   return db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?').all(limit)
 }

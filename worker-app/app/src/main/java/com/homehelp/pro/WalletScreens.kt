@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -626,13 +627,13 @@ private fun StatTile(label: String, amount: Int, color: Color = TextDark) {
 @Composable
 private fun BigAction(modifier: Modifier, icon: ImageVector, label: String, onClick: () -> Unit) {
     Surface(
-        modifier = modifier.height(84.dp).clickable { onClick() },
+        modifier = modifier.height(94.dp).clickable { onClick() },
         shape = RoundedCornerShape(14.dp), color = PurpleLight,
     ) {
-        Column(Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Column(Modifier.padding(horizontal = 6.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Icon(icon, null, tint = Purple, modifier = Modifier.size(26.dp))
             Spacer(Modifier.height(6.dp))
-            Text(label, color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Text(label, color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
         }
     }
 }

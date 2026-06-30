@@ -15,6 +15,7 @@ export interface Term { t: string; d: string }
 
 export interface ServiceDetail extends Service {
   description: string
+  headline?: string
   includes: string[]
   excludes: string[]
   note?: string
