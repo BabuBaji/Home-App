@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers } from '../api'
 import type { AdminBooking } from '../types'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
+import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
 import { useStore, can } from '../store'
 
 const ONGOING = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
@@ -232,6 +232,36 @@ export default function Bookings() {
                 </Field>
               )}
               <Field label="Total"><input className="input" value={money(detail.total ?? active.total)} readOnly /></Field>
+
+              {(detail.status === 'completed' || detail.work_photo || detail.photo || detail.started_at) && (
+                <div className="field">
+                  <span>Service Completion</span>
+                  <div className="grid" style={{ gap: 8 }}>
+                    <div className="row" style={{ gap: 24 }}>
+                      <div><small className="muted">Started</small><div>{detail.started_at ? new Date(detail.started_at).toLocaleString('en-IN') : '—'}</div></div>
+                      <div><small className="muted">Completed</small><div>{detail.completed_at ? new Date(detail.completed_at).toLocaleString('en-IN') : '—'}</div></div>
+                    </div>
+                    {detail.rating != null && (
+                      <div><small className="muted">Customer Rating</small><div>{'★'.repeat(Number(detail.rating) || 0)}{'☆'.repeat(Math.max(0, 5 - (Number(detail.rating) || 0)))} {detail.review ? `· "${detail.review}"` : ''}</div></div>
+                    )}
+                    {(detail.work_photo || detail.photo)
+                      ? <div className="grid" style={{ gap: 10 }}>
+                          {detail.work_photo && (
+                            <div><small className="muted">Worker Proof of Work</small><a href={detail.work_photo} target="_blank" rel="noreferrer"><img src={detail.work_photo} alt="Worker proof of work" style={{ width: '100%', maxHeight: 300, objectFit: 'contain', background: '#f4f4fa', borderRadius: 12, border: '1px solid var(--line)', marginTop: 4 }} /></a></div>
+                          )}
+                          {detail.photo && (
+                            <div><small className="muted">Customer Review Photo</small><a href={detail.photo} target="_blank" rel="noreferrer"><img src={detail.photo} alt="Customer photo" style={{ width: '100%', maxHeight: 300, objectFit: 'contain', background: '#f4f4fa', borderRadius: 12, border: '1px solid var(--line)', marginTop: 4 }} /></a></div>
+                          )}
+                        </div>
+                      : <div className="muted" style={{ fontSize: 12 }}>No proof photo uploaded by the worker.</div>}
+                  </div>
+                </div>
+              )}
+
+              {(() => {
+                const pos = parseLatLng({ lat: detail.cust_lat, lng: detail.cust_lng })
+                return pos ? <div className="field"><span>Customer Location</span><MiniMap lat={pos.lat} lng={pos.lng} label={detail.address || ''} /></div> : null
+              })()}
             </>
           )}
         </Modal>

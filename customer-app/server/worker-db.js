@@ -145,9 +145,15 @@ export function findOrCreateWorker(phone) {
   let w = findWorkerByPhone(phone)
   if (!w) {
     const tail = digits(phone).slice(-10) || digits(phone)
+    // Name the worker after the person who owns this mobile: if the same number is already
+    // known (e.g. they use the customer app too) reuse that real name; otherwise a distinct
+    // mobile-tied label so every number shows its own name (never a shared "New Pro").
+    const known = tail && db.prepare('SELECT name FROM users WHERE name IS NOT NULL').all()
+      .find((u) => digits(u.phone).slice(-10) === tail && u.name && u.name !== 'Guest User' && u.name !== 'Guest')
+    const name = (known && known.name) || (tail ? `Pro ${tail.slice(-4)}` : 'New Pro')
     const info = db.prepare(`INSERT INTO workers (name,phone,email,city,services,status,verified,rating,jobs,earnings,joined,available_days,job_prefs)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      'New Pro', tail, '', null, '[]', 'pending', 0, 4.5, 0, 0, now(),
+      name, tail, '', null, '[]', 'pending', 0, 4.5, 0, 0, now(),
       JSON.stringify(DEFAULT_DAYS), JSON.stringify(DEFAULT_PREFS))
     seedDocuments(info.lastInsertRowid)
     w = db.prepare('SELECT * FROM workers WHERE id=?').get(info.lastInsertRowid)
