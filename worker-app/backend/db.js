@@ -54,8 +54,7 @@ function seed() {
     documents: [
       { name: 'Aadhaar Card', status: 'Verified', fileName: '' },
       { name: 'PAN Card', status: 'Verified', fileName: '' },
-      { name: 'Police Verification', status: 'Verified', fileName: '' },
-      { name: 'Address Proof', status: 'Pending', fileName: '' },
+      { name: 'Passport Size Photo', status: 'Pending', fileName: '' },
     ],
     jobIndex: 0,
     activeJob: null,

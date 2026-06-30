@@ -203,6 +203,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             }
             Surface(
                 Modifier.fillMaxWidth().clickable {
+                    vm.logout()
                     nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
                 },
                 shape = RoundedCornerShape(12.dp),

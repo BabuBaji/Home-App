@@ -45,11 +45,12 @@ export default function Payment() {
   const [upiCfg, setUpiCfg] = useState({ vpa: 'homehelp@upi', payeeName: 'HomeHelp Services' })
   const [confirmFor, setConfirmFor] = useState<string | null>(null) // UPI app id awaiting confirmation
   const [icons, setIcons] = useState<Record<string, { installed: boolean; icon?: string; label?: string }>>({})
+  const [demo, setDemo] = useState(false) // backend upiMode==='demo' → simulate a successful payment (for testing)
 
   useEffect(() => {
     fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), coupon || undefined)
       .then((q) => setTotal(q.total)).catch(() => {})
-    fetchPaymentConfig().then((c) => { setProvider(c.provider); if (c.upiVpa) setUpiCfg({ vpa: c.upiVpa, payeeName: c.payeeName || 'HomeHelp Services' }) }).catch(() => {})
+    fetchPaymentConfig().then((c) => { setProvider(c.provider); setDemo(c.upiMode === 'demo'); if (c.upiVpa) setUpiCfg({ vpa: c.upiVpa, payeeName: c.payeeName || 'HomeHelp Services' }) }).catch(() => {})
     // Read the real installed UPI app icons (PhonePe/GPay/Paytm) from the device.
     if (Capacitor.isNativePlatform()) {
       const pkgs = UPI_APPS.map((a) => a.pkg).filter(Boolean) as string[]
@@ -83,6 +84,14 @@ export default function Payment() {
 
   async function pay() {
     if (total == null) return
+    // Demo/test mode: simulate a successful payment so the full flow can be tested
+    // without a live gateway. Cash still books as pay-after-service.
+    if (demo && payment !== 'cash') {
+      setBusy(true)
+      try { await finishBooking({}, 'Payment successful!') }
+      catch (e) { toast((e as Error).message); setBusy(false) }
+      return
+    }
     if (UPI_APPS.some((a) => a.id === payment)) return payViaUpi()
     // Razorpay handles Cards / Net Banking / Wallets / UPI when keys are configured.
     if (payment === 'razorpay') {

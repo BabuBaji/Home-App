@@ -2,16 +2,33 @@ import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
 
-// Backend base URL. A runtime override saved in localStorage (set via the login
-// screen's "Server settings") wins over the value baked in at build time, so the
-// app can follow the dev machine to a new IP without a rebuild.
+// Backend base URL. Resolution order, highest priority first:
+//   1. A manual override saved in localStorage (set via the login screen's "Server
+//      settings") — lets the app follow the dev machine to a new IP without a rebuild.
+//   2. The live URL from a small public config file (app-config.json on GitHub), fetched
+//      at startup by initApiBase() — repoints every app at a new tunnel/host, no rebuild.
+//   3. The value baked in at build time (LAN IP via build-apk.ps1) as a last resort.
+const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json'
 const storedApi = (() => { try { return localStorage.getItem('hh_api') || '' } catch { return '' } })()
-export const API_BASE = (storedApi || import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+export let API_BASE = (storedApi || import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 export function getApiBase() { return API_BASE }
 /** Persist a new backend URL (caller should reload the app so it takes effect everywhere). */
 export function setApiBase(url: string) {
   const u = (url || '').trim().replace(/\/$/, '')
   try { if (u) localStorage.setItem('hh_api', u); else localStorage.removeItem('hh_api') } catch { /* ignore */ }
+}
+
+/** Resolve the backend URL from the public config at startup. A manual override wins, so
+ *  we skip the network fetch entirely when one is set. */
+export async function initApiBase(): Promise<void> {
+  if (storedApi) return // manual override wins; don't let the config clobber it
+  try {
+    const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    if (r.ok) {
+      const j = await r.json()
+      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+    }
+  } catch { /* keep the baked fallback */ }
 }
 
 let token = localStorage.getItem('hh_token') || ''

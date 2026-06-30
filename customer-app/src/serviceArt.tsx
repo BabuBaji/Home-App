@@ -9,7 +9,7 @@ import {
   Sparkles, SprayCan, Bath, ChefHat, CookingPot, Sofa, WashingMachine, Wind, Refrigerator,
   Tv, Zap, Wrench, Hammer, PaintRoller, Droplets, ShieldCheck, Bug, Leaf, Baby, Dog,
   Car, Package, Truck, ShoppingBag, Building2, ClipboardCheck, Shirt, Utensils, HeartHandshake,
-  ShowerHead, Camera, Cctv,
+  ShowerHead, Camera, Cctv, Feather, Fan, BedDouble, Trash2, LayoutGrid,
 } from 'lucide-react'
 
 type Tone =
@@ -36,10 +36,10 @@ type Art = [Tone, ComponentType<any>]
 
 // Exact matches by service id (the seeded services).
 const BY_ID: Record<string, Art> = {
-  cleaning: ['violet', Sparkles], deep: ['indigo', SprayCan], kitchen: ['orange', CookingPot],
-  bathroom: ['cyan', Bath], dishwashing: ['sky', Utensils], laundry: ['blue', WashingMachine],
-  ironing: ['pink', Shirt], cooking: ['orange', ChefHat], dusting: ['violet', Wind],
-  babycare: ['pink', Baby], eldercare: ['rose', HeartHandshake],
+  mopping: ['violet', SprayCan], dusting: ['amber', Feather], dishwashing: ['sky', Utensils],
+  bathroom: ['cyan', ShowerHead], kitchen: ['orange', CookingPot], laundry: ['blue', WashingMachine],
+  window: ['teal', Sparkles], fan: ['indigo', Fan], bedmaking: ['rose', BedDouble],
+  garbage: ['green', Trash2], organization: ['pink', LayoutGrid],
 }
 
 // Fallback by keyword in the service name — covers the full 40-service catalogue.
@@ -88,10 +88,8 @@ export function ServiceMedallion({ service, size = 56 }: { service: { id?: strin
 
 /** Fills its (position:relative) parent with a soft pastel card + centered medallion. */
 export function ServiceArt({ service, medallion = 56 }: { service: { id?: string; name?: string }; medallion?: number }) {
-  const [tone] = artFor(service)
-  const bg = TONE[tone][2]
   return (
-    <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: `radial-gradient(120% 120% at 72% 12%, #ffffff, ${bg})` }}>
+    <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: '#ffffff' }}>
       <ServiceMedallion service={service} size={medallion} />
     </span>
   )
@@ -103,7 +101,7 @@ export function ServiceThumb({ service, medallion = 56 }: { service: { id?: stri
   const [ok, setOk] = useState(true)
   if (service.image && ok) {
     return <img alt="" loading="lazy" decoding="async" src={service.image} onError={() => setOk(false)}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#fff' }} />
   }
   return <ServiceArt service={service} medallion={medallion} />
 }

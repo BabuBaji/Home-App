@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
@@ -48,6 +49,7 @@ export default function App() {
   return (
     <ToastHost>
       <div className="device">
+        <BackButtonHandler />
         <Splash visible={showSplash} />
         {(
           <Routes>
@@ -84,6 +86,31 @@ export default function App() {
       </div>
     </ToastHost>
   )
+}
+
+// Wire the Android hardware/gesture back button to React Router. Without this the
+// WebView's own back fails on SPA pushState navigation and Android exits the app.
+// On the root tabs (home/login) back exits; otherwise it navigates one step back,
+// falling back to /home when there is no in-app history to pop.
+function BackButtonHandler() {
+  const nav = useNavigate()
+  const loc = useLocation()
+  const locRef = useRef(loc)
+  locRef.current = loc
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let remove: (() => void) | undefined
+    import('@capacitor/app').then(({ App: CapApp }) => {
+      CapApp.addListener('backButton', () => {
+        const { pathname, key } = locRef.current
+        if (pathname === '/home' || pathname === '/login') CapApp.exitApp()
+        else if (key === 'default') nav('/home')
+        else nav(-1)
+      }).then((h) => { remove = () => h.remove() })
+    })
+    return () => { remove?.() }
+  }, [])
+  return null
 }
 
 function Guard({ authed }: { authed: boolean }) {

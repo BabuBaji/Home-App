@@ -2,21 +2,28 @@ package com.homehelp.pro.network
 
 import android.content.Context
 import android.content.SharedPreferences
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 /**
- * Retrofit client for the shared HomeHelp backend (the same server the customer and admin
- * apps use), with a runtime-configurable server address so the app does not need rebuilding
- * when the dev machine's IP changes.
+ * Single Retrofit instance for the shared HomeHelp backend (the same server the customer
+ * and admin apps use); the worker API lives under `/api/worker` — those prefixes are baked
+ * into each [ApiService] path, so the base URL here is just the backend root (host:port).
  *
- * The worker API lives under `/api/worker` — those route prefixes are baked into the
- * endpoint paths in [ApiService], so the base URL here is just the backend root (host:port).
- * Default is the dev PC's Wi-Fi LAN IP — override it from the in-app "Server settings" on the
- * login screen. Persisted in SharedPreferences.
+ * Backend URL resolution, highest priority first:
+ *   1. A manual override saved via the login screen's "Server settings" (SharedPreferences).
+ *   2. The live URL from a small public config file (app-config.json on GitHub), fetched by
+ *      [refreshBaseUrl] — repoints every app at a new tunnel/host WITHOUT rebuilding the APK.
+ *   3. [FALLBACK_URL] — the dev PC's LAN IP for same-Wi-Fi testing.
+ *
+ * A request interceptor rewrites every call's scheme/host/port to the current [baseUrl], so
+ * the address can change at runtime without rebuilding Retrofit.
  *
  *   - Wi-Fi (real phone):  http://<PC-LAN-IP>:4000   e.g. http://192.168.0.112:4000
  *   - Emulator:            http://10.0.2.2:4000
@@ -24,33 +31,69 @@ import java.util.concurrent.TimeUnit
  */
 object RetrofitClient {
     const val DEFAULT_SERVER = "http://192.168.0.112:4000"
+    private const val FALLBACK_URL = "$DEFAULT_SERVER/"
+    private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
     private const val PREFS = "homehelp_pro_prefs"
     private const val KEY_SERVER = "server_base"
 
-    /** Bearer token issued by /api/worker/auth/verify; attached to every later call. */
-    @Volatile
-    var token: String? = null
+    /** Current backend base URL (with trailing slash); updated by [refreshBaseUrl]/[setServerUrl]. */
+    @Volatile var baseUrl: String = FALLBACK_URL
 
-    @Volatile private var serverBase: String = DEFAULT_SERVER
-    @Volatile private var cached: ApiService? = null
+    /** Bearer token issued by /api/worker/auth/verify; attached to every later call. */
+    @Volatile var token: String? = null
+
+    @Volatile private var refreshed = false
+    @Volatile private var manualOverride = false
     private var prefs: SharedPreferences? = null
 
-    /** Load any saved server address. Call once from MainActivity.onCreate. */
+    // Bare client used ONLY to fetch the config (not host-rewritten by the interceptor).
+    private val bare = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
+
+    /** Load any saved (manual) server address. Call once from MainActivity.onCreate. */
     fun init(context: Context) {
         val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p
-        serverBase = p.getString(KEY_SERVER, DEFAULT_SERVER) ?: DEFAULT_SERVER
+        val saved = p.getString(KEY_SERVER, null)
+        if (!saved.isNullOrBlank()) {
+            baseUrl = withSlash(normalize(saved))
+            manualOverride = true
+        }
     }
 
     /** The current backend address (host:port, no trailing slash), e.g. http://192.168.0.112:4000 */
-    fun serverUrl(): String = serverBase
+    fun serverUrl(): String = baseUrl.trimEnd('/')
 
-    /** Update + persist the backend address; the next api call uses it. */
+    /** Update + persist a manual backend address; wins over the config file. */
     fun setServerUrl(raw: String) {
-        serverBase = normalize(raw)
-        prefs?.edit()?.putString(KEY_SERVER, serverBase)?.apply()
-        cached = null // force the api to rebuild against the new address
+        val norm = normalize(raw)
+        baseUrl = withSlash(norm)
+        manualOverride = true
+        prefs?.edit()?.putString(KEY_SERVER, norm)?.apply()
     }
+
+    /** Pull the live backend URL from the public config. Blocking — call off the main thread.
+     *  A manual override wins, so we skip the fetch when one is set. */
+    fun refreshBaseUrl() {
+        if (refreshed || manualOverride) return
+        try {
+            val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()
+            bare.newCall(req).execute().use { resp ->
+                val body = resp.body?.string()
+                if (resp.isSuccessful && !body.isNullOrBlank()) {
+                    val api = Regex("\"apiBase\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+                    if (!api.isNullOrBlank()) {
+                        baseUrl = withSlash(api)
+                        refreshed = true
+                    }
+                }
+            }
+        } catch (_: Exception) { /* keep the fallback */ }
+    }
+
+    private fun withSlash(u: String): String = if (u.endsWith("/")) u else "$u/"
 
     private fun normalize(raw: String): String {
         var u = raw.trim()
@@ -63,26 +106,27 @@ object RetrofitClient {
         return u
     }
 
-    val api: ApiService
-        get() = cached ?: build().also { cached = it }
-
-    private fun build(): ApiService {
+    val api: ApiService by lazy {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
-        // Attach the worker's bearer token (once logged in) to every request.
-        val authHeader = okhttp3.Interceptor { chain ->
-            val req = chain.request().newBuilder()
+        // Rewrite each request's scheme/host/port to the current baseUrl, then attach the token.
+        val dynamic = Interceptor { chain ->
+            val orig = chain.request()
+            val base = baseUrl.toHttpUrlOrNull()
+            val url = if (base != null) orig.url.newBuilder()
+                .scheme(base.scheme).host(base.host).port(base.port).build()
+            else orig.url
+            val req = orig.newBuilder().url(url)
             token?.let { req.header("Authorization", "Bearer $it") }
             chain.proceed(req.build())
         }
         val client = OkHttpClient.Builder()
-            .addInterceptor(authHeader)
+            .addInterceptor(dynamic)
             .addInterceptor(logging)
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
             .build()
-        return Retrofit.Builder()
-            // Backend root; the /api/worker prefix is part of each ApiService path.
-            .baseUrl("$serverBase/")
+        Retrofit.Builder()
+            .baseUrl(FALLBACK_URL) // placeholder for path resolution; interceptor swaps the host
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
