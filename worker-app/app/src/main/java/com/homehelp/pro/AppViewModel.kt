@@ -378,16 +378,25 @@ class AppViewModel : ViewModel() {
         sync { api.arrived() }
     }
 
-    /** OTP-gated start. Returns true if the OTP matches and service begins. */
+    /** OTP-gated start. Returns true if the OTP matches and service begins.
+     *  We adopt the server's job snapshot from the response so the live timer anchors to
+     *  the SERVER's started_at (the same value the customer app uses) — otherwise the two
+     *  timers drift by the request round-trip / local-clock difference. */
     fun verifyOtpAndStart(input: String): Boolean {
         val job = activeJob ?: return false
-        return if (input == job.otp) {
-            jobStatus = JobStatus.IN_PROGRESS
-            serviceStartMs = System.currentTimeMillis()
-            serviceEndMs = 0L
-            sync { api.verifyOtp(OtpBody(input)) }
-            true
-        } else false
+        if (input != job.otp) return false
+        jobStatus = JobStatus.IN_PROGRESS
+        serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
+        serviceEndMs = 0L
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.verifyOtp(OtpBody(input))
+                r.activeJob?.let { activeJob = it }    // now carries the server started_at
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+        return true
     }
 
     fun endService(photo: String? = null) {
