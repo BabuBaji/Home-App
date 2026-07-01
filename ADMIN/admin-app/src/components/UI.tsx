@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
-import { AlertTriangle, X, Search, TrendingUp, TrendingDown } from 'lucide-react'
+import { AlertTriangle, X, Search, TrendingUp, TrendingDown, ChevronLeft, ChevronRight } from 'lucide-react'
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string, kind?: 'ok' | 'err') => void>(() => {})
@@ -44,14 +44,17 @@ export function Card({ title, right, children, className = '' }: { title?: strin
   )
 }
 
-export function StatCard({ icon, tint, label, value, sub, down }: { icon: ReactNode; tint: string; label: string; value: ReactNode; sub?: ReactNode; down?: boolean }) {
+export function StatCard({ icon, tint, label, value, delta, sub, down }: { icon: ReactNode; tint: string; label: string; value: ReactNode; delta?: ReactNode; sub?: ReactNode; down?: boolean }) {
   return (
     <div className="stat">
-      <div className="stat-ico" style={{ background: `linear-gradient(145deg, ${tint}1f, ${tint}33)`, color: tint, boxShadow: `0 6px 14px ${tint}26` }}>{icon}</div>
+      <div className="stat-ico" style={{ background: `${tint}14`, color: tint }}>{icon}</div>
       <div className="stat-body">
         <span className="stat-label">{label}</span>
-        <strong className="stat-value">{value}</strong>
-        {sub && <span className={'stat-sub' + (down ? ' down' : '')}>{down ? <TrendingDown size={11} /> : <TrendingUp size={11} />}{sub}</span>}
+        <div className="stat-line">
+          <strong className="stat-value">{value}</strong>
+          {delta != null && <span className={'stat-delta' + (down ? ' down' : '')}>{down ? <TrendingDown size={12} /> : <TrendingUp size={12} />}{delta}</span>}
+        </div>
+        {sub && <span className="stat-sub">{sub}</span>}
       </div>
     </div>
   )
@@ -67,6 +70,58 @@ const TONE: Record<string, string> = {
 export function Badge({ children, tone, dot = true }: { children: ReactNode; tone?: string; dot?: boolean }) {
   const t = tone || TONE[String(children).toLowerCase().replace(/\s+/g, '_')] || 'gray'
   return <span className={'badge ' + t}>{dot && <i className="bdot" />}{String(children).replace(/_/g, ' ')}</span>
+}
+
+/* ---------- pagination footer ---------- */
+function pageWindow(page: number, pages: number): (number | '…')[] {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1)
+  const out: (number | '…')[] = [1]
+  const lo = Math.max(2, page - 1), hi = Math.min(pages - 1, page + 1)
+  if (lo > 2) out.push('…')
+  for (let i = lo; i <= hi; i++) out.push(i)
+  if (hi < pages - 1) out.push('…')
+  out.push(pages)
+  return out
+}
+export function Pagination({ page, pageSize, total, noun = 'items', onPage, onSize }: {
+  page: number; pageSize: number; total: number; noun?: string; onPage: (p: number) => void; onSize?: (s: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const to = Math.min(total, page * pageSize)
+  return (
+    <div className="pager">
+      <span className="pager-info">Showing {from} to {to} of {total} {noun}</span>
+      <div className="pager-mid">
+        <button className="pgbtn" disabled={page <= 1} onClick={() => onPage(page - 1)}><ChevronLeft size={15} /></button>
+        {pageWindow(page, pages).map((p, i) => p === '…'
+          ? <span key={'d' + i} className="pgbtn dots">…</span>
+          : <button key={p} className={'pgbtn' + (p === page ? ' active' : '')} onClick={() => onPage(p)}>{p}</button>)}
+        <button className="pgbtn" disabled={page >= pages} onClick={() => onPage(page + 1)}><ChevronRight size={15} /></button>
+      </div>
+      <div className="pgsize">
+        <select className="select" value={pageSize} onChange={(e) => onSize?.(Number(e.target.value))} disabled={!onSize}>
+          {[5, 10, 20, 50].map((s) => <option key={s} value={s}>{s} / page</option>)}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- summary bar list (right rail) ---------- */
+export function SumBars({ rows }: { rows: { label: string; value: ReactNode; pct: number; color?: string }[] }) {
+  const max = Math.max(1, ...rows.map((r) => r.pct))
+  return (
+    <div className="sumbars">
+      {rows.map((r, i) => (
+        <div key={i} className="sumbar">
+          <span className="sumbar-label">{r.label}</span>
+          <span className="sumbar-val">{r.value}</span>
+          <span className="sumbar-track"><span className="sumbar-fill" style={{ width: `${Math.round((r.pct / max) * 100)}%`, ...(r.color ? { background: r.color } : {}) }} /></span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /* ---------- search input ---------- */
@@ -111,3 +166,33 @@ export function Avatar({ name, src, size = 36 }: { name: string; src?: string | 
 
 export const money = (n: number) => '₹' + (n ?? 0).toLocaleString('en-IN')
 export const shortDate = (s?: string | null) => s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+
+/* ---------- location helpers ---------- */
+// Parse a "lat,lng" string (or {lat,lng}) into numbers, or null if not a valid coordinate.
+export function parseLatLng(v: unknown): { lat: number; lng: number } | null {
+  if (v && typeof v === 'object' && 'lat' in (v as any) && 'lng' in (v as any)) {
+    const lat = Number((v as any).lat), lng = Number((v as any).lng)
+    return isFinite(lat) && isFinite(lng) && (lat || lng) ? { lat, lng } : null
+  }
+  const m = String(v ?? '').match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/)
+  if (!m) return null
+  const lat = Number(m[1]), lng = Number(m[2])
+  return isFinite(lat) && isFinite(lng) && (lat || lng) ? { lat, lng } : null
+}
+
+/* ---------- mini map (no dependency — OpenStreetMap embed with a marker) ---------- */
+export function MiniMap({ lat, lng, height = 200, label }: { lat: number; lng: number; height?: number; label?: string }) {
+  const d = 0.008
+  const bbox = `${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}`
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lng}`
+  const link = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
+  return (
+    <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line)' }}>
+      <iframe title="Customer location" src={src} loading="lazy" style={{ width: '100%', height, border: 0, display: 'block' }} />
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--card, #fff)' }}>
+        <span className="muted" style={{ fontSize: 12 }}>📍 {lat.toFixed(5)}, {lng.toFixed(5)}{label ? ` · ${label}` : ''}</span>
+        <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 700, color: 'var(--violet, #5b51e8)' }}>Open in Maps</a>
+      </div>
+    </div>
+  )
+}

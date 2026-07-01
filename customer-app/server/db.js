@@ -51,8 +51,16 @@ db.exec(`
   );
 `)
 
-// Migration: timestamp for when the service actually started (OTP verified).
+// Migration: timestamps for when the service actually started (OTP verified) and
+// finished — so we can show the real time the worker spent, not just the booked duration.
 try { db.exec('ALTER TABLE bookings ADD COLUMN started_at TEXT') } catch { /* column already exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN completed_at TEXT') } catch { /* column already exists */ }
+
+// Migration: richer cancellation record (who cancelled, when, worker compensation, refund state).
+try { db.exec('ALTER TABLE bookings ADD COLUMN cancelled_by TEXT') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN cancel_time TEXT') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN worker_comp INTEGER') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN refund_status TEXT') } catch { /* exists */ }
 
 export { CATEGORIES }
 
@@ -178,16 +186,25 @@ export function createBooking(b) {
 }
 export function getBooking(id) { return rowToBooking(db.prepare('SELECT * FROM bookings WHERE id=?').get(id)) }
 export function getBookings(uid) { return db.prepare('SELECT * FROM bookings WHERE user_id=? ORDER BY id DESC').all(uid).map(rowToBooking) }
-export function setBookingStatus(id, status) { db.prepare('UPDATE bookings SET status=? WHERE id=?').run(status, id); return getBooking(id) }
+export function setBookingStatus(id, status) {
+  // Stamp the finish time the first time a booking is marked completed, so the actual
+  // service duration (completed_at − started_at) can be shown alongside the booked time.
+  if (status === 'completed') db.prepare('UPDATE bookings SET status=?, completed_at=COALESCE(completed_at, ?) WHERE id=?').run(status, now(), id)
+  else db.prepare('UPDATE bookings SET status=? WHERE id=?').run(status, id)
+  return getBooking(id)
+}
 export function setBookingStarted(id) {
   db.prepare('UPDATE bookings SET status=?, started_at=? WHERE id=?').run('in_progress', now(), id)
   return getBooking(id)
 }
 export function setPaymentStatus(id, ps) { db.prepare('UPDATE bookings SET payment_status=? WHERE id=?').run(ps, id); return getBooking(id) }
 export function rescheduleBooking(id, date, time) { db.prepare('UPDATE bookings SET date=?, time=?, type=? WHERE id=?').run(date, time, 'schedule', id); return getBooking(id) }
-export function cancelBookingRow(id, reason, fee, refund) {
-  db.prepare('UPDATE bookings SET status=?, cancel_reason=?, cancel_fee=?, refund=? WHERE id=?')
-    .run('cancelled', reason, fee, refund, id)
+export function cancelBookingRow(id, reason, fee, refund, extra = {}) {
+  db.prepare(`UPDATE bookings SET status=?, cancel_reason=?, cancel_fee=?, refund=?,
+      cancelled_by=?, cancel_time=?, worker_comp=?, refund_status=? WHERE id=?`)
+    .run('cancelled', reason, fee, refund,
+      extra.cancelledBy || 'customer', now(), extra.workerComp || 0,
+      extra.refundStatus || (refund > 0 ? 'refunded' : 'none'), id)
   return getBooking(id)
 }
 export function setBookingReview(id, rating, review, photo) {

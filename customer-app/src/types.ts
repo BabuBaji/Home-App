@@ -15,6 +15,7 @@ export interface Term { t: string; d: string }
 
 export interface ServiceDetail extends Service {
   description: string
+  headline?: string
   includes: string[]
   excludes: string[]
   note?: string
@@ -105,6 +106,10 @@ export interface Booking {
   scheduled_at?: number | null   // ms epoch of the scheduled slot (null for instant)
   otp_released?: boolean         // false while a future scheduled booking is still waiting
   started_at?: string | null
+  completed_at?: string | null   // when the worker ended the service (for actual duration)
+  work_photo?: string | null     // worker's proof-of-work photo captured at completion
+  cust_lat?: number | null
+  cust_lng?: number | null
   pro_name: string
   pro_rating: number
   rating?: number
@@ -117,6 +122,13 @@ export interface Booking {
   dist?: number
   eta?: number
   pos?: { lat: number; lng: number }
+  serviceAvailable?: boolean
+  pro?: {
+    id: number; name: string; phone?: string; avatar?: string | null
+    rating: number; servicesDone: number; reviewsCount: number
+    services: string[]
+    reviews: { rating: number; review: string; customer: string; created: string }[]
+  }
 }
 
 export interface Transaction {

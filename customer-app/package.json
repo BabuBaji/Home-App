@@ -12,8 +12,11 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/app-launcher": "^6.0.4",
     "@capacitor/core": "^6.2.1",
     "@capacitor/geolocation": "^6.1.1",
+    "@capacitor/status-bar": "^6.0.3",
     "@fontsource/inter": "^5.2.8",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.21.0",
