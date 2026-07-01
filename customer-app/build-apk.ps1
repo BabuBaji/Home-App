@@ -3,9 +3,29 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
-# Toolchain (adjust if your paths differ)
-$env:JAVA_HOME   = 'C:\Users\Smartgrow\Android\jdk\jdk-17.0.19+10'
-$env:ANDROID_HOME = 'C:\Users\Smartgrow\Android\Sdk'
+# Toolchain — auto-detect so this works on any dev machine.
+# Respects an already-set JAVA_HOME / ANDROID_HOME; otherwise probes common locations.
+if (-not $env:JAVA_HOME -or -not (Test-Path $env:JAVA_HOME)) {
+  $jdk = @(
+    'C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot',
+    "$env:USERPROFILE\Android\jdk\jdk-17.0.19+10",
+    'C:\Program Files\Android\Android Studio\jbr'
+  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $jdk) { $jdk = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium\jdk-17*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+  if (-not $jdk) { throw 'Could not find a JDK 17. Set $env:JAVA_HOME and retry.' }
+  $env:JAVA_HOME = $jdk
+}
+if (-not $env:ANDROID_HOME -or -not (Test-Path $env:ANDROID_HOME)) {
+  $sdk = @(
+    "$env:LOCALAPPDATA\Android\Sdk",
+    "$env:USERPROFILE\Android\Sdk",
+    'C:\Android\Sdk'
+  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $sdk) { throw 'Could not find the Android SDK. Set $env:ANDROID_HOME and retry.' }
+  $env:ANDROID_HOME = $sdk
+}
+Write-Host "JAVA_HOME    -> $env:JAVA_HOME" -ForegroundColor DarkGray
+Write-Host "ANDROID_HOME -> $env:ANDROID_HOME" -ForegroundColor DarkGray
 
 # 1) Detect LAN IPv4 (prefer Wi-Fi)
 $ip = (Get-NetIPAddress -AddressFamily IPv4 |
