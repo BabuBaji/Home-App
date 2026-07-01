@@ -1,0 +1,128 @@
+# HomeHelp — microservices (strangler-fig, in progress)
+#
+#   [ clients ] → gateway(:8080) ─┬─ /api/auth/*                       → auth-service(:4002)    → auth-db (Postgres)
+#                                 ├─ /api/services*, /api/admin/services* → catalog-service(:4001) → catalog-db (Postgres)
+#                                 └─ everything else (+ socket.io)      → monolith on host(:4000) → sqlite
+#
+# Each extracted service has its OWN database instance (database-per-service).
+# The legacy monolith (services/api) still runs on the host: `npm start`, port 4000.
+#
+#   docker compose up --build
+#
+services:
+  # ---- databases (one per service) ----
+  catalog-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: catalog }
+    ports: ["5432:5432"]
+    volumes: ["catalog-pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homehelp -d catalog"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: auth }
+    ports: ["5433:5432"]
+    volumes: ["auth-pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homehelp -d auth"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  activity-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: activity }
+    ports: ["5434:5432"]
+    volumes: ["activity-pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homehelp -d activity"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: worker }
+    ports: ["5435:5432"]
+    volumes: ["worker-pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homehelp -d worker"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- services ----
+  catalog-service:
+    build: ../services/catalog
+    environment:
+      PORT: 4001
+      DATABASE_URL: postgres://homehelp:homehelp@catalog-db:5432/catalog
+      MONOLITH_URL: http://host.docker.internal:4000
+      INTERNAL_KEY: hh-internal-dev
+    ports: ["4001:4001"]
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  auth-service:
+    build: ../services/auth
+    environment:
+      PORT: 4002
+      DATABASE_URL: postgres://homehelp:homehelp@auth-db:5432/auth
+      MONOLITH_URL: http://host.docker.internal:4000
+      INTERNAL_KEY: hh-internal-dev
+    ports: ["4002:4002"]
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  activity-service:
+    build: ../services/activity
+    environment:
+      PORT: 4003
+      DATABASE_URL: postgres://homehelp:homehelp@activity-db:5432/activity
+      MONOLITH_URL: http://host.docker.internal:4000
+      INTERNAL_KEY: hh-internal-dev
+    ports: ["4003:4003"]
+    depends_on:
+      activity-db:
+        condition: service_healthy
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  worker-service:
+    build: ../services/worker
+    environment:
+      PORT: 4004
+      DATABASE_URL: postgres://homehelp:homehelp@worker-db:5432/worker
+      MONOLITH_URL: http://host.docker.internal:4000
+      INTERNAL_KEY: hh-internal-dev
+    ports: ["4004:4004"]
+    depends_on:
+      worker-db:
+        condition: service_healthy
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  gateway:
+    build: ../services/gateway
+    environment:
+      PORT: 8080
+      AUTH_URL: http://auth-service:4002
+      ACTIVITY_URL: http://activity-service:4003
+      CATALOG_URL: http://catalog-service:4001
+      WORKER_URL: http://worker-service:4004
+      MONOLITH_URL: http://host.docker.internal:4000
+    ports: ["8080:8080"]
+    depends_on: [auth-service, activity-service, catalog-service, worker-service]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+volumes:
+  catalog-pgdata:
+  auth-pgdata:
+  activity-pgdata:
+  worker-pgdata:

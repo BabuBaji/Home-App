@@ -1,0 +1,13 @@
+{
+  "name": "hh-worker-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HomeHelp Worker microservice — owns worker profiles, verification, availability, documents and the worker wallet/ledger on its own Postgres. Job-lifecycle (bookings) stays in the Booking core and calls this service for worker data.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}

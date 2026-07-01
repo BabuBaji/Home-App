@@ -5,9 +5,34 @@ HomeHelp-debug.apk
 # Node
 node_modules/
 
+# Runtime data / local config (not source)
+*.db
+payment.config.json
+.env.production
+*.tsbuildinfo
+
+# IDE
+.idea/
+
+# Screenshots / mockups (not source)
+/_*.png
+/*_SLIDE.png
+/*MOCKSCREEN*.png
+/*MOCK_SCREEN*.png
+/*mock_screen*.png
+docs/admin-mockups/
+
 # OS / editor
 Thumbs.db
 .DS_Store
 
 # Office temp files
 ~$*
+
+# Spec/mockup folders (binary, not source)
+/ADMIN/
+/CUSTOMER/
+/WORKER/
+docs/CUSTOMER/
+docs/WORKER/
+*.docx
