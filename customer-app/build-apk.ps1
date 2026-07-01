@@ -1,5 +1,7 @@
 # Builds the HomeHelp Android debug APK.
-# Auto-detects your current Wi-Fi LAN IP, points the app at <ip>:4000, and assembles the APK.
+# Auto-detects your current Wi-Fi LAN IP, points the app at <ip>:4000, assembles the APK,
+# and installs+launches it on a USB-connected device (use -NoInstall to skip that step).
+param([switch]$NoInstall)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -59,3 +61,16 @@ Copy-Item $apk $dest -Force
 $mb = [math]::Round((Get-Item $dest).Length / 1MB, 2)
 Write-Host "`nAPK ready: $dest  ($mb MB)" -ForegroundColor Green
 Write-Host "App points to http://$ip`:4000 - make sure the backend is running (npm run server)." -ForegroundColor Yellow
+
+# 6) Install & launch on a USB-connected device (skip with -NoInstall)
+if (-not $NoInstall) {
+  $adb = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
+  if (-not (Test-Path $adb)) { Write-Host "adb not found, skipping install." -ForegroundColor Yellow; return }
+  $devices = (& $adb devices | Select-Object -Skip 1 | Where-Object { $_ -match '\tdevice$' })
+  if (-not $devices) { Write-Host "No USB device connected, skipping install. Plug in a device (with USB debugging on) and rerun." -ForegroundColor Yellow; return }
+  Write-Host "`nInstalling to device..." -ForegroundColor Cyan
+  & $adb install -r $dest
+  if ($LASTEXITCODE) { throw 'adb install failed' }
+  & $adb shell monkey -p com.homehelp.customer -c android.intent.category.LAUNCHER 1 | Out-Null
+  Write-Host "Installed and launched com.homehelp.customer on device." -ForegroundColor Green
+}
