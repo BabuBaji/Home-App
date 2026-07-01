@@ -29,6 +29,7 @@ import Wallet from './screens/Wallet'
 import Profile from './screens/Profile'
 import Support from './screens/Support'
 import Addresses from './screens/Addresses'
+import CancelPolicy from './screens/CancelPolicy'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="/profile" element={<Profile />} />
               <Route path="/support" element={<Support />} />
               <Route path="/addresses" element={<Addresses />} />
+              <Route path="/cancellation-policy" element={<CancelPolicy />} />
             </Route>
             <Route path="*" element={<Navigate to={user ? '/home' : '/login'} replace />} />
           </Routes>

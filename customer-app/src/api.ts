@@ -120,6 +120,16 @@ export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { m
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })
 export const completeBooking = (id: number) => req<Booking>(`/api/bookings/${id}/complete`, { method: 'POST' })
 export const rescheduleBookingApi = (id: number, date: string, time: string) => req<Booking>(`/api/bookings/${id}/reschedule`, { method: 'POST', body: JSON.stringify({ date, time }) })
+export interface CancelQuote {
+  allowed: boolean; model: 'instant' | 'scheduled'; stage: string; title: string; note: string
+  paid: number; refund: number; fee: number; refundPct: number; workerComp: number
+}
+export const fetchCancelQuote = (id: number) => req<CancelQuote>(`/api/bookings/${id}/cancel-quote`)
+export interface CancellationPolicy {
+  travelFee: number; arrivalPct: number; commissionPct: number
+  schedFullHrs: number; schedHalfHrs: number; schedHalfPct: number
+}
+export const fetchCancellationPolicy = () => req<CancellationPolicy>('/api/policy/cancellation')
 export const cancelBookingApi = (id: number, reason: string) => req<Booking>(`/api/bookings/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) })
 export const reviewBooking = (id: number, rating: number, review: string, photo?: string) => req<Booking>(`/api/bookings/${id}/review`, { method: 'POST', body: JSON.stringify({ rating, review, photo }) })
 

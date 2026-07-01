@@ -67,7 +67,11 @@ const DEFAULT_SETTINGS = {
   timezone: 'GMT+5:30 (IST)',
   platform_fee: '20',          // ₹ booking fee
   tax_percent: '5',            // GST %
-  cancel_fee: '50',
+  cancel_fee: '50',            // travel fee once a worker is on the way (instant bookings)
+  cancel_arrival_pct: '100',   // % of the bill charged if cancelled after the worker arrives
+  cancel_sched_full_hrs: '6',  // scheduled: cancel >6h before slot → full refund
+  cancel_sched_half_hrs: '3',  // scheduled: cancel 3–6h before slot → partial refund
+  cancel_sched_half_pct: '50', // scheduled: partial-refund percentage
   commission_percent: '20',    // platform cut of worker earnings
   auto_assign: 'true',
   maintenance_mode: 'false',

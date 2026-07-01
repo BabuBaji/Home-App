@@ -56,6 +56,12 @@ db.exec(`
 try { db.exec('ALTER TABLE bookings ADD COLUMN started_at TEXT') } catch { /* column already exists */ }
 try { db.exec('ALTER TABLE bookings ADD COLUMN completed_at TEXT') } catch { /* column already exists */ }
 
+// Migration: richer cancellation record (who cancelled, when, worker compensation, refund state).
+try { db.exec('ALTER TABLE bookings ADD COLUMN cancelled_by TEXT') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN cancel_time TEXT') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN worker_comp INTEGER') } catch { /* exists */ }
+try { db.exec('ALTER TABLE bookings ADD COLUMN refund_status TEXT') } catch { /* exists */ }
+
 export { CATEGORIES }
 
 // Upsert the catalogue on every boot so name/price/icon/category changes (e.g. the
@@ -193,9 +199,12 @@ export function setBookingStarted(id) {
 }
 export function setPaymentStatus(id, ps) { db.prepare('UPDATE bookings SET payment_status=? WHERE id=?').run(ps, id); return getBooking(id) }
 export function rescheduleBooking(id, date, time) { db.prepare('UPDATE bookings SET date=?, time=?, type=? WHERE id=?').run(date, time, 'schedule', id); return getBooking(id) }
-export function cancelBookingRow(id, reason, fee, refund) {
-  db.prepare('UPDATE bookings SET status=?, cancel_reason=?, cancel_fee=?, refund=? WHERE id=?')
-    .run('cancelled', reason, fee, refund, id)
+export function cancelBookingRow(id, reason, fee, refund, extra = {}) {
+  db.prepare(`UPDATE bookings SET status=?, cancel_reason=?, cancel_fee=?, refund=?,
+      cancelled_by=?, cancel_time=?, worker_comp=?, refund_status=? WHERE id=?`)
+    .run('cancelled', reason, fee, refund,
+      extra.cancelledBy || 'customer', now(), extra.workerComp || 0,
+      extra.refundStatus || (refund > 0 ? 'refunded' : 'none'), id)
   return getBooking(id)
 }
 export function setBookingReview(id, rating, review, photo) {

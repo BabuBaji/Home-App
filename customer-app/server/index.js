@@ -16,7 +16,8 @@ import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_
 import { createAdminRouter } from './admin.js'
 import { createWorkerRouter } from './worker.js'
 import { setBookingCoords, anyActiveWorkerForServices, workerPublicProfile, workerLastLocation, distanceKm } from './worker-db.js'
-import { confirmWorkerSettlement } from './worker-wallet-db.js'
+import { confirmWorkerSettlement, recordIncome } from './worker-wallet-db.js'
+import { quoteCancellation } from './cancellation.js'
 import { createPaymentsRouter } from './payments.js'
 import { recordExternalPayment, createPayment } from './payments-db.js'
 import { getSetting } from './admin-db.js'
@@ -293,6 +294,19 @@ app.post('/api/wallet/add', auth, (req, res) => res.json({ balance: addTransacti
 
 /* ---------- support ---------- */
 app.get('/api/support/reasons', (_q, res) => res.json({ cancelReasons: CANCEL_REASONS }))
+// Public, read-only cancellation & refund policy — reflects the admin-tunable settings
+// so the customer-facing policy page always matches what the engine actually charges.
+app.get('/api/policy/cancellation', (_q, res) => {
+  const int = (k, d) => { const n = parseInt(getSetting(k, String(d)), 10); return Number.isFinite(n) ? n : d }
+  res.json({
+    travelFee: int('cancel_fee', 50),
+    arrivalPct: int('cancel_arrival_pct', 100),
+    commissionPct: int('commission_percent', 20),
+    schedFullHrs: int('cancel_sched_full_hrs', 6),
+    schedHalfHrs: int('cancel_sched_half_hrs', 3),
+    schedHalfPct: int('cancel_sched_half_pct', 50),
+  })
+})
 app.get('/api/tickets', auth, (req, res) => res.json(getTickets(req.user.id)))
 app.post('/api/tickets', auth, (req, res) => {
   if (!req.body?.message) return res.status(400).json({ error: 'Describe your issue' })
@@ -432,18 +446,31 @@ app.post('/api/bookings/:id/reschedule', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   res.json(rescheduleBooking(b.id, req.body?.date, req.body?.time))
 })
+// Preview the refund/fee for a cancellation before the customer confirms it.
+app.get('/api/bookings/:id/cancel-quote', auth, (req, res) => {
+  const b = getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  res.json(quoteCancellation(b))
+})
 app.post('/api/bookings/:id/cancel', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  // Policy engine decides refund / fee / worker compensation from the booking's stage.
+  const q = quoteCancellation(b)
+  if (!q.allowed) return res.status(409).json({ error: q.note || 'This booking can no longer be cancelled.' })
   if (sims.has(b.id)) { clearInterval(sims.get(b.id)); sims.delete(b.id) }
-  // fee: free before pro is on the way, else ₹50
-  const fee = ['confirmed', 'worker_assigned'].includes(b.status) ? 0 : 50
-  const refundable = b.payment === 'cash' ? 0 : Math.max(0, b.total - fee)
-  const u = cancelBookingRow(b.id, req.body?.reason || 'Not specified', fee, refundable)
+
+  const refundable = q.refund
+  const u = cancelBookingRow(b.id, req.body?.reason || 'Not specified', q.fee, refundable,
+    { cancelledBy: 'customer', workerComp: q.workerComp, refundStatus: refundable > 0 ? 'refunded' : 'none' })
   if (refundable > 0) { addTransaction(req.user.id, 'credit', `Refund ${b.ref}`, refundable, b.ref); setPaymentStatus(b.id, 'refunded') }
-  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.cancel', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Cancelled: ${req.body?.reason || 'Not specified'}`, meta: { fee, refund: refundable } })
+  // Pay the worker a travel/visit fee if they were already dispatched when cancelled.
+  if (q.workerComp > 0 && b.worker_id) {
+    try { recordIncome(b.worker_id, q.stage === 'arrived' ? 'Visit Fee (Cancellation)' : 'Travel Compensation', q.workerComp, { label: b.ref, bucket: 'available' }) } catch { /* wallet not set up for this worker */ }
+  }
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.cancel', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Cancelled (${q.title}): ${req.body?.reason || 'Not specified'}`, meta: { model: q.model, stage: q.stage, fee: q.fee, refund: refundable, workerComp: q.workerComp } })
   io.to(room(b.id)).emit('booking:update', getBooking(b.id))
-  res.json(getBooking(b.id))
+  res.json(u)
 })
 app.post('/api/bookings/:id/review', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
