@@ -122,6 +122,13 @@ export interface Booking {
   dist?: number
   eta?: number
   pos?: { lat: number; lng: number }
+  serviceAvailable?: boolean
+  pro?: {
+    id: number; name: string; phone?: string; avatar?: string | null
+    rating: number; servicesDone: number; reviewsCount: number
+    services: string[]
+    reviews: { rating: number; review: string; customer: string; created: string }[]
+  }
 }
 
 export interface Transaction {

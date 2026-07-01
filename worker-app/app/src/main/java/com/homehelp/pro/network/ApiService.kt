@@ -60,6 +60,9 @@ interface ApiService {
     @POST("api/worker/jobs/arrived")
     suspend fun arrived(): StatusResponse
 
+    @POST("api/worker/jobs/location")
+    suspend fun reportLocation(@Body body: LatLngBody): StatusResponse
+
     @POST("api/worker/jobs/verify-otp")
     suspend fun verifyOtp(@Body body: OtpBody): StatusResponse
 

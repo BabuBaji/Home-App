@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { Users, UserCheck, UserPlus, Repeat, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
 import { fetchCustomers, fetchCustomer, createCustomer, updateCustomer, adjustWallet } from '../api'
 import type { Customer } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
+import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
 
 type AddDraft = { name: string; phone: string; email: string; city: string }
 const EMPTY_ADD: AddDraft = { name: '', phone: '', email: '', city: '' }
@@ -238,6 +238,13 @@ export default function Customers() {
             <Field label={`Addresses (${(viewing.addresses || []).length})`}>
               <input value={(viewing.addresses || []).map((a: any) => a.line || a.address || a.label).filter(Boolean).join(' • ') || '—'} readOnly />
             </Field>
+
+            {(() => {
+              const pos = parseLatLng(viewing.customer?.location)
+              return pos
+                ? <div className="field"><span>Live Location</span><MiniMap lat={pos.lat} lng={pos.lng} label={viewing.customer?.city || ''} /></div>
+                : <Field label="Live Location"><input value="Not shared yet" readOnly /></Field>
+            })()}
 
             <div className="field"><span>Recent Bookings ({(viewing.bookings || []).length})</span></div>
             <div className="tablewrap">

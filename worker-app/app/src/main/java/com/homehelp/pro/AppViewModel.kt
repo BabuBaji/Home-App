@@ -13,6 +13,7 @@ import com.homehelp.pro.network.AdvanceEligibilityDto
 import com.homehelp.pro.network.AdvanceEntry
 import com.homehelp.pro.network.AmountBody
 import com.homehelp.pro.network.AuthRequest
+import com.homehelp.pro.network.LatLngBody
 import com.homehelp.pro.network.AvailabilityBody
 import com.homehelp.pro.network.BankBody
 import com.homehelp.pro.network.BootstrapResponse
@@ -270,15 +271,45 @@ class AppViewModel : ViewModel() {
     }
 
     // ---- lifecycle transitions ----
+    // Login is gated by the backend: only a number the admin has onboarded AND marked
+    // active is allowed in. We do NOT flip isLoggedIn optimistically — we wait for the
+    // server, surface its rejection message, and stay on the login screen on failure.
+    var loginError by mutableStateOf<String?>(null)
+        private set
+    var loggingIn by mutableStateOf(false)
+        private set
+    fun clearLoginError() { loginError = null }
+
     fun login(phone: String = "", otp: String = "") {
-        isLoggedIn = true
-        Session.phone = phone.ifBlank { "9000012345" }
-        // Authenticate against the backend and hydrate state from the server.
-        sync {
-            val b = api.verify(AuthRequest(phone = phone.ifBlank { "9000012345" }, otp = otp.ifBlank { "1234" }))
-            applyBootstrap(b)
+        val p = phone.ifBlank { "9000012345" }
+        loginError = null
+        loggingIn = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val b = api.verify(AuthRequest(phone = p, otp = otp.ifBlank { "1234" }))
+                Session.phone = p
+                applyBootstrap(b)
+                backendConnected = true
+                isLoggedIn = true        // only now is the worker really logged in
+            } catch (e: retrofit2.HttpException) {
+                loginError = httpErrorMessage(e)
+                isLoggedIn = false
+            } catch (e: Exception) {
+                loginError = "Could not reach the server. Check your connection and try again."
+                isLoggedIn = false
+            } finally {
+                loggingIn = false
+            }
         }
     }
+
+    private fun httpErrorMessage(e: retrofit2.HttpException): String =
+        try {
+            val body = e.response()?.errorBody()?.string()
+            val msg = body?.let { org.json.JSONObject(it).optString("error") }
+            if (!msg.isNullOrBlank()) msg else "Login failed (${e.code()}). Contact the admin."
+        } catch (_: Exception) { "Login failed. Please contact the admin." }
 
     /** Restore a persisted session on app launch so the worker stays logged in across
      *  process death. Re-hydrates from the backend using the saved token. */
@@ -373,21 +404,36 @@ class AppViewModel : ViewModel() {
         sync { api.onTheWay() }
     }
 
+    /** Push the worker's live GPS to the backend so the customer's map shows the real
+     *  expert position + an accurate ETA. Fire-and-forget; never blocks the UI. */
+    fun reportLocation(lat: Double, lng: Double) {
+        sync { api.reportLocation(LatLngBody(lat, lng)) }
+    }
+
     fun markArrived() {
         jobStatus = JobStatus.ARRIVED
         sync { api.arrived() }
     }
 
-    /** OTP-gated start. Returns true if the OTP matches and service begins. */
+    /** OTP-gated start. Returns true if the OTP matches and service begins.
+     *  We adopt the server's job snapshot from the response so the live timer anchors to
+     *  the SERVER's started_at (the same value the customer app uses) — otherwise the two
+     *  timers drift by the request round-trip / local-clock difference. */
     fun verifyOtpAndStart(input: String): Boolean {
         val job = activeJob ?: return false
-        return if (input == job.otp) {
-            jobStatus = JobStatus.IN_PROGRESS
-            serviceStartMs = System.currentTimeMillis()
-            serviceEndMs = 0L
-            sync { api.verifyOtp(OtpBody(input)) }
-            true
-        } else false
+        if (input != job.otp) return false
+        jobStatus = JobStatus.IN_PROGRESS
+        serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
+        serviceEndMs = 0L
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.verifyOtp(OtpBody(input))
+                r.activeJob?.let { activeJob = it }    // now carries the server started_at
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+        return true
     }
 
     fun endService(photo: String? = null) {

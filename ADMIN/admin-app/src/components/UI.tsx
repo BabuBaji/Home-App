@@ -166,3 +166,33 @@ export function Avatar({ name, src, size = 36 }: { name: string; src?: string | 
 
 export const money = (n: number) => '₹' + (n ?? 0).toLocaleString('en-IN')
 export const shortDate = (s?: string | null) => s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+
+/* ---------- location helpers ---------- */
+// Parse a "lat,lng" string (or {lat,lng}) into numbers, or null if not a valid coordinate.
+export function parseLatLng(v: unknown): { lat: number; lng: number } | null {
+  if (v && typeof v === 'object' && 'lat' in (v as any) && 'lng' in (v as any)) {
+    const lat = Number((v as any).lat), lng = Number((v as any).lng)
+    return isFinite(lat) && isFinite(lng) && (lat || lng) ? { lat, lng } : null
+  }
+  const m = String(v ?? '').match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/)
+  if (!m) return null
+  const lat = Number(m[1]), lng = Number(m[2])
+  return isFinite(lat) && isFinite(lng) && (lat || lng) ? { lat, lng } : null
+}
+
+/* ---------- mini map (no dependency — OpenStreetMap embed with a marker) ---------- */
+export function MiniMap({ lat, lng, height = 200, label }: { lat: number; lng: number; height?: number; label?: string }) {
+  const d = 0.008
+  const bbox = `${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}`
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lng}`
+  const link = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
+  return (
+    <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line)' }}>
+      <iframe title="Customer location" src={src} loading="lazy" style={{ width: '100%', height, border: 0, display: 'block' }} />
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--card, #fff)' }}>
+        <span className="muted" style={{ fontSize: 12 }}>📍 {lat.toFixed(5)}, {lng.toFixed(5)}{label ? ` · ${label}` : ''}</span>
+        <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 700, color: 'var(--violet, #5b51e8)' }}>Open in Maps</a>
+      </div>
+    </div>
+  )
+}

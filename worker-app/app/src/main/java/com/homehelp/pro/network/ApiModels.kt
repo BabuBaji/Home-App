@@ -213,6 +213,7 @@ data class WalletOpResponse(
 data class AuthRequest(val phone: String, val otp: String? = null)
 data class OtpBody(val otp: String)
 data class EndBody(val photo: String? = null)
+data class LatLngBody(val lat: Double, val lng: Double)
 data class AmountBody(val amount: Int)
 data class WithdrawBody(val amount: Int, val method: String, val otp: String)
 data class AdvanceBody(val amount: Int)

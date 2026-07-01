@@ -1,5 +1,11 @@
 package com.homehelp.pro
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -123,12 +130,20 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 shape = RoundedCornerShape(12.dp),
             )
             Text("Demo OTP: any 4 digits", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            if (vm.loginError != null) {
+                Text(
+                    vm.loginError!!,
+                    color = Color(0xFFD92D20), fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
             Spacer(Modifier.height(16.dp))
-            PrimaryButton("Verify & Continue", enabled = otp.length == 4) {
+            PrimaryButton(if (vm.loggingIn) "Verifying…" else "Verify & Continue", enabled = otp.length == 4 && !vm.loggingIn) {
                 vm.login(phone, otp)
-                nav.navigate(Routes.HOME) {
-                    popUpTo(Routes.LOGIN) { inclusive = true }
-                }
+            }
+            // Navigate to Home ONLY after the backend confirms the worker is registered & active.
+            LaunchedEffect(vm.isLoggedIn) {
+                if (vm.isLoggedIn) nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
             }
         } else {
             PrimaryButton("Get OTP", enabled = phone.length == 10) { otpSent = true }
@@ -209,6 +224,24 @@ fun ServerSettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit = {}) 
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val appCtx = LocalContext.current.applicationContext
+
+    // Ask for notification permission (Android 13+) so background job alerts can show.
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    // Start/stop the background "online" alert service as the worker toggles online.
+    LaunchedEffect(vm.isOnline) {
+        if (vm.isOnline) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            JobAlertService.start(appCtx)
+        } else {
+            JobAlertService.stop(appCtx)
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = { HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },

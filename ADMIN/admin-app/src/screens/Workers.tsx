@@ -1,16 +1,14 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical, Sparkles, Briefcase, Wrench, Hammer, Paintbrush } from 'lucide-react'
-import { fetchWorkers, createWorker, updateWorker, deleteWorker } from '../api'
+import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
+import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices } from '../api'
 import type { Worker } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, shortDate } from '../components/UI'
 import { useStore, can } from '../store'
 
-const SVC_ICONS = [Sparkles, Briefcase, Wrench, Hammer, Paintbrush]
-
 type Stats = { total: number; active: number; pending: number; inactive: number }
 
-type Draft = { name: string; phone: string; email: string; city: string; services: string; status: string }
-const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: '', status: 'pending' }
+type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string }
+const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending' }
 
 export default function Workers() {
   const { admin } = useStore()
@@ -31,9 +29,12 @@ export default function Workers() {
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
   const [viewing, setViewing] = useState<Worker | null>(null)
   const [busy, setBusy] = useState(false)
+  const [allServices, setAllServices] = useState<string[]>([])
 
   const load = () => { setErr(''); fetchWorkers(q, status, city).then(setData).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [q, status, city])
+  // All bookable services → checkbox options for assigning a worker.
+  useEffect(() => { fetchServices().then((s) => setAllServices(s.map((x) => x.name))).catch(() => {}) }, [])
 
   useEffect(() => {
     if (menuId == null) return
@@ -53,12 +54,10 @@ export default function Workers() {
   const rated = data.workers.filter((w) => w.rating > 0)
   const avgRating = rated.length ? (rated.reduce((a, w) => a + w.rating, 0) / rated.length).toFixed(1) : '—'
 
-  const parseServices = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean)
-
   const addWorker = async () => {
     setBusy(true)
     try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: parseServices(draft.services), status: draft.status })
+      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status })
       toast('Worker added')
       setAddOpen(false); setDraft(EMPTY_DRAFT); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -68,7 +67,7 @@ export default function Workers() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: parseServices(editDraft.services), status: editDraft.status })
+      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status })
       toast('Worker updated')
       setEditing(null); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -84,7 +83,7 @@ export default function Workers() {
   }
 
   const openEdit = (w: Worker) => {
-    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: (w.services || []).join(', '), status: w.status })
+    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status })
     setEditing(w)
   }
 
@@ -113,7 +112,7 @@ export default function Workers() {
           </select>
           <select className="select flt" value={service} onChange={(e) => { setService(e.target.value); setPage(1) }}>
             <option value="all">All Services</option>
-            <option>Cleaning</option><option>Plumbing</option><option>Electrical</option>
+            {allServices.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <button className="btn line"><Funnel size={16} /> Filters</button>
           <button className="btn" onClick={() => { setDraft(EMPTY_DRAFT); setAddOpen(true) }}><Plus size={17} /> Add Worker</button>
@@ -152,11 +151,12 @@ export default function Workers() {
                     <td className="muted">{w.email ?? '—'}</td>
                     <td>{w.city ?? '—'}</td>
                     <td>
-                      <div className="row" style={{ gap: 8, color: '#2e90fa' }}>
-                        {SVC_ICONS.slice(0, Math.min(svcCount, 3)).map((Ic, i) => <Ic key={i} size={16} />)}
-                        {svcCount > 3 && <span style={{ color: '#2e90fa', fontSize: 12, fontWeight: 600 }}>+{svcCount - 3}</span>}
-                        {svcCount === 0 && <span className="muted">—</span>}
-                      </div>
+                      {svcCount === 0 ? <span className="muted">—</span> : (
+                        <span className="row" style={{ gap: 5 }}>
+                          {(w.services || []).slice(0, 2).map((s) => <Badge key={s} tone="blue" dot={false}>{s}</Badge>)}
+                          {svcCount > 2 && <span style={{ color: '#2e90fa', fontSize: 12, fontWeight: 700 }}>+{svcCount - 2}</span>}
+                        </span>
+                      )}
                     </td>
                     <td className="num">{w.jobs}</td>
                     <td>
@@ -199,7 +199,7 @@ export default function Workers() {
             <button className="btn" disabled={busy || !draft.name.trim()} onClick={addWorker}>Add Worker</button>
           </>
         }>
-          <WorkerForm draft={draft} onChange={setDraft} />
+          <WorkerForm draft={draft} onChange={setDraft} services={allServices} />
         </Modal>
       )}
 
@@ -210,7 +210,7 @@ export default function Workers() {
             <button className="btn" disabled={busy || !editDraft.name.trim()} onClick={saveEdit}>Save Changes</button>
           </>
         }>
-          <WorkerForm draft={editDraft} onChange={setEditDraft} />
+          <WorkerForm draft={editDraft} onChange={setEditDraft} services={allServices} />
         </Modal>
       )}
 
@@ -237,15 +237,31 @@ export default function Workers() {
 
 const MENU_ITEM: CSSProperties = { display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }
 
-function WorkerForm({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
-  const set = (k: keyof Draft, v: string) => onChange({ ...draft, [k]: v })
+function WorkerForm({ draft, onChange, services }: { draft: Draft; onChange: (d: Draft) => void; services: string[] }) {
+  const set = (k: 'name' | 'phone' | 'email' | 'city' | 'status', v: string) => onChange({ ...draft, [k]: v })
+  const toggleService = (name: string) => {
+    const has = draft.services.includes(name)
+    onChange({ ...draft, services: has ? draft.services.filter((s) => s !== name) : [...draft.services, name] })
+  }
   return (
     <div className="grid" style={{ gap: 12 }}>
       <Field label="Name"><input value={draft.name} onChange={(e) => set('name', e.target.value)} placeholder="Full name" /></Field>
       <Field label="Mobile Number"><input value={draft.phone} onChange={(e) => set('phone', e.target.value)} placeholder="Phone" /></Field>
       <Field label="Email"><input value={draft.email} onChange={(e) => set('email', e.target.value)} placeholder="Email" /></Field>
       <Field label="City"><input value={draft.city} onChange={(e) => set('city', e.target.value)} placeholder="City" /></Field>
-      <Field label="Services"><input value={draft.services} onChange={(e) => set('services', e.target.value)} placeholder="Cleaning, Plumbing" /></Field>
+      <div className="field">
+        <span>Services{draft.services.length > 0 ? ` · ${draft.services.length} selected` : ''}</span>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
+          {services.length === 0
+            ? <span className="muted" style={{ fontSize: 13 }}>Loading services…</span>
+            : services.map((name) => (
+                <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={draft.services.includes(name)} onChange={() => toggleService(name)} />
+                  <span>{name}</span>
+                </label>
+              ))}
+        </div>
+      </div>
       <Field label="Status">
         <select value={draft.status} onChange={(e) => set('status', e.target.value)}>
           <option value="pending">Pending</option>
