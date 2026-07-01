@@ -139,14 +139,9 @@
       "fileName": ""
     },
     {
-      "name": "Police Verification",
-      "status": "Verified",
+      "name": "Passport Size Photo",
+      "status": "Pending",
       "fileName": ""
-    },
-    {
-      "name": "Address Proof",
-      "status": "Under Review",
-      "fileName": "address.pdf"
     }
   ],
   "jobIndex": 0,

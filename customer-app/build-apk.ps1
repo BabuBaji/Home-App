@@ -4,8 +4,8 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
 # Toolchain (adjust if your paths differ)
-$env:JAVA_HOME   = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot'
-$env:ANDROID_HOME = 'C:\Users\balaj\Android\Sdk'
+$env:JAVA_HOME   = 'C:\Users\Smartgrow\Android\jdk\jdk-17.0.19+10'
+$env:ANDROID_HOME = 'C:\Users\Smartgrow\Android\Sdk'
 
 # 1) Detect LAN IPv4 (prefer Wi-Fi)
 $ip = (Get-NetIPAddress -AddressFamily IPv4 |

@@ -1,5 +1,11 @@
 package com.homehelp.pro
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,24 +23,45 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -100,12 +127,20 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 shape = RoundedCornerShape(12.dp),
             )
             Text("Demo OTP: any 4 digits", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            if (vm.loginError != null) {
+                Text(
+                    vm.loginError!!,
+                    color = Color(0xFFD92D20), fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
             Spacer(Modifier.height(16.dp))
-            PrimaryButton("Verify & Continue", enabled = otp.length == 4) {
+            PrimaryButton(if (vm.loggingIn) "Verifying…" else "Verify & Continue", enabled = otp.length == 4 && !vm.loggingIn) {
                 vm.login(phone, otp)
-                nav.navigate(Routes.HOME) {
-                    popUpTo(Routes.LOGIN) { inclusive = true }
-                }
+            }
+            // Navigate to Home ONLY after the backend confirms the worker is registered & active.
+            LaunchedEffect(vm.isLoggedIn) {
+                if (vm.isLoggedIn) nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
             }
         } else {
             PrimaryButton("Get OTP", enabled = phone.length == 10) { otpSent = true }
@@ -132,13 +167,40 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
 
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val appCtx = LocalContext.current.applicationContext
+
+    // Ask for notification permission (Android 13+) so background job alerts can show.
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    // Start/stop the background "online" alert service as the worker toggles online.
+    LaunchedEffect(vm.isOnline) {
+        if (vm.isOnline) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            JobAlertService.start(appCtx)
+        } else {
+            JobAlertService.stop(appCtx)
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = { HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },
+    ) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Column(Modifier.fillMaxWidth().background(Color.White)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Menu, contentDescription = null, tint = TextDark, modifier = Modifier.size(24.dp))
+                Icon(
+                    Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark,
+                    modifier = Modifier.size(24.dp).clickable { scope.launch { drawerState.open() } },
+                )
                 Text("Home", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
                 Spacer(Modifier.size(24.dp))
             }
@@ -167,15 +229,46 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     Switch(
                         checked = vm.isOnline,
                         onCheckedChange = { vm.goOnline(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = GreenSuccess, checkedThumbColor = Color.White),
+                        colors = SwitchDefaults.colors(checkedTrackColor = Purple, checkedThumbColor = Color.White),
                     )
                 }
             }
 
             if (vm.isOnline) {
-                PrimaryButton("🔔  Simulate New Job Request") {
-                    vm.requestJob()
-                    nav.navigate(Routes.NEW_JOB)
+                val ctx = LocalContext.current
+                if (vm.hasIncomingJob) {
+                    // A real customer has booked — show the New Job Request notification.
+                    Box(
+                        Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp))
+                            .clickable {
+                                vm.requestJob { found ->
+                                    if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
+                                }
+                            }
+                            .padding(18.dp),
+                    ) {
+                        Column {
+                            Text("🔔  New Job Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                            Text("A customer needs your service — tap to view", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                        }
+                    }
+                } else {
+                    // Online and idle — waiting for a real booking (no fake/demo jobs).
+                    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(16.dp)).padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🟢", fontSize = 18.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Waiting for job requests…", color = TextDark, fontWeight = FontWeight.SemiBold)
+                                Text("You'll be notified when a customer books", color = TextGray, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                    OutlineButton("🔄  Check for Jobs", modifier = Modifier.fillMaxWidth()) {
+                        vm.requestJob { found ->
+                            if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "No new job requests right now")
+                        }
+                    }
                 }
             }
 
@@ -219,6 +312,48 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.height(8.dp))
         }
     }
+    }
+}
+
+// Slide-out menu opened by the Home top-bar hamburger. Quick links to the profile
+// sub-screens plus logout — each closes the drawer first, then navigates.
+@Composable
+private fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
+    ModalDrawerSheet(drawerContainerColor = Color.White) {
+        Column(Modifier.background(PurpleLight).fillMaxWidth().padding(20.dp)) {
+            Text(vm.workerName.ifBlank { "HomeHelp Pro" }, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark)
+            Text(vm.workerPhone.ifBlank { "Partner" }, fontSize = 13.sp, color = TextGray)
+        }
+        Spacer(Modifier.height(8.dp))
+
+        fun go(route: String) { close(); nav.navigate(route) }
+        DrawerLink(Icons.Filled.Person, "My Profile") { go(Routes.PROFILE) }
+        DrawerLink(Icons.Filled.Home, "Personal Info") { go(Routes.P_PERSONAL) }
+        DrawerLink(Icons.Filled.Description, "Documents") { go(Routes.P_DOCUMENTS) }
+        DrawerLink(Icons.Filled.AccountBalance, "Bank Details") { go(Routes.P_BANK) }
+        DrawerLink(Icons.Filled.CalendarMonth, "Availability") { go(Routes.P_AVAILABILITY) }
+        DrawerLink(Icons.Filled.Tune, "Preferences") { go(Routes.P_PREFERENCES) }
+        DrawerLink(Icons.Filled.Notifications, "Notification Settings") { go(Routes.P_NOTIFICATIONS) }
+        DrawerLink(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { go(Routes.P_HELP) }
+        DrawerLink(Icons.Filled.Info, "About Us") { go(Routes.P_ABOUT) }
+        Spacer(Modifier.height(8.dp)); HairlineDivider(); Spacer(Modifier.height(8.dp))
+        DrawerLink(Icons.Filled.Logout, "Logout", tint = RedCancel) {
+            close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun DrawerLink(icon: ImageVector, label: String, tint: Color = Purple, onClick: () -> Unit) {
+    NavigationDrawerItem(
+        icon = { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp)) },
+        label = { Text(label, color = if (tint == RedCancel) RedCancel else TextDark, fontWeight = FontWeight.Medium) },
+        selected = false,
+        onClick = onClick,
+        colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.White),
+        modifier = Modifier.padding(horizontal = 12.dp),
+    )
 }
 
 @Composable

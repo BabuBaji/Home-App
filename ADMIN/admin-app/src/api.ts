@@ -36,9 +36,18 @@ export const fetchDashboard = () => req<DashboardData>('/dashboard')
 export const fetchAnalytics = () => req<any>('/analytics')
 export const fetchAudit = () => req<any[]>('/audit')
 
+/* activity monitor (customer + worker + admin) */
+export const fetchActivity = (params: Record<string, string | number> = {}) => {
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, String(v)])).toString()
+  return req<{ total: number; items: any[] }>(`/activity${qs ? '?' + qs : ''}`)
+}
+export const fetchActivityStats = (days = 7) => req<{ total: number; since: string; byActor: { actor_type: string; n: number }[]; byAction: { action: string; n: number }[] }>(`/activity/stats?days=${days}`)
+export const fetchBookingTimeline = (id: number) => req<any[]>(`/bookings/${id}/timeline`)
+
 /* customers */
 export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/customers?q=${encodeURIComponent(q)}&status=${status}`)
 export const fetchCustomer = (id: number) => req<any>(`/customers/${id}`)
+export const createCustomer = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/customers', post('', body))
 export const updateCustomer = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/customers/${id}`, patch(body))
 export const adjustWallet = (id: number, amount: number, note?: string) => req<{ balance: number }>(`/customers/${id}/wallet`, post('', { amount, note }))
 
@@ -47,6 +56,29 @@ export const fetchWorkers = (q = '', status = 'all', city = 'all') => req<{ stat
 export const createWorker = (body: Record<string, unknown>) => req<Worker>('/workers', post('', body))
 export const updateWorker = (id: number, body: Record<string, unknown>) => req<Worker>(`/workers/${id}`, patch(body))
 export const deleteWorker = (id: number) => req<{ ok: boolean }>(`/workers/${id}`, { method: 'DELETE' })
+
+/* worker wallet */
+export const fetchWorkerWallet = (id: number) => req<any>(`/workers/${id}/wallet`)
+export const walletBonus = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/bonus`, post('', body))
+export const walletPenalty = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/penalty`, post('', body))
+export const walletHold = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/hold`, post('', body))
+export const walletReleaseHold = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/release-hold`, post('', body))
+export const walletReleasePending = (id: number, body: Record<string, unknown>) => req<any>(`/workers/${id}/wallet/release-pending`, post('', body))
+export const approveWithdrawal = (id: number, wd: number) => req<any>(`/workers/${id}/wallet/withdrawals/${wd}/approve`, post(''))
+export const rejectWithdrawal = (id: number, wd: number, reason: string) => req<any>(`/workers/${id}/wallet/withdrawals/${wd}/reject`, post('', { reason }))
+export const approveAdvance = (id: number, adv: number) => req<any>(`/workers/${id}/wallet/advances/${adv}/approve`, post(''))
+export const rejectAdvance = (id: number, adv: number, reason: string) => req<any>(`/workers/${id}/wallet/advances/${adv}/reject`, post('', { reason }))
+export const generateWorkerPayslip = (id: number, month?: string) => req<any>(`/workers/${id}/wallet/payslip`, post('', { month }))
+export const approveWorkerBank = (id: number) => req<any>(`/workers/${id}/bank/approve`, post(''))
+export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/workers/${id}/bank/reject`, post('', { reason }))
+export async function downloadWalletReport() {
+  const res = await fetch(API_BASE + '/api/admin/wallet/report.csv', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+  if (!res.ok) throw new Error('Could not export report')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = 'wallet-report.csv'; a.click()
+  URL.revokeObjectURL(url)
+}
 
 /* bookings */
 export const fetchBookings = (status = 'all', q = '') => req<AdminBooking[]>(`/bookings?status=${status}&q=${encodeURIComponent(q)}`)
@@ -70,9 +102,10 @@ export const updateComplaint = (id: number, body: Record<string, unknown>) => re
 
 /* tickets */
 export const fetchTickets = () => req<Ticket[]>('/tickets')
-export const updateTicket = (id: number, status: string) => req<Ticket>(`/tickets/${id}`, patch({ status }))
+export const updateTicket = (id: number, body: { status?: string; response?: string }) => req<Ticket>(`/tickets/${id}`, patch(body))
 
 /* notifications */
+export const fetchNotifications = () => req<any[]>('/notifications')
 export const broadcast = (body: Record<string, unknown>) => req<{ ok: boolean; sent: number }>('/notifications/broadcast', post('', body))
 
 /* settings */

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header, FooterCTA, Loading, useToast } from '../components/UI'
 import LiveMap from '../components/LiveMap'
-import { fetchBooking, trackBooking, getSocket, verifyServiceOtp, completeBooking } from '../api'
+import { fetchBooking, trackBooking, getSocket, completeBooking } from '../api'
 import type { Booking } from '../types'
 
 const STEPS = ['Confirmed', 'Assigned', 'On Way', 'Arrived', 'Started', 'Done']
@@ -15,7 +15,6 @@ export default function Track() {
   const toast = useToast()
   const [b, setB] = useState<Booking | null>(null)
   const [busy, setBusy] = useState(false)
-  const [otpInput, setOtpInput] = useState('')
   const [, force] = useState(0)
 
   // 1-second heartbeat so the live service timer re-renders
@@ -33,9 +32,19 @@ export default function Track() {
     }).catch(() => toast('Could not load booking'))
     const s = getSocket()
     const onUpd = (u: Booking) => { if (u.id === bid) setB((p) => ({ ...p, ...u })) }
+    // On (re)connect — e.g. after a dropped link or a server restart — rejoin the
+    // booking room and refetch, so the live status/timer never gets stuck.
+    const onConnect = () => { s.emit('booking:join', bid); fetchBooking(bid).then((d) => setB((p) => ({ ...p, ...d }))).catch(() => {}) }
     s.on('booking:update', onUpd)
-    return () => { s.off('booking:update', onUpd); s.emit('booking:leave', bid) }
+    s.on('connect', onConnect)
+    return () => { s.off('booking:update', onUpd); s.off('connect', onConnect); s.emit('booking:leave', bid) }
   }, [bid])
+
+  // When the worker ends the service (photo uploaded), the booking flips to completed —
+  // take the customer straight to the review/feedback page.
+  useEffect(() => {
+    if (b?.status === 'completed') { const t = setTimeout(() => nav(`/rate/${bid}`, { replace: true }), 700); return () => clearTimeout(t) }
+  }, [b?.status])
 
   if (!b) return <div className="screen"><Header title="Track" /><Loading /></div>
 
@@ -53,9 +62,13 @@ export default function Track() {
   const schedStart = b.scheduled_at ?? null
   const scheduledWaiting = b.status === 'confirmed' && b.otp_released === false && schedStart != null
   const otpReleaseAt = schedStart != null ? schedStart - 60 * 60 * 1000 : null
-  const h = scheduledWaiting
-    ? { t: 'Booking Scheduled', s: 'Your expert will be dispatched near your slot', cls: undefined as string | undefined }
-    : heads[b.status]
+  // No active worker provides this service → tell the customer instead of "assigning…".
+  const noWorker = b.status === 'confirmed' && b.serviceAvailable === false
+  const h = noWorker
+    ? { t: 'No Service Found', s: 'No worker is available for this service in your area yet.', cls: 'red' as string | undefined }
+    : scheduledWaiting
+      ? { t: 'Booking Scheduled', s: 'Your expert will be dispatched near your slot', cls: undefined as string | undefined }
+      : heads[b.status]
   const serving = b.status === 'in_progress' || b.status === 'completed'
   const posLeft = b.pos ? `${8 + b.pos.lng * 70}%` : '10%'
   const posTop = b.pos ? `${18 + b.pos.lat * 55}%` : '20%'
@@ -64,7 +77,12 @@ export default function Track() {
   const DUR_MIN: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
   const targetMin = DUR_MIN[b.items[0]?.durationId] ?? 60
   const startedMs = b.started_at ? new Date(b.started_at).getTime() : Date.now()
-  const elapsedSec = b.status === 'completed' ? targetMin * 60 : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+  const completedMs = b.completed_at ? new Date(b.completed_at).getTime() : null
+  // Completed → show the REAL time the worker spent (completed_at − started_at);
+  // fall back to the booked time only if timestamps are missing.
+  const elapsedSec = b.status === 'completed'
+    ? (b.started_at && completedMs ? Math.max(0, Math.round((completedMs - startedMs) / 1000)) : targetMin * 60)
+    : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
   const targetSec = targetMin * 60
   const remainingSec = Math.max(0, targetSec - elapsedSec)
   const pct = Math.min(100, (elapsedSec / targetSec) * 100)
@@ -74,22 +92,31 @@ export default function Track() {
     return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`
   }
 
-  async function verify() {
-    if (otpInput.length !== 4) return toast('Enter the 4-digit OTP')
-    setBusy(true)
-    try { setB(await verifyServiceOtp(bid, otpInput)); toast('OTP verified · service started') }
-    catch (e) { toast((e as Error).message) } finally { setBusy(false) }
-  }
   async function complete() { setBusy(true); try { await completeBooking(bid); nav(`/rate/${bid}`, { replace: true }) } catch (e) { toast((e as Error).message); setBusy(false) } }
 
   const phone = '+919876500000'
+  const proPhone = b.pro?.phone || phone // the assigned worker's real number (else support line)
   const waMsg = encodeURIComponent(`Hi, regarding my HomeHelp booking ${b.ref}`)
+  // Expected arrival clock time = now + ETA minutes (Rapido-style).
+  const arriveBy = (mins: number) => new Date(Date.now() + mins * 60000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 
   return (
     <div className="screen">
       <Header title="Track Your Expert" />
       <div className="content pad-cta">
         <div className="track-status"><h2 className={h.cls}>{h.t}</h2><p>{h.s}</p></div>
+
+        {noWorker && (
+          <div className="card" style={{ border: '1px solid #f3c0c0', background: '#fff5f5' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 22 }}>🚫</span>
+              <div>
+                <div style={{ fontWeight: 700, color: '#c0392b', marginBottom: 2 }}>No worker found for this service</div>
+                <div className="muted sm">No active expert currently offers “{b.items?.[0]?.name || 'this service'}”. We’ll auto-assign one the moment a matching expert is available. You can also cancel for a full refund.</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {scheduledWaiting && (
           <div className="card sched-card">
@@ -113,20 +140,52 @@ export default function Track() {
           ))}
         </div>
 
-        {b.status !== 'cancelled' && !scheduledWaiting && <LiveMap booking={b} />}
+        {b.status !== 'cancelled' && !scheduledWaiting && !noWorker && <LiveMap booking={b} />}
 
-        {(b.status === 'on_the_way' || b.status === 'worker_assigned') && <div className="eta-bar"><div>📍 {b.dist ?? 2.4} km away</div><div>🕐 {b.eta ?? 12} mins</div></div>}
-        {b.status === 'arrived' && <div className="eta-bar"><div>📍 Arrived</div><div>🕐 Just now</div></div>}
-        {serving && <div className="eta-bar"><div>🧹 {b.status === 'completed' ? 'Completed' : 'In progress'}</div><div>🕐 ~{b.eta ?? 28} min</div></div>}
+        {(b.status === 'on_the_way' || b.status === 'worker_assigned') && (
+          b.eta != null ? (
+            <div className="card" style={{ background: '#eef0ff', border: '1px solid #d7d3f7', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 26 }}>🛵</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 16, color: '#4840c4' }}>Arriving in ~{b.eta} min</div>
+                <div className="muted sm">Reaches you by <b>{arriveBy(b.eta)}</b>{b.dist != null ? ` · ${b.dist} km away` : ''}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="eta-bar"><div>🛵 {b.status === 'on_the_way' ? 'On the way' : 'Expert assigned'}</div><div>Finding the best route…</div></div>
+          )
+        )}
+        {b.status === 'arrived' && <div className="eta-bar"><div>📍 Arrived</div><div>🕐 At your location</div></div>}
+        {serving && <div className="eta-bar"><div>🧹 {b.status === 'completed' ? 'Completed' : 'In progress'}</div><div>🕐 {b.status === 'completed' ? 'Done' : 'Service running'}</div></div>}
 
-        {b.status !== 'cancelled' && !scheduledWaiting && (
+        {b.status !== 'cancelled' && !scheduledWaiting && !noWorker && (
           <div className="card pro-card">
             <div className="ava">👩🏻</div>
-            <div><div className="pn">{b.pro_name}</div><div className="pr">🏅 Verified Expert · ⭐ {b.pro_rating}</div></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="pn">{b.pro?.name || b.pro_name}</div>
+              <div className="pr">⭐ {b.pro?.rating ?? b.pro_rating} · <b>{(b.pro?.servicesDone ?? 0).toLocaleString('en-IN')} services done</b> · {b.pro?.reviewsCount ?? 0} reviews</div>
+              {b.pro?.services && b.pro.services.length > 0 && <div className="pr" style={{ marginTop: 2 }}>🧰 {b.pro.services.join(' · ')}</div>}
+              {b.pro?.phone && <div className="pr" style={{ marginTop: 2 }}>📞 {b.pro.phone}</div>}
+            </div>
             <div className="pro-actions">
-              <a className="circle-btn" href={`tel:${phone}`}>📞</a>
+              <a className="circle-btn" href={`tel:${proPhone}`} aria-label="Call worker">📞</a>
               <button className="circle-btn" onClick={() => toast('Chat opening…')}>💬</button>
-              <a className="circle-btn wa" href={`https://wa.me/${phone.replace('+', '')}?text=${waMsg}`} target="_blank">🟢</a>
+              <a className="circle-btn wa" href={`https://wa.me/${proPhone.replace(/[^0-9]/g, '')}?text=${waMsg}`} target="_blank">🟢</a>
+            </div>
+          </div>
+        )}
+
+        {!noWorker && b.pro?.reviews && b.pro.reviews.length > 0 && (
+          <div className="card">
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>What customers say about {b.pro.name.split(' ')[0]}</div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {b.pro.reviews.slice(0, 3).map((r, i) => (
+                <div key={i} style={{ borderTop: i ? '1px solid #f0eef9' : 'none', paddingTop: i ? 10 : 0 }}>
+                  <div style={{ fontSize: 13 }}>{'⭐'.repeat(Math.max(1, Math.min(5, r.rating || 5)))}</div>
+                  {r.review && <div style={{ fontSize: 13, color: '#444', margin: '2px 0' }}>“{r.review}”</div>}
+                  <div className="muted sm">— {r.customer}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -140,13 +199,9 @@ export default function Track() {
         {b.status === 'arrived' && (
           <div className="otp-box">
             <div className="ot">📋 Start Service OTP</div>
-            <p className="muted sm">Share this OTP with your expert to begin</p>
+            <p className="muted sm">Read this code out to your expert — they enter it to start the service</p>
             <div className="otp-digits">{(b.service_otp ?? '').split('').map((d, i) => <span key={i}>{d}</span>)}</div>
-            <div className="otp-entry-wrap">
-              <p className="muted sm">Expert enters it here to start the service</p>
-              <input className="otp-entry" value={otpInput} inputMode="numeric" placeholder="• • • •"
-                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-            </div>
+            <p className="muted sm">⏳ Waiting for {b.pro_name} to start the service…</p>
           </div>
         )}
         {(b.status === 'in_progress' || b.status === 'completed') && (
@@ -167,7 +222,7 @@ export default function Track() {
             <button className="btn-ghost danger-ghost" onClick={() => nav(`/cancel/${bid}`)}>Cancel</button>
           </div>
         )}
-        {b.status === 'arrived' && <button className="btn full" onClick={verify} disabled={busy || otpInput.length !== 4}>{busy ? 'Verifying…' : 'Verify OTP & Start Service'}</button>}
+        {b.status === 'arrived' && <button className="btn full" disabled>Waiting for expert to start…</button>}
         {b.status === 'in_progress' && <button className="btn full" onClick={complete} disabled={busy}>Mark Service Completed</button>}
         {(b.status === 'completed') && <button className="btn full" onClick={() => nav(`/rate/${bid}`)}>Rate your experience</button>}
         {(b.status === 'cancelled') && <button className="btn full" onClick={() => nav('/bookings', { replace: true })}>Go to My Bookings</button>}

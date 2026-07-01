@@ -9,6 +9,7 @@ import Login from './screens/Login'
 import Dashboard from './screens/Dashboard'
 import Customers from './screens/Customers'
 import Workers from './screens/Workers'
+import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
 import Pricing from './screens/Pricing'
@@ -19,8 +20,10 @@ import Notifications from './screens/Notifications'
 import Tickets from './screens/Tickets'
 import Reports from './screens/Reports'
 import Analytics from './screens/Analytics'
+import Activity from './screens/Activity'
 import SettingsScreen from './screens/Settings'
 import Admins from './screens/Admins'
+import Roles from './screens/Roles'
 
 export default function App() {
   const { admin, signIn, setAdmin } = useStore()
@@ -37,7 +40,9 @@ export default function App() {
           <Route path="/dashboard" element={<Page><Dashboard /></Page>} />
           <Route path="/customers" element={<Page><Customers /></Page>} />
           <Route path="/workers" element={<Page><Workers /></Page>} />
+          <Route path="/worker-wallet" element={<Page><WorkerWallet /></Page>} />
           <Route path="/bookings" element={<Page><Bookings /></Page>} />
+          <Route path="/cancellations" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
           <Route path="/pricing" element={<Page><Pricing /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
@@ -47,8 +52,10 @@ export default function App() {
           <Route path="/tickets" element={<Page><Tickets /></Page>} />
           <Route path="/reports" element={<Page><Reports /></Page>} />
           <Route path="/analytics" element={<Page><Analytics /></Page>} />
+          <Route path="/activity" element={<Page><Activity /></Page>} />
           <Route path="/settings" element={<Page><SettingsScreen /></Page>} />
           <Route path="/admins" element={<Page><Admins /></Page>} />
+          <Route path="/roles" element={<Page><Roles /></Page>} />
         </Route>
         <Route path="*" element={<Navigate to={admin ? '/dashboard' : '/login'} replace />} />
       </Routes>

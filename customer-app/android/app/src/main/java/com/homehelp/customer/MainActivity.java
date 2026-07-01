@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(LocationServicesPlugin.class);
+        registerPlugin(UpiPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

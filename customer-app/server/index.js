@@ -14,6 +14,14 @@ import {
 } from './db.js'
 import { detailsFor, durationsFor, applyCoupon, priceBreakdown, COUPONS, CANCEL_REASONS, REFERRAL, TRUST_BADGES, PAYMENT_METHODS, EXTERNAL_METHODS } from './catalog.js'
 import { createAdminRouter } from './admin.js'
+import { createWorkerRouter } from './worker.js'
+import { setBookingCoords, anyActiveWorkerForServices, workerPublicProfile, workerLastLocation, distanceKm } from './worker-db.js'
+import { confirmWorkerSettlement, recordIncome } from './worker-wallet-db.js'
+import { quoteCancellation } from './cancellation.js'
+import { createPaymentsRouter } from './payments.js'
+import { recordExternalPayment, createPayment } from './payments-db.js'
+import { getSetting } from './admin-db.js'
+import { logActivity } from './activity-db.js'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -21,19 +29,27 @@ import { readFileSync } from 'node:fs'
    Keys are read from server/payment.config.json (gitignored) or env vars.
    With no keys present, payments fall back to MOCK mode so the app still runs. */
 let RZP = { keyId: process.env.RAZORPAY_KEY_ID || '', keySecret: process.env.RAZORPAY_KEY_SECRET || '' }
+// Payee VPA the customer pays INTO (company UPI handle). Money is company-first.
+// upiMode: 'demo' = show an in-app UPI pay screen (no real money, no valid VPA needed);
+//          'live' = deep-link into the real UPI app (needs a real, registered upiVpa).
+let UPI = { vpa: process.env.UPI_VPA || 'homehelp@upi', payeeName: process.env.UPI_PAYEE_NAME || 'HomeHelp Services', mode: process.env.UPI_MODE || 'demo' }
 try {
   const c = JSON.parse(readFileSync(new URL('./payment.config.json', import.meta.url), 'utf8'))
   RZP = { keyId: c.keyId || RZP.keyId, keySecret: c.keySecret || RZP.keySecret }
+  UPI = { vpa: c.upiVpa || UPI.vpa, payeeName: c.payeeName || UPI.payeeName, mode: c.upiMode || UPI.mode }
 } catch { /* no config file → mock mode */ }
 const RZP_LIVE = !!(RZP.keyId && RZP.keySecret)
 const verifiedPayments = new Map() // razorpay_payment_id -> { amount, at }
 
 const app = express()
 app.use(cors())
-app.use(express.json({ limit: '6mb' })) // allow review photo data-URLs
+// Keep the raw body so gateway/payout webhooks can verify HMAC signatures over the exact bytes.
+app.use(express.json({ limit: '6mb', verify: (req, _res, buf) => { req.rawBody = buf } }))
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 app.use('/api/admin', createAdminRouter(io)) // admin panel API (workers, settings, dashboard, …)
+app.use('/api/worker', createWorkerRouter(io)) // worker app API (HomeHelp Pro) — shares bookings/DB/socket
+app.use('/api/payments', createPaymentsRouter(io)) // payment + payout gateway webhooks (signed, idempotent)
 const room = (id) => `booking:${id}`
 const now = () => new Date()
 const otp4 = () => String(Math.floor(1000 + Math.random() * 9000))
@@ -100,6 +116,7 @@ app.post('/api/auth/verify-otp', (req, res) => {
   if (String(req.body?.otp || '') !== otpStore.get(phone)) return res.status(401).json({ error: 'Invalid OTP' })
   otpStore.delete(phone)
   const u = findOrCreateUser(phone)
+  logActivity({ actorType: 'customer', actorId: u.id, actorName: u.name, action: 'customer.login', entityType: 'customer', entityId: u.id, detail: `Signed in (${phone})` })
   res.json({ token: 'demo-' + u.id, user: publicUser(u) })
 })
 app.post('/api/auth/google', (req, res) => {
@@ -108,6 +125,7 @@ app.post('/api/auth/google', (req, res) => {
   else if (req.body?.demo) p = { email: 'rahul.sharma@gmail.com', name: 'Rahul Sharma' }
   else return res.status(400).json({ error: 'Missing Google credential' })
   const u = findOrCreateGoogleUser(p)
+  logActivity({ actorType: 'customer', actorId: u.id, actorName: u.name, action: 'customer.login', entityType: 'customer', entityId: u.id, detail: `Signed in with Google (${u.email || ''})` })
   res.json({ token: 'demo-' + u.id, user: publicUser(u) })
 })
 
@@ -145,7 +163,13 @@ app.get('/api/payment/methods', (_q, res) => res.json({ methods: PAYMENT_METHODS
 
 // Tells the client which flow to use and exposes the PUBLIC key id (never the secret).
 app.get('/api/payment/config', (_q, res) =>
-  res.json({ provider: RZP_LIVE ? 'razorpay' : 'mock', keyId: RZP_LIVE ? RZP.keyId : null }))
+  res.json({
+    provider: RZP_LIVE ? 'razorpay' : 'mock', keyId: RZP_LIVE ? RZP.keyId : null,
+    // UPI payee so the app can deep-link into PhonePe/GPay/Paytm with the amount prefilled.
+    upiVpa: getSetting('upi_vpa', '') || UPI.vpa,
+    payeeName: getSetting('upi_payee_name', '') || UPI.payeeName,
+    upiMode: getSetting('upi_mode', '') || UPI.mode, // 'demo' | 'live'
+  }))
 
 // Create an order. Real Razorpay order when keys are present; otherwise a mock order.
 app.post('/api/payment/order', auth, async (req, res) => {
@@ -185,6 +209,18 @@ app.post('/api/payment/verify', auth, (req, res) => {
   if (expected !== razorpay_signature) return res.status(400).json({ error: 'Payment verification failed' })
   verifiedPayments.set(String(razorpay_payment_id), { at: Date.now() })
   res.json({ ok: true, txnId: razorpay_payment_id })
+})
+
+// Create a payment order (spec: "Backend creates payment order"). Returns an orderId the
+// client opens in the UPI/QR/card/netbanking gateway; the booking is only marked paid when
+// the SIGNED gateway webhook arrives (POST /api/payments/webhook) — never from the frontend.
+app.post('/api/payments/order', auth, (req, res) => {
+  const amount = parseInt(req.body?.amount, 10)
+  if (!amount || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount' })
+  const mode = String(req.body?.mode || 'upi') // upi_intent | upi_qr | upi_id | card | netbanking | wallet
+  const orderId = 'order_' + crypto.randomBytes(8).toString('hex')
+  const p = createPayment({ bookingId: req.body?.bookingId || null, customerId: req.user.id, amount, mode, gateway: 'razorpay', orderId, idempotencyKey: req.body?.idempotencyKey || '' })
+  res.json({ ok: true, orderId, paymentId: `PM${String(p.id).padStart(7, '0')}`, amount, mode, status: 'CREATED' })
 })
 
 // Legacy mock charge (still used when no keys are configured).
@@ -258,10 +294,25 @@ app.post('/api/wallet/add', auth, (req, res) => res.json({ balance: addTransacti
 
 /* ---------- support ---------- */
 app.get('/api/support/reasons', (_q, res) => res.json({ cancelReasons: CANCEL_REASONS }))
+// Public, read-only cancellation & refund policy — reflects the admin-tunable settings
+// so the customer-facing policy page always matches what the engine actually charges.
+app.get('/api/policy/cancellation', (_q, res) => {
+  const int = (k, d) => { const n = parseInt(getSetting(k, String(d)), 10); return Number.isFinite(n) ? n : d }
+  res.json({
+    travelFee: int('cancel_fee', 50),
+    arrivalPct: int('cancel_arrival_pct', 100),
+    commissionPct: int('commission_percent', 20),
+    schedFullHrs: int('cancel_sched_full_hrs', 6),
+    schedHalfHrs: int('cancel_sched_half_hrs', 3),
+    schedHalfPct: int('cancel_sched_half_pct', 50),
+  })
+})
 app.get('/api/tickets', auth, (req, res) => res.json(getTickets(req.user.id)))
 app.post('/api/tickets', auth, (req, res) => {
   if (!req.body?.message) return res.status(400).json({ error: 'Describe your issue' })
-  res.status(201).json(createTicket(req.user.id, req.body.category || 'General', req.body.message))
+  const t = createTicket(req.user.id, req.body.category || 'General', req.body.message)
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'support.ticket', entityType: 'ticket', entityId: t?.id, ref: t?.ref, detail: `Raised ticket: ${req.body.category || 'General'}` })
+  res.status(201).json(t)
 })
 
 /* ---------- bookings ---------- */
@@ -269,7 +320,18 @@ app.get('/api/bookings', auth, (req, res) => res.json(getBookings(req.user.id).m
 app.get('/api/bookings/:id', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  res.json(publicBooking(b))
+  const serviceAvailable = anyActiveWorkerForServices((b.items || []).map((i) => i.name))
+  const pro = b.worker_id ? workerPublicProfile(b.worker_id) : null
+  // Real distance + ETA from the worker's last-known GPS so the route/ETA is ready on load.
+  let travel = {}
+  if (b.worker_id) {
+    const wp = workerLastLocation(b.worker_id)
+    if (wp && b.cust_lat != null && b.cust_lng != null) {
+      const d = distanceKm(wp.lat, wp.lng, b.cust_lat, b.cust_lng)
+      if (d != null) travel = { pos: { lat: wp.lat, lng: wp.lng }, dist: +d.toFixed(1), eta: Math.max(1, Math.round(d * 2.5)) }
+    }
+  }
+  res.json({ ...publicBooking(b), serviceAvailable, pro, ...travel })
 })
 app.post('/api/bookings', auth, (req, res) => {
   const body = req.body || {}
@@ -284,26 +346,41 @@ app.post('/api/bookings', auth, (req, res) => {
   const isCash = payment === 'cash'
   const isWallet = payment === 'wallet'
   let paymentStatus = isCash ? 'pending' : 'paid'
-  // With real Razorpay configured, an online booking is only "paid" once we've
-  // verified the gateway payment (the client passes the verified paymentId).
-  if (RZP_LIVE && !isCash && !isWallet) {
+  // UPI-direct (deep-link straight into PhonePe/GPay/Paytm) is confirmed in-app, so it carries no
+  // Razorpay paymentId. Only the Razorpay-routed methods (cards / net banking) need gateway
+  // verification — those go through Checkout and pass a verified paymentId.
+  const upiDirect = ['phonepe', 'gpay', 'paytm', 'bhim', 'upi'].includes(payment)
+  if (RZP_LIVE && !isCash && !isWallet && !upiDirect) {
     const pid = String(body.paymentId || '')
     if (!verifiedPayments.has(pid)) return res.status(402).json({ error: 'Payment not verified' })
     verifiedPayments.delete(pid) // single use
     paymentStatus = 'paid'
   }
 
-  const booking = createBooking({
+  let booking = createBooking({
     ref: ref(), user_id: req.user.id, type: body.type || 'instant', freq: body.freq, note: body.note,
     date: body.date, time: body.time, address, payment, payment_status: paymentStatus,
     items: q.items, duration: q.items[0]?.durationLabel,
     subtotal: pb.subtotal, fee: pb.fee, tax: pb.tax, discount: pb.discount, coupon, total: pb.total,
     status: 'confirmed', service_otp: otp4(),
   })
+  // Capture the customer's live location so the assigned worker can see it on their map.
+  if (body.lat != null && body.lng != null) { setBookingCoords(booking.id, body.lat, body.lng); booking = getBooking(booking.id) }
   // Only the in-app wallet reduces the balance; external gateway methods (UPI/card/
   // netbanking) are settled outside, so we just record them as paid.
   if (isWallet) addTransaction(req.user.id, 'debit', `Booking Payment ${booking.ref}`, pb.total, booking.ref)
-  res.status(201).json(publicBooking(booking))
+  // Record the customer payment in the finance ledger (online/wallet are paid up-front;
+  // cash is recorded at settlement time when the worker collects). Company-first: this money
+  // belongs to the platform account until the booking is settled to the worker.
+  if (paymentStatus === 'paid') {
+    try { recordExternalPayment({ bookingId: booking.id, customerId: req.user.id, amount: pb.total, mode: isWallet ? 'wallet' : payment, gateway: isWallet ? 'wallet' : 'razorpay', paymentId: body.paymentId || '' }) } catch { /* finance optional */ }
+  }
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.create', entityType: 'booking', entityId: booking.id, ref: booking.ref, detail: `Booked ${q.items.map((i) => i.name).join(', ')} · ₹${pb.total}`, meta: { total: pb.total, payment, payment_status: paymentStatus, items: q.items.map((i) => i.name) } })
+  if (paymentStatus === 'paid') logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'payment.success', entityType: 'booking', entityId: booking.id, ref: booking.ref, detail: `Paid ₹${pb.total} via ${payment}`, meta: { amount: pb.total, mode: isWallet ? 'wallet' : payment } })
+  // Is there an active worker who actually provides this service? If not, the customer is
+  // told "no service found" — nobody can be dispatched for it.
+  const serviceAvailable = anyActiveWorkerForServices(q.items.map((i) => i.name))
+  res.status(201).json({ ...publicBooking(booking), serviceAvailable })
 })
 
 /* ---------- real-time tracking ----------
@@ -337,6 +414,12 @@ app.post('/api/bookings/:id/track', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   // A future scheduled booking waits — the expert is only dispatched 1 hour before the slot.
   if (!serviceWindowOpen(b)) return res.json({ ok: false, scheduled: true, ...publicBooking(b) })
+  // Unified with the HomeHelp Pro worker app: a REAL worker drives the live status
+  // (assigned → on the way → arrived → in progress). The customer just subscribes to the
+  // booking room and reflects the worker's updates over socket.io. The old simulated
+  // "Anjali Verma" dispatch is only used as a fallback when no worker app is in play
+  // (set SIMULATE_DISPATCH=1 to re-enable it for the standalone customer demo).
+  if (b.worker_id || process.env.SIMULATE_DISPATCH !== '1') return res.json({ ok: true, live: true })
   startTracking(b.id); res.json({ ok: true })
 })
 app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
@@ -345,6 +428,7 @@ app.post('/api/bookings/:id/verify-otp', auth, (req, res) => {
   if (!serviceWindowOpen(b)) return res.status(409).json({ error: 'This scheduled service has not started yet' })
   if (String(req.body?.otp) !== b.service_otp) return res.status(401).json({ error: 'Incorrect OTP' })
   const u = setBookingStarted(b.id) // status -> in_progress + stamp started_at
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)', meta: { status: 'in_progress' } })
   io.to(room(b.id)).emit('booking:update', u); res.json(u)
 })
 app.post('/api/bookings/:id/complete', auth, (req, res) => {
@@ -352,6 +436,9 @@ app.post('/api/bookings/:id/complete', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   let u = setBookingStatus(b.id, 'completed')
   if (b.payment === 'cash') u = setPaymentStatus(b.id, 'paid')
+  // Customer confirms the job is done -> system verifies and credits the worker (Pending -> QC).
+  confirmWorkerSettlement(getBooking(b.id))
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.complete', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Customer confirmed completion', meta: { status: 'completed' } })
   io.to(room(b.id)).emit('booking:update', u); res.json(u)
 })
 app.post('/api/bookings/:id/reschedule', auth, (req, res) => {
@@ -359,22 +446,40 @@ app.post('/api/bookings/:id/reschedule', auth, (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   res.json(rescheduleBooking(b.id, req.body?.date, req.body?.time))
 })
+// Preview the refund/fee for a cancellation before the customer confirms it.
+app.get('/api/bookings/:id/cancel-quote', auth, (req, res) => {
+  const b = getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  res.json(quoteCancellation(b))
+})
 app.post('/api/bookings/:id/cancel', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  // Policy engine decides refund / fee / worker compensation from the booking's stage.
+  const q = quoteCancellation(b)
+  if (!q.allowed) return res.status(409).json({ error: q.note || 'This booking can no longer be cancelled.' })
   if (sims.has(b.id)) { clearInterval(sims.get(b.id)); sims.delete(b.id) }
-  // fee: free before pro is on the way, else ₹50
-  const fee = ['confirmed', 'worker_assigned'].includes(b.status) ? 0 : 50
-  const refundable = b.payment === 'cash' ? 0 : Math.max(0, b.total - fee)
-  const u = cancelBookingRow(b.id, req.body?.reason || 'Not specified', fee, refundable)
+
+  const refundable = q.refund
+  const u = cancelBookingRow(b.id, req.body?.reason || 'Not specified', q.fee, refundable,
+    { cancelledBy: 'customer', workerComp: q.workerComp, refundStatus: refundable > 0 ? 'refunded' : 'none' })
   if (refundable > 0) { addTransaction(req.user.id, 'credit', `Refund ${b.ref}`, refundable, b.ref); setPaymentStatus(b.id, 'refunded') }
+  // Pay the worker a travel/visit fee if they were already dispatched when cancelled.
+  if (q.workerComp > 0 && b.worker_id) {
+    try { recordIncome(b.worker_id, q.stage === 'arrived' ? 'Visit Fee (Cancellation)' : 'Travel Compensation', q.workerComp, { label: b.ref, bucket: 'available' }) } catch { /* wallet not set up for this worker */ }
+  }
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.cancel', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Cancelled (${q.title}): ${req.body?.reason || 'Not specified'}`, meta: { model: q.model, stage: q.stage, fee: q.fee, refund: refundable, workerComp: q.workerComp } })
   io.to(room(b.id)).emit('booking:update', getBooking(b.id))
-  res.json(getBooking(b.id))
+  res.json(u)
 })
 app.post('/api/bookings/:id/review', auth, (req, res) => {
   const b = getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  res.json(setBookingReview(b.id, Number(req.body?.rating) || 5, req.body?.review, req.body?.photo))
+  const reviewed = setBookingReview(b.id, Number(req.body?.rating) || 5, req.body?.review, req.body?.photo)
+  logActivity({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.review', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Rated ${Number(req.body?.rating) || 5}★`, meta: { rating: Number(req.body?.rating) || 5 } })
+  // Submitting the review is the customer's confirmation -> settle the worker if not already done.
+  confirmWorkerSettlement(getBooking(b.id))
+  res.json(reviewed)
 })
 
 /* ---------- socket ---------- */

@@ -164,19 +164,85 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    DetailScaffold("Bank Details", nav) {
+    var reenter by remember { mutableStateOf("") }
+    var chequeName by remember { mutableStateOf("") }
+    var otpStep by remember { mutableStateOf(false) }
+    var otp by remember { mutableStateOf("") }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) { chequeName = pickedFileName(ctx, uri); toast(ctx, "Attached: $chequeName") }
+    }
+    val (pillBg, pillFg) = when (vm.bankStatus) {
+        "Approved" -> GreenLight to GreenSuccess
+        "Pending Verification" -> Color(0xFFFFF3D6) to Gold
+        "Rejected" -> Color(0xFFFDE7E7) to RedCancel
+        else -> PurpleLight to Purple
+    }
+
+    DetailScaffold("Bank & KYC", nav) {
+        // Verification status — and the rule that withdrawals need an Approved account.
         Card {
-            Text("Payouts are sent to this account", fontSize = 12.sp, color = TextGray)
-            Spacer(Modifier.height(8.dp))
-            Text(vm.bankName, fontWeight = FontWeight.Bold, color = TextDark)
-            Text("A/c ${vm.bankAccount}", color = TextDark)
-            Text("IFSC ${vm.bankIfsc}", fontSize = 12.sp, color = TextGray)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Verification Status", fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                StatusPill(if (vm.bankStatus == "Not Added") "Not Added" else vm.bankStatus, pillBg, pillFg)
+            }
+            if (vm.bankStatus == "Rejected" && vm.bankRemarks.isNotBlank()) {
+                Spacer(Modifier.height(6.dp)); Text("Reason: ${vm.bankRemarks}", fontSize = 12.sp, color = RedCancel)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (vm.bankApproved) "Your account is verified — you can withdraw money."
+                else "You can withdraw only after admin approves your bank account.",
+                fontSize = 12.sp, color = if (vm.bankApproved) GreenSuccess else TextGray,
+            )
         }
-        Field("Account Holder Name", vm.bankHolder) { vm.bankHolder = it }
-        Field("Bank Name", vm.bankName) { vm.bankName = it }
-        Field("Account Number", vm.bankAccount) { vm.bankAccount = it }
-        Field("IFSC Code", vm.bankIfsc) { vm.bankIfsc = it }
-        PrimaryButton("Update Bank Details") { vm.saveBank(); toast(ctx, "Bank details updated (re-verification required)") }
+
+        if (!otpStep) {
+            Field("Account Holder Name", vm.bankHolder) { vm.bankHolder = it }
+            Field("Bank Name", vm.bankName) { vm.bankName = it }
+            Field("Account Number", vm.bankAccount) { vm.bankAccount = it }
+            Field("Re-enter Account Number", reenter) { reenter = it }
+            Field("IFSC Code", vm.bankIfsc) { vm.bankIfsc = it }
+            Field("UPI ID (optional)", vm.bankUpi) { vm.bankUpi = it }
+            // Optional cancelled cheque / passbook photo.
+            Box(
+                Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(12.dp))
+                    .clickable { picker.launch("image/*") }.padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CheckCircle, null, tint = if (chequeName.isBlank()) TextGray else GreenSuccess, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(chequeName.ifBlank { "Attach cancelled cheque / passbook (optional)" }, fontSize = 13.sp, color = TextDark)
+                }
+            }
+            PrimaryButton("Continue") {
+                when {
+                    vm.bankHolder.isBlank() || vm.bankName.isBlank() || vm.bankAccount.isBlank() || vm.bankIfsc.isBlank() ->
+                        toast(ctx, "Please fill all required fields")
+                    vm.bankAccount.trim() != reenter.trim() -> toast(ctx, "Account numbers do not match")
+                    else -> otpStep = true
+                }
+            }
+        } else {
+            Card {
+                Text("OTP Confirmation", fontWeight = FontWeight.SemiBold, color = TextDark)
+                Spacer(Modifier.height(4.dp))
+                Text("Enter the 4-digit OTP sent to your registered mobile to confirm these bank details.", fontSize = 12.sp, color = TextGray)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = otp,
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
+                    label = { Text("OTP") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            PrimaryButton("Verify & Submit") {
+                if (otp.length < 4) toast(ctx, "Enter the 4-digit OTP")
+                else {
+                    vm.saveBank(chequeName)
+                    toast(ctx, "Bank submitted — pending admin verification")
+                    otpStep = false; otp = ""; reenter = ""
+                }
+            }
+        }
     }
 }
 
