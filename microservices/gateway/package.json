@@ -1,0 +1,15 @@
+{
+  "name": "hh-api-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HomeHelp API Gateway — single entry point; routes catalogue traffic to the Catalog service and everything else (incl. socket.io) to the legacy monolith.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^2.0.6"
+  }
+}

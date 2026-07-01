@@ -3,6 +3,7 @@ import cors from 'cors'
 import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import {
+  db,
   getServices, getServiceById, updateService,
   findOrCreateUser, findOrCreateGoogleUser, getUser, updateUser,
   getAddresses, addAddress, setDefaultAddress, deleteAddress, ensureDefaultAddressFromLocation,
@@ -142,6 +143,16 @@ app.get('/api/services/:id', (req, res) => {
   const s = getServiceById(req.params.id)
   if (!s) return res.status(404).json({ error: 'Service not found' })
   res.json({ ...s, ...detailsFor(s.id, s.price) })
+})
+// Internal (service-to-service): per-service booking counts, consumed by the Catalog
+// microservice to enrich its admin list. Guarded by a shared key when INTERNAL_KEY is set.
+app.get('/api/internal/service-booking-counts', (req, res) => {
+  if (process.env.INTERNAL_KEY && req.headers['x-internal-key'] !== process.env.INTERNAL_KEY)
+    return res.status(403).json({ error: 'forbidden' })
+  const out = {}
+  for (const s of db.prepare('SELECT id FROM services').all())
+    out[s.id] = db.prepare('SELECT COUNT(*) n FROM bookings WHERE items LIKE ?').get(`%"id":"${s.id}"%`).n
+  res.json(out)
 })
 app.patch('/api/services/:id', (req, res) => {
   const u = updateService(req.params.id, { price: req.body?.price, available: req.body?.available })
