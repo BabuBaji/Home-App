@@ -1,93 +1,77 @@
-# HomeHelp — Microservices (proof of concept)
+# HomeHelp — Microservices Architecture
 
-This is **step 1** of migrating the HomeHelp backend from a modular monolith to
-microservices, using the **strangler-fig pattern**: put a gateway in front, then peel
-services off the monolith one at a time. Nothing in the existing apps has to change — the
-gateway preserves the exact URL contract (`/api/*`, `/api/admin/*`, `/api/worker/*`, `/socket.io`).
+HomeHelp is a **pure microservices** system: there is **no monolith**. Every domain is its own
+deployable service with its **own database**, fronted by a single API gateway, and coordinated
+by a **Redis event bus** (async reactions) plus service-to-service HTTP (synchronous reads).
 
 ## Architecture
 
 ```
-                        ┌───────────────────────────┐
-   Customer / Admin /   │      API Gateway :8080     │
-   Worker apps ────────▶│  (single entry point)      │
-                        └───────┬───────────┬────────┘
-                                │           │
-      /api/services*, /api/admin/services*  │  everything else (+ socket.io ws)
-                                │           │
-                                ▼           ▼
-                   ┌────────────────┐   ┌──────────────────────────┐
-                   │ Catalog svc    │   │  Monolith (customer-app) │
-                   │  :4001         │   │  :4000  (legacy)         │
-                   │  → Postgres    │   │  → SQLite                │
-                   └────────────────┘   └──────────────────────────┘
-                          ▲                        │
-                          └── service-to-service ──┘
-                              (admin auth /api/admin/me,
-                               booking counts /api/internal/…)
+ customer / admin (web, socket.io)          worker (native, REST)
+                    │                                 │
+                    ▼                                 ▼
+        ┌───────────────────────  API Gateway :8080  ───────────────────────┐
+        │  reverse-proxy by path prefix  +  socket.io hub (Redis-relayed)    │
+        └──┬─────┬───────┬────────┬────────┬────────┬───────┬────────┬───────┘
+        auth  catalog  booking  dispatch  payment  wallet  worker  notif   admin
+        4002   4001     4006     4007      4008     4009    4004    4003    4010
+          │      │        │        │         │        │       │       │       │
+        each → its own Postgres DB          └──────── Redis Streams (events) ─┘
 ```
 
-- **API Gateway** (`gateway/`) — Express + `http-proxy-middleware`. Routes catalogue
-  traffic to the Catalog service and everything else (including websockets) to the monolith.
-- **Catalog service** (`catalog-service/`) — owns the service catalogue on its **own
-  Postgres DB**. Serves `GET /api/services`, `GET /api/services/:id`, and admin CRUD
-  under `/api/admin/services`.
-- **Monolith** — the current `services/api`, unchanged except one small internal
-  endpoint (`/api/internal/service-booking-counts`) that the Catalog service calls.
+| Service | Owns | Responsibilities |
+|---|---|---|
+| **gateway** (8080) | — | single entry point; routes every prefix to its service; hosts the socket.io hub, relaying `booking:update` / `services:update` etc. published to Redis by services |
+| **auth** (4002) | users, addresses, transactions, auth_identities | customer identity/login, profile, addresses, customer wallet; internal user/wallet API |
+| **catalog** (4001) | services | catalogue, pricing/quote, coupons, home content; admin service CRUD |
+| **booking** (4006) | bookings, favourites | booking lifecycle, cancellation policy, favourites, notifications feed; emits `booking.*` |
+| **dispatch** (4007) | dispatch_offers | job matching + `/api/worker/jobs/*` lifecycle; orchestrates worker + booking |
+| **payment** (4008) | payments, settlements, payouts, wallet_ledger, webhook_events | customer payments, Razorpay/UPI, signed webhooks, finance panel |
+| **wallet** (4009) | worker_income/deductions/withdrawals/advances/payslips/notifications | worker earnings ledger; settles on `booking.completed` |
+| **worker** (4004) | workers, worker_documents | worker identity/profile/KYC + balance snapshot; admin worker panel |
+| **notification** (4003) | activity_log, tickets, complaints, broadcasts | unified activity feed (consumes all events), support, announcements |
+| **admin** (4010) | admins, settings, audit_log | admin identity + RBAC, config source-of-record, BFF dashboards/analytics |
 
-### Service-to-service patterns demonstrated
-- **Delegated auth** — the Catalog service validates admin tokens by calling the
-  monolith's `GET /api/admin/me` (it doesn't own the admin identity — Auth service will, later).
-- **Data federation** — the admin catalogue list enriches each service with a live
-  booking count fetched from the monolith over HTTP.
-- **Own database per service** — Catalog uses Postgres; the monolith keeps SQLite.
+### Patterns
+- **Database per service** — 9 Postgres instances; no cross-service SQL. Cross-domain reads are
+  internal HTTP calls guarded by `x-internal-key`; cross-domain reactions are events.
+- **Event bus (Redis Streams)** — e.g. `booking.completed` → wallet credits the worker + payment
+  records the settlement + notification logs it, each in its own consumer group (fan-out).
+- **Realtime** — services publish `{room,event,payload}` to a Redis pub/sub channel; the gateway's
+  socket.io hub relays it to the booking room. Services never hold sockets.
+- **Config** — the admin service owns `settings`; `@homehelp/shared` `getSetting()` reads it (cached).
+- **Shared lib** — `services/shared` (`@homehelp/shared`): event bus, realtime, internal HTTP,
+  admin/customer auth middleware, pg pool, config cache. Bundled into each image at build time.
 
 ## Run it
 
-Prereqs: **Docker Desktop**, and the monolith running on the host:
-
 ```bash
-# 1) start the legacy monolith on :4000 (as usual)
-cd services/api && npm start
-
-# 2) from the repo root, bring up Postgres + Catalog + Gateway
-docker compose up --build
+docker compose -f infra/docker-compose.yml up --build      # whole stack (Redis + 9 DBs + 10 services)
+curl http://localhost:8080/health                          # gateway + all upstreams
 ```
 
-Then hit the **gateway** instead of the monolith:
-
+Then everything is reached through the gateway, e.g.:
 ```bash
-curl http://localhost:8080/health                     # gateway
-curl http://localhost:8080/api/services               # served by Catalog service → Postgres
-curl http://localhost:8080/api/dashboard -H '...'      # still the monolith
+curl http://localhost:8080/api/services                    # catalog
+curl -X POST http://localhost:8080/api/admin/login -H 'content-type: application/json' \
+  -d '{"email":"admin@homehelp.in","password":"admin123"}'  # admin (admin-<id> token)
 ```
 
-Point the apps at the gateway to use the microservices path:
-- Admin/customer web (Vite dev): change the proxy target from `http://localhost:4000` to `http://localhost:8080`.
-- Installed apps: set `apiBase` to the gateway URL.
+Apps point at the gateway (`:8080`): customer/admin via `VITE_API_URL` (or the runtime
+`app-config.json`), worker via `RetrofitClient.kt`. `infra/scripts/go-live.ps1` brings the stack
+up and tunnels the **gateway** publicly.
 
-### Run without Docker (quick local test)
+### Import existing monolith data (optional, one-time)
 ```bash
-# needs a local Postgres reachable at DATABASE_URL
-cd services/catalog && npm install && \
-  DATABASE_URL=postgres://homehelp:homehelp@localhost:5432/catalog MONOLITH_URL=http://localhost:4000 npm start
-cd services/gateway && npm install && \
-  CATALOG_URL=http://localhost:4001 MONOLITH_URL=http://localhost:4000 npm start
+cd infra/migrate && npm install && node index.js           # services/api/homehelp.db → per-service Postgres
 ```
 
-## Known boundaries (documented next steps)
-This is a **proof**, so a few things are intentionally deferred:
-
-1. **Booking pricing still reads the monolith's SQLite copy of services.** So an admin
-   price edit via the Catalog service won't change booking pricing until the Booking
-   service calls the Catalog service for prices. *(Next: extract Booking service; have it
-   fetch prices from Catalog.)*
-2. **Realtime `services:update` socket events** are still emitted by the monolith only.
-3. **The monolith is not yet containerized** (it uses `better-sqlite3`/native SQLite). It
-   runs on the host; the gateway reaches it via `host.docker.internal`. *(Next: migrate
-   its data to Postgres and containerize it too.)*
-4. **Coupons/pricing math** remain in the monolith (they belong to a future Pricing service).
-
-## Roadmap (remaining services)
-`Auth ✅` · `Catalog ✅` · `Activity/Notifications ✅` · `Booking/Dispatch` · `Worker` · `Payments/Wallet` · `Admin/Analytics`
-— extracted one at a time, each with its own DB, coordinated by events (a message broker) for cross-service reactions.
+## Events (publisher → consumers)
+- `booking.created` (booking) → dispatch, notification
+- `booking.completed` (booking) → wallet (credit worker), payment (record settlement), notification
+- `booking.cancelled` (booking) → wallet (comp), notification
+- `payment.succeeded` (booking/payment) → payment (record), booking (mark paid), notification
+- `payout.completed` (payment) → wallet (mark paid)
+- `job.accepted` (dispatch), `customer.login` (auth), `admin.action` (admin), `activity` (all) → notification
+- `settings.updated` (admin) → config caches
+```

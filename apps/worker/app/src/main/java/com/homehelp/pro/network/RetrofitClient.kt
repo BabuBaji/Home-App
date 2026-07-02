@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * same-Wi-Fi testing).
  */
 object RetrofitClient {
-    private const val FALLBACK_URL = "http://192.168.0.114:4000/"
+    private const val FALLBACK_URL = "http://192.168.0.114:8080/"
     private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
 
     /** Current backend base URL — updated by [refreshBaseUrl]. */

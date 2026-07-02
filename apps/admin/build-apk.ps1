@@ -1,5 +1,5 @@
 # Builds the HomeHelp Admin Android debug APK.
-# Auto-detects your Wi-Fi LAN IP, points the app at <ip>:4000, and assembles the APK.
+# Auto-detects your Wi-Fi LAN IP, points the app at <ip>:8080, and assembles the APK.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -13,8 +13,8 @@ $ip = (Get-NetIPAddress -AddressFamily IPv4 |
   Sort-Object { $_.InterfaceAlias -notlike '*Wi-Fi*' } |
   Select-Object -First 1).IPAddress
 if (-not $ip) { throw 'Could not detect a LAN IP. Connect to Wi-Fi and retry.' }
-Write-Host "Backend URL -> http://$ip`:4000" -ForegroundColor Cyan
-"VITE_API_URL=http://$ip`:4000" | Out-File -FilePath "$root\.env.production" -Encoding ascii
+Write-Host "Backend URL -> http://$ip`:8080" -ForegroundColor Cyan
+"VITE_API_URL=http://$ip`:8080" | Out-File -FilePath "$root\.env.production" -Encoding ascii
 
 # 2) Build web bundle
 Push-Location $root
@@ -43,4 +43,4 @@ $dest = "$root\..\..\HomeHelp-Admin-debug.apk"
 Copy-Item $apk $dest -Force
 $mb = [math]::Round((Get-Item $dest).Length / 1MB, 2)
 Write-Host "`nAPK ready: $dest  ($mb MB)" -ForegroundColor Green
-Write-Host "App points to http://$ip`:4000 - make sure the backend is running (npm start in services/api)." -ForegroundColor Yellow
+Write-Host "App points to http://$ip`:8080 - make sure the backend is running (docker compose -f infra/docker-compose.yml up)." -ForegroundColor Yellow
