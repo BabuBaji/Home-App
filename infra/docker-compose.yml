@@ -1,128 +1,261 @@
-# HomeHelp — microservices (strangler-fig, in progress)
+# HomeHelp — pure microservices stack
+# ------------------------------------
+#   [ customer / admin / worker apps ] → gateway(:8080) → 9 domain services
+#   • database-per-service (9 Postgres instances, distinct host ports 5432–5440)
+#   • Redis: async event bus (Streams) + realtime relay (pub/sub) for the socket.io hub
+#   • no monolith — every route is served by an owning service
 #
-#   [ clients ] → gateway(:8080) ─┬─ /api/auth/*                       → auth-service(:4002)    → auth-db (Postgres)
-#                                 ├─ /api/services*, /api/admin/services* → catalog-service(:4001) → catalog-db (Postgres)
-#                                 └─ everything else (+ socket.io)      → monolith on host(:4000) → sqlite
+#   docker compose -f infra/docker-compose.yml up --build
 #
-# Each extracted service has its OWN database instance (database-per-service).
-# The legacy monolith (services/api) still runs on the host: `npm start`, port 4000.
-#
-#   docker compose up --build
-#
+# Build context is the REPO ROOT (..) so each image can bundle services/shared.
 services:
-  # ---- databases (one per service) ----
+  # ============================ infrastructure ============================
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ============================ databases (one per service) ============================
   catalog-db:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: catalog }
     ports: ["5432:5432"]
     volumes: ["catalog-pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U homehelp -d catalog"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d catalog"], interval: 5s, timeout: 3s, retries: 10 }
 
   auth-db:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: auth }
     ports: ["5433:5432"]
     volumes: ["auth-pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U homehelp -d auth"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d auth"], interval: 5s, timeout: 3s, retries: 10 }
 
-  activity-db:
+  notification-db:
     image: postgres:16-alpine
-    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: activity }
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: notification }
     ports: ["5434:5432"]
-    volumes: ["activity-pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U homehelp -d activity"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    volumes: ["notification-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d notification"], interval: 5s, timeout: 3s, retries: 10 }
 
   worker-db:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: worker }
     ports: ["5435:5432"]
     volumes: ["worker-pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U homehelp -d worker"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d worker"], interval: 5s, timeout: 3s, retries: 10 }
 
-  # ---- services ----
-  catalog-service:
-    build: ../services/catalog
-    environment:
-      PORT: 4001
-      DATABASE_URL: postgres://homehelp:homehelp@catalog-db:5432/catalog
-      MONOLITH_URL: http://host.docker.internal:4000
-      INTERNAL_KEY: hh-internal-dev
-    ports: ["4001:4001"]
-    depends_on:
-      catalog-db:
-        condition: service_healthy
-    extra_hosts: ["host.docker.internal:host-gateway"]
+  booking-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: booking }
+    ports: ["5436:5432"]
+    volumes: ["booking-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d booking"], interval: 5s, timeout: 3s, retries: 10 }
 
-  auth-service:
-    build: ../services/auth
+  dispatch-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: dispatch }
+    ports: ["5437:5432"]
+    volumes: ["dispatch-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d dispatch"], interval: 5s, timeout: 3s, retries: 10 }
+
+  payment-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: payment }
+    ports: ["5438:5432"]
+    volumes: ["payment-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d payment"], interval: 5s, timeout: 3s, retries: 10 }
+
+  wallet-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: wallet }
+    ports: ["5439:5432"]
+    volumes: ["wallet-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d wallet"], interval: 5s, timeout: 3s, retries: 10 }
+
+  admin-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: homehelp, POSTGRES_PASSWORD: homehelp, POSTGRES_DB: admin }
+    ports: ["5440:5432"]
+    volumes: ["admin-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U homehelp -d admin"], interval: 5s, timeout: 3s, retries: 10 }
+
+  # ============================ services ============================
+  auth:
+    build: { context: .., dockerfile: services/auth/Dockerfile }
     environment:
       PORT: 4002
       DATABASE_URL: postgres://homehelp:homehelp@auth-db:5432/auth
-      MONOLITH_URL: http://host.docker.internal:4000
+      REDIS_URL: redis://redis:6379
       INTERNAL_KEY: hh-internal-dev
     ports: ["4002:4002"]
     depends_on:
-      auth-db:
-        condition: service_healthy
-    extra_hosts: ["host.docker.internal:host-gateway"]
+      auth-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
 
-  activity-service:
-    build: ../services/activity
+  catalog:
+    build: { context: .., dockerfile: services/catalog/Dockerfile }
     environment:
-      PORT: 4003
-      DATABASE_URL: postgres://homehelp:homehelp@activity-db:5432/activity
-      MONOLITH_URL: http://host.docker.internal:4000
+      PORT: 4001
+      DATABASE_URL: postgres://homehelp:homehelp@catalog-db:5432/catalog
+      REDIS_URL: redis://redis:6379
       INTERNAL_KEY: hh-internal-dev
-    ports: ["4003:4003"]
+      ADMIN_URL: http://admin:4010
+      BOOKING_URL: http://booking:4006
+    ports: ["4001:4001"]
     depends_on:
-      activity-db:
-        condition: service_healthy
-    extra_hosts: ["host.docker.internal:host-gateway"]
+      catalog-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
 
-  worker-service:
-    build: ../services/worker
+  booking:
+    build: { context: .., dockerfile: services/booking/Dockerfile }
+    environment:
+      PORT: 4006
+      DATABASE_URL: postgres://homehelp:homehelp@booking-db:5432/booking
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: hh-internal-dev
+      CATALOG_URL: http://catalog:4001
+      AUTH_URL: http://auth:4002
+      WORKER_URL: http://worker:4004
+      ADMIN_URL: http://admin:4010
+    ports: ["4006:4006"]
+    depends_on:
+      booking-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  dispatch:
+    build: { context: .., dockerfile: services/dispatch/Dockerfile }
+    environment:
+      PORT: 4007
+      DATABASE_URL: postgres://homehelp:homehelp@dispatch-db:5432/dispatch
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: hh-internal-dev
+      WORKER_URL: http://worker:4004
+      BOOKING_URL: http://booking:4006
+      ADMIN_URL: http://admin:4010
+    ports: ["4007:4007"]
+    depends_on:
+      dispatch-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  payment:
+    build: { context: .., dockerfile: services/payment/Dockerfile }
+    environment:
+      PORT: 4008
+      DATABASE_URL: postgres://homehelp:homehelp@payment-db:5432/payment
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: hh-internal-dev
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
+      BOOKING_URL: http://booking:4006
+      WALLET_URL: http://wallet:4009
+      FINANCE_ENC_KEY: hh-finance-dev-key
+    ports: ["4008:4008"]
+    depends_on:
+      payment-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  wallet:
+    build: { context: .., dockerfile: services/wallet/Dockerfile }
+    environment:
+      PORT: 4009
+      DATABASE_URL: postgres://homehelp:homehelp@wallet-db:5432/wallet
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: hh-internal-dev
+      ADMIN_URL: http://admin:4010
+      WORKER_URL: http://worker:4004
+      PAYMENT_URL: http://payment:4008
+    ports: ["4009:4009"]
+    depends_on:
+      wallet-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: { context: .., dockerfile: services/worker/Dockerfile }
     environment:
       PORT: 4004
       DATABASE_URL: postgres://homehelp:homehelp@worker-db:5432/worker
-      MONOLITH_URL: http://host.docker.internal:4000
+      REDIS_URL: redis://redis:6379
       INTERNAL_KEY: hh-internal-dev
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
     ports: ["4004:4004"]
     depends_on:
-      worker-db:
-        condition: service_healthy
-    extra_hosts: ["host.docker.internal:host-gateway"]
+      worker-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  notification:
+    build: { context: .., dockerfile: services/notification/Dockerfile }
+    environment:
+      PORT: 4003
+      DATABASE_URL: postgres://homehelp:homehelp@notification-db:5432/notification
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: hh-internal-dev
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
+      BOOKING_URL: http://booking:4006
+    ports: ["4003:4003"]
+    depends_on:
+      notification-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  admin:
+    build: { context: .., dockerfile: services/admin/Dockerfile }
+    environment:
+      PORT: 4010
+      DATABASE_URL: postgres://homehelp:homehelp@admin-db:5432/admin
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: hh-internal-dev
+      AUTH_URL: http://auth:4002
+      CATALOG_URL: http://catalog:4001
+      BOOKING_URL: http://booking:4006
+      DISPATCH_URL: http://dispatch:4007
+      PAYMENT_URL: http://payment:4008
+      WALLET_URL: http://wallet:4009
+      WORKER_URL: http://worker:4004
+      NOTIFICATION_URL: http://notification:4003
+    ports: ["4010:4010"]
+    depends_on:
+      admin-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
 
   gateway:
-    build: ../services/gateway
+    build: { context: .., dockerfile: services/gateway/Dockerfile }
     environment:
       PORT: 8080
-      AUTH_URL: http://auth-service:4002
-      ACTIVITY_URL: http://activity-service:4003
-      CATALOG_URL: http://catalog-service:4001
-      WORKER_URL: http://worker-service:4004
-      MONOLITH_URL: http://host.docker.internal:4000
+      REDIS_URL: redis://redis:6379
+      AUTH_URL: http://auth:4002
+      CATALOG_URL: http://catalog:4001
+      BOOKING_URL: http://booking:4006
+      DISPATCH_URL: http://dispatch:4007
+      PAYMENT_URL: http://payment:4008
+      WALLET_URL: http://wallet:4009
+      WORKER_URL: http://worker:4004
+      NOTIFICATION_URL: http://notification:4003
+      ADMIN_URL: http://admin:4010
     ports: ["8080:8080"]
-    depends_on: [auth-service, activity-service, catalog-service, worker-service]
-    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      - auth
+      - catalog
+      - booking
+      - dispatch
+      - payment
+      - wallet
+      - worker
+      - notification
+      - admin
+      - redis
 
 volumes:
   catalog-pgdata:
   auth-pgdata:
-  activity-pgdata:
+  notification-pgdata:
   worker-pgdata:
+  booking-pgdata:
+  dispatch-pgdata:
+  payment-pgdata:
+  wallet-pgdata:
+  admin-pgdata:

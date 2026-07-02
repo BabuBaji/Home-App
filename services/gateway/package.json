@@ -3,13 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "HomeHelp API Gateway — single entry point; routes catalogue traffic to the Catalog service and everything else (incl. socket.io) to the legacy monolith.",
+  "description": "HomeHelp API Gateway — single entry point; routes every path prefix to its owning microservice and hosts the socket.io realtime hub (Redis-relayed).",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "http-proxy-middleware": "^2.0.6"
+    "http-proxy-middleware": "^2.0.6",
+    "socket.io": "^4.7.5",
+    "ioredis": "^5.4.1"
   }
 }

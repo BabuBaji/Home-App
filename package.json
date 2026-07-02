@@ -1,0 +1,24 @@
+{
+  "name": "homehelp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HomeHelp — microservices monorepo (npm workspaces). Each folder under services/ is an independently deployable service with its own database; services share the @homehelp/shared library.",
+  "workspaces": [
+    "services/shared",
+    "services/gateway",
+    "services/auth",
+    "services/catalog",
+    "services/booking",
+    "services/dispatch",
+    "services/payment",
+    "services/wallet",
+    "services/worker",
+    "services/notification",
+    "services/admin"
+  ],
+  "scripts": {
+    "up": "docker compose -f infra/docker-compose.yml up --build",
+    "down": "docker compose -f infra/docker-compose.yml down",
+    "migrate": "node infra/migrate/index.js"
+  }
+}
