@@ -169,6 +169,7 @@ services:
       ADMIN_URL: http://admin:4010
       WORKER_URL: http://worker:4004
       PAYMENT_URL: http://payment:4008
+      BOOKING_URL: http://booking:4006
     ports: ["4009:4009"]
     depends_on:
       wallet-db: { condition: service_healthy }
