@@ -89,3 +89,33 @@ export function detailsFor(id, base) {
     reviewsCount: 120 + (id.length * 37) % 400, reviews: SAMPLE_REVIEWS,
   }
 }
+
+/* ---------- pricing, coupons, home content (ported from the monolith catalog) ---------- */
+export const REFERRAL = { code: 'HOMEHELP150', reward: 150, label: 'Earn ₹150 for every friend you refer' }
+
+export const TRUST_BADGES = [
+  { icon: '🏅', label: 'Top Rated Experts' },
+  { icon: '📜', label: 'Professionally Trained' },
+  { icon: '🛡️', label: 'Background Verified' },
+]
+
+export const COUPONS = [
+  { code: 'SNAB50', type: 'flat', value: 50, min: 199, label: '₹50 off on orders above ₹199' },
+  { code: 'FIRST100', type: 'flat', value: 100, min: 299, label: '₹100 off your first booking' },
+  { code: 'CLEAN20', type: 'pct', value: 20, max: 120, min: 249, label: '20% off up to ₹120' },
+]
+
+export function applyCoupon(code, subtotal) {
+  const c = COUPONS.find((x) => x.code === String(code || '').toUpperCase())
+  if (!c) return { error: 'Invalid coupon code' }
+  if (subtotal < c.min) return { error: `Add ₹${c.min - subtotal} more to use ${c.code}` }
+  const discount = c.type === 'flat' ? c.value : Math.min(c.max, Math.round((subtotal * c.value) / 100))
+  return { code: c.code, discount, label: c.label }
+}
+
+// Platform fee & taxes are 0 — total payable = item total − discount.
+export function priceBreakdown(subtotal, discount = 0) {
+  const fee = 0, tax = 0
+  const total = Math.max(0, subtotal + fee + tax - discount)
+  return { subtotal, fee, tax, discount, total }
+}
