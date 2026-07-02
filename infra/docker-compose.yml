@@ -136,6 +136,7 @@ services:
       WORKER_URL: http://worker:4004
       BOOKING_URL: http://booking:4006
       ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
     ports: ["4007:4007"]
     depends_on:
       dispatch-db: { condition: service_healthy }
