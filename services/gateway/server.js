@@ -73,6 +73,19 @@ function pickTarget(url) {
 
 const app = express()
 
+// CORS — the apps run in a Capacitor webview (origin http://localhost) and browsers, so every
+// cross-origin request needs these headers + a preflight response. Set here at the single entry
+// point so all proxied services are covered (the old monolith did app.use(cors())).
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*')
+  res.setHeader('Vary', 'Origin')
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization, x-internal-key')
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
+
 app.get('/health', (_q, res) => res.json({ service: 'gateway', ok: true, upstreams: U }))
 
 // Decide the upstream before proxying; 502 for unknown /api routes, pass through everything else.
@@ -99,6 +112,11 @@ const proxy = createProxyMiddleware({
   logLevel: 'warn',
   target: U.catalog, // fallback; router() overrides per request
   router: (req) => req._target,
+  onProxyRes: (proxyRes, req) => {
+    proxyRes.headers['access-control-allow-origin'] = req.headers.origin || '*'
+    proxyRes.headers['access-control-allow-credentials'] = 'true'
+    proxyRes.headers['vary'] = 'Origin'
+  },
   onError,
 })
 app.use(proxy)
