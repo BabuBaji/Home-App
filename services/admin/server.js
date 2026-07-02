@@ -9,12 +9,19 @@
 // The BFF aggregation endpoints (dashboard/analytics/customers/…) are added in Phase 2i.
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, requireRole, publishEvent } from '@homehelp/shared'
+import { makePool, migrate, nowIso, internalOnly, requireRole, publishEvent, tryGet, internalPost, internalPatch } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4010)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5440/admin'
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+const U = {
+  auth: (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, ''),
+  booking: (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''),
+  worker: (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, ''),
+  payment: (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, ''),
+}
 
+process.on('unhandledRejection', (e) => console.error('[admin] unhandledRejection:', e?.message || e))
 const pool = makePool(DATABASE_URL)
 
 /* ---------- password hashing (scrypt) ---------- */
@@ -162,6 +169,59 @@ app.delete('/api/admin/admins/:id', admin, requireRole('super'), async (req, res
 app.get('/api/admin/audit', admin, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM audit_log ORDER BY id DESC LIMIT $1', [Number(req.query.limit) || 30])
   res.json(rows)
+})
+
+/* ================= BFF aggregation (reads other services over internal HTTP) ================= */
+app.get('/api/admin/dashboard', admin, async (_q, res) => {
+  const [customers, bookings, workers] = await Promise.all([
+    tryGet(U.auth, '/api/internal/customers', []),
+    tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.worker, '/internal/workers', { stats: {}, workers: [] }),
+  ])
+  const paid = bookings.filter((b) => b.payment_status === 'paid' || b.status === 'completed')
+  const revenue = paid.reduce((s, b) => s + (b.total || 0), 0)
+  const byStatus = {}
+  for (const b of bookings) byStatus[b.status] = (byStatus[b.status] || 0) + 1
+  res.json({
+    customers: customers.length,
+    bookings: bookings.length,
+    revenue,
+    activeBookings: bookings.filter((b) => ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress'].includes(b.status)).length,
+    completed: byStatus.completed || 0,
+    workers: workers.stats || {},
+    byStatus,
+  })
+})
+
+app.get('/api/admin/analytics', admin, async (req, res) => {
+  const bookings = await tryGet(U.booking, '/api/internal/bookings', [])
+  const revenue = bookings.filter((b) => b.payment_status === 'paid' || b.status === 'completed').reduce((s, b) => s + (b.total || 0), 0)
+  const byDay = {}
+  for (const b of bookings) { const d = String(b.created).slice(0, 10); byDay[d] = (byDay[d] || 0) + 1 }
+  res.json({ totalRevenue: revenue, totalBookings: bookings.length, byDay })
+})
+
+app.get('/api/admin/insights', admin, async (_q, res) => {
+  const [bookings, workers] = await Promise.all([tryGet(U.booking, '/api/internal/bookings', []), tryGet(U.worker, '/internal/workers', { workers: [] })])
+  const cityCount = {}
+  for (const b of bookings) { const c = (b.address || '').split(',').pop().trim() || 'Unknown'; cityCount[c] = (cityCount[c] || 0) + 1 }
+  res.json({ topCities: Object.entries(cityCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([city, n]) => ({ city, n })), workers: (workers.workers || []).length })
+})
+
+app.get('/api/admin/alerts', admin, async (_q, res) => {
+  const workers = await tryGet(U.worker, '/internal/workers', { workers: [] })
+  const pending = (workers.workers || []).filter((w) => w.status === 'pending')
+  res.json([...pending.map((w) => ({ type: 'worker_pending', message: `${w.name} awaiting verification`, id: w.id }))])
+})
+
+/* ---------- customers (proxied to the auth service) ---------- */
+app.get('/api/admin/customers', admin, async (_q, res) => res.json(await tryGet(U.auth, '/api/internal/customers', [])))
+app.patch('/api/admin/customers/:id', admin, async (req, res) => {
+  try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+app.post('/api/admin/customers/:id/wallet', admin, async (req, res) => {
+  try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet`, { type: (Number(req.body?.amount) >= 0 ? 'credit' : 'debit'), title: req.body?.title || 'Admin adjustment', amount: Math.abs(Number(req.body?.amount) || 0) })) }
+  catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 /* ---------- internal: config for other services ---------- */
