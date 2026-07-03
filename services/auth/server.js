@@ -55,7 +55,7 @@ async function init() {
 const publicUser = (u) => u && ({
   id: u.id, phone: u.phone, name: u.name, email: u.email, provider: u.provider,
   avatar: u.avatar, country: u.country, city: u.city, location: u.location,
-  wallet: u.wallet, rating: u.rating, status: u.status,
+  wallet: u.wallet, rating: u.rating, status: u.status, created: u.created,
 })
 
 async function getUser(id) {

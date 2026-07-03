@@ -70,11 +70,15 @@ async function init() {
     await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [k, v])
   const n = await pool.query('SELECT COUNT(*)::int AS n FROM admins')
   if (n.rows[0].n === 0) {
+    const adminEmail = process.env.ADMIN_SEED_EMAIL || 'admin@homehelp.in'
+    const adminPass = process.env.ADMIN_SEED_PASSWORD || 'admin123'
+    const opsEmail = process.env.OPS_SEED_EMAIL || 'ops@homehelp.in'
+    const opsPass = process.env.OPS_SEED_PASSWORD || 'ops12345'
     await pool.query('INSERT INTO admins (name,email,phone,pass_hash,role,status) VALUES ($1,$2,$3,$4,$5,$6)',
-      ['Super Admin', 'admin@homehelp.in', '+91 90000 00000', hashPw('admin123'), 'super', 'active'])
+      ['Super Admin', adminEmail, '+91 90000 00000', hashPw(adminPass), 'super', 'active'])
     await pool.query('INSERT INTO admins (name,email,phone,pass_hash,role,status) VALUES ($1,$2,$3,$4,$5,$6)',
-      ['Ops Manager', 'ops@homehelp.in', '+91 90000 11111', hashPw('ops12345'), 'manager', 'active'])
-    console.log('[admin] seeded default admins (admin@homehelp.in / admin123)')
+      ['Ops Manager', opsEmail, '+91 90000 11111', hashPw(opsPass), 'manager', 'active'])
+    console.log(`[admin] seeded default admins (${adminEmail})`)
   }
   console.log('[admin] Postgres ready (admins, settings, audit_log)')
 }
@@ -145,7 +149,7 @@ app.post('/api/admin/admins', admin, requireRole('super'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       'INSERT INTO admins (name,email,phone,pass_hash,role,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || 'changeme123'), b.role || 'manager', b.status || 'active'])
+      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), b.role || 'manager', b.status || 'active'])
     await logAudit(req.admin.email, 'admin.create', b.email)
     res.status(201).json(publicAdmin(rows[0]))
   } catch { res.status(409).json({ error: 'Email already exists' }) }
@@ -178,18 +182,61 @@ app.get('/api/admin/dashboard', admin, async (_q, res) => {
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.worker, '/internal/workers', { stats: {}, workers: [] }),
   ])
-  const paid = bookings.filter((b) => b.payment_status === 'paid' || b.status === 'completed')
-  const revenue = paid.reduce((s, b) => s + (b.total || 0), 0)
-  const byStatus = {}
-  for (const b of bookings) byStatus[b.status] = (byStatus[b.status] || 0) + 1
+  const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+  const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
+  const revenue = bookings.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0)
+  const rated = customers.filter((c) => c.rating > 0)
+  const avgRating = rated.length ? +(rated.reduce((a, c) => a + c.rating, 0) / rated.length).toFixed(1) : 0
+  const nameById = new Map(customers.map((c) => [c.id, c.name]))
+  const dayOf = (d) => String(d || '').slice(0, 10)
+
+  // 7-day trend (oldest → newest) for the line/bar charts
+  const trend = []
+  for (let i = 6; i >= 0; i--) {
+    const dt = new Date(); dt.setDate(dt.getDate() - i)
+    const key = dt.toISOString().slice(0, 10)
+    const day = bookings.filter((b) => dayOf(b.created) === key)
+    trend.push({
+      day: key,
+      total: day.length,
+      completed: day.filter((b) => b.status === 'completed').length,
+      revenue: day.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0),
+    })
+  }
+
+  // bookings grouped by city (from the address tail)
+  const cityCount = {}
+  for (const b of bookings) { const c = (b.address || '').split(',').pop().trim() || 'Unknown'; cityCount[c] = (cityCount[c] || 0) + 1 }
+  const cityRows = Object.entries(cityCount).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([city, n]) => ({ city, n }))
+
+  // most-booked services (by line-item name)
+  const svcCount = {}
+  for (const b of bookings) for (const it of (b.items || [])) { const nm = it.name || 'Service'; svcCount[nm] = (svcCount[nm] || 0) + 1 }
+  const topServices = Object.entries(svcCount).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, n]) => ({ name, n }))
+
+  const recent = [...bookings]
+    .sort((a, b) => new Date(b.created) - new Date(a.created)).slice(0, 8)
+    .map((b) => ({ id: b.id, ref: b.ref, customer: nameById.get(b.user_id) || 'Customer', total: b.total || 0, status: b.status, created: b.created, service: (b.items || []).map((i) => i.name).join(', ') }))
+
+  const registrations = customers.slice(0, 8).map((c) => ({ id: c.id, name: c.name, phone: c.phone, email: c.email, city: c.city, created: c.created }))
+
   res.json({
-    customers: customers.length,
-    bookings: bookings.length,
-    revenue,
-    activeBookings: bookings.filter((b) => ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress'].includes(b.status)).length,
-    completed: byStatus.completed || 0,
-    workers: workers.stats || {},
-    byStatus,
+    stats: {
+      totalBookings: bookings.length,
+      completed: bookings.filter((b) => b.status === 'completed').length,
+      active: bookings.filter((b) => ACTIVE.includes(b.status)).length,
+      cancelled: bookings.filter((b) => b.status === 'cancelled').length,
+      revenue,
+      customers: customers.length,
+      avgRating,
+      workers: {
+        total: workers.stats?.total || 0,
+        active: workers.stats?.active || 0,
+        pending: workers.stats?.pending || 0,
+        inactive: workers.stats?.inactive || 0,
+      },
+    },
+    trend, cityRows, topServices, recent, registrations,
   })
 })
 
@@ -201,11 +248,88 @@ app.get('/api/admin/analytics', admin, async (req, res) => {
   res.json({ totalRevenue: revenue, totalBookings: bookings.length, byDay })
 })
 
+// Reports screen (fetchInsights). Builds the full analytics contract the frontend expects;
+// every field is a safe default so the screen renders cleanly even with zero data.
 app.get('/api/admin/insights', admin, async (_q, res) => {
-  const [bookings, workers] = await Promise.all([tryGet(U.booking, '/api/internal/bookings', []), tryGet(U.worker, '/internal/workers', { workers: [] })])
-  const cityCount = {}
-  for (const b of bookings) { const c = (b.address || '').split(',').pop().trim() || 'Unknown'; cityCount[c] = (cityCount[c] || 0) + 1 }
-  res.json({ topCities: Object.entries(cityCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([city, n]) => ({ city, n })), workers: (workers.workers || []).length })
+  const [bookings, customers, wResp] = await Promise.all([
+    tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.auth, '/api/internal/customers', []),
+    tryGet(U.worker, '/internal/workers', { stats: {}, workers: [] }),
+  ])
+  const workers = wResp.workers || []
+  const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
+  const paid = bookings.filter(isPaid)
+  const revenue = paid.reduce((s, b) => s + (b.total || 0), 0)
+  const totalBk = bookings.length
+  const completed = bookings.filter((b) => b.status === 'completed').length
+  const cancelled = bookings.filter((b) => b.status === 'cancelled').length
+  const noShow = bookings.filter((b) => b.status === 'no_show').length
+  const cancellationRate = totalBk ? Math.round((cancelled / totalBk) * 100) : 0
+  const noShowRate = totalBk ? Math.round((noShow / totalBk) * 100) : 0
+  const aov = paid.length ? Math.round(revenue / paid.length) : 0
+  const bkByUser = {}
+  for (const b of bookings) bkByUser[b.user_id] = (bkByUser[b.user_id] || 0) + 1
+  const returning = Object.values(bkByUser).filter((n) => n > 1).length
+  const newC = Object.values(bkByUser).filter((n) => n === 1).length
+  const repeatRate = customers.length ? Math.round((returning / customers.length) * 100) : 0
+  const clv = customers.length ? Math.round(revenue / customers.length) : 0
+  const dayOf = (d) => String(d || '').slice(0, 10)
+  const perItemRev = (b) => isPaid(b) ? (b.total || 0) / Math.max(1, (b.items || []).length) : 0
+
+  const series = [], growth = []
+  for (let i = 13; i >= 0; i--) {
+    const dt = new Date(); dt.setDate(dt.getDate() - i)
+    const key = dt.toISOString().slice(0, 10)
+    const day = bookings.filter((b) => dayOf(b.created) === key)
+    series.push({ date: key, revenue: day.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0), bookings: day.length, completed: day.filter((b) => b.status === 'completed').length, cancelled: day.filter((b) => b.status === 'cancelled').length })
+    growth.push({ date: key, n: customers.filter((c) => dayOf(c.created) === key).length })
+  }
+
+  const statusCount = {}
+  for (const b of bookings) statusCount[b.status] = (statusCount[b.status] || 0) + 1
+  const statusSplit = Object.entries(statusCount).map(([status, n]) => ({ status, n }))
+
+  const svc = {}
+  for (const b of bookings) for (const it of (b.items || [])) {
+    const nm = it.name || 'Service'
+    const s = svc[nm] || (svc[nm] = { service: nm, revenue: 0, bookings: 0, completed: 0, cancellations: 0, rs: 0, rc: 0 })
+    s.bookings += 1; s.revenue += perItemRev(b)
+    if (b.status === 'completed') s.completed += 1
+    if (b.status === 'cancelled') s.cancellations += 1
+    if (b.rating) { s.rs += b.rating; s.rc += 1 }
+  }
+  const topServices = Object.values(svc).map((s) => ({ service: s.service, revenue: Math.round(s.revenue), bookings: s.bookings, completed: s.completed, cancellations: s.cancellations, cancelRate: s.bookings ? Math.round((s.cancellations / s.bookings) * 100) : 0, rating: s.rc ? +(s.rs / s.rc).toFixed(1) : 0 })).sort((a, b) => b.revenue - a.revenue)
+  const revenueByService = topServices.slice(0, 8).map((s) => ({ label: s.service, value: s.revenue }))
+
+  const payBk = {}, payRev = {}
+  for (const b of bookings) { const m = b.payment || 'other'; payBk[m] = (payBk[m] || 0) + 1; if (isPaid(b)) payRev[m] = (payRev[m] || 0) + (b.total || 0) }
+  const bookingsByPayment = Object.entries(payBk).map(([label, value]) => ({ label, value }))
+  const revenueByPayment = Object.entries(payRev).map(([label, value]) => ({ label, value: Math.round(value) }))
+
+  const cityRev = {}, cityBk = {}
+  for (const b of bookings) { const c = (b.address || '').split(',').pop().trim() || 'Unknown'; cityBk[c] = (cityBk[c] || 0) + 1; if (isPaid(b)) cityRev[c] = (cityRev[c] || 0) + (b.total || 0) }
+  const topCitiesByRevenue = Object.entries(cityRev).map(([label, value]) => ({ label, value: Math.round(value) })).sort((a, b) => b.value - a.value).slice(0, 6)
+  const topCitiesByBookings = Object.entries(cityBk).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 6)
+
+  const newVsReturning = [{ label: 'New', value: newC }, { label: 'Returning', value: returning }]
+
+  const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0))
+  for (const b of bookings) { const dt = new Date(b.created); if (!Number.isNaN(dt.getTime())) heatmap[dt.getDay()][dt.getHours()] += 1 }
+
+  const insights = []
+  if (topServices[0]) insights.push({ title: `${topServices[0].service} leads revenue`, sub: `₹${topServices[0].revenue} from ${topServices[0].bookings} bookings` })
+  if (topCitiesByBookings[0]) insights.push({ title: `${topCitiesByBookings[0].label} is the top city`, sub: `${topCitiesByBookings[0].value} bookings` })
+  insights.push({ title: `${cancellationRate}% cancellation rate`, sub: `${cancelled} of ${totalBk} bookings cancelled` })
+  insights.push({ title: `₹${aov} average order value`, sub: `across ${paid.length} paid bookings` })
+  if (repeatRate) insights.push({ title: `${repeatRate}% repeat customers`, sub: `${returning} booked more than once` })
+
+  res.json({
+    totals: { revenue, bookings: totalBk, completed, cancelled, cancellationRate, activeCustomers: customers.length, activeWorkers: workers.filter((w) => w.status === 'active').length, aov, repeatRate, clv, noShowRate },
+    deltas: { revenue: null, bookings: null, completed: null, newCustomers: null, cancelRate: null },
+    statusSplit, series, growth, revenueByService, topServices,
+    bookingsByPayment, revenueByPayment, topCitiesByRevenue, topCitiesByBookings,
+    newVsReturning, heatmap, insights,
+  })
 })
 
 app.get('/api/admin/alerts', admin, async (_q, res) => {
@@ -215,7 +339,33 @@ app.get('/api/admin/alerts', admin, async (_q, res) => {
 })
 
 /* ---------- customers (proxied to the auth service) ---------- */
-app.get('/api/admin/customers', admin, async (_q, res) => res.json(await tryGet(U.auth, '/api/internal/customers', [])))
+app.get('/api/admin/customers', admin, async (_q, res) => {
+  const [customers, bookings] = await Promise.all([
+    tryGet(U.auth, '/api/internal/customers', []),
+    tryGet(U.booking, '/api/internal/bookings', []),
+  ])
+  const cnt = {}, spend = {}
+  for (const b of bookings) {
+    cnt[b.user_id] = (cnt[b.user_id] || 0) + 1
+    if (b.payment_status === 'paid' || b.status === 'completed') spend[b.user_id] = (spend[b.user_id] || 0) + (b.total || 0)
+  }
+  // Customers screen reads bookings/spend/joined per row (auth returns `created`, not `joined`).
+  res.json(customers.map((c) => ({ ...c, bookings: cnt[c.id] || 0, spend: spend[c.id] || 0, joined: c.created })))
+})
+// Customer detail (View modal): { customer, addresses, bookings, transactions }.
+app.get('/api/admin/customers/:id', admin, async (req, res) => {
+  const id = Number(req.params.id)
+  const [u, addresses, allBookings] = await Promise.all([
+    tryGet(U.auth, `/api/internal/users/${id}`, null),
+    tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
+    tryGet(U.booking, '/api/internal/bookings', []),
+  ])
+  const customer = u?.user || null
+  if (!customer) return res.status(404).json({ error: 'Not found' })
+  const bookings = allBookings.filter((b) => b.user_id === id)
+    .map((b) => ({ id: b.id, ref: b.ref, service: (b.items || []).map((i) => i.name).join(', '), total: b.total, status: b.status, created: b.created }))
+  res.json({ customer, addresses, bookings, transactions: [] })
+})
 app.patch('/api/admin/customers/:id', admin, async (req, res) => {
   try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }
 })

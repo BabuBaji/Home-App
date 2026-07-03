@@ -43,6 +43,18 @@ function distanceKm(aLat, aLng, bLat, bLng) {
 }
 const workerShare = async (amt) => { const pct = await getSettingInt(ADMIN_URL, 'commission_percent', 20); return Math.max(0, Math.round((amt * (100 - pct)) / 100)) }
 
+// Booked service length in minutes — authoritative value for the live timer / "time completed"
+// popup. Prefer the item's durationId (e.g. "90m", "2h"); fall back to parsing the label.
+const DUR_MIN = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+function bookingDurationMinutes(b) {
+  const id = b.items?.[0]?.durationId
+  if (id && DUR_MIN[id]) return DUR_MIN[id]
+  const s = String(b.duration || '')
+  const n = parseInt(s, 10)
+  if (!n) return 60
+  return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
+}
+
 async function jobFromBooking(b) {
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   const c = u?.user || {}
@@ -50,7 +62,7 @@ async function jobFromBooking(b) {
   return {
     id: b.ref, bookingId: b.id, customerName: c.name || 'Customer', initials, customerPhone: c.phone || '', customerRating: c.rating || 5.0,
     services: (b.items || []).map((i) => i.name), dateTime: [b.date, b.time].filter(Boolean).join(', ') || new Date(b.created).toLocaleString(),
-    durationHours: Math.max(1, parseInt(b.duration, 10) || 2), address: b.address, area: (b.address || '').split(',').slice(-2).join(',').trim() || b.address,
+    durationHours: Math.max(1, parseInt(b.duration, 10) || 2), durationMinutes: bookingDurationMinutes(b), address: b.address, area: (b.address || '').split(',').slice(-2).join(',').trim() || b.address,
     distanceKm: +(1 + (b.id % 30) / 10).toFixed(1), earnings: await workerShare(b.total), otp: b.service_otp,
     lat: b.cust_lat ?? (17.4448 + (b.id % 10) * 0.002), lng: b.cust_lng ?? (78.3498 + (b.id % 10) * 0.002),
     startedAt: b.started_at || null, completedAt: b.completed_at || null,

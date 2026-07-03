@@ -4,7 +4,27 @@ import type {
   Complaint, Ticket, Settings,
 } from './types'
 
-export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+// Backend base URL. Resolved at startup from a small public config file so the app
+// can be repointed at a new tunnel/host WITHOUT rebuilding the APK. Falls back to the
+// URL baked at build time (LAN IP via build-apk.ps1) if the config can't be fetched.
+const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json'
+export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
+export async function initApiBase(): Promise<void> {
+  // Admin WEB panel (browser): use same-origin relative URLs so API calls go through the local
+  // server's /api proxy to the gateway. This avoids CORS entirely and dodges the *.trycloudflare.com
+  // HTTP/2 connection-coalescing misroute between two tunnels. Native (APK) has no same-origin
+  // backend, so it resolves the absolute gateway URL from the public config.
+  const isNative = !!((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.())
+  if (!isNative) { API_BASE = ''; return }
+  try {
+    const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    if (r.ok) {
+      const j = await r.json()
+      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+    }
+  } catch { /* keep the baked fallback */ }
+}
 
 let token = localStorage.getItem('hha_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hha_token', t) }

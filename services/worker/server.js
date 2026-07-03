@@ -73,7 +73,9 @@ const workerDto = (w) => w && ({ id: w.id, name: w.name, phone: w.phone, email: 
 const walletDto = (w) => ({ balance: w.balance, pending: w.pending, hold: w.hold, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding, earnings: w.earnings })
 const walletSummary = (w) => ({ available: w.balance, pending: w.pending, onHold: w.hold, totalEarned: w.earnings, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding, thisWeek: 0, thisMonth: 0 })
 async function getWorker(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM workers WHERE id=$1', [id]); return rows[0] || null }
-async function getByPhone(phone) { const { rows } = await pool.query('SELECT * FROM workers WHERE phone=$1', [String(phone || '')]); return rows[0] || null }
+// If the same phone maps to more than one worker (e.g. a stray pending placeholder alongside a
+// real onboarded pro), prefer the active + verified account so login isn't shadowed by the dupe.
+async function getByPhone(phone) { const { rows } = await pool.query("SELECT * FROM workers WHERE phone=$1 ORDER BY (status='active') DESC, verified DESC, id DESC", [String(phone || '')]); return rows[0] || null }
 const serviceSet = (w) => new Set((w.services || []).map((s) => String(s).toLowerCase().trim()))
 
 async function listWorkers({ status, city, q } = {}) {
@@ -95,6 +97,18 @@ async function mergeProfile(wid, patch) {
   return getWorker(wid)
 }
 
+// Booked service length in minutes — mirrors the dispatch service so the restored (post-relaunch)
+// timer matches the live one. Prefer the item's durationId, else parse the label.
+const DUR_MIN = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+function bookingDurationMinutes(b) {
+  const id = b?.items?.[0]?.durationId
+  if (id && DUR_MIN[id]) return DUR_MIN[id]
+  const s = String(b?.duration || '')
+  const n = parseInt(s, 10)
+  if (!n) return 60
+  return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
+}
+
 // Worker-app bootstrap aggregates identity (local) + jobs/history (booking svc) + wallet (local snapshot).
 async function bootstrap(wid) {
   const w = await getWorker(wid)
@@ -104,7 +118,7 @@ async function bootstrap(wid) {
   return {
     worker: workerDto(w), wallet: walletDto(w), walletSummary: walletSummary(w),
     jobStatus: active ? (STATUS_TO_ENUM[active.status] || 'NONE') : 'NONE',
-    activeJob: active ? { id: active.ref, bookingId: active.id, services: (active.items || []).map((i) => i.name), address: active.address, otp: active.service_otp, startedAt: active.started_at, completedAt: active.completed_at } : null,
+    activeJob: active ? { id: active.ref, bookingId: active.id, services: (active.items || []).map((i) => i.name), durationMinutes: bookingDurationMinutes(active), address: active.address, otp: active.service_otp, startedAt: active.started_at, completedAt: active.completed_at } : null,
     bookings: mine.map((b) => ({ service: (b.items || []).map((i) => i.name).join(', '), address: b.address, amount: Math.round((b.total || 0) * 0.8), status: b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : 'Upcoming' })),
     documents: await documents(wid),
   }
@@ -122,7 +136,8 @@ function auth(req, res, next) {
   getWorker(id).then((w) => { if (!w) return res.status(401).json({ ok: false, error: 'Not authenticated' }); req.worker = w; next() })
 }
 
-app.post('/api/worker/auth/request-otp', (req, res) => res.json({ ok: true, devOtp: '1234', message: `OTP sent to ${req.body?.phone || ''}` }))
+const WORKER_DEV_OTP = process.env.WORKER_DEV_OTP || '1234'
+app.post('/api/worker/auth/request-otp', (req, res) => res.json({ ok: true, devOtp: WORKER_DEV_OTP, message: `OTP sent to ${req.body?.phone || ''}` }))
 app.post('/api/worker/auth/verify', async (req, res) => {
   const { phone, otp } = req.body || {}
   if (!otp || String(otp).length < 4) return res.status(400).json({ ok: false, error: 'Invalid OTP' })

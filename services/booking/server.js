@@ -274,7 +274,8 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
   const ids = [...new Set(bookings.map((b) => b.user_id))]
   const names = {}
   await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name }))
-  res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer' })))
+  // Admin Bookings list reads `pro` (worker name) and `service` (joined item names) directly.
+  res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer', pro: b.pro_name || '', service: (b.items || []).map((i) => i.name).join(', ') })))
 })
 app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
@@ -311,6 +312,11 @@ app.get('/api/internal/bookings', internalOnly, async (req, res) => {
   const sql = 'SELECT * FROM bookings' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC'
   const { rows } = await pool.query(sql, vals)
   res.json(rows.map(rowTo))
+})
+// Admin (via payment service): mark a cancelled booking as refunded.
+app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => {
+  await pool.query("UPDATE bookings SET payment_status='refunded', refund_status='refunded', refund=COALESCE(refund, total) WHERE id=$1", [Number(req.params.id)])
+  res.json({ ok: true })
 })
 // Dispatch: atomic claim of a job by a worker.
 app.post('/api/internal/bookings/:id/assign', internalOnly, async (req, res) => {

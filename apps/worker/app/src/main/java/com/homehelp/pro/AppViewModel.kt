@@ -55,6 +55,9 @@ data class Job(
     val services: List<String>,
     val dateTime: String,
     val durationHours: Int,
+    // Booked service length in MINUTES (authoritative, from the backend). Drives the
+    // "service time completed" popup + timer freeze. Defaults to 60 if the server omits it.
+    val durationMinutes: Int = 60,
     val address: String,
     val area: String,
     val distanceKm: Double,
@@ -268,6 +271,10 @@ class AppViewModel : ViewModel() {
             documents.clear()
             documents.addAll(b.documents.map { DocItem(it.name, it.status, it.fileName) })
         }
+        // Restore any job the worker is mid-way through, so relaunching the app (or coming
+        // back to Home) keeps the active/in-progress job visible instead of losing it.
+        activeJob = b.activeJob
+        jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
     }
 
     // ---- lifecycle transitions ----

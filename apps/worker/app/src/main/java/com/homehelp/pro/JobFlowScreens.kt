@@ -514,7 +514,14 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         parseIsoMillis(job.startedAt) ?: vm.serviceStartMs.takeIf { it > 0L } ?: System.currentTimeMillis()
     }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val elapsed = ((nowMs - startMs) / 1000L).toInt().coerceAtLeast(0)
+    val rawElapsed = ((nowMs - startMs) / 1000L).toInt().coerceAtLeast(0)
+    // Booked time is up once elapsed reaches the duration. Freeze the on-screen timer at the
+    // booked length and raise a one-time "service time completed" popup (worker still ends
+    // the service manually with the proof photo).
+    val targetSec = job.durationMinutes.coerceAtLeast(1) * 60
+    val timeUp = rawElapsed >= targetSec
+    val elapsed = if (timeUp) targetSec else rawElapsed
+    var timeUpDismissed by remember { mutableStateOf(false) }
 
     // Live-camera proof of work: capture a photo, attach it to the job, end the service,
     // then move on. The customer app receives the completion (+ photo) and opens its
@@ -553,9 +560,9 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             Box(Modifier.fillMaxWidth().background(GreenLight, RoundedCornerShape(12.dp)).padding(16.dp)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("Service In Progress", color = GreenSuccess, fontWeight = FontWeight.SemiBold)
+                    Text(if (timeUp) "Service Time Completed" else "Service In Progress", color = GreenSuccess, fontWeight = FontWeight.SemiBold)
                     Text(timer, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TextDark)
-                    Text("Time Elapsed", fontSize = 12.sp, color = TextGray)
+                    Text(if (timeUp) "Booked ${job.durationMinutes} min reached" else "Time Elapsed", fontSize = 12.sp, color = TextGray)
                 }
             }
             Card {
@@ -591,6 +598,16 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 captureAndEnd()
             }
         }
+    }
+
+    // One-time "service time completed" popup when the booked duration elapses.
+    if (timeUp && !timeUpDismissed) {
+        AlertDialog(
+            onDismissRequest = { timeUpDismissed = true },
+            confirmButton = { TextButton(onClick = { timeUpDismissed = true }) { Text("OK") } },
+            title = { Text("⏱  Service Time Completed", fontWeight = FontWeight.Bold) },
+            text = { Text("The booked ${job.durationMinutes} min for this service is over. Wrap up and tap “End Service” to capture the proof photo.", color = TextGray, fontSize = 14.sp) },
+        )
     }
 }
 

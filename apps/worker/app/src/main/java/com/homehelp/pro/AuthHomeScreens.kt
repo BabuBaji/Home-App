@@ -211,6 +211,43 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // Active job — keep the in-progress service reachable from Home so the worker
+            // can jump back to the timer / OTP / end-service screen after navigating away.
+            vm.activeJob?.let { job ->
+                val resumeRoute = when (vm.jobStatus) {
+                    JobStatus.REQUESTED -> Routes.NEW_JOB
+                    JobStatus.ACCEPTED -> Routes.JOB_DETAILS
+                    JobStatus.ON_THE_WAY -> Routes.ON_THE_WAY
+                    JobStatus.ARRIVED -> Routes.START_SERVICE
+                    JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
+                    else -> null
+                }
+                val label = when (vm.jobStatus) {
+                    JobStatus.REQUESTED -> "New job request"
+                    JobStatus.ACCEPTED -> "Job accepted"
+                    JobStatus.ON_THE_WAY -> "On the way to customer"
+                    JobStatus.ARRIVED -> "Arrived — start the service"
+                    JobStatus.IN_PROGRESS -> "Service in progress"
+                    else -> "Active job"
+                }
+                if (resumeRoute != null) {
+                    Box(
+                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(16.dp))
+                            .clickable { nav.navigate(resumeRoute) }
+                            .padding(18.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🛠", fontSize = 20.sp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("${job.services.joinToString(", ")} · tap to resume", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Greeting banner
             Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(16.dp)).padding(18.dp)) {
                 Column {
@@ -234,7 +271,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            if (vm.isOnline) {
+            if (vm.isOnline && vm.activeJob == null) {
                 val ctx = LocalContext.current
                 if (vm.hasIncomingJob) {
                     // A real customer has booked — show the New Job Request notification.

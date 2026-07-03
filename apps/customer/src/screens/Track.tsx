@@ -16,6 +16,7 @@ export default function Track() {
   const [b, setB] = useState<Booking | null>(null)
   const [busy, setBusy] = useState(false)
   const [, force] = useState(0)
+  const [timeUpAck, setTimeUpAck] = useState(false)
 
   // 1-second heartbeat so the live service timer re-renders
   useEffect(() => {
@@ -80,10 +81,14 @@ export default function Track() {
   const completedMs = b.completed_at ? new Date(b.completed_at).getTime() : null
   // Completed → show the REAL time the worker spent (completed_at − started_at);
   // fall back to the booked time only if timestamps are missing.
-  const elapsedSec = b.status === 'completed'
-    ? (b.started_at && completedMs ? Math.max(0, Math.round((completedMs - startedMs) / 1000)) : targetMin * 60)
-    : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
   const targetSec = targetMin * 60
+  const rawElapsedSec = b.status === 'completed'
+    ? (b.started_at && completedMs ? Math.max(0, Math.round((completedMs - startedMs) / 1000)) : targetSec)
+    : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+  // Booked time is up while the service is still running → freeze the timer at the booked
+  // length and raise a one-time "service time completed" popup (below).
+  const timeUp = b.status === 'in_progress' && rawElapsedSec >= targetSec
+  const elapsedSec = timeUp ? targetSec : rawElapsedSec
   const remainingSec = Math.max(0, targetSec - elapsedSec)
   const pct = Math.min(100, (elapsedSec / targetSec) * 100)
   const fmt = (s: number) => {
@@ -103,6 +108,29 @@ export default function Track() {
   return (
     <div className="screen">
       <Header title="Track Your Expert" />
+
+      {/* One-time popup when the booked service time is up */}
+      {timeUp && !timeUpAck && (
+        <div
+          onClick={() => setTimeUpAck(true)}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,16,45,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 18, padding: '24px 22px', maxWidth: 340, width: '100%', textAlign: 'center', boxShadow: '0 20px 60px rgba(60,40,140,0.3)' }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>⏱️</div>
+            <h3 style={{ margin: '0 0 6px', fontSize: 18, color: '#1e1b3a' }}>Service Time Completed</h3>
+            <p style={{ margin: '0 0 18px', fontSize: 14, color: '#6b6690', lineHeight: 1.5 }}>
+              The booked {targetMin} min for your service is over. Your expert is wrapping up and will finish shortly.
+            </p>
+            <button
+              onClick={() => setTimeUpAck(true)}
+              style={{ width: '100%', padding: '12px', border: 'none', borderRadius: 12, background: '#6d28d9', color: '#fff', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="content pad-cta">
         <div className="track-status"><h2 className={h.cls}>{h.t}</h2><p>{h.s}</p></div>
 

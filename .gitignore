@@ -9,6 +9,8 @@ node_modules/
 *.db
 payment.config.json
 .env.production
+.env
+infra/.env
 *.tsbuildinfo
 
 # IDE

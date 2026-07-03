@@ -9,7 +9,7 @@ import express from 'express'
 import crypto from 'node:crypto'
 import {
   makePool, migrate, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents,
-  publishEvent, getSetting, getSettingInt,
+  publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4008)
@@ -17,6 +17,7 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
+const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[payment] unhandledRejection:', e?.message || e))
 
@@ -148,7 +149,37 @@ app.post('/api/payments/payout/webhook', async (req, res) => {
 })
 
 /* ---------- admin finance ---------- */
-app.get('/api/admin/payments', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows))
+// Admin Payments screen expects { summary, methods, transactions } — not a raw row array.
+app.get('/api/admin/payments', adminAuth, async (_q, res) => {
+  const rows = (await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows
+  const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
+  const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
+  const paid = rows.filter((r) => r.status === 'PAID')
+  const summary = {
+    revenue: paid.reduce((s, r) => s + (r.amount || 0), 0),
+    successful: paid.length,
+    pending: rows.filter((r) => ['CREATED', 'PENDING'].includes(r.status)).length,
+    refunded: rows.filter((r) => r.status === 'REFUNDED').length,
+  }
+  const methodMap = {}
+  for (const r of rows) {
+    const m = r.mode || 'other'
+    const e = methodMap[m] || (methodMap[m] = { method: m, n: 0, amount: 0 })
+    e.n += 1
+    if (r.status === 'PAID') e.amount += (r.amount || 0)
+  }
+  const transactions = rows.map((r) => ({
+    id: r.id,
+    type: r.status === 'REFUNDED' ? 'refund' : 'credit',
+    status: r.status,
+    title: `${r.mode || 'Online'} payment`,
+    amount: r.amount || 0,
+    created: r.created,
+    ref: r.booking_id ? `BK${r.booking_id}` : (r.order_id || ''),
+    customer: nameById.get(r.customer_id) || `Customer #${r.customer_id}`,
+  }))
+  res.json({ summary, methods: Object.values(methodMap), transactions })
+})
 app.get('/api/admin/finance/payments', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows))
 app.get('/api/admin/finance/settlements', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM settlements ORDER BY id DESC LIMIT 500')).rows))
 app.get('/api/admin/finance/payouts', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM payouts ORDER BY id DESC LIMIT 500')).rows))
@@ -159,8 +190,25 @@ app.get('/api/admin/finance/reports', adminAuth, async (_q, res) => {
   const commissionPct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
   res.json({ revenue: rev, settledToWorkers: paidOut, commission: rev - paidOut, commissionPct })
 })
-app.get('/api/admin/refunds', adminAuth, async (_q, res) => res.json((await pool.query("SELECT * FROM payments WHERE status='REFUNDED' ORDER BY id DESC")).rows))
-app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => { await pool.query("UPDATE payments SET status='REFUNDED' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
+// Refunds screen shows CANCELLED bookings + their refund/fee/reason (that data lives on the
+// booking table, not payments). Fetch cancelled bookings and shape them with the customer name.
+app.get('/api/admin/refunds', adminAuth, async (_q, res) => {
+  const [bookings, customers] = await Promise.all([
+    tryGet(BOOKING_URL, '/api/internal/bookings?status=cancelled', []),
+    tryGet(AUTH_URL, '/api/internal/customers', []),
+  ])
+  const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
+  res.json((bookings || []).map((b) => ({
+    id: b.id, ref: b.ref, customer: nameById.get(b.user_id) || `Customer #${b.user_id}`,
+    total: b.total || 0, refund: b.refund ?? null, cancel_fee: b.cancel_fee ?? null,
+    cancel_reason: b.cancel_reason ?? null, payment: b.payment ?? null,
+    payment_status: b.payment_status ?? null, created: b.created,
+  })))
+})
+app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => {
+  await internalPost(BOOKING_URL, `/api/internal/bookings/${Number(req.params.id)}/refund`, {})
+  res.json({ ok: true })
+})
 
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'payment', async (type, data) => {

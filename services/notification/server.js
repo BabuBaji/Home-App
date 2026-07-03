@@ -9,7 +9,7 @@
 // them, so the admin Activity Monitor and booking timeline work without any service calling it.
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents,
+  makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents, tryGet,
 } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4003)
@@ -111,7 +111,13 @@ app.post('/api/tickets', auth, async (req, res) => {
   await logEvent({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'support.ticket', entityType: 'ticket', entityId: rows[0].id, ref, detail: `Raised ticket: ${req.body.category || 'General'}` })
   res.status(201).json(rows[0])
 })
-app.get('/api/admin/tickets', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM tickets ORDER BY id DESC')).rows))
+app.get('/api/admin/tickets', adminAuth, async (_q, res) => {
+  const rows = (await pool.query('SELECT * FROM tickets ORDER BY id DESC')).rows
+  // tickets store only user_id; resolve the customer display name for the admin table/search/CSV.
+  const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
+  const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
+  res.json(rows.map((t) => ({ ...t, customer: nameById.get(t.user_id) || `Customer #${t.user_id}` })))
+})
 app.patch('/api/admin/tickets/:id', adminAuth, async (req, res) => {
   const b = req.body || {}
   const cur = (await pool.query('SELECT * FROM tickets WHERE id=$1', [Number(req.params.id)])).rows[0]
