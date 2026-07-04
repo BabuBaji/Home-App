@@ -26,6 +26,7 @@ import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
 import Rate from './screens/Rate'
 import Bookings from './screens/Bookings'
+import BookingDetail from './screens/BookingDetail'
 import Wallet from './screens/Wallet'
 import Profile from './screens/Profile'
 import Support from './screens/Support'
@@ -111,6 +112,7 @@ export default function App() {
               <Route path="/cancel/:id" element={<Cancel />} />
               <Route path="/rate/:id" element={<Rate />} />
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/booking/:id" element={<BookingDetail />} />
               <Route path="/wallet" element={<Wallet />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/support" element={<Support />} />
