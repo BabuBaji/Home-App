@@ -138,16 +138,16 @@ private fun BookingCard(b: Booking) {
     }
     Card {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(b.timeInfo.substringBefore(" •"), fontSize = 12.sp, color = TextGray)
-            StatusPill(b.status, bg, fg)
+            Text((b.timeInfo ?: "").substringBefore(" •"), fontSize = 12.sp, color = TextGray)
+            StatusPill(b.status ?: "", bg, fg)
         }
         Spacer(Modifier.height(8.dp))
-        Text(b.service, fontWeight = FontWeight.SemiBold, color = TextDark)
-        Text(b.customerName, fontSize = 13.sp, color = TextDark)
-        Text(b.address, fontSize = 12.sp, color = TextGray)
+        Text(b.service ?: "", fontWeight = FontWeight.SemiBold, color = TextDark)
+        Text(b.customerName ?: "", fontSize = 13.sp, color = TextDark)
+        Text(b.address ?: "", fontSize = 12.sp, color = TextGray)
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(b.timeInfo, fontSize = 11.sp, color = TextGray, modifier = Modifier.weight(1f))
+            Text(b.timeInfo ?: "", fontSize = 11.sp, color = TextGray, modifier = Modifier.weight(1f))
             Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = TextDark)
         }
     }

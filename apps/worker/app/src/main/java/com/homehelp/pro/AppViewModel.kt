@@ -72,12 +72,12 @@ data class Job(
 )
 
 data class Booking(
-    val service: String,
-    val customerName: String,
-    val address: String,
-    val timeInfo: String,
-    val amount: Int,
-    val status: String,
+    val service: String? = null,
+    val customerName: String? = null,
+    val address: String? = null,
+    val timeInfo: String? = null,
+    val amount: Int = 0,
+    val status: String? = null,
 )
 
 data class EarningEntry(val date: String, val amount: Int, val paid: Boolean = true)
