@@ -1,0 +1,24 @@
+# Production override for VM hosting: restart every container unless explicitly stopped, so the
+# whole stack survives crashes and VM reboots. Use together with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+services:
+  redis:          { restart: unless-stopped }
+  catalog-db:     { restart: unless-stopped }
+  auth-db:        { restart: unless-stopped }
+  notification-db: { restart: unless-stopped }
+  worker-db:      { restart: unless-stopped }
+  booking-db:     { restart: unless-stopped }
+  dispatch-db:    { restart: unless-stopped }
+  payment-db:     { restart: unless-stopped }
+  wallet-db:      { restart: unless-stopped }
+  admin-db:       { restart: unless-stopped }
+  auth:           { restart: unless-stopped }
+  catalog:        { restart: unless-stopped }
+  booking:        { restart: unless-stopped }
+  dispatch:       { restart: unless-stopped }
+  payment:        { restart: unless-stopped }
+  wallet:         { restart: unless-stopped }
+  worker:         { restart: unless-stopped }
+  notification:   { restart: unless-stopped }
+  admin:          { restart: unless-stopped }
+  gateway:        { restart: unless-stopped }
