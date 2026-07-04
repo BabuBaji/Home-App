@@ -117,18 +117,18 @@ class AppViewModel : ViewModel() {
         private set
 
     // Live dashboard / wallet figures
-    var todayEarnings by mutableIntStateOf(650)
+    var todayEarnings by mutableIntStateOf(0)
         private set
-    var todayJobs by mutableIntStateOf(4)
+    var todayJobs by mutableIntStateOf(0)
         private set
-    val todayHours = 5.2
-    var walletBalance by mutableIntStateOf(8450)
+    val todayHours = 0.0
+    var walletBalance by mutableIntStateOf(0)
         private set
-    var totalEarned by mutableIntStateOf(15680)
+    var totalEarned by mutableIntStateOf(0)
         private set
-    var withdrawnTotal by mutableIntStateOf(7230)
+    var withdrawnTotal by mutableIntStateOf(0)
         private set
-    var pendingAmount by mutableIntStateOf(1200)
+    var pendingAmount by mutableIntStateOf(0)
         private set
 
     // ---- wallet module: balances, periods, queues ----
@@ -161,21 +161,21 @@ class AppViewModel : ViewModel() {
         private set
 
     // ---- editable profile state (Profile sub-screens) ----
-    var workerName by mutableStateOf("Rahul Kumar")
-    var workerPhone by mutableStateOf("+91 90000 12345")
-    var workerEmail by mutableStateOf("rahul.kumar@email.com")
-    var workerCity by mutableStateOf("Mumbai")
-    var jobsCompleted by mutableIntStateOf(128)
+    var workerName by mutableStateOf("")
+    var workerPhone by mutableStateOf("")
+    var workerEmail by mutableStateOf("")
+    var workerCity by mutableStateOf("")
+    var jobsCompleted by mutableIntStateOf(0)
         private set
-    var workerRating by mutableStateOf(4.7)
+    var workerRating by mutableStateOf(0.0)
         private set
 
-    var bankName by mutableStateOf("HDFC Bank")
-    var bankAccount by mutableStateOf("xxxx xxxx 1234")
-    var bankIfsc by mutableStateOf("HDFC0001234")
-    var bankHolder by mutableStateOf("Rahul Kumar")
+    var bankName by mutableStateOf("")
+    var bankAccount by mutableStateOf("")
+    var bankIfsc by mutableStateOf("")
+    var bankHolder by mutableStateOf("")
     var bankUpi by mutableStateOf("")
-    var bankStatus by mutableStateOf("Approved")   // Not Added / Pending Verification / Approved / Rejected
+    var bankStatus by mutableStateOf("Not Added")   // Not Added / Pending Verification / Approved / Rejected
         private set
     var bankRemarks by mutableStateOf("")
         private set
@@ -200,11 +200,7 @@ class AppViewModel : ViewModel() {
     var notifRatings by mutableStateOf(true)
 
     // ---- verification documents ----
-    val documents = mutableStateListOf(
-        DocItem("Aadhaar Card", "Verified"),
-        DocItem("PAN Card", "Verified"),
-        DocItem("Passport Size Photo", "Pending"),
-    )
+    val documents = mutableStateListOf<DocItem>()
 
     // ---- networking helpers ----
     /** Fire a backend call without blocking the UI; failures degrade to offline mode. */
@@ -610,29 +606,9 @@ class AppViewModel : ViewModel() {
     }
 
     // ---- dynamic data (seeded, grows as jobs complete) ----
-    val bookings = mutableStateListOf(
-        Booking("Utensil Wash, Mopping, Dusting", "Priya Sharma", "Bandra West, Mumbai", "16 May 2025, 09:00 AM • 2 hours • 1.8 km", 297, "Upcoming"),
-        Booking("Bathroom Cleaning, Laundry", "Rohan Verma", "Andheri West, Mumbai", "17 May 2025, 10:30 AM • 2.3 km", 349, "Upcoming"),
-        Booking("Sweeping, Mopping, Dusting", "Sneha Iyer", "Bandra West, Mumbai", "18 May 2025, 08:00 AM • 2.0 km", 249, "Upcoming"),
-        Booking("Bathroom Cleaning, Laundry", "Amit Shah", "Khar West, Mumbai", "15 May 2025, 02:00 PM • 1.5 hours", 199, "Completed"),
-        Booking("Kitchen Cleaning", "Kavya Menon", "Santacruz West, Mumbai", "14 May 2025, 04:00 PM", 199, "Cancelled"),
-    )
+    val bookings = mutableStateListOf<Booking>()
 
-    val earnings = mutableStateListOf(
-        EarningEntry("16 May 2025", 650),
-        EarningEntry("15 May 2025", 810),
-        EarningEntry("14 May 2025", 540),
-        EarningEntry("13 May 2025", 620),
-        EarningEntry("12 May 2025", 430),
-        EarningEntry("11 May 2025", 590),
-        EarningEntry("10 May 2025", 710),
-    )
+    val earnings = mutableStateListOf<EarningEntry>()
 
-    val walletTxns = mutableStateListOf(
-        WalletTxn("Job Payment", "16 May 2025, 11:00 AM", 297, "Success", true),
-        WalletTxn("Withdraw to Bank", "A/c No. xxxx1234", 2700, "Success", false),
-        WalletTxn("Job Payment", "12 May 2025, 06:30 PM", 349, "Success", true),
-        WalletTxn("Incentive", "Performance Bonus", 50, "Success", true),
-        WalletTxn("Pending Amount", "16 May 2025, 05:00 PM", 1200, "Pending", true),
-    )
+    val walletTxns = mutableStateListOf<WalletTxn>()
 }

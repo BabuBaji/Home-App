@@ -331,8 +331,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionTitle("This Week")
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    MiniStat("₹3,250", "Earnings", "↑ 12%")
-                    MiniStat("18", "Jobs", "↑ 8%")
+                    MiniStat("₹${vm.weekEarnings}", "Earnings", null)
+                    MiniStat("${vm.bookings.count { it.status == "Completed" }}", "Jobs", null)
                 }
             }
 
@@ -341,9 +341,9 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionTitle("Performance")
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    MiniStat("4.8 ★", "Rating", null)
-                    MiniStat("98%", "Completion", null)
-                    MiniStat("92%", "On-time", null)
+                    MiniStat(if (vm.workerRating > 0) "${vm.workerRating} ★" else "—", "Rating", null)
+                    MiniStat("${vm.jobsCompleted}", "Completed", null)
+                    MiniStat("—", "On-time", null)
                 }
             }
             Spacer(Modifier.height(8.dp))
