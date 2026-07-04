@@ -214,7 +214,7 @@ app.get('/api/admin/live-ops', admin, async (_q, res) => {
       : demand > online ? 'short' : 'healthy'
     return {
       id: z.id, name: z.name, state: z.state, city: z.city, status: z.status, pincodeCount: z.pincodeCount,
-      supply: { assigned: zw.length, active: zw.filter((w) => w.status === 'active').length, online },
+      supply: { assigned: zw.length, active: zw.filter((w) => w.status === 'active').length, online, onShift: zw.filter((w) => w.on_shift).length },
       demand: { open, active, total: demand }, health,
     }
   })

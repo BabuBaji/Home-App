@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
-  UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio,
+  UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, can } from '../store'
@@ -27,6 +27,7 @@ const NAV: NavGroup[] = [
   { section: 'Operations', items: [
     { to: '/live-ops', label: 'Live Ops', Icon: Radio, min: 'admin' },
     { to: '/service-areas', label: 'Service Areas', Icon: MapPin, min: 'admin' },
+    { to: '/roster', label: 'Shifts / Roster', Icon: CalendarClock, min: 'admin' },
     { to: '/complaints', label: 'Complaints', Icon: AlertOctagon },
     { to: '/cancellations', label: 'Cancellations', Icon: Ban },
     { to: '/worker-wallet', label: 'Add Funds / Wallet', Icon: Wallet },
@@ -48,7 +49,7 @@ const NAV: NavGroup[] = [
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', pricing: 'Pricing', payments: 'Payments', refunds: 'Refunds',
-  'live-ops': 'Live Ops', 'service-areas': 'Service Areas', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
+  'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', roles: 'Roles & Permissions',
 }
 

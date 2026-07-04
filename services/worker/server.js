@@ -39,6 +39,14 @@ async function init() {
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS bank_status TEXT DEFAULT 'Pending'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
+    // Shifts (WFM roster): a worker is "on shift" in a zone during weekly time windows.
+    // weekday 0=Sun..6=Sat; start_min/end_min = minutes from midnight (IST).
+    `CREATE TABLE IF NOT EXISTS shifts (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, zone_id INTEGER,
+      weekday INTEGER NOT NULL, start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_shift_worker ON shifts(worker_id)`,
   ])
   const seeded = (await pool.query('SELECT COUNT(*)::int n FROM workers')).rows[0].n
   if (!seeded) {
@@ -79,8 +87,21 @@ async function getWorker(id) { if (!Number.isFinite(id)) return null; const { ro
 async function getByPhone(phone) { const { rows } = await pool.query("SELECT * FROM workers WHERE phone=$1 ORDER BY (status='active') DESC, verified DESC, id DESC", [String(phone || '')]); return rows[0] || null }
 const serviceSet = (w) => new Set((w.services || []).map((s) => String(s).toLowerCase().trim()))
 
+/* ---------- shifts / roster (WFM) ---------- */
+// Current IST weekday + minutes-from-midnight (the settings timezone is GMT+5:30).
+function istNow() { const d = new Date(Date.now() + 5.5 * 3600 * 1000); return { weekday: d.getUTCDay(), minutes: d.getUTCHours() * 60 + d.getUTCMinutes() } }
+const onShiftNow = (rows) => { const { weekday, minutes } = istNow(); return rows.some((s) => s.weekday === weekday && s.start_min <= minutes && minutes < s.end_min) }
+const toMin = (t) => { const [h, m] = String(t || '').split(':').map(Number); return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0) }
+const toHHMM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+async function shiftsByWorker() {
+  const rows = (await pool.query('SELECT worker_id, weekday, start_min, end_min FROM shifts')).rows
+  const by = {}; for (const s of rows) (by[s.worker_id] ||= []).push(s); return by
+}
+
 async function listWorkers({ status, city, q } = {}) {
   let rows = (await pool.query('SELECT * FROM workers ORDER BY id DESC')).rows.map(rowToWorker)
+  const by = await shiftsByWorker()
+  rows = rows.map((w) => ({ ...w, on_shift: onShiftNow(by[w.id] || []) }))
   if (status && status !== 'all') rows = rows.filter((w) => w.status === status)
   if (city && city !== 'all') rows = rows.filter((w) => w.city === city)
   if (q) { const s = q.toLowerCase(); rows = rows.filter((w) => w.name.toLowerCase().includes(s) || (w.phone || '').includes(s) || (w.email || '').toLowerCase().includes(s)) }
@@ -178,6 +199,46 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
 app.get('/api/admin/workers/:id', adminAuth, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+
+/* ---------- shifts / roster (admin) ---------- */
+app.get('/api/admin/shifts', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT s.*, w.name AS worker_name FROM shifts s JOIN workers w ON w.id=s.worker_id ORDER BY s.worker_id, s.weekday, s.start_min')
+  const { weekday, minutes } = istNow()
+  res.json(rows.map((s) => ({
+    id: s.id, worker_id: s.worker_id, worker_name: s.worker_name, zone_id: s.zone_id, weekday: s.weekday,
+    start: toHHMM(s.start_min), end: toHHMM(s.end_min),
+    on_now: s.weekday === weekday && s.start_min <= minutes && minutes < s.end_min,
+  })))
+})
+app.post('/api/admin/shifts', adminAuth, async (req, res) => {
+  const b = req.body || {}
+  if (!b.worker_id) return res.status(400).json({ error: 'Worker is required' })
+  const days = Array.isArray(b.weekdays) && b.weekdays.length ? b.weekdays : [b.weekday]
+  const sm = toMin(b.start), em = toMin(b.end)
+  if (!(em > sm)) return res.status(400).json({ error: 'End time must be after start time' })
+  let added = 0
+  for (const d of days) {
+    if (!Number.isFinite(Number(d))) continue
+    await pool.query('INSERT INTO shifts (worker_id,zone_id,weekday,start_min,end_min) VALUES ($1,$2,$3,$4,$5)',
+      [Number(b.worker_id), b.zone_id ? Number(b.zone_id) : null, Number(d), sm, em]); added++
+  }
+  res.status(201).json({ ok: true, added })
+})
+app.delete('/api/admin/shifts/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM shifts WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+
+/* Internal: on-shift qualified workers now (for auto-assign / live-ops). */
+app.get('/internal/on-shift', internalOnly, async (req, res) => {
+  const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
+  const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
+  const { weekday, minutes } = istNow()
+  const vals = [weekday, minutes]
+  let sql = `SELECT DISTINCT w.* FROM workers w JOIN shifts s ON s.worker_id=w.id
+    WHERE w.status='active' AND s.weekday=$1 AND s.start_min<=$2 AND $2 < s.end_min`
+  if (zoneId) { vals.push(zoneId); sql += ` AND (s.zone_id=$3 OR s.zone_id IS NULL)` }
+  const rows = (await pool.query(sql, vals)).rows
+  const qualified = rows.filter((w) => { const set = serviceSet(w); return names.length === 0 || names.some((n) => set.has(n)) })
+  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, available: !!w.available, zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
+})
 
 async function patchWorker(id, b, res) {
   const w = await getWorker(id); if (!w) { res.status(404); return { error: 'Not found' } }

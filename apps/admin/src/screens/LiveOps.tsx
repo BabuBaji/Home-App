@@ -84,8 +84,8 @@ function ZoneCard({ z }: { z: LiveOpsZone }) {
           </div>
           <div style={{ background: 'var(--panel, #f6f7fb)', borderRadius: 10, padding: '8px 10px' }}>
             <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.4px' }}>Supply</div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>{z.supply.online}</div>
-            <div className="muted" style={{ fontSize: 12 }}>online · {z.supply.assigned} assigned</div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>{z.supply.onShift}</div>
+            <div className="muted" style={{ fontSize: 12 }}>on shift · {z.supply.online} online · {z.supply.assigned} total</div>
           </div>
         </div>
         <div style={{ height: 6, borderRadius: 4, background: '#ececf0', overflow: 'hidden' }}>

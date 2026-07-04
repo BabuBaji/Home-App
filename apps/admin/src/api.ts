@@ -141,7 +141,7 @@ export const fetchZones = () => req<Zone[]>('/zones')
 /* live ops control tower */
 export interface LiveOpsZone {
   id: number; name: string; state: string; city: string; status: string; pincodeCount: number
-  supply: { assigned: number; active: number; online: number }
+  supply: { assigned: number; active: number; online: number; onShift: number }
   demand: { open: number; active: number; total: number }
   health: 'off' | 'idle' | 'critical' | 'short' | 'healthy'
 }
@@ -150,6 +150,12 @@ export interface LiveOps {
   totals: { openJobs: number; activeJobs: number; onlineWorkers: number; activeWorkers: number; zonesLive: number; zonesTotal: number }
 }
 export const fetchLiveOps = () => req<LiveOps>('/live-ops')
+
+/* shifts / roster (WFM) */
+export interface Shift { id: number; worker_id: number; worker_name: string; zone_id: number | null; weekday: number; start: string; end: string; on_now: boolean }
+export const fetchShifts = () => req<Shift[]>('/shifts')
+export const createShift = (body: Record<string, unknown>) => req<{ ok: boolean; added: number }>('/shifts', post('', body))
+export const deleteShift = (id: number) => req<{ ok: boolean }>(`/shifts/${id}`, { method: 'DELETE' })
 export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
 export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
 export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })
