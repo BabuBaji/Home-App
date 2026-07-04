@@ -75,6 +75,7 @@ async function init() {
     razorpay_key_id: process.env.RAZORPAY_KEY_ID,
     razorpay_key_secret: process.env.RAZORPAY_KEY_SECRET,
     razorpay_webhook_secret: process.env.RAZORPAY_WEBHOOK_SECRET,
+    google_maps_key: process.env.GOOGLE_MAPS_KEY,
     upi_vpa: process.env.UPI_VPA,
     upi_payee_name: process.env.UPI_PAYEE_NAME,
     upi_mode: process.env.UPI_MODE,
