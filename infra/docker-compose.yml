@@ -232,6 +232,8 @@ services:
       RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
       RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      # Google Maps/Places key (powers catalog address search; blank => Nominatim fallback)
+      GOOGLE_MAPS_KEY: ${GOOGLE_MAPS_KEY:-}
     ports: ["4010:4010"]
     depends_on:
       admin-db: { condition: service_healthy }
