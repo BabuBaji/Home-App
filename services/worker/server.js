@@ -38,6 +38,7 @@ async function init() {
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS bank_status TEXT DEFAULT 'Pending'`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
   ])
   const seeded = (await pool.query('SELECT COUNT(*)::int n FROM workers')).rows[0].n
   if (!seeded) {
@@ -170,8 +171,8 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const b = req.body || {}
   if (!b.name) return res.status(400).json({ error: 'Name required' })
   const { rows } = await pool.query(
-    `INSERT INTO workers (name,phone,email,city,services,status,verified,rating) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) RETURNING *`,
-    [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5])
+    `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING *`,
+    [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null])
   res.status(201).json(rowToWorker(rows[0]))
 })
 app.get('/api/admin/workers/:id', adminAuth, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
@@ -180,10 +181,11 @@ app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool
 
 async function patchWorker(id, b, res) {
   const w = await getWorker(id); if (!w) { res.status(404); return { error: 'Not found' } }
-  await pool.query('UPDATE workers SET name=$1, phone=$2, email=$3, city=$4, services=$5::jsonb, status=$6, verified=$7, bank_status=COALESCE($8,bank_status) WHERE id=$9', [
+  await pool.query('UPDATE workers SET name=$1, phone=$2, email=$3, city=$4, services=$5::jsonb, status=$6, verified=$7, bank_status=COALESCE($8,bank_status), zone_id=$9 WHERE id=$10', [
     b.name ?? w.name, b.phone ?? w.phone, b.email ?? w.email, b.city ?? w.city,
     JSON.stringify(b.services ?? w.services), b.status ?? w.status,
-    b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null, id])
+    b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
+    b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), id])
   return rowToWorker(await getWorker(id))
 }
 

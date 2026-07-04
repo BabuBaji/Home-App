@@ -130,6 +130,17 @@ export const createService = (body: Record<string, unknown>) => req<{ ok: boolea
 export const updateService = (id: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/services/${id}`, patch(body))
 export const deleteService = (id: string) => req<{ ok: boolean }>(`/services/${id}`, { method: 'DELETE' })
 
+/* service zones (area-by-area onboarding) */
+export interface Zone {
+  id: number; name: string; state: string; city: string; pincodes: string
+  status: 'planned' | 'live' | 'paused'; sla_minutes: number | null; created: string
+  pincodeList: string[]; pincodeCount: number
+}
+export const fetchZones = () => req<Zone[]>('/zones')
+export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
+export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
+export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })
+
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')
 export const fetchRefunds = () => req<any[]>('/refunds')

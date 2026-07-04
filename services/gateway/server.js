@@ -38,7 +38,7 @@ function pickTarget(url) {
   const p = (s) => u === s || u.startsWith(s + '/') || u.startsWith(s)
 
   // ----- admin panel (BFF + per-domain admin routes) -----
-  if (p('/api/admin/services')) return U.catalog
+  if (p('/api/admin/services') || p('/api/admin/zones')) return U.catalog
   if (p('/api/admin/activity')) return U.notification
   if (p('/api/admin/notifications')) return U.notification
   if (/^\/api\/admin\/workers\/[^/]+\/wallet/.test(u)) return U.wallet
@@ -57,7 +57,7 @@ function pickTarget(url) {
   if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')) return U.auth
 
   // ----- catalogue / pricing / address search -----
-  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/serviceable') || p('/api/eta')) return U.catalog
+  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/serviceable') || p('/api/eta') || p('/api/zones')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
   if (p('/api/bookings') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking

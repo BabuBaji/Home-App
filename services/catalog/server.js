@@ -28,6 +28,14 @@ async function init() {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT NOT NULL, price INTEGER NOT NULL,
       category TEXT NOT NULL, available BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0
     )`,
+    // Service Zones (the "dark store" / micro-market): a launchable area = a set of pincodes.
+    // status: planned (not live) | live (serviceable) | paused. state/city give the hierarchy.
+    `CREATE TABLE IF NOT EXISTS zones (
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, state TEXT NOT NULL DEFAULT '',
+      city TEXT NOT NULL DEFAULT '', pincodes TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'planned', sla_minutes INTEGER,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
   ])
   const up = `INSERT INTO services (id,name,icon,price,category,available,sort)
     VALUES ($1,$2,$3,$4,$5,true,$6)
@@ -236,16 +244,40 @@ app.get('/api/geocode', async (req, res) => {
   } catch (e) { console.error('[catalog] geocode:', e.message); res.status(502).json({ error: 'Geocode failed' }) }
 })
 
-// Service-area gating. Admin settings: `serviceable_pincodes` (comma 6-digit PINs) and/or
-// `service_cities` (comma city names). Both empty => serve everywhere (default, no gating).
+// Normalize a pincode blob (comma/space separated) to a clean, de-duped list of 6-digit PINs.
+const normPins = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((s) => s.trim()).filter((s) => /^\d{6}$/.test(s)))]
+
+// Service-area gating.
+//  • If ANY zones exist → zones are the source of truth: a pincode is serviceable iff it (or its
+//    city) belongs to a LIVE zone. This is how areas launch/pause "block by block".
+//  • If NO zones exist → fall back to legacy flat settings (serviceable_pincodes/service_cities;
+//    both empty = serve everywhere).
 app.get('/api/serviceable', async (req, res) => {
   const pincode = String(req.query.pincode || '').trim()
   const city = String(req.query.city || '').trim().toLowerCase()
+  const zones = (await pool.query('SELECT city, pincodes, status FROM zones')).rows
+  if (zones.length > 0) {
+    const live = zones.filter((z) => z.status === 'live')
+    if (live.length === 0) return res.json({ serviceable: false, reason: 'no_live_zones', pincode: pincode || null })
+    const covered = live.some((z) => {
+      const pins = normPins(z.pincodes)
+      const cityMatch = city && String(z.city || '').trim().toLowerCase() === city
+      if (pincode) return pins.includes(pincode) || (pins.length === 0 && cityMatch)
+      return cityMatch
+    })
+    return res.json({ serviceable: covered, reason: covered ? 'covered' : 'not_covered', pincode: pincode || null })
+  }
   const pins = (await getSetting(ADMIN_URL, 'serviceable_pincodes', '')).split(',').map((s) => s.trim()).filter(Boolean)
   const cities = (await getSetting(ADMIN_URL, 'service_cities', '')).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
   if (pins.length === 0 && cities.length === 0) return res.json({ serviceable: true, reason: 'open' })
   const serviceable = (pins.length > 0 && pins.includes(pincode)) || (cities.length > 0 && cities.includes(city))
   res.json({ serviceable, reason: serviceable ? 'covered' : 'not_covered', pincode: pincode || null })
+})
+
+// Public: live zones (for a "we're now in these areas" display).
+app.get('/api/zones', async (_q, res) => {
+  const { rows } = await pool.query("SELECT name, state, city FROM zones WHERE status='live' ORDER BY state, city, name")
+  res.json(rows)
 })
 
 // Worker/customer ETA via OSRM road routing (free). Distance Matrix (Google) can slot in later
@@ -300,6 +332,37 @@ app.delete('/api/admin/services/:id', adminAuth, requireRole('admin'), async (re
   await broadcastServices()
   res.json({ ok: true })
 })
+/* ---------- admin: Service Zones (area-by-area onboarding) ---------- */
+const zoneOut = (z) => ({ ...z, pincodeList: normPins(z.pincodes), pincodeCount: normPins(z.pincodes).length })
+app.get('/api/admin/zones', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
+  res.json(rows.map(zoneOut))
+})
+app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) => {
+  const b = req.body || {}
+  if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
+  const status = ['planned', 'live', 'paused'].includes(b.status) ? b.status : 'planned'
+  const { rows } = await pool.query(
+    'INSERT INTO zones (name,state,city,pincodes,status,sla_minutes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+    [String(b.name).trim(), String(b.state || '').trim(), String(b.city || '').trim(), normPins(b.pincodes).join(','), status, b.slaMinutes ? Number(b.slaMinutes) : null])
+  res.status(201).json(zoneOut(rows[0]))
+})
+app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
+  const cur = await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])
+  if (!cur.rowCount) return res.status(404).json({ error: 'Zone not found' })
+  const z = cur.rows[0], b = req.body || {}
+  await pool.query('UPDATE zones SET name=$1,state=$2,city=$3,pincodes=$4,status=$5,sla_minutes=$6 WHERE id=$7', [
+    b.name ?? z.name, b.state ?? z.state, b.city ?? z.city,
+    b.pincodes !== undefined ? normPins(b.pincodes).join(',') : z.pincodes,
+    b.status && ['planned', 'live', 'paused'].includes(b.status) ? b.status : z.status,
+    b.slaMinutes !== undefined ? (b.slaMinutes ? Number(b.slaMinutes) : null) : z.sla_minutes, req.params.id])
+  res.json(zoneOut((await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])).rows[0]))
+})
+app.delete('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
+  await pool.query('DELETE FROM zones WHERE id=$1', [req.params.id])
+  res.json({ ok: true })
+})
+
 // Customer-facing single-field update kept from the monolith (price/availability toggle).
 app.patch('/api/services/:id', adminAuth, requireRole('manager'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
