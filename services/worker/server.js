@@ -191,9 +191,11 @@ async function patchWorker(id, b, res) {
 app.get('/internal/workers', internalOnly, async (req, res) => res.json({ stats: await workerStats(), workers: await listWorkers(req.query) }))
 app.get('/internal/workers/active-for', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
-  const rows = (await pool.query("SELECT services FROM workers WHERE status='active' AND available=true")).rows
-  const available = rows.some((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
-  res.json({ available })
+  const rows = (await pool.query("SELECT services, available FROM workers WHERE status='active'")).rows
+  const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
+  // available/onlineCount = qualified workers online now (for instant); count = all active qualified
+  // workers (for future scheduled slots, where being online right now doesn't matter).
+  res.json({ available: qualified.some((w) => w.available), count: qualified.length, onlineCount: qualified.filter((w) => w.available).length })
 })
 app.get('/internal/workers/:id', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
 app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json({ services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available, status: w?.status, offered_booking: w?.offered_booking, last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null }) })

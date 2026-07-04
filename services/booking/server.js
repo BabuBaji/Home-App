@@ -98,6 +98,26 @@ async function anyActiveWorker(serviceNames) {
   return r ? !!r.available : true // default true if worker service is unavailable
 }
 
+// Fixed hourly slots — must match the customer app's Calendar (08:00 AM … 07:00 PM).
+const SLOT_HOURS = Array.from({ length: 12 }, (_, i) => 8 + i)
+const slotLabel = (h) => `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:00 ${h >= 12 ? 'PM' : 'AM'}`
+const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+
+// Capacity check for a scheduled slot: pincode served + at least one qualified worker not already
+// booked at that date/slot. Workers being online *now* doesn't matter for a future slot.
+async function slotAvailability(date, time, pincode, serviceNames) {
+  const srv = pincode ? await tryGet(CATALOG_URL, `/api/serviceable?pincode=${encodeURIComponent(pincode)}`, { serviceable: true }) : { serviceable: true }
+  if (!srv.serviceable) return { available: false, reason: `Sorry, we don't serve ${pincode} yet.` }
+  const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent((serviceNames || []).join(','))}`, { count: 0 })
+  const workerCount = wa.count ?? 0
+  if (workerCount === 0) return { available: false, reason: 'No expert offers this service yet.' }
+  const booked = date && time
+    ? (await pool.query(`SELECT count(*)::int n FROM bookings WHERE date=$1 AND time=$2 AND status = ANY($3)`, [date, time, ACTIVE_STATES])).rows[0].n
+    : 0
+  const available = workerCount > booked
+  return { available, workerCount, booked, reason: available ? null : 'All experts are booked for this time. Please pick another slot.' }
+}
+
 const app = express()
 app.use(express.json({ limit: '6mb' }))
 app.get('/health', (_q, res) => res.json({ service: 'booking', ok: true }))
@@ -119,6 +139,18 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
   res.json({ ...publicBooking(b), serviceAvailable, pro, ...travel })
 })
 
+// Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
+app.get('/api/slots', auth, async (req, res) => {
+  const date = String(req.query.date || ''), pincode = String(req.query.pincode || ''), services = String(req.query.services || '')
+  const srv = pincode ? await tryGet(CATALOG_URL, `/api/serviceable?pincode=${encodeURIComponent(pincode)}`, { serviceable: true }) : { serviceable: true }
+  const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent(services)}`, { count: 0 })
+  const workerCount = wa.count ?? 0
+  const rows = date ? (await pool.query(`SELECT time, count(*)::int n FROM bookings WHERE date=$1 AND status = ANY($2) GROUP BY time`, [date, ACTIVE_STATES])).rows : []
+  const booked = Object.fromEntries(rows.map((r) => [r.time, r.n]))
+  const slots = SLOT_HOURS.map((h) => { const time = slotLabel(h); const m = booked[time] || 0; return { hour: h, time, booked: m, available: !!srv.serviceable && workerCount > m } })
+  res.json({ serviceable: !!srv.serviceable, workerCount, slots })
+})
+
 app.post('/api/bookings', auth, async (req, res) => {
   const body = req.body || {}
   // Authoritative pricing from the catalog service.
@@ -126,6 +158,12 @@ app.post('/api/bookings', auth, async (req, res) => {
   try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon }) }
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
+
+  // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
+  if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
+    const avail = await slotAvailability(body.date, body.time, body.pincode || '', priced.items.map((i) => i.name))
+    if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
+  }
 
   // Address: explicit, else the customer's default (from the auth service).
   let address = body.address
