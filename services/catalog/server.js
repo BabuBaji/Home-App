@@ -280,6 +280,20 @@ app.get('/api/zones', async (_q, res) => {
   res.json(rows)
 })
 
+// Internal: which zone covers a pincode — booking stamps booking.zone_id from this on create.
+app.get('/api/internal/zone-for', internalOnly, async (req, res) => {
+  const pincode = String(req.query.pincode || '').trim()
+  if (!pincode) return res.json({ zoneId: null })
+  const { rows } = await pool.query('SELECT id, name, status, pincodes FROM zones')
+  const z = rows.find((r) => normPins(r.pincodes).includes(pincode))
+  res.json(z ? { zoneId: z.id, zoneName: z.name, live: z.status === 'live' } : { zoneId: null })
+})
+// Internal: full zone list (for the admin live-ops aggregation).
+app.get('/api/internal/zones', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
+  res.json(rows.map(zoneOut))
+})
+
 // Worker/customer ETA via OSRM road routing (free). Distance Matrix (Google) can slot in later
 // when billing is enabled. Returns straight road distance + drive-time estimate.
 app.get('/api/eta', async (req, res) => {

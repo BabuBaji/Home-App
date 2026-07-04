@@ -53,6 +53,8 @@ async function init() {
       user_id INTEGER NOT NULL, service_id TEXT NOT NULL, created TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, service_id)
     )`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pincode TEXT`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -182,14 +184,19 @@ app.post('/api/bookings', auth, async (req, res) => {
     catch (e) { return res.status(402).json({ error: e.message || 'Insufficient wallet balance' }) }
   }
 
+  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops).
+  const pincode = String(body.pincode || '').trim()
+  let zoneId = null
+  if (pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null); zoneId = zr?.zoneId ?? null }
+
   const ins = await pool.query(
     `INSERT INTO bookings (ref,user_id,type,freq,note,date,time,address,payment,payment_status,items,duration,
-       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,created)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22) RETURNING *`,
+       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24) RETURNING *`,
     [ref(), req.user.id, body.type || 'instant', body.freq ?? null, body.note ?? null, body.date ?? null, body.time ?? null,
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
-      body.lat ?? null, body.lng ?? null, nowIso()])
+      body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
   const booking = rowTo(ins.rows[0])
 
   // Events: dispatch starts matching; notification logs; payment records the collected money.
@@ -341,6 +348,13 @@ app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json
 app.get('/api/internal/pool', internalOnly, async (_q, res) => {
   const { rows } = await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL ORDER BY id DESC")
   res.json(rows.map(rowTo))
+})
+// Live-ops: open + in-progress bookings (lightweight) for the admin control tower.
+app.get('/api/internal/ops', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, ref, status, zone_id, pincode, worker_id, total, created FROM bookings
+     WHERE status = ANY($1) ORDER BY created DESC LIMIT 500`, [ACTIVE_STATES])
+  res.json(rows)
 })
 app.get('/api/internal/bookings', internalOnly, async (req, res) => {
   const { worker_id, status } = req.query

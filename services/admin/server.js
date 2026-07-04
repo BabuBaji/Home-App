@@ -19,6 +19,7 @@ const U = {
   booking: (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''),
   worker: (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, ''),
   payment: (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, ''),
+  catalog: (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, ''),
 }
 
 process.on('unhandledRejection', (e) => console.error('[admin] unhandledRejection:', e?.message || e))
@@ -191,6 +192,47 @@ app.get('/api/admin/audit', admin, async (req, res) => {
 })
 
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
+// Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).
+app.get('/api/admin/live-ops', admin, async (_q, res) => {
+  const ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+  const [zones, wres, ops] = await Promise.all([
+    tryGet(U.catalog, '/api/internal/zones', []),
+    tryGet(U.worker, '/internal/workers', { workers: [] }),
+    tryGet(U.booking, '/api/internal/ops', []),
+  ])
+  const workers = wres.workers || []
+  const zoneRows = (zones || []).map((z) => {
+    const zw = workers.filter((w) => w.zone_id === z.id)
+    const online = zw.filter((w) => w.status === 'active' && w.available).length
+    const zb = (ops || []).filter((b) => b.zone_id === z.id)
+    const open = zb.filter((b) => b.status === 'confirmed' && !b.worker_id).length
+    const active = zb.filter((b) => ACTIVE.includes(b.status)).length
+    const demand = open + active
+    const health = z.status !== 'live' ? 'off'
+      : demand === 0 ? 'idle'
+      : online === 0 ? 'critical'
+      : demand > online ? 'short' : 'healthy'
+    return {
+      id: z.id, name: z.name, state: z.state, city: z.city, status: z.status, pincodeCount: z.pincodeCount,
+      supply: { assigned: zw.length, active: zw.filter((w) => w.status === 'active').length, online },
+      demand: { open, active, total: demand }, health,
+    }
+  })
+  const totals = {
+    openJobs: (ops || []).filter((b) => b.status === 'confirmed' && !b.worker_id).length,
+    activeJobs: (ops || []).filter((b) => ACTIVE.includes(b.status)).length,
+    onlineWorkers: workers.filter((w) => w.status === 'active' && w.available).length,
+    activeWorkers: workers.filter((w) => w.status === 'active').length,
+    zonesLive: (zones || []).filter((z) => z.status === 'live').length,
+    zonesTotal: (zones || []).length,
+  }
+  const unzoned = {
+    open: (ops || []).filter((b) => !b.zone_id && b.status === 'confirmed' && !b.worker_id).length,
+    active: (ops || []).filter((b) => !b.zone_id && ACTIVE.includes(b.status)).length,
+  }
+  res.json({ zones: zoneRows, unzoned, totals })
+})
+
 app.get('/api/admin/dashboard', admin, async (_q, res) => {
   const [customers, bookings, workers] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),

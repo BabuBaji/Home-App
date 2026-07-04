@@ -13,6 +13,7 @@ import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
 import ServiceAreas from './screens/ServiceAreas'
+import LiveOps from './screens/LiveOps'
 import Pricing from './screens/Pricing'
 import Payments from './screens/Payments'
 import Refunds from './screens/Refunds'
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/cancellations" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
           <Route path="/service-areas" element={<Page><ServiceAreas /></Page>} />
+          <Route path="/live-ops" element={<Page><LiveOps /></Page>} />
           <Route path="/pricing" element={<Page><Pricing /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
           <Route path="/refunds" element={<Page><Refunds /></Page>} />

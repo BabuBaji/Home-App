@@ -137,6 +137,19 @@ export interface Zone {
   pincodeList: string[]; pincodeCount: number
 }
 export const fetchZones = () => req<Zone[]>('/zones')
+
+/* live ops control tower */
+export interface LiveOpsZone {
+  id: number; name: string; state: string; city: string; status: string; pincodeCount: number
+  supply: { assigned: number; active: number; online: number }
+  demand: { open: number; active: number; total: number }
+  health: 'off' | 'idle' | 'critical' | 'short' | 'healthy'
+}
+export interface LiveOps {
+  zones: LiveOpsZone[]; unzoned: { open: number; active: number }
+  totals: { openJobs: number; activeJobs: number; onlineWorkers: number; activeWorkers: number; zonesLive: number; zonesTotal: number }
+}
+export const fetchLiveOps = () => req<LiveOps>('/live-ops')
 export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
 export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
 export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })

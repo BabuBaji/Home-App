@@ -83,7 +83,16 @@ async function matchingBookings(w) {
     const dist = w.last ? distanceKm(w.last.lat, w.last.lng, b.cust_lat, b.cust_lng) : null
     cands.push({ b, dist })
   }
-  cands.sort((a, c) => { const ad = a.dist ?? Infinity, cd = c.dist ?? Infinity; return ad !== cd ? ad - cd : a.b.id - c.b.id })
+  // Zone-first: a worker's own-zone jobs rank ahead of out-of-zone ones; then nearest by GPS.
+  // (Soft preference — out-of-zone jobs are still offered if no in-zone work, to avoid starvation.)
+  const wz = w.zone_id ?? null
+  cands.sort((a, c) => {
+    const az = wz != null && a.b.zone_id === wz ? 0 : 1
+    const cz = wz != null && c.b.zone_id === wz ? 0 : 1
+    if (az !== cz) return az - cz
+    const ad = a.dist ?? Infinity, cd = c.dist ?? Infinity
+    return ad !== cd ? ad - cd : a.b.id - c.b.id
+  })
   return cands.map((x) => x.b)
 }
 
