@@ -2,7 +2,7 @@ import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { API_BASE } from './api'
 
-export interface Place { label: string; sub?: string; lat: number; lng: number; placeId?: string }
+export interface Place { label: string; sub?: string; lat: number; lng: number; placeId?: string; pincode?: string }
 
 /** Typed reason so the UI can react ('permission' vs 'disabled' vs generic). */
 export class GeoError extends Error {
@@ -113,14 +113,15 @@ export async function nearbyPlaces(lat: number, lng: number, city: string): Prom
 
 // Address search goes through our backend, which uses Google Places (rich Indian POI coverage,
 // finds specific residencies/apartments) when a Google Maps key is set, else OpenStreetMap.
-export async function searchPlaces(q: string): Promise<Place[]> {
+export async function searchPlaces(q: string, coords?: { lat: number; lng: number } | null): Promise<Place[]> {
   if (!q.trim()) return []
+  const bias = coords ? `&lat=${coords.lat}&lng=${coords.lng}` : ''
   try {
-    const res = await fetch(`${API_BASE}/api/places/search?q=${encodeURIComponent(q)}`)
+    const res = await fetch(`${API_BASE}/api/places/search?q=${encodeURIComponent(q)}${bias}`)
     if (res.ok) {
       const j = await res.json()
       return (j.results || []).map((r: any) => ({
-        label: r.label, sub: r.sub, lat: r.lat ?? 0, lng: r.lng ?? 0, placeId: r.placeId || undefined,
+        label: r.label, sub: r.sub, lat: r.lat ?? 0, lng: r.lng ?? 0, placeId: r.placeId || undefined, pincode: r.pincode || undefined,
       }))
     }
   } catch { /* fall back to direct OSM below */ }
@@ -128,16 +129,41 @@ export async function searchPlaces(q: string): Promise<Place[]> {
     const res = await fetch(`${NOMINATIM}/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=6&addressdetails=1&countrycodes=in,us,gb,ae,sg,au,ca`, { headers: { Accept: 'application/json' } })
     const list = await res.json()
     return (Array.isArray(list) ? list : []).map((r: any) => ({
-      label: r.display_name.split(',').slice(0, 2).join(',').trim(), sub: r.display_name, lat: +r.lat, lng: +r.lon,
+      label: r.display_name.split(',').slice(0, 2).join(',').trim(), sub: r.display_name, lat: +r.lat, lng: +r.lon, pincode: r.address?.postcode || undefined,
     }))
   } catch { return [] }
 }
 
-// Resolve a Google prediction (placeId) to coordinates + clean address (backend proxy).
-export async function placeDetails(placeId: string): Promise<{ label: string; sub: string; lat: number | null; lng: number | null } | null> {
+// Resolve a Google prediction (placeId) to coordinates + clean address + pincode (backend proxy).
+export async function placeDetails(placeId: string): Promise<{ label: string; sub: string; lat: number | null; lng: number | null; pincode?: string | null } | null> {
   try {
     const res = await fetch(`${API_BASE}/api/places/details?placeId=${encodeURIComponent(placeId)}`)
     if (!res.ok) return null
     return await res.json()
   } catch { return null }
+}
+
+// Forward-geocode a typed/manual address string to coords + pincode (Google→OSM on the backend).
+export async function geocodeAddress(q: string): Promise<{ label: string; sub: string; lat: number | null; lng: number | null; pincode?: string | null } | null> {
+  if (!q.trim()) return null
+  try {
+    const res = await fetch(`${API_BASE}/api/geocode?q=${encodeURIComponent(q)}`)
+    if (!res.ok) return null
+    const j = await res.json()
+    return j.lat != null ? j : null
+  } catch { return null }
+}
+
+// Ask the backend whether we cover a pincode/city. Fails open (serviceable) on network error so
+// a flaky connection never blocks a booking. Returns { serviceable: true } when no gating is set.
+export async function checkServiceable(pincode?: string, city?: string): Promise<{ serviceable: boolean; reason: string }> {
+  if (!pincode && !city) return { serviceable: true, reason: 'open' }
+  try {
+    const qs = new URLSearchParams()
+    if (pincode) qs.set('pincode', pincode)
+    if (city) qs.set('city', city)
+    const res = await fetch(`${API_BASE}/api/serviceable?${qs.toString()}`)
+    if (!res.ok) return { serviceable: true, reason: 'unknown' }
+    return await res.json()
+  } catch { return { serviceable: true, reason: 'unknown' } }
 }

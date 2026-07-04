@@ -88,12 +88,68 @@ async function findOrCreateGoogleUser({ email, name, avatar }) {
   return ins.rows[0]
 }
 
-async function ensureDefaultAddressFromLocation(uid, city, location) {
+// A location value that is raw "lat,lng" coordinates rather than a human-readable address.
+const looksLikeCoords = (s) => typeof s === 'string' && /^\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*$/.test(s)
+// Pull a 6-digit PIN out of an address string (India), if present.
+const pinOf = (s) => (typeof s === 'string' ? (s.match(/\b\d{6}\b/) || [null])[0] : null)
+async function ensureDefaultAddressFromLocation(uid, city, location, pincode) {
   if (!location && !city) return
-  const n = await pool.query('SELECT COUNT(*)::int AS n FROM addresses WHERE user_id=$1', [uid])
-  if (n.rows[0].n > 0) return
-  await pool.query('INSERT INTO addresses (user_id,label,line,city,is_default) VALUES ($1,$2,$3,$4,true)',
-    [uid, 'Home', location || city, city || null])
+  const pin = pincode || pinOf(location) || null
+  const def = await pool.query('SELECT id, line, pincode FROM addresses WHERE user_id=$1 ORDER BY is_default DESC, id LIMIT 1', [uid])
+  if (def.rows.length === 0) {
+    // First address: seed "Home" from a human-readable value only (never raw coordinates).
+    const line = looksLikeCoords(location) ? city : (location || city)
+    if (!line) return
+    await pool.query('INSERT INTO addresses (user_id,label,line,city,pincode,is_default) VALUES ($1,$2,$3,$4,$5,true)',
+      [uid, 'Home', line, city || null, pin])
+    return
+  }
+  // Repair a default address whose line is stale raw coordinates once a real address arrives;
+  // also backfill the PIN on a default address that doesn't have one yet.
+  if (location && !looksLikeCoords(location) && looksLikeCoords(def.rows[0].line)) {
+    await pool.query('UPDATE addresses SET line=$1, city=COALESCE($2,city), pincode=COALESCE($3,pincode) WHERE id=$4',
+      [location, city || null, pin, def.rows[0].id])
+  } else if (pin && !def.rows[0].pincode) {
+    await pool.query('UPDATE addresses SET pincode=$1 WHERE id=$2', [pin, def.rows[0].id])
+  }
+}
+
+// Reverse-geocode "lat,lng" to "Area, City - PIN" via OpenStreetMap Nominatim. Cached in memory
+// (rounded key) so repeated app-opens don't hammer Nominatim's public endpoint.
+const geoCache = new Map()
+async function reverseGeocodeServer(location) {
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(location || '')
+  if (!m) return null
+  const lat = Number(m[1]), lng = Number(m[2])
+  const key = `${lat.toFixed(3)},${lng.toFixed(3)}`
+  if (geoCache.has(key)) return geoCache.get(key)
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
+      { headers: { Accept: 'application/json', 'User-Agent': 'HomeHelp/1.0 (support@homehelp.in)' } })
+    if (!r.ok) return null
+    const j = await r.json()
+    const a = j.address || {}
+    const area = (a.suburb || a.neighbourhood || a.village || a.town || a.city_district || a.locality || '').replace(/^Ward\s+\d+\s+/i, '')
+    const city = a.city || a.town || a.state_district || a.state || ''
+    const pincode = a.postcode || pinOf(j.display_name) || null
+    let label = [area, city].filter(Boolean).join(', ') || (j.display_name ? j.display_name.split(',').slice(0, 2).join(', ').trim() : '')
+    if (label && pincode) label = `${label} - ${pincode}`
+    const out = label ? { label, pincode } : null
+    if (out) geoCache.set(key, out)
+    return out
+  } catch { return null }
+}
+
+// Decide what to persist as the display location. Never store raw coordinates: keep an already
+// chosen address, else reverse-geocode the incoming coords to "Area, City - PIN".
+// Returns { value, pincode }.
+async function normalizeLocation(incoming, existing) {
+  if (incoming == null) return { value: existing ?? null, pincode: pinOf(existing) }
+  if (!looksLikeCoords(incoming)) return { value: incoming, pincode: pinOf(incoming) }
+  if (existing && !looksLikeCoords(existing)) return { value: existing, pincode: pinOf(existing) }
+  const g = await reverseGeocodeServer(incoming)
+  if (!g) return { value: existing || null, pincode: pinOf(existing) }
+  return { value: g.label, pincode: g.pincode }
 }
 
 async function getAddresses(uid) {
@@ -173,10 +229,12 @@ app.get('/api/me', auth, async (req, res) => res.json({ user: publicUser(req.use
 app.patch('/api/me', auth, async (req, res) => {
   const b = req.body || {}
   const u = req.user
+  // Convert any raw "lat,lng" into a human-readable "Area, City - PIN" before saving (keeps a chosen address).
+  const norm = b.location !== undefined ? await normalizeLocation(b.location, u.location) : { value: u.location, pincode: pinOf(u.location) }
   const upd = await pool.query(
     'UPDATE users SET name=$1, email=$2, phone=$3, country=$4, city=$5, location=$6 WHERE id=$7 RETURNING *',
-    [b.name ?? u.name, b.email ?? u.email, b.phone ?? u.phone, b.country ?? u.country, b.city ?? u.city, b.location ?? u.location, u.id])
-  if (b.location || b.city) await ensureDefaultAddressFromLocation(u.id, upd.rows[0].city, upd.rows[0].location)
+    [b.name ?? u.name, b.email ?? u.email, b.phone ?? u.phone, b.country ?? u.country, b.city ?? u.city, norm.value, u.id])
+  if (b.location || b.city) await ensureDefaultAddressFromLocation(u.id, upd.rows[0].city, upd.rows[0].location, norm.pincode)
   res.json({ user: publicUser(upd.rows[0]) })
 })
 

@@ -100,7 +100,8 @@ export async function captureLocationOnOpen(): Promise<void> {
     const pos = await getCurrentPosition()
     lastPos = { ...pos, ts: Date.now() }
     try { localStorage.setItem('hh_geo', JSON.stringify(lastPos)) } catch { /* ignore */ }
-    // Store on the user's profile (best-effort) so worker/admin see the live location.
+    // Store on the user's profile (best-effort) so worker/admin see the live location. The backend
+    // reverse-geocodes raw "lat,lng" into a human-readable address before saving (see auth service).
     if (token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
   } catch { /* permission denied / no fix — keep any previous fix */ }
 }
