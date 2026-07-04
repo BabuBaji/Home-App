@@ -1,0 +1,11 @@
+**/node_modules
+.git
+.idea
+apps
+ADMIN
+docs
+*.apk
+*.png
+*.md
+services/api/homehelp.db
+infra/migrate/homehelp.db

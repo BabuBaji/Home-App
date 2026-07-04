@@ -1,272 +1,308 @@
 import { useEffect, useState } from 'react'
-import {
-  Wallet, Clock, Lock, Coins, Plus, Minus, Download, FileText, Check, X, RotateCcw, Landmark,
-} from 'lucide-react'
-import {
-  fetchWorkers, fetchWorkerWallet, walletBonus, walletPenalty, walletHold, walletReleaseHold,
-  walletReleasePending, approveWithdrawal, rejectWithdrawal, approveAdvance, rejectAdvance,
-  generateWorkerPayslip, downloadWalletReport, approveWorkerBank, rejectWorkerBank,
-} from '../api'
-import type { Worker } from '../types'
-import { Card, StatCard, Loading, ErrorState, Empty, Badge, Avatar, SearchBox, Modal, Field, money, useToast } from '../components/UI'
-import { useStore, can } from '../store'
+import { Download, Plus, Wallet, ChevronRight, ArrowRight } from 'lucide-react'
+import { fetchCustomers, adjustWallet, fetchPayments } from '../api'
+import type { Customer } from '../types'
+import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Field, Loading, ErrorState, useToast, money, shortDate } from '../components/UI'
+import { Donut } from '../components/Charts'
 
-const INCOME = ['Tips', 'Attendance Bonus', 'Peak Hour Bonus', 'Festival Bonus', 'Performance Bonus', 'Referral Bonus', 'Customer Rating Bonus']
-const PENALTIES = ['Penalty', 'Hostel Rent', 'Meal Charges', 'Uniform Charges', 'Equipment Charges', 'Late Arrival Deduction', 'Damage Deduction', 'Other Deductions']
+/* ---------- static demo data (web visualization build) ---------- */
 
-const statusTone = (s: string): string => {
-  if (['Paid', 'Success', 'Cleared'].includes(s)) return 'green'
-  if (['Rejected', 'Failed', 'Hold'].includes(s)) return 'red'
-  return 'amber'
+const QUICK_AMOUNTS = ['₹500', '₹1,000', '₹2,000', '₹5,000', '₹10,000', 'Other']
+
+type Txn = { id: number; type: string; title: string; amount: number; created: string; ref?: string; customer: string }
+
+const typeTone = (t: string): string => {
+  const s = (t || '').toLowerCase()
+  if (s === 'credit') return 'green'
+  if (s === 'debit') return 'amber'
+  return 'violet'
 }
-const bankTone = (s?: string): string =>
-  s === 'Approved' ? 'green' : s === 'Rejected' ? 'red' : s === 'Pending Verification' ? 'amber' : 'gray'
+const typeLabel = (t: string): string => {
+  const s = (t || '').toLowerCase()
+  if (s === 'credit') return 'Added'
+  if (s === 'debit') return 'Used'
+  if (s === 'refund') return 'Refunded'
+  return t || '—'
+}
+
+const TOPUP_METHODS = [
+  { label: 'UPI', value: 560560, color: '#2e90fa' },
+  { label: 'Cards', value: 311420, color: '#16a34a' },
+  { label: 'Net Banking', value: 248250, color: '#f59e0b' },
+  { label: 'Wallet', value: 87230, color: '#7c6df7' },
+  { label: 'Others', value: 38220, color: '#98a2b3' },
+]
+
+const TOPUP_LEGEND = [
+  { label: 'UPI', pct: '45%', amt: '(₹5,60,560)', color: '#2e90fa' },
+  { label: 'Cards', pct: '25%', amt: '(₹3,11,420)', color: '#16a34a' },
+  { label: 'Net Banking', pct: '20%', amt: '(₹2,48,250)', color: '#f59e0b' },
+  { label: 'Wallet', pct: '7%', amt: '(₹87,230)', color: '#7c6df7' },
+  { label: 'Others', pct: '3%', amt: '(₹38,220)', color: '#98a2b3' },
+]
+
+const SUMMARY_ROWS = [
+  { label: 'Pending Amount', value: '₹1,25,340' },
+  { label: 'On Hold', value: '₹45,680' },
+  { label: 'Used This Month', value: '₹1,45,230' },
+  { label: 'Expired / Inactive', value: '₹12,450' },
+]
+
+const QUICK_LINKS = [
+  { title: 'Wallet Transactions', sub: 'View all transactions' },
+  { title: 'Customer Wallets', sub: 'Manage customer wallets' },
+  { title: 'Wallet Adjustments', sub: 'Add / Deduct manually' },
+  { title: 'Bulk Add Funds', sub: 'Add funds to multiple customers' },
+]
+
+const HOW_IT_WORKS = [
+  'Select a customer',
+  'Enter amount & select payment method',
+  'Confirm to add funds to wallet',
+]
+
+type Tab = 'funds' | 'transactions' | 'adjust'
 
 export default function WorkerWallet() {
   const toast = useToast()
-  const { admin } = useStore()
-  const isManager = can(admin?.role, 'manager')
+  const [tab, setTab] = useState<Tab>('funds')
   const [q, setQ] = useState('')
-  const [workers, setWorkers] = useState<Worker[]>([])
-  const [sel, setSel] = useState<Worker | null>(null)
-  const [w, setW] = useState<any>(null)
+  const [page, setPage] = useState(1)
+  const pageSize = 5
+
+  const [customers, setCustomers] = useState<Customer[] | null>(null)
+  const [txns, setTxns] = useState<Txn[] | null>(null)
   const [err, setErr] = useState('')
-  const [dialog, setDialog] = useState<null | { kind: string }>(null)
 
-  useEffect(() => {
-    const id = setTimeout(() => { fetchWorkers(q).then((d) => setWorkers(d.workers)).catch((e) => setErr(e.message)) }, 250)
-    return () => clearTimeout(id)
-  }, [q])
+  // Add Funds form
+  const [custId, setCustId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState('')
+  const [desc, setDesc] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  const loadWallet = (worker: Worker) => {
-    setSel(worker); setW(null); setErr('')
-    fetchWorkerWallet(worker.id).then(setW).catch((e) => setErr(e.message))
+  const loadTxns = () => fetchPayments().then((d: any) => setTxns(d.transactions || []))
+  const load = () => {
+    setErr('')
+    Promise.all([fetchCustomers().then(setCustomers), loadTxns()]).catch((e: Error) => setErr(e.message))
   }
-  const reload = () => sel && fetchWorkerWallet(sel.id).then(setW).catch((e) => setErr(e.message))
+  useEffect(load, [])
 
-  async function run(fn: () => Promise<any>, msg: string) {
-    try { const res = await fn(); if (res?.summary) setW(res); else reload(); toast(msg) }
-    catch (e: any) { toast(e.message, 'err') }
+  if (err) return <ErrorState msg={err} onRetry={load} />
+  if (!customers || !txns) return <Loading />
+
+  const resetForm = () => { setCustId(''); setAmount(''); setMethod(''); setDesc('') }
+
+  const pickChip = (a: string) => {
+    if (a === 'Other') { setAmount(''); return }
+    setAmount(a.replace(/[₹,]/g, ''))
   }
 
-  if (err && !sel) return <ErrorState msg={err} onRetry={() => location.reload()} />
+  const addFunds = async () => {
+    const amt = Number(amount)
+    if (!custId) { toast('Select a customer', 'err'); return }
+    if (!(amt > 0)) { toast('Enter a valid amount', 'err'); return }
+    setSaving(true)
+    try {
+      await adjustWallet(Number(custId), amt, desc)
+      toast('Funds added', 'ok')
+      resetForm()
+      await Promise.all([fetchCustomers().then(setCustomers), loadTxns()])
+    } catch (e) {
+      toast((e as Error).message || 'Could not add funds', 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
 
-  const s = w?.summary
-  const pendingWd = (w?.withdrawals || []).filter((x: any) => ['Requested', 'Processing', 'Approved'].includes(x.status))
-  const pendingAdv = (w?.advances || []).filter((x: any) => x.status === 'Requested')
+  // derived stat numbers
+  const totalBalance = customers.reduce((a, c) => a + (c.wallet || 0), 0)
+  const totalAdded = txns.filter((t) => (t.type || '').toLowerCase() === 'credit').reduce((a, t) => a + t.amount, 0)
+  const totalUsed = txns.filter((t) => (t.type || '').toLowerCase() === 'debit').reduce((a, t) => a + t.amount, 0)
+  const totalRefunds = txns.filter((t) => (t.type || '').toLowerCase() === 'refund').reduce((a, t) => a + t.amount, 0)
+  const activeWallets = customers.filter((c) => (c.wallet || 0) > 0).length
+
+  const STATS = [
+    { icon: <Wallet size={22} />, tint: '#5b51e8', label: 'Total Wallet Balance', value: money(totalBalance), sub: 'across customers' },
+    { icon: <Download size={22} />, tint: '#16a34a', label: 'Total Added', value: money(totalAdded), sub: 'recent transactions' },
+    { icon: <Plus size={22} />, tint: '#f59e0b', label: 'Total Used', value: money(totalUsed), down: true, sub: 'recent transactions' },
+    { icon: <Wallet size={22} />, tint: '#f04438', label: 'Total Refunds', value: money(totalRefunds), down: true, sub: 'recent transactions' },
+    { icon: <Wallet size={22} />, tint: '#2e90fa', label: 'Active Wallets', value: activeWallets.toLocaleString('en-IN'), sub: 'with balance' },
+  ]
+
+  const ql = q.trim().toLowerCase()
+  const filtered = txns.filter((t) =>
+    !ql || String(t.id).includes(ql) || (t.ref || '').toLowerCase().includes(ql) || (t.customer || '').toLowerCase().includes(ql) || (t.title || '').toLowerCase().includes(ql))
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <Card>
-        <div className="toolbar">
-          <SearchBox value={q} onChange={setQ} placeholder="Search a worker to open their wallet…" />
-          <div className="spacer" />
-          <button className="btn ghost" onClick={() => downloadWalletReport().catch((e) => toast(e.message, 'err'))}><Download size={16} /> Export CSV</button>
-        </div>
-        <div className="tablewrap">
-          <table className="tbl">
-            <thead><tr><th>Worker</th><th>City</th><th>Earnings</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              {workers.map((x) => (
-                <tr key={x.id} className={sel?.id === x.id ? 'active-row' : ''}>
-                  <td><div className="cell-user"><Avatar name={x.name} size={32} /><div><strong>{x.name}</strong><small>{x.phone}</small></div></div></td>
-                  <td>{x.city}</td>
-                  <td className="num">{money(x.earnings)}</td>
-                  <td><Badge tone={x.status === 'active' ? 'green' : undefined}>{x.status}</Badge></td>
-                  <td><span className="link" onClick={() => loadWallet(x)}>Open Wallet →</span></td>
-                </tr>
-              ))}
-              {workers.length === 0 && <tr><td colSpan={5}><Empty msg="No workers found." /></td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+    <div className="grid" style={{ gap: 16 }}>
+      {/* KPI row */}
+      <div className="stat-row">
+        {STATS.map((s) => (
+          <StatCard key={s.label} icon={s.icon} tint={s.tint} label={s.label} value={s.value} sub={s.sub} down={(s as any).down} />
+        ))}
+      </div>
 
-      {sel && (
-        <Card title={`${sel.name} — Wallet`} right={<small className="muted">Next payout: {s?.nextPayout || '—'}</small>}>
-          {!w ? <Loading /> : (
-            <div className="grid" style={{ gap: 16 }}>
-              <div className="stat-row">
-                <StatCard icon={<Wallet size={22} />} tint="#16a34a" label="Available" value={money(s.available)} />
-                <StatCard icon={<Clock size={22} />} tint="#f5a524" label="Pending (QC)" value={money(s.pending)} />
-                <StatCard icon={<Lock size={22} />} tint="#dc2626" label="On Hold" value={money(s.hold)} />
-                <StatCard icon={<Coins size={22} />} tint="#5b51e8" label="Advance Due" value={money(s.advanceOutstanding)} />
-              </div>
+      <div className="cols">
+        {/* MAIN COLUMN */}
+        <div className="grid" style={{ gap: 16 }}>
+          {/* Tabs + Add Funds panel */}
+          <Card>
+            <div className="tabs">
+              <button className={'tab' + (tab === 'funds' ? ' active' : '')} onClick={() => setTab('funds')}>Add Funds</button>
+              <button className={'tab' + (tab === 'transactions' ? ' active' : '')} onClick={() => setTab('transactions')}>Wallet Transactions</button>
+              <button className={'tab' + (tab === 'adjust' ? ' active' : '')} onClick={() => setTab('adjust')}>Wallet Adjustment</button>
+            </div>
 
-              {/* Bank & KYC verification */}
-              <div className="card" style={{ background: 'var(--bg-soft, #f8f9fc)', padding: 14, borderRadius: 12 }}>
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <strong className="row" style={{ gap: 8, alignItems: 'center' }}><Landmark size={17} /> Bank &amp; KYC</strong>
-                  <Badge tone={bankTone(w.bank?.status)}>{w.bank?.status || 'Not Added'}</Badge>
-                </div>
-                {!w.bank || w.bank.status === 'Not Added' ? (
-                  <Empty msg="Worker has not added a bank account yet." />
-                ) : (
-                  <>
-                    <div className="form-grid">
-                      <div><small className="muted">Account Holder</small><div>{w.bank.holder || '—'}</div></div>
-                      <div><small className="muted">Bank</small><div>{w.bank.bankName || '—'}</div></div>
-                      <div><small className="muted">Account No.</small><div>{w.bank.account || '—'}</div></div>
-                      <div><small className="muted">IFSC</small><div>{w.bank.ifsc || '—'}</div></div>
-                      <div><small className="muted">UPI</small><div>{w.bank.upi || '—'}</div></div>
-                      <div><small className="muted">Cheque/Passbook</small><div>{w.bank.cheque ? '✓ Attached' : '—'}</div></div>
-                    </div>
-                    {w.bank.status === 'Rejected' && w.bank.remarks && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 6 }}>Reason: {w.bank.remarks}</div>}
-                    {isManager && w.bank.status !== 'Approved' && (
-                      <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                        <button className="btn" onClick={() => run(() => approveWorkerBank(sel.id), 'Bank approved')}><Check size={15} /> Approve Bank</button>
-                        <button className="btn ghost" onClick={() => { const r = prompt('Reason for rejection?') || 'Details could not be verified'; run(() => rejectWorkerBank(sel.id, r), 'Bank rejected') }}><X size={15} /> Reject</button>
-                      </div>
-                    )}
-                    {isManager && w.bank.status === 'Approved' && (
-                      <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                        <button className="btn ghost" onClick={() => { const r = prompt('Reason for revoking approval?') || 'Re-verification required'; run(() => rejectWorkerBank(sel.id, r), 'Bank approval revoked') }}><X size={15} /> Revoke</button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {isManager && (
-                <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" onClick={() => setDialog({ kind: 'bonus' })}><Plus size={15} /> Add Bonus</button>
-                  <button className="btn ghost" onClick={() => setDialog({ kind: 'penalty' })}><Minus size={15} /> Add Penalty</button>
-                  <button className="btn ghost" onClick={() => setDialog({ kind: 'hold' })}><Lock size={15} /> Hold</button>
-                  <button className="btn ghost" onClick={() => run(() => walletReleaseHold(sel.id, {}), 'Hold released')}><RotateCcw size={15} /> Release Hold</button>
-                  <button className="btn ghost" onClick={() => run(() => walletReleasePending(sel.id, {}), 'Pending cleared to Available')}><Check size={15} /> Clear Pending</button>
-                  <button className="btn ghost" onClick={() => run(() => generateWorkerPayslip(sel.id), 'Payslip generated')}><FileText size={15} /> Generate Payslip</button>
-                </div>
-              )}
-
-              {/* Approval queues */}
-              <div className="form-grid">
-                <div>
-                  <h4 className="muted" style={{ margin: '4px 0' }}>Withdrawal Requests</h4>
-                  {pendingWd.length === 0 ? <Empty msg="No pending withdrawals." /> : (
-                    <table className="tbl"><tbody>
-                      {pendingWd.map((x: any) => (
-                        <tr key={x.id}>
-                          <td><strong>{money(x.amount)}</strong><br /><small className="muted">{x.method} • {x.destination}</small></td>
-                          <td><Badge tone={statusTone(x.status)}>{x.status}</Badge></td>
-                          {isManager && <td><div className="actions">
-                            <button className="iconbtn" style={{ color: 'var(--green)' }} title="Approve & pay" onClick={() => run(() => approveWithdrawal(sel.id, x.id), 'Withdrawal approved')}><Check size={16} /></button>
-                            <button className="iconbtn" style={{ color: 'var(--red)' }} title="Reject & refund" onClick={() => run(() => rejectWithdrawal(sel.id, x.id, 'Rejected by admin'), 'Withdrawal rejected')}><X size={16} /></button>
-                          </div></td>}
-                        </tr>
-                      ))}
-                    </tbody></table>
-                  )}
-                </div>
-                <div>
-                  <h4 className="muted" style={{ margin: '4px 0' }}>Salary Advance Requests</h4>
-                  {pendingAdv.length === 0 ? <Empty msg="No pending advances." /> : (
-                    <table className="tbl"><tbody>
-                      {pendingAdv.map((x: any) => (
-                        <tr key={x.id}>
-                          <td><strong>{money(x.amount)}</strong><br /><small className="muted">{x.date}</small></td>
-                          <td><Badge tone={statusTone(x.status)}>{x.status}</Badge></td>
-                          {isManager && <td><div className="actions">
-                            <button className="iconbtn" style={{ color: 'var(--green)' }} title="Approve & credit" onClick={() => run(() => approveAdvance(sel.id, x.id), 'Advance approved')}><Check size={16} /></button>
-                            <button className="iconbtn" style={{ color: 'var(--red)' }} title="Reject" onClick={() => run(() => rejectAdvance(sel.id, x.id, 'Rejected by admin'), 'Advance rejected')}><X size={16} /></button>
-                          </div></td>}
-                        </tr>
-                      ))}
-                    </tbody></table>
-                  )}
-                </div>
-              </div>
-
-              {/* Breakup + deductions */}
-              <div className="form-grid">
-                <div>
-                  <h4 className="muted" style={{ margin: '4px 0' }}>Earnings Breakup</h4>
-                  <table className="tbl"><tbody>
-                    {(w.earningsBreakup || []).map((b: any) => (
-                      <tr key={b.category}><td>{b.category}</td><td className="num" style={{ color: 'var(--green)' }}>{money(b.amount)}</td></tr>
-                    ))}
-                  </tbody></table>
-                </div>
-                <div>
-                  <h4 className="muted" style={{ margin: '4px 0' }}>Deductions <span style={{ color: 'var(--red)' }}>({money(w.deductions?.total || 0)})</span></h4>
-                  <table className="tbl"><tbody>
-                    {(w.deductions?.summary || []).map((b: any) => (
-                      <tr key={b.category}><td>{b.category}</td><td className="num" style={{ color: b.amount ? 'var(--red)' : 'var(--muted)' }}>{b.amount ? '- ' + money(b.amount) : '—'}</td></tr>
-                    ))}
-                  </tbody></table>
-                </div>
-              </div>
-
-              {/* History */}
+            <div className="grid" style={{ gridTemplateColumns: '1.7fr 1fr', gap: 18, alignItems: 'start', marginTop: 18 }}>
               <div>
-                <h4 className="muted" style={{ margin: '4px 0' }}>Transaction History</h4>
-                <div className="tablewrap">
-                  <table className="tbl">
-                    <thead><tr><th>Date</th><th>Type</th><th>Ref</th><th>Method</th><th>Amount</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {(w.history || []).map((t: any) => (
-                        <tr key={t.id}>
-                          <td className="muted">{t.date}<br /><small>{t.time}</small></td>
-                          <td>{t.type}{t.remarks && <><br /><small className="muted">{t.remarks}</small></>}</td>
-                          <td className="muted">{t.refId || '—'}</td>
-                          <td className="muted">{t.method}</td>
-                          <td className="num" style={{ color: t.isCredit ? 'var(--green)' : 'var(--red)' }}>{(t.isCredit ? '+' : '-') + money(t.amount)}</td>
-                          <td><Badge tone={statusTone(t.status)}>{t.status}</Badge></td>
-                        </tr>
+                <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0 }}>Add Funds to Wallet</h3>
+                <p className="muted" style={{ fontSize: 13, margin: '4px 0 18px' }}>Add balance to customer's wallet</p>
+
+                <div className="form-grid">
+                  <Field label="Select Customer *">
+                    <select value={custId} onChange={(e) => setCustId(e.target.value)}>
+                      <option value="" disabled>Search by name, phone or email…</option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''} · {money(c.wallet || 0)}</option>
                       ))}
-                      {(w.history || []).length === 0 && <tr><td colSpan={6}><Empty msg="No transactions." /></td></tr>}
-                    </tbody>
-                  </table>
+                    </select>
+                  </Field>
+                  <Field label="Amount (₹) *">
+                    <input type="text" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                  </Field>
+                  <Field label="Payment Method *">
+                    <select value={method} onChange={(e) => setMethod(e.target.value)}>
+                      <option value="" disabled>Select payment method</option>
+                      <option value="upi">UPI</option>
+                      <option value="card">Credit Card</option>
+                      <option value="netbanking">Net Banking</option>
+                      <option value="wallet">Wallet Balance</option>
+                    </select>
+                  </Field>
+                  <Field label="Description (Optional)">
+                    <input type="text" placeholder="e.g., Promotional bonus, Top-up, etc." value={desc} onChange={(e) => setDesc(e.target.value)} />
+                  </Field>
                 </div>
+
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap', margin: '14px 0 18px' }}>
+                  {QUICK_AMOUNTS.map((a) => <button key={a} className="chip" onClick={() => pickChip(a)}>{a}</button>)}
+                </div>
+
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <label className="row" style={{ gap: 8, alignItems: 'center', fontSize: 14 }}>
+                    <input type="checkbox" defaultChecked /> Send SMS &amp; Email Notification
+                  </label>
+                  <div className="row" style={{ gap: 10 }}>
+                    <button className="btn line" onClick={resetForm}>Reset</button>
+                    <button className="btn" onClick={addFunds} disabled={saving}><Plus size={15} /> Add Funds</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* How it works panel */}
+              <div className="card" style={{ background: '#f4f3fe', padding: 18, borderRadius: 14, position: 'relative', overflow: 'hidden' }}>
+                <strong style={{ fontSize: 15 }}>How it works</strong>
+                <div className="minilist" style={{ marginTop: 14 }}>
+                  {HOW_IT_WORKS.map((t, i) => (
+                    <div key={i} className="mini-row" style={{ alignItems: 'flex-start' }}>
+                      <span className="mini-ico" style={{ background: '#5b51e8', color: '#fff', borderRadius: '50%', flex: 'none' }}>{i + 1}</span>
+                      <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{t}</strong></div>
+                    </div>
+                  ))}
+                </div>
+                <Wallet size={70} style={{ position: 'absolute', right: 12, bottom: 10, color: '#5b51e8', opacity: 0.12 }} />
               </div>
             </div>
-          )}
-        </Card>
-      )}
+          </Card>
 
-      {dialog && sel && (
-        <AmountDialog
-          kind={dialog.kind}
-          onClose={() => setDialog(null)}
-          onSubmit={async (amount, category, reason) => {
-            const body = { amount, category, reason, label: reason }
-            const fn =
-              dialog.kind === 'bonus' ? () => walletBonus(sel.id, body)
-                : dialog.kind === 'penalty' ? () => walletPenalty(sel.id, body)
-                  : () => walletHold(sel.id, { amount, reason })
-            await run(fn, dialog.kind === 'bonus' ? 'Bonus added' : dialog.kind === 'penalty' ? 'Penalty added' : 'Amount held')
-            setDialog(null)
-          }}
-        />
-      )}
-    </div>
-  )
-}
+          {/* Recent Wallet Transactions */}
+          <Card title="Recent Wallet Transactions" right={<span className="link">View All</span>}>
+            <div className="toolbar">
+              <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by transaction, customer or ref…" />
+              <div className="tb-spacer" />
+            </div>
+            <div className="tablewrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Transaction ID</th><th>Customer</th><th>Type</th><th>Amount</th>
+                    <th>Payment Method</th><th>Description</th><th>Date &amp; Time</th><th>Status</th><th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((t) => (
+                    <tr key={t.id}>
+                      <td className="num">#WLT{t.id}</td>
+                      <td>
+                        <div className="cell-user">
+                          <Avatar name={t.customer} size={32} />
+                          <div><strong>{t.customer}</strong><small>{t.ref || ''}</small></div>
+                        </div>
+                      </td>
+                      <td><Badge tone={typeTone(t.type)}>{typeLabel(t.type)}</Badge></td>
+                      <td className="num">{money(t.amount)}</td>
+                      <td>
+                        <strong style={{ fontWeight: 500 }}>{t.title}</strong>
+                      </td>
+                      <td>{t.title}</td>
+                      <td className="muted">{shortDate(t.created)}</td>
+                      <td><Badge tone="green">Completed</Badge></td>
+                      <td><span className="link">View</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="transactions" onPage={setPage} />
+          </Card>
+        </div>
 
-function AmountDialog({ kind, onClose, onSubmit }: { kind: string; onClose: () => void; onSubmit: (amount: number, category: string, reason: string) => Promise<void> }) {
-  const title = kind === 'bonus' ? 'Add Bonus / Incentive' : kind === 'penalty' ? 'Add Penalty / Charge' : 'Hold Payment'
-  const cats = kind === 'bonus' ? INCOME : kind === 'penalty' ? PENALTIES : []
-  const [amount, setAmount] = useState('')
-  const [category, setCategory] = useState(cats[0] || '')
-  const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
+        {/* RIGHT RAIL */}
+        <div className="col-rail">
+          <Card title="Wallet Summary" right={<span className="link">View Report</span>}>
+            <div className="card" style={{ background: '#f4f3fe', padding: 16, borderRadius: 12, marginBottom: 14 }}>
+              <small className="muted">Available Balance</small>
+              <div style={{ fontSize: 26, fontWeight: 800 }}>{money(totalBalance)}</div>
+            </div>
+            <div className="minilist">
+              {SUMMARY_ROWS.map((r) => (
+                <div key={r.label} className="mini-row">
+                  <span className="mini-ico" style={{ background: '#5b51e81f', color: '#5b51e8' }}><Wallet size={15} /></span>
+                  <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{r.label}</strong></div>
+                  <strong>{r.value}</strong>
+                </div>
+              ))}
+            </div>
+          </Card>
 
-  async function go() {
-    const amt = parseInt(amount, 10)
-    if (!amt || amt <= 0) return
-    setBusy(true)
-    try { await onSubmit(amt, category, reason) } finally { setBusy(false) }
-  }
+          <Card title="Top Up Methods">
+            <Donut data={TOPUP_METHODS} size={170} />
+            <div className="minilist" style={{ marginTop: 10 }}>
+              {TOPUP_LEGEND.map((r) => (
+                <div key={r.label} className="mini-row">
+                  <span className="dot" style={{ background: r.color }} />
+                  <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{r.label}</strong></div>
+                  <span className="num"><strong>{r.pct}</strong> <small className="muted">{r.amt}</small></span>
+                </div>
+              ))}
+            </div>
+          </Card>
 
-  return (
-    <Modal title={title} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy} onClick={go}>{busy ? 'Saving…' : 'Confirm'}</button></>}>
-      <div className="form-grid">
-        <Field label="Amount (₹)"><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="500" /></Field>
-        {cats.length > 0 && <Field label="Category"><select value={category} onChange={(e) => setCategory(e.target.value)}>{cats.map((c) => <option key={c}>{c}</option>)}</select></Field>}
+          <Card title="Quick Links">
+            <div className="minilist">
+              {QUICK_LINKS.map((l, i) => (
+                <div key={l.title} className="mini-row link-row">
+                  <span className="mini-ico"><Wallet size={16} /></span>
+                  <div className="mini-bd"><strong>{l.title}</strong><small>{l.sub}</small></div>
+                  {i === 3 ? <ArrowRight size={16} className="muted" /> : <ChevronRight size={16} className="muted" />}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
       </div>
-      <Field label={kind === 'hold' ? 'Reason (shown to worker)' : 'Reason / note (shown to worker)'}>
-        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={kind === 'hold' ? 'Customer complaint under review' : 'e.g. Diwali festival bonus'} />
-      </Field>
-    </Modal>
+    </div>
   )
 }
