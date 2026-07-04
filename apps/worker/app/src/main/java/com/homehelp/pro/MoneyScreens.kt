@@ -108,6 +108,7 @@ fun EarningsScreen(vm: AppViewModel) {
 @Composable
 fun BookingsScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf("Upcoming") }
+    var selected by remember { mutableStateOf<Booking?>(null) }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         BellHeader("My Bookings")
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -123,20 +124,21 @@ fun BookingsScreen(vm: AppViewModel) {
             if (filtered.isEmpty()) {
                 Text("No $tab bookings.", color = TextGray, modifier = Modifier.padding(24.dp))
             }
-            filtered.forEach { b -> BookingCard(b) }
+            filtered.forEach { b -> BookingCard(b) { selected = b } }
             Spacer(Modifier.height(16.dp))
         }
     }
+    selected?.let { BookingDetailDialog(it) { selected = null } }
 }
 
 @Composable
-private fun BookingCard(b: Booking) {
+private fun BookingCard(b: Booking, onClick: () -> Unit) {
     val (bg, fg) = when (b.status) {
         "Upcoming" -> PurpleLight to Purple
         "Completed" -> GreenLight to GreenSuccess
         else -> Color(0xFFFDE7E7) to RedCancel
     }
-    Card {
+    Card(modifier = Modifier.clickable { onClick() }) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text((b.timeInfo ?: "").substringBefore(" •"), fontSize = 12.sp, color = TextGray)
             StatusPill(b.status ?: "", bg, fg)
@@ -149,7 +151,42 @@ private fun BookingCard(b: Booking) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(b.timeInfo ?: "", fontSize = 11.sp, color = TextGray, modifier = Modifier.weight(1f))
             Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = TextDark)
+            Text("  ›", fontSize = 15.sp, color = TextGray)
         }
+    }
+}
+
+// Tap a booking → full details (service, customer, address, time, amount, status).
+@Composable
+private fun BookingDetailDialog(b: Booking, onDismiss: () -> Unit) {
+    val (bg, fg) = when (b.status) {
+        "Upcoming" -> PurpleLight to Purple
+        "Completed" -> GreenLight to GreenSuccess
+        else -> Color(0xFFFDE7E7) to RedCancel
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Purple) } },
+        title = { Text("Booking Details", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusPill(b.status ?: "", bg, fg)
+                DetailRow("Service", b.service ?: "—")
+                DetailRow("Customer", b.customerName ?: "—")
+                DetailRow("Address", b.address ?: "—")
+                DetailRow("When", b.timeInfo ?: "—")
+                Divider(color = Color(0x11000000))
+                DetailRow("Your earnings", "₹${b.amount}", bold = true)
+            }
+        },
+    )
+}
+
+@Composable
+private fun DetailRow(k: String, v: String, bold: Boolean = false) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(k, fontSize = 13.sp, color = TextGray)
+        Text(v, fontSize = 13.sp, color = TextDark, fontWeight = if (bold) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
     }
 }
 
