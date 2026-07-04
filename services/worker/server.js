@@ -237,7 +237,7 @@ app.get('/internal/on-shift', internalOnly, async (req, res) => {
   if (zoneId) { vals.push(zoneId); sql += ` AND (s.zone_id=$3 OR s.zone_id IS NULL)` }
   const rows = (await pool.query(sql, vals)).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.length === 0 || names.some((n) => set.has(n)) })
-  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, available: !!w.available, zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
+  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, rating: w.rating, available: !!w.available, zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
 })
 
 async function patchWorker(id, b, res) {

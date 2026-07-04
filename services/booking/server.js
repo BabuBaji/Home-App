@@ -8,7 +8,7 @@
 import express from 'express'
 import {
   makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly,
-  internalPost, tryGet, publishEvent, publishRealtime, getSettingInt, subscribeEvents,
+  internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents,
 } from '@homehelp/shared'
 import { quoteCancellation, scheduledStartMs } from './cancellation.js'
 
@@ -418,6 +418,40 @@ subscribeEvents(REDIS_URL, 'booking', async (type, data) => {
     await emitBookingUpdate(data.bookingId)
   }
 })
+
+/* ---------- auto-assign (push): assign open jobs to on-shift experts in the zone ----------
+   When `auto_assign` is on, the server assigns each open (unclaimed) booking that has a zone to
+   the best FREE on-shift qualified expert in that zone — the "instant"/Snabbit push model, so the
+   customer doesn't wait for a worker to pull. Inert until you roster shifts + create live zones.
+   Runs every 15s (ahead of the 5-min auto-cancel, so rostered supply gets first shot). */
+const AA_ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+async function autoAssignSweep() {
+  try {
+    if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
+    const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND zone_id IS NOT NULL ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
+    if (!open.length) return
+    const busy = new Set((await pool.query('SELECT DISTINCT worker_id FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1)', [AA_ACTIVE])).rows.map((r) => r.worker_id))
+    for (const b of open) {
+      const names = (b.items || []).map((i) => i.name).join(',')
+      const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${b.zone_id}&services=${encodeURIComponent(names)}`, { workers: [] })
+      const cands = (feed.workers || []).filter((w) => w.available && !busy.has(w.id))
+      if (!cands.length) continue
+      if (b.cust_lat != null) cands.sort((a, c) => ((distanceKm(a.last?.lat, a.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity) - ((distanceKm(c.last?.lat, c.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity))
+      const w = cands[0]
+      const upd = await pool.query(
+        "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned' WHERE id=$4 AND worker_id IS NULL AND status='confirmed' RETURNING *",
+        [w.id, w.name || 'Expert', w.rating || 4.8, b.id])
+      if (!upd.rowCount) continue
+      busy.add(w.id)
+      await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})
+      await emitBookingUpdate(b.id)
+      publishEvent(REDIS_URL, 'booking.assigned', { booking: rowTo(upd.rows[0]), workerId: w.id, auto: true })
+      publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Auto-dispatch', action: 'booking.autoassign', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Auto-assigned to ${w.name} (on shift)`, meta: { worker_id: w.id } })
+      console.log(`[booking] auto-assigned ${b.ref} -> ${w.name} (zone ${b.zone_id})`)
+    }
+  } catch (e) { console.error('[booking] autoAssignSweep:', e.message) }
+}
+setInterval(autoAssignSweep, 15_000)
 
 /* ---------- auto-cancel: no expert accepted an instant booking in time ----------
    Instant bookings still sitting unclaimed after `dispatch_timeout_min` (default 5) are
