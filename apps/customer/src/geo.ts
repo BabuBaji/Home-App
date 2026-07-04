@@ -1,7 +1,8 @@
 import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import { API_BASE } from './api'
 
-export interface Place { label: string; sub?: string; lat: number; lng: number }
+export interface Place { label: string; sub?: string; lat: number; lng: number; placeId?: string }
 
 /** Typed reason so the UI can react ('permission' vs 'disabled' vs generic). */
 export class GeoError extends Error {
@@ -110,15 +111,33 @@ export async function nearbyPlaces(lat: number, lng: number, city: string): Prom
   } catch { return [] }
 }
 
+// Address search goes through our backend, which uses Google Places (rich Indian POI coverage,
+// finds specific residencies/apartments) when a Google Maps key is set, else OpenStreetMap.
 export async function searchPlaces(q: string): Promise<Place[]> {
   if (!q.trim()) return []
+  try {
+    const res = await fetch(`${API_BASE}/api/places/search?q=${encodeURIComponent(q)}`)
+    if (res.ok) {
+      const j = await res.json()
+      return (j.results || []).map((r: any) => ({
+        label: r.label, sub: r.sub, lat: r.lat ?? 0, lng: r.lng ?? 0, placeId: r.placeId || undefined,
+      }))
+    }
+  } catch { /* fall back to direct OSM below */ }
   try {
     const res = await fetch(`${NOMINATIM}/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=6&addressdetails=1&countrycodes=in,us,gb,ae,sg,au,ca`, { headers: { Accept: 'application/json' } })
     const list = await res.json()
     return (Array.isArray(list) ? list : []).map((r: any) => ({
-      label: r.display_name.split(',').slice(0, 2).join(',').trim(),
-      sub: r.display_name,
-      lat: +r.lat, lng: +r.lon,
+      label: r.display_name.split(',').slice(0, 2).join(',').trim(), sub: r.display_name, lat: +r.lat, lng: +r.lon,
     }))
   } catch { return [] }
+}
+
+// Resolve a Google prediction (placeId) to coordinates + clean address (backend proxy).
+export async function placeDetails(placeId: string): Promise<{ label: string; sub: string; lat: number | null; lng: number | null } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/places/details?placeId=${encodeURIComponent(placeId)}`)
+    if (!res.ok) return null
+    return await res.json()
+  } catch { return null }
 }

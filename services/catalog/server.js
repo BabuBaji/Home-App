@@ -6,7 +6,7 @@
 // the booking service; catalogue changes are broadcast as `services:update` via the realtime bus.
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime,
+  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting,
 } from '@homehelp/shared'
 import {
   CATEGORIES, SERVICES_SEED, SERVICE_IMAGES, detailsFor, durationsFor,
@@ -99,6 +99,65 @@ app.post('/api/coupons/validate', (req, res) => {
 })
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
 app.get('/api/referral', (_q, res) => res.json(REFERRAL))
+
+/* ---------- address search (Google Places when key set; OpenStreetMap/Nominatim fallback) ----------
+   Google is proxied server-side so the key stays private and CORS isn't an issue. The key comes
+   from admin settings (google_maps_key). Without it, we fall back to Nominatim (limited India POIs). */
+const NOMINATIM = 'https://nominatim.openstreetmap.org'
+const gkey = async () => { try { return await getSetting(ADMIN_URL, 'google_maps_key', '') } catch { return '' } }
+
+async function nominatimSearch(q) {
+  const r = await fetch(`${NOMINATIM}/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=6&addressdetails=1&countrycodes=in`,
+    { headers: { 'User-Agent': 'HomeHelp/1.0 (address search)', Accept: 'application/json' } })
+  const list = await r.json()
+  return (Array.isArray(list) ? list : []).map((x) => ({
+    placeId: '', label: (x.display_name || '').split(',').slice(0, 2).join(',').trim(),
+    sub: x.display_name || '', lat: +x.lat, lng: +x.lon,
+  }))
+}
+
+// Predictive address search. Google Autocomplete (India-biased) → results with a place_id you
+// resolve to coords via /api/places/details. Falls back to Nominatim on no-key or API error.
+app.get('/api/places/search', async (req, res) => {
+  const q = String(req.query.q || '').trim()
+  if (!q) return res.json({ results: [] })
+  const key = await gkey()
+  try {
+    if (key) {
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&key=${key}&components=country:in&language=en`
+      const j = await (await fetch(url)).json()
+      if (j.status === 'OK' || j.status === 'ZERO_RESULTS') {
+        return res.json({ provider: 'google', results: (j.predictions || []).map((p) => ({
+          placeId: p.place_id,
+          label: p.structured_formatting?.main_text || p.description,
+          sub: p.structured_formatting?.secondary_text || p.description,
+        })) })
+      }
+      console.warn('[catalog] google autocomplete:', j.status, j.error_message || '')
+    }
+    return res.json({ provider: 'nominatim', results: await nominatimSearch(q) })
+  } catch (e) {
+    console.error('[catalog] places/search:', e.message)
+    try { return res.json({ provider: 'nominatim', results: await nominatimSearch(q) }) }
+    catch { return res.status(502).json({ error: 'Place search failed', results: [] }) }
+  }
+})
+
+// Resolve a Google place_id to coordinates + a clean formatted address.
+app.get('/api/places/details', async (req, res) => {
+  const placeId = String(req.query.placeId || req.query.id || '')
+  if (!placeId) return res.status(400).json({ error: 'Missing placeId' })
+  const key = await gkey()
+  if (!key) return res.status(400).json({ error: 'Google Maps not configured' })
+  try {
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&key=${key}&fields=geometry,formatted_address,name&language=en`
+    const j = await (await fetch(url)).json()
+    if (j.status !== 'OK') return res.status(502).json({ error: j.status })
+    const g = j.result || {}
+    res.json({ label: g.name || (g.formatted_address || '').split(',')[0], sub: g.formatted_address || '',
+      lat: g.geometry?.location?.lat ?? null, lng: g.geometry?.location?.lng ?? null })
+  } catch (e) { res.status(502).json({ error: 'Details failed' }) }
+})
 
 /* ---------- internal (service-to-service) ---------- */
 // Booking service prices bookings authoritatively through here.

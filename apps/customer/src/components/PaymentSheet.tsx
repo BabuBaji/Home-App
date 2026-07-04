@@ -5,6 +5,7 @@ import { useToast } from './UI'
 import type { PaymentGroup } from '../types'
 import { UPI_APPS, payByUpi, type UpiApp } from '../upi'
 import { Upi } from '../upiNative'
+import { RazorpayNative } from '../razorpayNative'
 
 interface Props {
   open: boolean
@@ -53,7 +54,7 @@ const APP_THEME: Record<string, { bg: string; name: string }> = {
 export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
   const toast = useToast()
   const [groups, setGroups] = useState<PaymentGroup[]>([])
-  const [method, setMethod] = useState('phonepe')
+  const [method, setMethod] = useState('upi')
   const [phase, setPhase] = useState<'select' | 'processing' | 'confirm' | 'done' | 'upiapp'>('select')
   const [provider, setProvider] = useState<'razorpay' | 'mock'>('mock')
   const [keyId, setKeyId] = useState<string | null>(null)
@@ -89,18 +90,32 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
   if (!open) return null
   const cash = method === 'cash'
 
-  // Primary path when Razorpay keys are configured — handles UPI (opens PhonePe/GPay with a REAL
-  // merchant VPA), Cards, Net Banking and Wallets, and confirms server-side via the webhook.
+  // Primary path when Razorpay keys are configured — handles UPI (PhonePe/GPay/Paytm), Cards,
+  // Net Banking and Wallets, and confirms server-side (HMAC verify) before the booking is placed.
+  // UPI is the priority option, so a UPI selection restricts the checkout to UPI only.
   async function payViaRazorpay() {
+    const upiOnly = isUpiMethod(method)
     setPhase('processing')
     try {
-      if (!(await loadRazorpay())) { toast('Could not load Razorpay'); setPhase('select'); return }
       const order = await createOrder(amount)
-      const rzp = new (window as any).Razorpay({
+      // Native app → Razorpay native SDK fires the real UPI intent (PhonePe/GPay/Paytm open
+      // directly) and returns a verifiable payment id. Web falls back to checkout.js.
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const r = await RazorpayNative.open({
+            key: order.keyId || keyId || '', orderId: order.orderId, amount: amount * 100, currency: 'INR',
+            name: 'HomeHelp', description: 'Service booking',
+          })
+          await verifyPayment({ razorpay_order_id: r.razorpay_order_id || order.orderId, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })
+          setPhase('done'); setTimeout(() => onPaid(method, r.razorpay_payment_id), 650)
+        } catch (e) { toast((e as Error).message || 'Payment cancelled'); setPhase('select') }
+        return
+      }
+      if (!(await loadRazorpay())) { toast('Could not load Razorpay'); setPhase('select'); return }
+      const opts: any = {
         key: order.keyId || keyId, order_id: order.orderId, amount: amount * 100, currency: 'INR',
         name: 'HomeHelp', description: 'Service booking',
-        // Nudge the customer's chosen UPI app to the front of the checkout.
-        prefill: isUpiMethod(method) ? { method: 'upi' } : {},
+        prefill: upiOnly ? { method: 'upi' } : {},
         theme: { color: '#5b51e8' },
         handler: async (resp: any) => {
           try {
@@ -109,7 +124,11 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
           } catch (e) { toast((e as Error).message); setPhase('select') }
         },
         modal: { ondismiss: () => setPhase('select') },
-      })
+      }
+      // UPI-first via prefill.method above. We deliberately do NOT hard-restrict to UPI-only —
+      // inside the Android WebView that can yield zero eligible methods ("no appropriate payment
+      // method found"). Razorpay renders its eligible methods with UPI preselected.
+      const rzp = new (window as any).Razorpay(opts)
       rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || 'Payment failed'); setPhase('select') })
       rzp.open()
     } catch (e) { toast((e as Error).message); setPhase('select') }
@@ -142,13 +161,11 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
 
   function pay() {
     if (cash) { setPhase('done'); setTimeout(() => onPaid('cash', 'CASH'), 700); return }
-    if (isUpiMethod(method)) {
-      // live = open the real UPI app (needs a real registered VPA); demo = in-app pay screen.
-      if (upiMode === 'live') return payUpiDirect()
-      return setPhase('upiapp')
-    }
-    // Cards / Net Banking / Wallets go through Razorpay Checkout when keys are configured.
+    // Verified path: when Razorpay keys are set, everything (UPI first, then cards / net banking /
+    // wallets) is collected through Razorpay Checkout and confirmed server-side.
     if (provider === 'razorpay') return payViaRazorpay()
+    // No keys configured yet — demo/testing fallbacks so the flow still works locally.
+    if (isUpiMethod(method)) return setPhase('upiapp') // in-app demo UPI screen (no real money)
     return payMock()
   }
 

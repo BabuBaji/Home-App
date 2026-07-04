@@ -228,6 +228,10 @@ services:
       OPS_SEED_EMAIL: ${OPS_SEED_EMAIL}
       OPS_SEED_PASSWORD: ${OPS_SEED_PASSWORD}
       NEW_ADMIN_DEFAULT_PASSWORD: ${NEW_ADMIN_DEFAULT_PASSWORD}
+      # Payment gateway keys (seeded into admin settings on boot; leave blank to use the admin UI)
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
     ports: ["4010:4010"]
     depends_on:
       admin-db: { condition: service_healthy }

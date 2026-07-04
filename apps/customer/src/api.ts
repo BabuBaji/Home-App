@@ -9,6 +9,9 @@ const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app
 export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 export async function initApiBase(): Promise<void> {
+  // A build-time URL (VITE_API_URL, e.g. a LAN IP for local device testing) takes priority —
+  // don't let the remote config override it.
+  if (API_BASE) return
   try {
     const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
     if (r.ok) {
@@ -110,7 +113,9 @@ export const createBookingApi = async (payload: any) => {
   if (payload.lat == null) {
     const cached = getCachedPosition()
     if (cached && Date.now() - cached.ts < POS_FRESH_MS) coords = { lat: cached.lat, lng: cached.lng }
-    else { try { coords = await getCurrentPosition() } catch { /* server falls back */ } }
+    // No fresh fix → don't block the booking on a GPS lock (slow, esp. right after payment).
+    // Send without coords (the server falls back) and warm the cache in the background.
+    else { captureLocationOnOpen() }
   }
   return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
 }

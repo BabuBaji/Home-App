@@ -68,6 +68,19 @@ async function init() {
   ])
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS))
     await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [k, v])
+  // Operator-provided integration keys from the environment override the (empty) defaults, so
+  // secrets live in gitignored infra/.env rather than in source or a hand-entered DB row. Upserted
+  // on every boot, so rotating a key in .env just needs a restart. Only non-empty values apply.
+  const ENV_SETTINGS = {
+    razorpay_key_id: process.env.RAZORPAY_KEY_ID,
+    razorpay_key_secret: process.env.RAZORPAY_KEY_SECRET,
+    razorpay_webhook_secret: process.env.RAZORPAY_WEBHOOK_SECRET,
+    upi_vpa: process.env.UPI_VPA,
+    upi_payee_name: process.env.UPI_PAYEE_NAME,
+    upi_mode: process.env.UPI_MODE,
+  }
+  for (const [k, v] of Object.entries(ENV_SETTINGS))
+    if (v) await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [k, v])
   const n = await pool.query('SELECT COUNT(*)::int AS n FROM admins')
   if (n.rows[0].n === 0) {
     const adminEmail = process.env.ADMIN_SEED_EMAIL || 'admin@homehelp.in'

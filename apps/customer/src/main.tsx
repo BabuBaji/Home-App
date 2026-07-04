@@ -14,12 +14,8 @@ if (Capacitor.isNativePlatform()) {
     StatusBar.setStyle({ style: Style.Light }).catch(() => {}) // dark icons for the light app
   }).catch(() => {})
 }
-// Self-hosted Inter — bundled into the app so the font ALWAYS applies (no network dependency)
-import '@fontsource/inter/400.css'
-import '@fontsource/inter/500.css'
-import '@fontsource/inter/600.css'
-import '@fontsource/inter/700.css'
-import '@fontsource/inter/800.css'
+// Self-hosted Satoshi (Fontshare) — Snabbit-style condensed geometric, bundled so it ALWAYS applies.
+import './fonts/satoshi.css'
 import './index.css'
 
 // Resolve the backend URL from the public config before the app makes any API call,

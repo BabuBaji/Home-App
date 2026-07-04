@@ -56,8 +56,8 @@ function pickTarget(url) {
   // ----- customer identity / profile / wallet -----
   if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')) return U.auth
 
-  // ----- catalogue / pricing -----
-  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/home') || p('/api/referral')) return U.catalog
+  // ----- catalogue / pricing / address search -----
+  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/home') || p('/api/referral') || p('/api/places')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
   if (p('/api/bookings') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
