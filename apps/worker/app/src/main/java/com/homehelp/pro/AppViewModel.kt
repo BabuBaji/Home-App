@@ -46,6 +46,26 @@ import kotlinx.coroutines.withContext
  */
 enum class JobStatus { NONE, REQUESTED, ACCEPTED, ON_THE_WAY, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED }
 
+/**
+ * Partner performance tier, earned from real completed-job count + rating. Higher tiers
+ * signal reliability to customers (mirrors the "Pro/Elite" ladders in Snabbit/Pronto).
+ * [minJobs]/[minRating] are the thresholds to REACH this tier.
+ */
+enum class WorkerTier(val label: String, val emoji: String, val minJobs: Int, val minRating: Double) {
+    BRONZE("Bronze", "🥉", 0, 0.0),
+    SILVER("Silver", "🥈", 25, 4.0),
+    GOLD("Gold", "🥇", 75, 4.5),
+    PLATINUM("Platinum", "💎", 150, 4.7);
+
+    companion object {
+        /** Highest tier whose thresholds the worker currently satisfies. */
+        fun of(jobs: Int, rating: Double): WorkerTier =
+            entries.last { jobs >= it.minJobs && rating >= it.minRating }
+        fun next(current: WorkerTier): WorkerTier? =
+            entries.getOrNull(current.ordinal + 1)
+    }
+}
+
 data class Job(
     val id: String,
     val customerName: String,
@@ -104,6 +124,7 @@ class AppViewModel : ViewModel() {
     var isLoggedIn by mutableStateOf(false)
         private set
     var isOnline by mutableStateOf(false)
+        private set
     var jobStatus by mutableStateOf(JobStatus.NONE)
         private set
     var activeJob by mutableStateOf<Job?>(null)
@@ -116,19 +137,37 @@ class AppViewModel : ViewModel() {
     var serviceEndMs by mutableStateOf(0L)
         private set
 
-    // Live dashboard / wallet figures
-    var todayEarnings by mutableIntStateOf(650)
+    // ---- online-session tracking (genuine "online today" timer) ----
+    // Wall-clock ms the worker went online for the current stretch (0 when offline), plus
+    // the total online time already accumulated today. Live display = accum + (now - since).
+    var onlineSinceMs by mutableStateOf(0L)
         private set
-    var todayJobs by mutableIntStateOf(4)
+    private var onlineAccumMs by mutableStateOf(0L)
+
+    /** Total time online today in ms, including the stretch currently in progress. */
+    fun onlineTodayMs(nowMs: Long): Long =
+        onlineAccumMs + if (isOnline && onlineSinceMs > 0) (nowMs - onlineSinceMs) else 0L
+
+    // ---- daily earnings goal (worker-set, persisted) ----
+    var dailyGoal by mutableIntStateOf(1000)
         private set
-    val todayHours = 5.2
-    var walletBalance by mutableIntStateOf(8450)
+    fun updateDailyGoal(v: Int) { dailyGoal = v.coerceIn(100, 100000); Session.dailyGoal = dailyGoal }
+    /** Progress toward today's goal, 0f..1f. */
+    val goalProgress: Float get() = if (dailyGoal <= 0) 0f else (todayEarnings.toFloat() / dailyGoal).coerceIn(0f, 1f)
+
+    // Live dashboard / wallet figures — all start empty and are filled from the backend
+    // (bootstrap / wallet summary). No seeded/fake values are ever shown.
+    var todayEarnings by mutableIntStateOf(0)
         private set
-    var totalEarned by mutableIntStateOf(15680)
+    var todayJobs by mutableIntStateOf(0)
         private set
-    var withdrawnTotal by mutableIntStateOf(7230)
+    var walletBalance by mutableIntStateOf(0)
         private set
-    var pendingAmount by mutableIntStateOf(1200)
+    var totalEarned by mutableIntStateOf(0)
+        private set
+    var withdrawnTotal by mutableIntStateOf(0)
+        private set
+    var pendingAmount by mutableIntStateOf(0)
         private set
 
     // ---- wallet module: balances, periods, queues ----
@@ -160,22 +199,28 @@ class AppViewModel : ViewModel() {
     var payslip by mutableStateOf<PayslipDto?>(null)
         private set
 
-    // ---- editable profile state (Profile sub-screens) ----
-    var workerName by mutableStateOf("Rahul Kumar")
-    var workerPhone by mutableStateOf("+91 90000 12345")
-    var workerEmail by mutableStateOf("rahul.kumar@email.com")
-    var workerCity by mutableStateOf("Mumbai")
-    var jobsCompleted by mutableIntStateOf(128)
+    // ---- editable profile state (Profile sub-screens) — empty until the backend loads it ----
+    var workerName by mutableStateOf("")
+    var workerPhone by mutableStateOf("")
+    var workerEmail by mutableStateOf("")
+    var workerCity by mutableStateOf("")
+    var jobsCompleted by mutableIntStateOf(0)
         private set
-    var workerRating by mutableStateOf(4.7)
+    var workerRating by mutableStateOf(0.0)
         private set
 
-    var bankName by mutableStateOf("HDFC Bank")
-    var bankAccount by mutableStateOf("xxxx xxxx 1234")
-    var bankIfsc by mutableStateOf("HDFC0001234")
-    var bankHolder by mutableStateOf("Rahul Kumar")
+    /** Current earned performance tier (derived from real jobs + rating). */
+    val tier: WorkerTier get() = WorkerTier.of(jobsCompleted, workerRating)
+    /** Jobs still needed to reach the next tier, or 0 if already at the top / rating-gated. */
+    val jobsToNextTier: Int
+        get() = WorkerTier.next(tier)?.let { (it.minJobs - jobsCompleted).coerceAtLeast(0) } ?: 0
+
+    var bankName by mutableStateOf("")
+    var bankAccount by mutableStateOf("")
+    var bankIfsc by mutableStateOf("")
+    var bankHolder by mutableStateOf("")
     var bankUpi by mutableStateOf("")
-    var bankStatus by mutableStateOf("Approved")   // Not Added / Pending Verification / Approved / Rejected
+    var bankStatus by mutableStateOf("Not Added")   // Not Added / Pending Verification / Approved / Rejected
         private set
     var bankRemarks by mutableStateOf("")
         private set
@@ -200,9 +245,11 @@ class AppViewModel : ViewModel() {
     var notifRatings by mutableStateOf(true)
 
     // ---- verification documents ----
+    // The required-document checklist. Statuses start as "Pending" and are replaced by the
+    // backend's real review status on load (no document is shown as verified until it is).
     val documents = mutableStateListOf(
-        DocItem("Aadhaar Card", "Verified"),
-        DocItem("PAN Card", "Verified"),
+        DocItem("Aadhaar Card", "Pending"),
+        DocItem("PAN Card", "Pending"),
         DocItem("Passport Size Photo", "Pending"),
     )
 
@@ -297,6 +344,7 @@ class AppViewModel : ViewModel() {
                 val b = api.verify(AuthRequest(phone = p, otp = otp.ifBlank { "1234" }))
                 Session.phone = p
                 applyBootstrap(b)
+                loadDailyGoal()
                 backendConnected = true
                 isLoggedIn = true        // only now is the worker really logged in
             } catch (e: retrofit2.HttpException) {
@@ -325,6 +373,7 @@ class AppViewModel : ViewModel() {
         if (saved.isNullOrBlank()) return
         RetrofitClient.token = saved
         isLoggedIn = true
+        loadDailyGoal()
         sync {
             val b = api.bootstrap()
             applyBootstrap(b)
@@ -337,7 +386,12 @@ class AppViewModel : ViewModel() {
         RetrofitClient.token = null
         isLoggedIn = false
         isOnline = false
+        onlineSinceMs = 0L
+        onlineAccumMs = 0L
     }
+
+    /** Load the worker's persisted daily goal (called once the session is ready). */
+    fun loadDailyGoal() { dailyGoal = Session.dailyGoal }
 
     /** True when a real customer booking is waiting — drives the "New Job Request" notification. */
     var hasIncomingJob by mutableStateOf(false)
@@ -345,8 +399,18 @@ class AppViewModel : ViewModel() {
     private var pollingStarted = false
 
     fun goOnline(v: Boolean) {
+        if (v == isOnline) return
+        val now = System.currentTimeMillis()
+        if (v) {
+            onlineSinceMs = now
+            startJobPolling()
+        } else {
+            // Bank the just-finished online stretch into today's total.
+            if (onlineSinceMs > 0) onlineAccumMs += now - onlineSinceMs
+            onlineSinceMs = 0L
+            hasIncomingJob = false
+        }
         isOnline = v
-        if (v) startJobPolling() else hasIncomingJob = false
     }
 
     // While online and idle, poll the backend for a real waiting booking. When one
@@ -477,26 +541,6 @@ class AppViewModel : ViewModel() {
         sync { api.cancel(ReasonBody(reason)) }
     }
 
-    // ---- wallet operations ----
-    /** Returns null on success, or an error message. */
-    fun withdraw(amount: Int): String? {
-        if (amount <= 0) return "Enter a valid amount"
-        if (amount > walletBalance) return "Amount exceeds available balance"
-        walletBalance -= amount
-        withdrawnTotal += amount
-        walletTxns.add(0, WalletTxn("Withdraw to Bank", "A/c No. xxxx1234", amount, "Success", false))
-        sync { api.withdraw(AmountBody(amount)) }
-        return null
-    }
-
-    fun addMoney(amount: Int): String? {
-        if (amount <= 0) return "Enter a valid amount"
-        walletBalance += amount
-        walletTxns.add(0, WalletTxn("Added to Wallet", "UPI • Instant", amount, "Success", true))
-        sync { api.addMoney(AmountBody(amount)) }
-        return null
-    }
-
     // ---- wallet module ----
     private fun applyWalletSummary(s: WalletSummaryDto) {
         walletBalance = s.available
@@ -609,30 +653,8 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    // ---- dynamic data (seeded, grows as jobs complete) ----
-    val bookings = mutableStateListOf(
-        Booking("Utensil Wash, Mopping, Dusting", "Priya Sharma", "Bandra West, Mumbai", "16 May 2025, 09:00 AM • 2 hours • 1.8 km", 297, "Upcoming"),
-        Booking("Bathroom Cleaning, Laundry", "Rohan Verma", "Andheri West, Mumbai", "17 May 2025, 10:30 AM • 2.3 km", 349, "Upcoming"),
-        Booking("Sweeping, Mopping, Dusting", "Sneha Iyer", "Bandra West, Mumbai", "18 May 2025, 08:00 AM • 2.0 km", 249, "Upcoming"),
-        Booking("Bathroom Cleaning, Laundry", "Amit Shah", "Khar West, Mumbai", "15 May 2025, 02:00 PM • 1.5 hours", 199, "Completed"),
-        Booking("Kitchen Cleaning", "Kavya Menon", "Santacruz West, Mumbai", "14 May 2025, 04:00 PM", 199, "Cancelled"),
-    )
-
-    val earnings = mutableStateListOf(
-        EarningEntry("16 May 2025", 650),
-        EarningEntry("15 May 2025", 810),
-        EarningEntry("14 May 2025", 540),
-        EarningEntry("13 May 2025", 620),
-        EarningEntry("12 May 2025", 430),
-        EarningEntry("11 May 2025", 590),
-        EarningEntry("10 May 2025", 710),
-    )
-
-    val walletTxns = mutableStateListOf(
-        WalletTxn("Job Payment", "16 May 2025, 11:00 AM", 297, "Success", true),
-        WalletTxn("Withdraw to Bank", "A/c No. xxxx1234", 2700, "Success", false),
-        WalletTxn("Job Payment", "12 May 2025, 06:30 PM", 349, "Success", true),
-        WalletTxn("Incentive", "Performance Bonus", 50, "Success", true),
-        WalletTxn("Pending Amount", "16 May 2025, 05:00 PM", 1200, "Pending", true),
-    )
+    // ---- dynamic data — empty until populated from the backend; grows as jobs complete ----
+    val bookings = mutableStateListOf<Booking>()
+    val earnings = mutableStateListOf<EarningEntry>()
+    val walletTxns = mutableStateListOf<WalletTxn>()
 }

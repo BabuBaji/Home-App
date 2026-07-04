@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -114,6 +115,94 @@ fun OutlineButton(text: String, modifier: Modifier = Modifier, color: Color = Pu
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(text, color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * iOS-style segmented control: a light track with a white "pill" marking the selection.
+ * Cleaner and more aligned than loose buttons, and can show a live count per segment.
+ */
+@Composable
+fun SegmentedTabs(
+    options: List<String>,
+    selected: String,
+    modifier: Modifier = Modifier,
+    counts: Map<String, Int>? = null,
+    onSelect: (String) -> Unit,
+) {
+    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = Color(0xFFF2F2F5)) {
+        Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEach { opt ->
+                val isSel = opt == selected
+                val label = counts?.get(opt)?.let { "$opt ($it)" } ?: opt
+                Surface(
+                    modifier = Modifier.weight(1f).height(38.dp).clickable { onSelect(opt) },
+                    shape = RoundedCornerShape(9.dp),
+                    color = if (isSel) Color.White else Color.Transparent,
+                    shadowElevation = if (isSel) 1.dp else 0.dp,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            label,
+                            color = if (isSel) Purple else TextGray,
+                            fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Medium,
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Friendly centered empty-state placeholder for filtered lists with no results. */
+@Composable
+fun EmptyState(emoji: String, title: String, subtitle: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(emoji, fontSize = 40.sp)
+        Spacer(Modifier.height(10.dp))
+        Text(title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 16.sp)
+        Spacer(Modifier.height(4.dp))
+        Text(subtitle, color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+    }
+}
+
+/** Rounded, flat progress bar for goals/tier progress on the white UI. */
+@Composable
+fun ProgressBar(progress: Float, modifier: Modifier = Modifier, track: Color = Divider, fill: Color = Purple, height: Int = 8) {
+    val p = progress.coerceIn(0f, 1f)
+    Box(modifier.fillMaxWidth().height(height.dp).clip(RoundedCornerShape(50)).background(track)) {
+        Box(Modifier.fillMaxWidth(p).height(height.dp).clip(RoundedCornerShape(50)).background(fill))
+    }
+}
+
+/** Earned performance-tier chip (Bronze/Silver/Gold/Platinum) with its own accent tint. */
+@Composable
+fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
+    val fg = when (tier) {
+        WorkerTier.BRONZE -> Color(0xFF9A6B3F)
+        WorkerTier.SILVER -> Color(0xFF6E7787)
+        WorkerTier.GOLD -> Color(0xFFB7791F)
+        WorkerTier.PLATINUM -> Purple
+    }
+    val bg = when (tier) {
+        WorkerTier.BRONZE -> Color(0xFFF4EBE1)
+        WorkerTier.SILVER -> Color(0xFFEEF0F3)
+        WorkerTier.GOLD -> Color(0xFFFDF3DC)
+        WorkerTier.PLATINUM -> PurpleLight
+    }
+    Surface(shape = RoundedCornerShape(50), color = bg, modifier = modifier) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(tier.emoji, fontSize = 12.sp)
+            Spacer(Modifier.width(5.dp))
+            Text("${tier.label} Partner", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

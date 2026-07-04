@@ -24,6 +24,11 @@ object Session {
         get() = prefs?.getString("phone", null)
         set(v) { prefs?.edit()?.apply { if (v.isNullOrBlank()) remove("phone") else putString("phone", v) }?.apply() }
 
+    /** Worker's self-set daily earnings target (₹). Drives the Home goal progress bar. */
+    var dailyGoal: Int
+        get() = prefs?.getInt("daily_goal", 1000) ?: 1000
+        set(v) { prefs?.edit()?.putInt("daily_goal", v.coerceIn(100, 100000))?.apply() }
+
     val isLoggedIn: Boolean get() = !token.isNullOrBlank()
 
     fun clear() { prefs?.edit()?.clear()?.apply() }

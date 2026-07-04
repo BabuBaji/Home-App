@@ -1,5 +1,7 @@
 package com.homehelp.pro
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
@@ -42,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,47 +63,66 @@ import androidx.navigation.NavHostController
 
 @Composable
 fun EarningsScreen(vm: AppViewModel) {
-    var tab by remember { mutableStateOf("Daily") }
+    // Pull the latest wallet snapshot so week/month totals are populated from the server.
+    LaunchedEffect(Unit) { vm.refreshWallet() }
+    var tab by remember { mutableStateOf("Today") }
+    val tabs = listOf("Today", "This Week", "This Month")
+
+    // Period total + caption — the filter now genuinely drives the headline figure.
+    // Week/Month fall back to summing the daily entries when the server hasn't sent a total yet.
+    val (periodTotal, caption) = when (tab) {
+        "This Week" -> (if (vm.weekEarnings > 0) vm.weekEarnings else vm.earnings.take(7).sumOf { it.amount }) to "Last 7 days"
+        "This Month" -> (if (vm.monthEarnings > 0) vm.monthEarnings else vm.earnings.sumOf { it.amount }) to "This month so far"
+        else -> vm.todayEarnings to "${vm.todayJobs} ${if (vm.todayJobs == 1) "job" else "jobs"} today"
+    }
+
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         BellHeader("Earnings")
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            SegmentedTabs(tabs, tab) { tab = it }
+
+            // Headline earnings for the selected period.
             Box(Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp)).padding(18.dp)) {
                 Column {
-                    Text("Today's Earnings", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
-                    Text("₹${vm.todayEarnings}", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        SplitStat("₹0", "Cash Collected")
-                        SplitStat("₹${vm.todayEarnings}", "Online")
-                        SplitStat("₹50", "Incentives")
-                    }
+                    Text("$tab Earnings", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                    Text("₹$periodTotal", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(caption, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Daily", "Weekly", "Monthly").forEach { t ->
-                    TabPill(t, tab == t, Modifier.weight(1f)) { tab = t }
-                }
+
+            // Payout status — genuinely useful, cleanly aligned.
+            Card {
+                SectionTitle("Payout")
+                Spacer(Modifier.height(6.dp))
+                LabeledRow("Available to withdraw", "₹${vm.walletBalance}", GreenSuccess)
+                LabeledRow("Pending clearance", "₹${vm.pendingAmount}", Gold)
+                LabeledRow("Next payout", vm.nextPayout)
             }
+
+            // Day-by-day breakdown.
             Card {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(tab, fontWeight = FontWeight.SemiBold, color = TextDark)
-                    Text("₹${vm.todayEarnings}", fontWeight = FontWeight.Bold, color = Purple)
+                    Text("Recent Days", fontWeight = FontWeight.SemiBold, color = TextDark)
+                    Text("₹${vm.earnings.sumOf { it.amount }}", fontWeight = FontWeight.Bold, color = Purple)
                 }
                 Spacer(Modifier.height(8.dp))
-                vm.earnings.forEach { e ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(e.date, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                        Text("₹${e.amount}", fontWeight = FontWeight.SemiBold, color = TextDark)
-                        Spacer(Modifier.width(10.dp))
-                        StatusPill("Paid", GreenLight, GreenSuccess)
+                if (vm.earnings.isEmpty()) {
+                    EmptyState("📅", "No earnings yet", "Completed jobs will show up here.")
+                } else {
+                    vm.earnings.forEach { e ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(e.date, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            Text("₹${e.amount}", fontWeight = FontWeight.SemiBold, color = TextDark)
+                            Spacer(Modifier.width(10.dp))
+                            StatusPill(if (e.paid) "Paid" else "Pending", if (e.paid) GreenLight else Color(0xFFFFF3D6), if (e.paid) GreenSuccess else Gold)
+                        }
+                        Divider(color = Divider)
                     }
-                    Divider(color = Divider)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("View More ▾", color = Purple, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -108,22 +131,36 @@ fun EarningsScreen(vm: AppViewModel) {
 @Composable
 fun BookingsScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf("Upcoming") }
+    val tabs = listOf("Upcoming", "Completed", "Cancelled")
+    val counts = tabs.associateWith { t -> vm.bookings.count { it.status == t } }
+    val filtered = vm.bookings.filter { it.status == tab }
+
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         BellHeader("My Bookings")
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Upcoming", "Completed", "Cancelled").forEach { t ->
-                TabPill(t, tab == t, Modifier.weight(1f)) { tab = t }
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SegmentedTabs(tabs, tab, counts = counts) { tab = it }
+            // Aligned summary strip for the selected filter.
+            if (filtered.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("${filtered.size} ${tab.lowercase()} ${if (filtered.size == 1) "booking" else "bookings"}", fontSize = 13.sp, color = TextGray)
+                    Text("₹${filtered.sumOf { it.amount }} total", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
+                }
             }
         }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val filtered = vm.bookings.filter { it.status == tab }
             if (filtered.isEmpty()) {
-                Text("No $tab bookings.", color = TextGray, modifier = Modifier.padding(24.dp))
+                val (emoji, msg) = when (tab) {
+                    "Upcoming" -> "🗓️" to "New bookings will appear here once customers book you."
+                    "Completed" -> "✅" to "Jobs you finish will be listed here."
+                    else -> "🚫" to "Cancelled bookings will show up here."
+                }
+                EmptyState(emoji, "No $tab bookings", msg)
+            } else {
+                filtered.forEach { b -> BookingCard(b) }
             }
-            filtered.forEach { b -> BookingCard(b) }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -137,24 +174,39 @@ private fun BookingCard(b: Booking) {
         else -> Color(0xFFFDE7E7) to RedCancel
     }
     Card {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(b.timeInfo.substringBefore(" •"), fontSize = 12.sp, color = TextGray)
+        // Title + status, top-aligned so long service names wrap cleanly beside the pill.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(b.service, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                Spacer(Modifier.height(2.dp))
+                Text(b.customerName, fontSize = 13.sp, color = TextGray)
+            }
+            Spacer(Modifier.width(10.dp))
             StatusPill(b.status, bg, fg)
         }
+        Spacer(Modifier.height(10.dp)); HairlineDivider(); Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(b.address, fontSize = 12.sp, color = TextGray, modifier = Modifier.weight(1f))
+        }
         Spacer(Modifier.height(8.dp))
-        Text(b.service, fontWeight = FontWeight.SemiBold, color = TextDark)
-        Text(b.customerName, fontSize = 13.sp, color = TextDark)
-        Text(b.address, fontSize = 12.sp, color = TextGray)
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(b.timeInfo, fontSize = 11.sp, color = TextGray, modifier = Modifier.weight(1f))
-            Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = TextDark)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.Schedule, contentDescription = null, tint = TextGray, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(b.timeInfo, fontSize = 11.sp, color = TextGray)
+            }
+            Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
         }
     }
 }
 
 @Composable
 fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
+    val verified = vm.bankApproved
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         BellHeader("Profile")
         Column(
@@ -163,27 +215,35 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 56)
+                    Avatar(initials, size = 56)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(vm.workerName, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextDark)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Verified Partner", fontSize = 12.sp, color = Purple)
+                        Text(vm.workerName.ifBlank { "HomeHelp Partner" }, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextDark)
+                        if (verified) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Verified Partner", fontSize = 12.sp, color = Purple)
+                            }
                         }
-                        Text("${vm.workerRating} ★  •  ${vm.jobsCompleted} Jobs Completed", fontSize = 12.sp, color = TextGray)
+                        Text(
+                            if (vm.jobsCompleted > 0) "${vm.workerRating} ★  •  ${vm.jobsCompleted} jobs completed" else "New partner",
+                            fontSize = 12.sp, color = TextGray,
+                        )
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp)).padding(16.dp)) {
-                Column {
-                    Text("This Month Overview", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        SplitStat("₹8,450", "Earnings")
-                        SplitStat("32", "Jobs Completed")
-                        SplitStat("68h 30m", "Hours Worked")
+            // Overview — real figures; only shown once there's activity to report.
+            if (vm.monthEarnings > 0 || vm.jobsCompleted > 0 || vm.walletBalance > 0) {
+                Box(Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp)).padding(16.dp)) {
+                    Column {
+                        Text("Overview", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            SplitStat("₹${vm.monthEarnings}", "This Month")
+                            SplitStat("${vm.jobsCompleted}", "Jobs Done")
+                            SplitStat("₹${vm.walletBalance}", "Balance")
+                        }
                     }
                 }
             }
@@ -191,9 +251,10 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 MenuItem(Icons.Filled.Person, "Personal Information") { nav.navigate(Routes.P_PERSONAL) }
                 MenuItem(Icons.Filled.Description, "Documents") { nav.navigate(Routes.P_DOCUMENTS) }
                 MenuItem(Icons.Filled.AccountBalance, "Bank Details") { nav.navigate(Routes.P_BANK) }
-                MenuItem(Icons.Filled.Schedule, "Availability") { nav.navigate(Routes.P_AVAILABILITY) }
+                MenuItem(Icons.Filled.Schedule, "Availability & Shifts") { nav.navigate(Routes.P_AVAILABILITY) }
                 MenuItem(Icons.Filled.Tune, "Preferences") { nav.navigate(Routes.P_PREFERENCES) }
                 MenuItem(Icons.Filled.Notifications, "Notification Settings") { nav.navigate(Routes.P_NOTIFICATIONS) }
+                MenuItem(Icons.Filled.CardGiftcard, "Refer & Earn") { shareInvite(ctx) }
                 MenuItem(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { nav.navigate(Routes.P_HELP) }
                 MenuItem(Icons.Filled.Info, "About Us", divider = false) { nav.navigate(Routes.P_ABOUT) }
             }
@@ -218,6 +279,18 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
 
 // ---- helpers ----
 
+/** Open the Android share sheet to invite others to join HomeHelp Pro as partners. */
+private fun shareInvite(ctx: Context) {
+    val msg = "Join me on HomeHelp Pro — become a verified home-service partner and earn on your " +
+        "own schedule. Download the app to get started."
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, "Join HomeHelp Pro")
+        putExtra(Intent.EXTRA_TEXT, msg)
+    }
+    ctx.startActivity(Intent.createChooser(send, "Invite via").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
 @Composable
 private fun SplitStat(value: String, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -231,19 +304,6 @@ private fun SummaryMini(value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, color = color, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         Text(label, color = TextGray, fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun TabPill(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        modifier = modifier.height(40.dp).clickable { onClick() },
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) Purple else Color.White,
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(text, color = if (selected) Color.White else TextGray, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-        }
     }
 }
 
