@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CalendarCheck, CheckCircle2, Users, ShoppingBag, Star } from 'lucide-react'
+import { CalendarCheck, CheckCircle2, Users, ShoppingBag } from 'lucide-react'
 import { fetchDashboard } from '../api'
 import type { DashboardData } from '../types'
 import { Card, StatCard, Badge, Loading, ErrorState, money, shortDate } from '../components/UI'
@@ -44,7 +44,6 @@ export default function Dashboard() {
         <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Completed Bookings" value={s.completed.toLocaleString('en-IN')} sub="all time" />
         <StatCard icon={<Users size={22} />} tint="#2e90fa" label="Active Workers" value={wk.active.toLocaleString('en-IN')} sub={`${wk.total} total`} />
         <StatCard icon={<ShoppingBag size={22} />} tint="#f59e0b" label="Total Revenue" value={money(s.revenue)} sub="all time" />
-        <StatCard icon={<Star size={22} />} tint="#f59e0b" label="Customer Rating" value={s.avgRating || '—'} sub={`${s.customers} customers`} />
       </div>
 
       {/* ---- row: Bookings Overview + Recent Bookings ---- */}
