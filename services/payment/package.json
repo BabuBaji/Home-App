@@ -1,0 +1,14 @@
+{
+  "name": "hh-payment-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HomeHelp Payment microservice — customer payments, Razorpay/UPI, gateway + payout webhooks, finance ledger; owns payments/settlements/payouts/wallet_ledger.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "ioredis": "^5.4.1"
+  }
+}

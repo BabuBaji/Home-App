@@ -1,0 +1,10 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Transparent foreground; sits inside the adaptive safe zone (~center 66%). -->
+  <!-- Dashboard grid mark (matches the in-app brand logo): 2x2 rounded tiles. -->
+  <g transform="translate(512 512) scale(1.05) translate(-512 -512)">
+    <rect x="356" y="356" width="138" height="138" rx="30" fill="#ffffff"/>
+    <rect x="530" y="356" width="138" height="138" rx="30" fill="#ffffff" opacity="0.82"/>
+    <rect x="356" y="530" width="138" height="138" rx="30" fill="#ffffff" opacity="0.82"/>
+    <rect x="530" y="530" width="138" height="138" rx="30" fill="#ffffff"/>
+  </g>
+</svg>

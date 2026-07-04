@@ -1,0 +1,12 @@
+{
+  "name": "@homehelp/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared library for all HomeHelp services: Redis Streams event bus, realtime relay, service-to-service HTTP, admin-auth middleware, pg pool factory, config cache.",
+  "main": "index.js",
+  "dependencies": {
+    "ioredis": "^5.4.1",
+    "pg": "^8.12.0"
+  }
+}
