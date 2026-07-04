@@ -4,7 +4,8 @@ import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser, captureLocationOnOpen } from './api'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings } from './api'
+import { ensureNotifPermission, fireLocalNotification } from './notify'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
@@ -48,6 +49,36 @@ export default function App() {
   // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
   // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
   useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+
+  // App-wide push alert: notify the customer when a booking is auto-cancelled (no expert accepted),
+  // even if they've left the Track screen. Polls every 30s; the first pass seeds silently so old
+  // cancellations don't re-alert. (Fully-killed-app push would need FCM/Firebase.)
+  useEffect(() => {
+    if (!user) return
+    ensureNotifPermission()
+    const KEY = 'hh_autocancel_seen'
+    const raw = localStorage.getItem(KEY)
+    const seen = new Set<number>(raw ? JSON.parse(raw) : [])
+    let first = raw === null
+    let stopped = false
+    const tick = async () => {
+      try {
+        const bs = await fetchBookings()
+        let changed = false
+        for (const b of bs) {
+          if (b.status === 'cancelled' && b.cancelled_by === 'system' && !seen.has(b.id)) {
+            seen.add(b.id); changed = true
+            if (!first) fireLocalNotification('No expert available', `Booking ${b.ref} was cancelled — ₹${b.refund ?? b.total ?? 0} refunded to your wallet.`)
+          }
+        }
+        if (changed || first) localStorage.setItem(KEY, JSON.stringify([...seen]))
+        first = false
+      } catch { /* offline — retry next tick */ }
+    }
+    tick()
+    const iv = setInterval(() => { if (!stopped) tick() }, 30000)
+    return () => { stopped = true; clearInterval(iv) }
+  }, [user?.id])
 
   const showSplash = !minTime || !booted
 
