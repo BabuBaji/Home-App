@@ -305,8 +305,7 @@ private val SHIFT_PRESETS = listOf(
     ShiftPreset("Morning", "06:00 AM", "02:00 PM"),
     ShiftPreset("Day", "08:00 AM", "08:00 PM"),
     ShiftPreset("Evening", "02:00 PM", "10:00 PM"),
-    ShiftPreset("Night", "10:00 PM", "06:00 AM"),
-    ShiftPreset("Full Day", "06:00 AM", "10:00 PM"),
+    ShiftPreset("Full Day", "05:00 AM", "10:00 PM"),
 )
 
 @Composable
