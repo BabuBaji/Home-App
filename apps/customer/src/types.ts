@@ -117,6 +117,7 @@ export interface Booking {
   photo?: string
   cancel_reason?: string
   cancel_fee?: number
+  cancelled_by?: string
   refund?: number
   created: string
   dist?: number

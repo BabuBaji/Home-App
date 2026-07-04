@@ -42,10 +42,11 @@ const DEFAULT_SETTINGS = {
   platform_fee: '20', tax_percent: '5',
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
-  auto_assign: 'true', maintenance_mode: 'false',
+  auto_assign: 'true', maintenance_mode: 'false', dispatch_timeout_min: '5',
   razorpay_key_id: '', razorpay_key_secret: '', google_maps_key: '', msg91_key: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
+  serviceable_pincodes: '', service_cities: '',
   razorpay_webhook_secret: '', payment_webhook_secret: '', payout_webhook_secret: '', payout_provider: '',
   earnings_auto_release: 'true', advance_recovery_percent: '30', auto_approve_withdrawal_below: '2000', advance_max: '5000',
 }

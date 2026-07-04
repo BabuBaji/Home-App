@@ -17,6 +17,7 @@ export default function Track() {
   const [busy, setBusy] = useState(false)
   const [, force] = useState(0)
   const [timeUpAck, setTimeUpAck] = useState(false)
+  const [autoCancelAck, setAutoCancelAck] = useState(false)
 
   // 1-second heartbeat so the live service timer re-renders
   useEffect(() => {
@@ -123,6 +124,33 @@ export default function Track() {
             </p>
             <button
               onClick={() => setTimeUpAck(true)}
+              style={{ width: '100%', padding: '12px', border: 'none', borderRadius: 12, background: '#6d28d9', color: '#fff', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-cancel popup: no expert accepted in time → full refund to wallet */}
+      {b.status === 'cancelled' && b.cancelled_by === 'system' && !autoCancelAck && (
+        <div
+          onClick={() => setAutoCancelAck(true)}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,16,45,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 18, padding: '24px 22px', maxWidth: 340, width: '100%', textAlign: 'center', boxShadow: '0 20px 60px rgba(60,40,140,0.3)' }}>
+            <div style={{ fontSize: 42, marginBottom: 8 }}>😔</div>
+            <h3 style={{ margin: '0 0 6px', fontSize: 18, color: '#1e1b3a' }}>No expert available</h3>
+            <p style={{ margin: '0 0 14px', fontSize: 14, color: '#6b6690', lineHeight: 1.5 }}>
+              Sorry, no expert accepted your booking in time. Your booking has been cancelled.
+            </p>
+            {(b.refund ?? b.total ?? 0) > 0 && (
+              <div style={{ background: '#e7f6ee', border: '1px solid #b7e2c8', borderRadius: 12, padding: '10px 12px', margin: '0 0 16px', color: '#157347', fontWeight: 700, fontSize: 14 }}>
+                💰 ₹{b.refund ?? b.total} fully refunded to your wallet
+              </div>
+            )}
+            <button
+              onClick={() => { setAutoCancelAck(true); nav('/bookings', { replace: true }) }}
               style={{ width: '100%', padding: '12px', border: 'none', borderRadius: 12, background: '#6d28d9', color: '#fff', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}
             >
               OK
