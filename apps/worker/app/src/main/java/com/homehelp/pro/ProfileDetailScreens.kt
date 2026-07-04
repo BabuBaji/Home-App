@@ -272,9 +272,18 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
         }
         Card {
             Text("Preferred Shift", fontWeight = FontWeight.SemiBold, color = TextDark)
-            Text("Pick the time window you want to receive jobs in.", fontSize = 12.sp, color = TextGray)
+            Text("Pick full-time or a 4-hour part-time slot.", fontSize = 12.sp, color = TextGray)
             Spacer(Modifier.height(12.dp))
-            SHIFT_PRESETS.chunked(2).forEach { rowItems ->
+
+            // Start on the type that matches the worker's current shift (part-time slots are 4h).
+            var shiftType by remember {
+                mutableStateOf(if (PART_TIME_SHIFTS.any { it.start == vm.shiftStart && it.end == vm.shiftEnd }) "Part Time" else "Full Time")
+            }
+            SegmentedTabs(listOf("Full Time", "Part Time"), shiftType) { shiftType = it }
+            Spacer(Modifier.height(12.dp))
+
+            val presets = if (shiftType == "Part Time") PART_TIME_SHIFTS else FULL_TIME_SHIFTS
+            presets.chunked(2).forEach { rowItems ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     rowItems.forEach { s ->
                         val selected = vm.shiftStart == s.start && vm.shiftEnd == s.end
@@ -287,7 +296,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(10.dp))
             }
             val shiftSet = vm.shiftStart.isNotBlank() && vm.shiftEnd.isNotBlank()
-            LabeledRow("Selected", if (shiftSet) "${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
+            LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
         }
         PrimaryButton("Save Availability") {
             vm.saveAvailability()
@@ -301,11 +310,20 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
 /** A selectable shift window the worker can choose from on the Availability screen. */
 private data class ShiftPreset(val label: String, val start: String, val end: String)
 
-private val SHIFT_PRESETS = listOf(
+// Full-time shifts (longer windows) vs part-time 4-hour slots. The worker first picks a
+// type, then a slot within it.
+private val FULL_TIME_SHIFTS = listOf(
     ShiftPreset("Morning", "06:00 AM", "02:00 PM"),
     ShiftPreset("Day", "08:00 AM", "08:00 PM"),
     ShiftPreset("Evening", "02:00 PM", "10:00 PM"),
     ShiftPreset("Full Day", "05:00 AM", "10:00 PM"),
+)
+
+private val PART_TIME_SHIFTS = listOf(
+    ShiftPreset("Early", "06:00 AM", "10:00 AM"),
+    ShiftPreset("Midday", "10:00 AM", "02:00 PM"),
+    ShiftPreset("Afternoon", "02:00 PM", "06:00 PM"),
+    ShiftPreset("Evening", "06:00 PM", "10:00 PM"),
 )
 
 @Composable
