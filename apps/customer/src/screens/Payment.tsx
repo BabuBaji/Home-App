@@ -117,7 +117,9 @@ export default function Payment() {
       const opts: any = {
         key: order.keyId, order_id: order.orderId, amount: total! * 100, currency: 'INR',
         name: 'HomeHelp', description: cart.map((x) => x.name).join(', ').slice(0, 80) || 'Service booking',
-        prefill: { name: user?.name || '', contact: user?.phone || '', email: user?.email || '', ...(upiOnly ? { method: 'upi' } : {}) },
+        // Don't force method:'upi' — it can hide UPI when the intent can't complete; the checkout
+        // already shows UPI first for Indian accounts.
+        prefill: { name: user?.name || '', contact: user?.phone || '', email: user?.email || '' },
         theme: { color: '#5b51e8' },
         handler: async (resp: any) => {
           try {
@@ -165,8 +167,12 @@ export default function Payment() {
       </div>
 
       <FooterCTA>
-        <button className="btn full" onClick={pay} disabled={busy || total === null}>
-          {busy ? 'Processing…' : payment === 'cash' ? `Confirm Booking · ₹${total}` : `Pay ₹${total}`}
+        <button className="btn full pay-btn" onClick={pay} disabled={busy || total === null}>
+          {busy
+            ? <><span className="pay-spin" aria-hidden /> Processing…</>
+            : payment === 'cash'
+              ? <><span className="pay-ic">✓</span> Confirm Booking · ₹{total}</>
+              : <><span className="pay-ic secure">🔒</span> Pay ₹{total} <span className="pay-live" aria-hidden /></>}
         </button>
       </FooterCTA>
     </div>

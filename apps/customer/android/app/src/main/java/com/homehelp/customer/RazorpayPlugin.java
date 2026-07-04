@@ -50,8 +50,10 @@ public class RazorpayPlugin extends Plugin {
             String email = call.getString("email");
             if (contact != null && !contact.isEmpty()) prefill.put("contact", contact);
             if (email != null && !email.isEmpty()) prefill.put("email", email);
-            // UPI-first: preselect UPI so the app opens straight into the UPI-app choices.
-            prefill.put("method", "upi");
+            // Do NOT force prefill.method = "upi": forcing it makes Razorpay jump into the UPI flow, and
+            // when that can't complete (no UPI app installed / test mode) it drops to the "other methods"
+            // screen with UPI hidden — the reported bug. Leaving method unset renders the normal checkout
+            // with UPI on top (QR + enter-UPI-ID + any installed UPI apps).
             options.put("prefill", prefill);
 
             getActivity().runOnUiThread(() -> {
