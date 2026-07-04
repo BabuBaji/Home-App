@@ -131,7 +131,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             )
-            Text("Demo OTP: any 4 digits", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            Text("Enter the OTP sent to your mobile", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             if (vm.loginError != null) {
                 Text(
                     vm.loginError!!,

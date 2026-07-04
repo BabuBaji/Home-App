@@ -226,17 +226,19 @@ class AppViewModel : ViewModel() {
         private set
     val bankApproved: Boolean get() = bankStatus == "Approved"
 
+    // Selectable options only — nothing is pre-selected for the worker. The backend
+    // overwrites these with the worker's real saved choices on load.
     val availableDays = mutableStateMapOf(
-        "Mon" to true, "Tue" to true, "Wed" to true,
-        "Thu" to true, "Fri" to true, "Sat" to true, "Sun" to false,
+        "Mon" to false, "Tue" to false, "Wed" to false,
+        "Thu" to false, "Fri" to false, "Sat" to false, "Sun" to false,
     )
-    var shiftStart by mutableStateOf("08:00 AM")
-    var shiftEnd by mutableStateOf("08:00 PM")
+    var shiftStart by mutableStateOf("")
+    var shiftEnd by mutableStateOf("")
 
     val jobPreferences = mutableStateMapOf(
-        "Utensil Wash" to true, "Mopping" to true, "Sweeping" to true,
-        "Dusting" to true, "Bathroom Cleaning" to true, "Laundry" to false,
-        "Kitchen Cleaning" to true,
+        "Utensil Wash" to false, "Mopping" to false, "Sweeping" to false,
+        "Dusting" to false, "Bathroom Cleaning" to false, "Laundry" to false,
+        "Kitchen Cleaning" to false,
     )
 
     var notifNewJobs by mutableStateOf(true)
@@ -334,14 +336,14 @@ class AppViewModel : ViewModel() {
         private set
     fun clearLoginError() { loginError = null }
 
-    fun login(phone: String = "", otp: String = "") {
-        val p = phone.ifBlank { "9000012345" }
+    fun login(phone: String, otp: String) {
+        val p = phone.trim()
         loginError = null
         loggingIn = true
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
-                val b = api.verify(AuthRequest(phone = p, otp = otp.ifBlank { "1234" }))
+                val b = api.verify(AuthRequest(phone = p, otp = otp.trim()))
                 Session.phone = p
                 applyBootstrap(b)
                 loadDailyGoal()

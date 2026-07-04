@@ -286,12 +286,14 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(10.dp))
             }
-            LabeledRow("Selected", "${vm.shiftStart} – ${vm.shiftEnd}")
+            val shiftSet = vm.shiftStart.isNotBlank() && vm.shiftEnd.isNotBlank()
+            LabeledRow("Selected", if (shiftSet) "${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
         }
         PrimaryButton("Save Availability") {
             vm.saveAvailability()
             val active = vm.availableDays.count { it.value }
-            toast(ctx, "Saved • $active days/week • ${vm.shiftStart}–${vm.shiftEnd}")
+            val shift = if (vm.shiftStart.isNotBlank()) " • ${vm.shiftStart}–${vm.shiftEnd}" else ""
+            toast(ctx, "Saved • $active days/week$shift")
         }
     }
 }
