@@ -122,6 +122,9 @@ services:
       AUTH_URL: http://auth:4002
       WORKER_URL: http://worker:4004
       ADMIN_URL: http://admin:4010
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
     ports: ["4006:4006"]
     depends_on:
       booking-db: { condition: service_healthy }

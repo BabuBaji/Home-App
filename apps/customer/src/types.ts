@@ -58,6 +58,8 @@ export interface User {
   location?: string | null
   wallet: number
   rating: number
+  referralCode?: string | null
+  referredBy?: number | null
 }
 
 export interface Address {

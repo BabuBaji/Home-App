@@ -412,22 +412,36 @@ app.get('/api/admin/customers', admin, async (_q, res) => {
 // Customer detail (View modal): { customer, addresses, bookings, transactions }.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings] = await Promise.all([
+  const [u, addresses, allBookings, transactions] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.auth, `/api/internal/users/${id}/transactions`, []),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
   const bookings = allBookings.filter((b) => b.user_id === id)
     .map((b) => ({ id: b.id, ref: b.ref, service: (b.items || []).map((i) => i.name).join(', '), total: b.total, status: b.status, created: b.created }))
-  res.json({ customer, addresses, bookings, transactions: [] })
+  res.json({ customer, addresses, bookings, transactions })
 })
 app.patch('/api/admin/customers/:id', admin, async (req, res) => {
   try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }
 })
+// Admin wallet adjustment — credit/debit any balance (cash/promo/points), bypasses wallet status.
 app.post('/api/admin/customers/:id/wallet', admin, async (req, res) => {
-  try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet`, { type: (Number(req.body?.amount) >= 0 ? 'credit' : 'debit'), title: req.body?.title || 'Admin adjustment', amount: Math.abs(Number(req.body?.amount) || 0) })) }
+  const amt = Number(req.body?.amount) || 0
+  const type = amt >= 0 ? 'credit' : 'debit'
+  const balance = ['cash', 'promo', 'points'].includes(req.body?.balance) ? req.body.balance : 'cash'
+  try {
+    res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet`, {
+      type, balance, admin: true, kind: type === 'credit' ? 'ADMIN_CREDIT' : 'ADMIN_DEBIT',
+      title: req.body?.title || (type === 'credit' ? 'Admin credit' : 'Admin debit'), amount: Math.abs(amt),
+    }))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+// Admin sets wallet status: active / frozen / blocked / inactive.
+app.post('/api/admin/customers/:id/wallet/status', admin, async (req, res) => {
+  try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet-status`, { status: req.body?.status })) }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
 

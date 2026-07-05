@@ -6,6 +6,7 @@ import Splash from './components/Splash'
 import { useStore } from './store'
 import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings } from './api'
 import { ensureNotifPermission, fireLocalNotification } from './notify'
+import { runTopBackHandler } from './backStack'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
@@ -26,12 +27,15 @@ import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
 import Rate from './screens/Rate'
 import Bookings from './screens/Bookings'
+import History from './screens/History'
 import BookingDetail from './screens/BookingDetail'
 import Wallet from './screens/Wallet'
 import Profile from './screens/Profile'
 import Support from './screens/Support'
 import Addresses from './screens/Addresses'
 import CancelPolicy from './screens/CancelPolicy'
+import PersonalInfo from './screens/PersonalInfo'
+import Terms from './screens/Terms'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
@@ -112,12 +116,15 @@ export default function App() {
               <Route path="/cancel/:id" element={<Cancel />} />
               <Route path="/rate/:id" element={<Rate />} />
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/history" element={<History />} />
               <Route path="/booking/:id" element={<BookingDetail />} />
               <Route path="/wallet" element={<Wallet />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/support" element={<Support />} />
               <Route path="/addresses" element={<Addresses />} />
               <Route path="/cancellation-policy" element={<CancelPolicy />} />
+              <Route path="/personal" element={<PersonalInfo />} />
+              <Route path="/terms" element={<Terms />} />
             </Route>
             <Route path="*" element={<Navigate to={user ? '/home' : '/login'} replace />} />
           </Routes>
@@ -141,6 +148,7 @@ function BackButtonHandler() {
     let remove: (() => void) | undefined
     import('@capacitor/app').then(({ App: CapApp }) => {
       CapApp.addListener('backButton', () => {
+        if (runTopBackHandler()) return // close an open overlay (chat, invoice…) instead of navigating
         const { pathname, key } = locRef.current
         if (pathname === '/home' || pathname === '/login') CapApp.exitApp()
         else if (key === 'default') nav('/home')

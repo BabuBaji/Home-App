@@ -16,6 +16,10 @@ export const SERVICES_SEED = [
   ['bedmaking',    'Bed Making',                '🛏️', 99,  'Cleaning', 1],
   ['garbage',      'Garbage Disposal',          '🗑️', 79,  'Cleaning', 1],
   ['organization', 'Basic Home Organization',   '🗄️', 149, 'Cleaning', 1],
+  ['ironing',      'Ironing',                   '👔', 119, 'Cleaning', 1],
+  ['deepclean',    'Deep Cleaning',             '✨', 249, 'Cleaning', 1],
+  ['fridge',       'Refrigerator Cleaning',     '🧊', 149, 'Cleaning', 1],
+  ['sanitization', 'Home Sanitization',         '🧴', 199, 'Cleaning', 1],
 ]
 
 export const SERVICE_IMAGES = {
@@ -23,6 +27,8 @@ export const SERVICE_IMAGES = {
   bathroom: '/services/bathroom.jpg', kitchen: '/services/kitchen.jpg', laundry: '/services/laundry.jpg',
   window: '/services/window.jpg', fan: '/services/fan.jpg', bedmaking: '/services/bedmaking.jpg',
   garbage: '/services/garbage.jpg', organization: '/services/organization.jpg',
+  ironing: '/services/ironing.jpg', deepclean: '/services/deepclean.jpg',
+  fridge: '/services/fridge.jpg', sanitization: '/services/sanitization.jpg',
 }
 
 const DUR = [
@@ -55,6 +61,10 @@ const DETAILS = {
   bedmaking: { desc: 'Fresh bed making and tidy bedroom linen — neatly changed, tucked and arranged.', includes: ['Change & tuck bed sheets', 'Fluff & arrange pillows', 'Fold or arrange blankets', 'Tidy the bedside area'], excludes: ['Laundry/washing of linen', 'Mattress deep cleaning', 'Stain removal or restoration'] },
   garbage: { desc: 'Collect, bag and dispose of household garbage and reset clean bin liners.', includes: ['Collect waste from all bins', 'Bag & tie securely', 'Dispose at the collection point', 'Fit fresh bin liners', 'Wipe bin exterior'], excludes: ['Hazardous or chemical waste', 'Construction debris', 'Bulk/furniture disposal', 'Deep bin scrubbing'] },
   organization: { desc: 'Declutter and neatly arrange your wardrobes, shelves and everyday spaces.', includes: ['Organise wardrobes & shelves', 'Fold & arrange clothes', 'Declutter tabletops & drawers', 'Arrange everyday items neatly', 'Tidy living spaces'], excludes: ['Deep cleaning of surfaces', 'Moving heavy furniture', 'Discarding items without consent'] },
+  ironing: { desc: 'Crisp, wrinkle-free ironing of your clothes — neatly pressed, folded and hung.', includes: ['Iron shirts, trousers & everyday wear', 'Neat folding or hanging', 'Steam out stubborn wrinkles', 'Arrange pressed clothes tidily'], excludes: ['Washing or drying clothes', 'Starching (on request)', 'Dry cleaning', 'Delicate fabrics without care labels'] },
+  deepclean: { desc: 'An intensive top-to-bottom clean of your home — floors, surfaces and those often-missed corners.', includes: ['Detailed floor scrubbing & mopping', 'Dust & wipe all surfaces', 'Clean skirting, corners & edges', 'Spot-clean marks & buildup', 'Tidy and reset each room'], excludes: ['Moving heavy furniture', 'Wall or ceiling washing', 'Pest control or fumigation', 'Post-construction debris'] },
+  fridge: { desc: 'A thorough interior and exterior clean of your refrigerator — hygienic, fresh and odour-free.', includes: ['Empty & wipe all shelves and drawers', 'Sanitize interior surfaces', 'Clean door seals & handles', 'Wipe exterior & top', 'Deodorize the cabin'], excludes: ['Defrosting deep-freeze ice buildup', 'Moving the refrigerator', 'Electrical or coil repair', 'Discarding food without consent'] },
+  sanitization: { desc: 'Disinfectant fogging and sanitization of your home to reduce germs across high-touch areas.', includes: ['Disinfectant fogging of rooms', 'Wipe high-touch points (handles, switches)', 'Sanitize sofas & common surfaces', 'Safe, home-friendly disinfectant', 'Ventilate after treatment'], excludes: ['Medical-grade fumigation', 'Pest control', 'Cleaning of heavy soiling first (book cleaning)', 'Treatment of electronics interiors'] },
 }
 
 const HEADLINES = {
@@ -62,6 +72,8 @@ const HEADLINES = {
   bathroom: 'A Sparkling, Germ-Free Bathroom', kitchen: 'A Clean Kitchen, Ready To Cook', laundry: 'Fresh, Neatly Folded Laundry',
   window: 'Crystal-Clear, Streak-Free Windows', fan: 'Dust-Free Fans That Run Clean', bedmaking: 'A Neatly Made Bed, Every Time',
   garbage: 'Hassle-Free Garbage Disposal', organization: 'An Organized, Clutter-Free Home',
+  ironing: 'Crisp, Wrinkle-Free Clothes', deepclean: 'An Intensive Top-To-Bottom Clean',
+  fridge: 'A Fresh, Hygienic Refrigerator', sanitization: 'A Germ-Free, Sanitized Home',
 }
 
 const SAMPLE_REVIEWS = [

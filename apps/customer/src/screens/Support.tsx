@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { AppLauncher } from '@capacitor/app-launcher'
 import { Header, useToast } from '../components/UI'
 import { fetchTickets, createTicket } from '../api'
 import type { Ticket } from '../types'
@@ -7,6 +9,18 @@ const ISSUES = [
   { id: 'Service issue', icon: '🧹' }, { id: 'Worker issue', icon: '🧑‍🔧' },
   { id: 'Payment issue', icon: '💳' }, { id: 'Refund issue', icon: '💸' },
 ]
+
+// Customer-care contact — edit these to your real support line.
+const SUPPORT_PHONE = '+918000000000'   // shown in the dialer when the user taps “Call us”
+const SUPPORT_WA = '918000000000'       // WhatsApp number, no “+”
+
+// Open a tel:/https: URL in the right native app (dialer, WhatsApp). Falls back to web navigation.
+async function openExternal(url: string) {
+  if (Capacitor.isNativePlatform()) {
+    try { await AppLauncher.openUrl({ url }); return } catch { /* fall through to web */ }
+  }
+  window.location.href = url
+}
 
 export default function Support() {
   const toast = useToast()
@@ -30,8 +44,8 @@ export default function Support() {
       <Header title="Help & Support" />
       <div className="content">
         <div className="support-quick">
-          <a className="sq" href="tel:+918000000000"><span>📞</span>Call us</a>
-          <a className="sq" href="https://wa.me/918000000000" target="_blank"><span>🟢</span>WhatsApp</a>
+          <button className="sq" onClick={() => openExternal(`tel:${SUPPORT_PHONE}`)}><span>📞</span>Call us</button>
+          <button className="sq" onClick={() => openExternal(`https://wa.me/${SUPPORT_WA}`)}><span>🟢</span>WhatsApp</button>
           <button className="sq" onClick={() => toast('Live chat opening…')}><span>💬</span>Live chat</button>
         </div>
 

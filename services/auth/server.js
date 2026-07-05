@@ -9,6 +9,7 @@
 // /api/internal/* for other services (user lookup for token validation, addresses, wallet
 // debit/credit, admin customer management). No monolith involved.
 import express from 'express'
+import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, publishEvent } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4002)
@@ -47,15 +48,32 @@ async function init() {
     )`,
     `CREATE INDEX IF NOT EXISTS ix_addr_user ON addresses(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_txn_user ON transactions(user_id)`,
+    // Three-balance wallet: `wallet` is the Cash balance; add Promo + Reward Points and a status.
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_balance INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS reward_points INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_status TEXT NOT NULL DEFAULT 'active'`,
+    // Ledger: which balance a row touched, and a typed reason (ADD_MONEY, CASHBACK, REFUND…).
+    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS balance_type TEXT NOT NULL DEFAULT 'cash'`,
+    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS kind TEXT`,
+    // Referrals: each user has a unique code; referred_by links a new user to their referrer.
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_rewarded BOOLEAN NOT NULL DEFAULT false`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_users_refcode ON users(referral_code)`,
+    `UPDATE users SET referral_code='HH'||upper(substr(md5(random()::text||id::text),1,6)) WHERE referral_code IS NULL`,
   ])
   console.log('[auth] Postgres ready (users, addresses, transactions, auth_identities)')
 }
+
+const REFERRAL_REWARD = 150
 
 /* ---------- data helpers ---------- */
 const publicUser = (u) => u && ({
   id: u.id, phone: u.phone, name: u.name, email: u.email, provider: u.provider,
   avatar: u.avatar, country: u.country, city: u.city, location: u.location,
   wallet: u.wallet, rating: u.rating, status: u.status, created: u.created,
+  referralCode: u.referral_code, referredBy: u.referred_by,
+  promoBalance: u.promo_balance || 0, rewardPoints: u.reward_points || 0, walletStatus: u.wallet_status || 'active',
 })
 
 async function getUser(id) {
@@ -63,7 +81,19 @@ async function getUser(id) {
   return rows[0] || null
 }
 
+// Give a user a unique shareable referral code (idempotent — keeps an existing one).
+async function ensureReferralCode(uid) {
+  const u = await getUser(uid)
+  if (u?.referral_code) return u.referral_code
+  for (let i = 0; i < 6; i++) {
+    const code = 'HH' + crypto.randomBytes(3).toString('hex').toUpperCase()
+    try { await pool.query('UPDATE users SET referral_code=$1 WHERE id=$2', [code, uid]); return code } catch { /* collision → retry */ }
+  }
+  return null
+}
+
 async function provisionExtras(uid) {
+  await ensureReferralCode(uid)
   await pool.query(
     'INSERT INTO transactions (user_id,type,title,amount,balance,created) VALUES ($1,$2,$3,$4,$5,$6)',
     [uid, 'credit', 'Welcome bonus', WELCOME_BONUS, WELCOME_BONUS, nowIso()])
@@ -157,13 +187,34 @@ async function getAddresses(uid) {
   return rows
 }
 
-async function addTransaction(uid, type, title, amount, ref) {
+const BAL_COL = { cash: 'wallet', promo: 'promo_balance', points: 'reward_points' }
+// The ONLY way a balance changes — mutates one balance and writes a ledger row with the balance-after.
+async function walletMutate(uid, { balanceType = 'cash', type, kind, title, amount, ref }) {
   const u = await getUser(uid)
-  const bal = type === 'credit' ? u.wallet + amount : u.wallet - amount
-  await pool.query('UPDATE users SET wallet=$1 WHERE id=$2', [bal, uid])
-  await pool.query('INSERT INTO transactions (user_id,type,title,amount,balance,ref,created) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [uid, type, title, amount, bal, ref ?? null, nowIso()])
-  return bal
+  if (!u) throw new Error('User not found')
+  const col = BAL_COL[balanceType] || 'wallet'
+  const amt = Math.max(0, Math.round(Number(amount) || 0))
+  const next = (type === 'debit' ? (u[col] || 0) - amt : (u[col] || 0) + amt)
+  if (next < 0) throw Object.assign(new Error('Insufficient balance'), { code: 402 })
+  await pool.query(`UPDATE users SET ${col}=$1 WHERE id=$2`, [next, uid])
+  await pool.query('INSERT INTO transactions (user_id,type,title,amount,balance,ref,kind,balance_type,created) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [uid, type, title, amt, next, ref ?? null, kind ?? null, balanceType, nowIso()])
+  return next
+}
+// Spend the wallet for a booking: Promo balance first, then Cash.
+async function walletSpend(uid, amount, { title, ref, kind = 'BOOKING_PAYMENT' }) {
+  const u = await getUser(uid)
+  const amt = Math.max(0, Math.round(Number(amount) || 0))
+  if ((u.promo_balance || 0) + (u.wallet || 0) < amt) throw Object.assign(new Error('Insufficient wallet balance'), { code: 402 })
+  const fromPromo = Math.min(u.promo_balance || 0, amt)
+  if (fromPromo > 0) await walletMutate(uid, { balanceType: 'promo', type: 'debit', kind: kind === 'BOOKING_PAYMENT' && amt > fromPromo ? 'PARTIAL_PAYMENT' : kind, title, amount: fromPromo, ref })
+  if (amt - fromPromo > 0) await walletMutate(uid, { balanceType: 'cash', type: 'debit', kind, title, amount: amt - fromPromo, ref })
+  const nu = await getUser(uid)
+  return { balance: nu.wallet, promo: nu.promo_balance, total: (nu.wallet || 0) + (nu.promo_balance || 0) }
+}
+// Back-compat cash credit/debit used by existing callers.
+async function addTransaction(uid, type, title, amount, ref, kind) {
+  return walletMutate(uid, { balanceType: 'cash', type: type === 'debit' ? 'debit' : 'credit', kind: kind || (type === 'debit' ? 'DEBIT' : 'CREDIT'), title, amount, ref })
 }
 
 async function recordIdentity(user, provider) {
@@ -238,6 +289,22 @@ app.patch('/api/me', auth, async (req, res) => {
   res.json({ user: publicUser(upd.rows[0]) })
 })
 
+/* ---------- referrals ---------- */
+// A new user applies a friend's referral code (once). The referrer is rewarded later, when this
+// user completes their first booking (see /api/internal/users/:id/referral-complete).
+app.post('/api/referral/apply', auth, async (req, res) => {
+  const code = String(req.body?.code || '').trim().toUpperCase()
+  if (!code) return res.status(400).json({ error: 'Enter a referral code' })
+  const me = await getUser(req.user.id)
+  if (me.referred_by) return res.status(400).json({ error: 'You’ve already used a referral code' })
+  if (me.referral_code && code === me.referral_code) return res.status(400).json({ error: 'You can’t use your own code' })
+  const ref = (await pool.query('SELECT id,name FROM users WHERE referral_code=$1', [code])).rows[0]
+  if (!ref) return res.status(404).json({ error: 'Invalid referral code' })
+  if (ref.id === req.user.id) return res.status(400).json({ error: 'You can’t use your own code' })
+  await pool.query('UPDATE users SET referred_by=$1 WHERE id=$2', [ref.id, req.user.id])
+  res.json({ ok: true, referrer: ref.name || 'a friend', reward: REFERRAL_REWARD })
+})
+
 /* ---------- addresses ---------- */
 app.get('/api/addresses', auth, async (req, res) => res.json(await getAddresses(req.user.id)))
 app.post('/api/addresses', auth, async (req, res) => {
@@ -261,8 +328,13 @@ app.delete('/api/addresses/:id', auth, async (req, res) => {
 
 /* ---------- wallet ---------- */
 app.get('/api/wallet', auth, async (req, res) => {
+  const u = await getUser(req.user.id)
   const { rows } = await pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC', [req.user.id])
-  res.json({ balance: req.user.wallet, cashback: 200, transactions: rows })
+  const cash = u.wallet || 0, promo = u.promo_balance || 0, points = u.reward_points || 0
+  res.json({
+    balance: cash, cash, promo, points, total: cash + promo,
+    status: u.wallet_status || 'active', cashback: promo, transactions: rows,
+  })
 })
 app.post('/api/wallet/add', auth, async (req, res) => {
   const bal = await addTransaction(req.user.id, 'credit', 'Added to wallet', Math.max(1, Number(req.body?.amount) || 0))
@@ -275,6 +347,18 @@ app.get('/api/internal/users/:id', internalOnly, async (req, res) => {
   res.json({ user: publicUser(u) })
 })
 app.get('/api/internal/users/:id/addresses', internalOnly, async (req, res) => res.json(await getAddresses(Number(req.params.id))))
+// Full wallet ledger for a user (admin view).
+app.get('/api/internal/users/:id/transactions', internalOnly, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200', [Number(req.params.id)])
+  res.json(rows)
+})
+// Admin sets the wallet status (active / frozen / blocked / inactive).
+app.post('/api/internal/users/:id/wallet-status', internalOnly, async (req, res) => {
+  const status = String(req.body?.status || '').toLowerCase()
+  if (!['active', 'frozen', 'blocked', 'inactive'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+  await pool.query('UPDATE users SET wallet_status=$1 WHERE id=$2', [status, Number(req.params.id)])
+  res.json({ ok: true, status })
+})
 app.post('/api/internal/users/find-or-create', internalOnly, async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   if (phone.length < 6) return res.status(400).json({ error: 'Invalid phone' })
@@ -287,14 +371,42 @@ app.post('/api/internal/users/find-or-create-google', internalOnly, async (req, 
 })
 // Wallet debit/credit/refund driven by the booking service.
 app.post('/api/internal/users/:id/wallet', internalOnly, async (req, res) => {
-  const { type, title, amount, ref } = req.body || {}
+  const { type, title, amount, ref, kind, balance, admin } = req.body || {}
   const uid = Number(req.params.id)
   const u = await getUser(uid)
   if (!u) return res.status(404).json({ error: 'User not found' })
   const amt = Math.max(0, Math.round(Number(amount) || 0))
-  if (type === 'debit' && u.wallet < amt) return res.status(402).json({ error: 'Insufficient wallet balance' })
-  const bal = await addTransaction(uid, type === 'debit' ? 'debit' : 'credit', title || 'Wallet', amt, ref || null)
-  res.json({ balance: bal })
+  const status = u.wallet_status || 'active'
+  const bt = balance === 'promo' || balance === 'points' ? balance : 'cash'
+  try {
+    if (type === 'debit') {
+      // Customer spending is blocked on a frozen/blocked wallet; admin debits bypass.
+      if (!admin && status !== 'active') return res.status(403).json({ error: `Wallet is ${status}` })
+      if (bt !== 'cash') { const bal = await walletMutate(uid, { balanceType: bt, type: 'debit', kind, title: title || 'Wallet', amount: amt, ref: ref || null }); return res.json({ balance: u.wallet, [bt]: bal }) }
+      const r = await walletSpend(uid, amt, { title: title || 'Booking payment', ref: ref || null, kind }) // promo-first, then cash
+      return res.json(r)
+    }
+    // Credits (refund / cashback / referral / admin) are always allowed.
+    const bal = await walletMutate(uid, { balanceType: bt, type: 'credit', kind, title: title || 'Wallet', amount: amt, ref: ref || null })
+    return res.json({ balance: bt === 'cash' ? bal : u.wallet, [bt]: bal })
+  } catch (e) {
+    return res.status(e.code === 402 ? 402 : 500).json({ error: e.message || 'Wallet error' })
+  }
+})
+
+// Called by the booking service when a user completes a booking. If this user was referred and the
+// referrer hasn't been paid yet, credit the referrer's Promo balance — exactly once.
+app.post('/api/internal/users/:id/referral-complete', internalOnly, async (req, res) => {
+  const uid = Number(req.params.id)
+  const u = await getUser(uid)
+  if (!u || !u.referred_by || u.referral_rewarded) return res.json({ ok: true, rewarded: false })
+  // Atomically flip the flag so concurrent completions reward the referrer only once.
+  const flip = await pool.query('UPDATE users SET referral_rewarded=true WHERE id=$1 AND referral_rewarded=false RETURNING id', [uid])
+  if (!flip.rowCount) return res.json({ ok: true, rewarded: false })
+  try {
+    await walletMutate(u.referred_by, { balanceType: 'promo', type: 'credit', kind: 'REFERRAL_BONUS', title: `Referral bonus — ${u.name || 'a friend'} joined`, amount: REFERRAL_REWARD, ref: `REF${uid}` })
+  } catch (e) { console.error('[auth] referral reward failed:', e.message) }
+  res.json({ ok: true, rewarded: true })
 })
 // Admin customer management (called by the admin BFF).
 app.get('/api/internal/customers', internalOnly, async (_q, res) => {
