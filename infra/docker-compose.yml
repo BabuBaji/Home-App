@@ -1,0 +1,281 @@
+# HomeHelp — pure microservices stack
+# ------------------------------------
+#   [ customer / admin / worker apps ] → gateway(:8080) → 9 domain services
+#   • database-per-service (9 Postgres instances, distinct host ports 5432–5440)
+#   • Redis: async event bus (Streams) + realtime relay (pub/sub) for the socket.io hub
+#   • no monolith — every route is served by an owning service
+#
+#   docker compose -f infra/docker-compose.yml up --build
+#
+# Build context is the REPO ROOT (..) so each image can bundle services/shared.
+services:
+  # ============================ infrastructure ============================
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ============================ databases (one per service) ============================
+  catalog-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: catalog }
+    ports: ["5432:5432"]
+    volumes: ["catalog-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d catalog"], interval: 5s, timeout: 3s, retries: 10 }
+
+  auth-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: auth }
+    ports: ["5433:5432"]
+    volumes: ["auth-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d auth"], interval: 5s, timeout: 3s, retries: 10 }
+
+  notification-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: notification }
+    ports: ["5434:5432"]
+    volumes: ["notification-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d notification"], interval: 5s, timeout: 3s, retries: 10 }
+
+  worker-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: worker }
+    ports: ["5435:5432"]
+    volumes: ["worker-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d worker"], interval: 5s, timeout: 3s, retries: 10 }
+
+  booking-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: booking }
+    ports: ["5436:5432"]
+    volumes: ["booking-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d booking"], interval: 5s, timeout: 3s, retries: 10 }
+
+  dispatch-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: dispatch }
+    ports: ["5437:5432"]
+    volumes: ["dispatch-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d dispatch"], interval: 5s, timeout: 3s, retries: 10 }
+
+  payment-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: payment }
+    ports: ["5438:5432"]
+    volumes: ["payment-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d payment"], interval: 5s, timeout: 3s, retries: 10 }
+
+  wallet-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: wallet }
+    ports: ["5439:5432"]
+    volumes: ["wallet-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d wallet"], interval: 5s, timeout: 3s, retries: 10 }
+
+  admin-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: admin }
+    ports: ["5440:5432"]
+    volumes: ["admin-pgdata:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d admin"], interval: 5s, timeout: 3s, retries: 10 }
+
+  # ============================ services ============================
+  auth:
+    build: { context: .., dockerfile: services/auth/Dockerfile }
+    environment:
+      PORT: 4002
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@auth-db:5432/auth
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      DEV_OTP: ${DEV_OTP}
+    ports: ["4002:4002"]
+    depends_on:
+      auth-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  catalog:
+    build: { context: .., dockerfile: services/catalog/Dockerfile }
+    environment:
+      PORT: 4001
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@catalog-db:5432/catalog
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      ADMIN_URL: http://admin:4010
+      BOOKING_URL: http://booking:4006
+    ports: ["4001:4001"]
+    depends_on:
+      catalog-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  booking:
+    build: { context: .., dockerfile: services/booking/Dockerfile }
+    environment:
+      PORT: 4006
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@booking-db:5432/booking
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      CATALOG_URL: http://catalog:4001
+      AUTH_URL: http://auth:4002
+      WORKER_URL: http://worker:4004
+      ADMIN_URL: http://admin:4010
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
+    ports: ["4006:4006"]
+    depends_on:
+      booking-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  dispatch:
+    build: { context: .., dockerfile: services/dispatch/Dockerfile }
+    environment:
+      PORT: 4007
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@dispatch-db:5432/dispatch
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      WORKER_URL: http://worker:4004
+      BOOKING_URL: http://booking:4006
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
+    ports: ["4007:4007"]
+    depends_on:
+      dispatch-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  payment:
+    build: { context: .., dockerfile: services/payment/Dockerfile }
+    environment:
+      PORT: 4008
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@payment-db:5432/payment
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
+      BOOKING_URL: http://booking:4006
+      WALLET_URL: http://wallet:4009
+      FINANCE_ENC_KEY: ${FINANCE_ENC_KEY}
+    ports: ["4008:4008"]
+    depends_on:
+      payment-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  wallet:
+    build: { context: .., dockerfile: services/wallet/Dockerfile }
+    environment:
+      PORT: 4009
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@wallet-db:5432/wallet
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      ADMIN_URL: http://admin:4010
+      WORKER_URL: http://worker:4004
+      PAYMENT_URL: http://payment:4008
+      BOOKING_URL: http://booking:4006
+      WORKER_DEV_OTP: ${WORKER_DEV_OTP}
+    ports: ["4009:4009"]
+    depends_on:
+      wallet-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: { context: .., dockerfile: services/worker/Dockerfile }
+    environment:
+      PORT: 4004
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@worker-db:5432/worker
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
+      BOOKING_URL: http://booking:4006
+      WORKER_DEV_OTP: ${WORKER_DEV_OTP}
+    ports: ["4004:4004"]
+    depends_on:
+      worker-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  notification:
+    build: { context: .., dockerfile: services/notification/Dockerfile }
+    environment:
+      PORT: 4003
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@notification-db:5432/notification
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
+      BOOKING_URL: http://booking:4006
+    ports: ["4003:4003"]
+    depends_on:
+      notification-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  admin:
+    build: { context: .., dockerfile: services/admin/Dockerfile }
+    environment:
+      PORT: 4010
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@admin-db:5432/admin
+      REDIS_URL: redis://redis:6379
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      AUTH_URL: http://auth:4002
+      CATALOG_URL: http://catalog:4001
+      BOOKING_URL: http://booking:4006
+      DISPATCH_URL: http://dispatch:4007
+      PAYMENT_URL: http://payment:4008
+      WALLET_URL: http://wallet:4009
+      WORKER_URL: http://worker:4004
+      NOTIFICATION_URL: http://notification:4003
+      ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD}
+      OPS_SEED_EMAIL: ${OPS_SEED_EMAIL}
+      OPS_SEED_PASSWORD: ${OPS_SEED_PASSWORD}
+      NEW_ADMIN_DEFAULT_PASSWORD: ${NEW_ADMIN_DEFAULT_PASSWORD}
+      # Payment gateway keys (seeded into admin settings on boot; leave blank to use the admin UI)
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      # Google Maps/Places key (powers catalog address search; blank => Nominatim fallback)
+      GOOGLE_MAPS_KEY: ${GOOGLE_MAPS_KEY:-}
+    ports: ["4010:4010"]
+    depends_on:
+      admin-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  gateway:
+    build: { context: .., dockerfile: services/gateway/Dockerfile }
+    environment:
+      PORT: 8080
+      REDIS_URL: redis://redis:6379
+      AUTH_URL: http://auth:4002
+      CATALOG_URL: http://catalog:4001
+      BOOKING_URL: http://booking:4006
+      DISPATCH_URL: http://dispatch:4007
+      PAYMENT_URL: http://payment:4008
+      WALLET_URL: http://wallet:4009
+      WORKER_URL: http://worker:4004
+      NOTIFICATION_URL: http://notification:4003
+      ADMIN_URL: http://admin:4010
+    ports: ["8080:8080"]
+    depends_on:
+      - auth
+      - catalog
+      - booking
+      - dispatch
+      - payment
+      - wallet
+      - worker
+      - notification
+      - admin
+      - redis
+
+volumes:
+  catalog-pgdata:
+  auth-pgdata:
+  notification-pgdata:
+  worker-pgdata:
+  booking-pgdata:
+  dispatch-pgdata:
+  payment-pgdata:
+  wallet-pgdata:
+  admin-pgdata:

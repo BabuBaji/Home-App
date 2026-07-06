@@ -1,0 +1,14 @@
+{
+  "name": "hh-booking-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HomeHelp Booking microservice — owns bookings + favourites; drives the booking lifecycle and emits booking.* events.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "ioredis": "^5.4.1"
+  }
+}
