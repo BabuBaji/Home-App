@@ -22,6 +22,7 @@ data class WorkerDto(
     val bankRemarks: String = "",
     val shiftStart: String = "",
     val shiftEnd: String = "",
+    val availabilityState: String = "",
     val availableDays: Map<String, Boolean> = emptyMap(),
     val jobPreferences: Map<String, Boolean> = emptyMap(),
     val notifNewJobs: Boolean = true,
@@ -52,6 +53,8 @@ data class WalletSummaryDto(
     val pending: Int = 0,
     val hold: Int = 0,
     val todayEarnings: Int = 0,
+    val todayJobs: Int = 0,
+    val todayCompleted: Int = 0,
     val weekEarnings: Int = 0,
     val monthEarnings: Int = 0,
     val totalWithdrawn: Int = 0,
@@ -177,9 +180,49 @@ data class BootstrapResponse(
     val jobStatus: String? = null,
     val activeJob: Job? = null,
     val bookings: List<Booking> = emptyList(),
+    val schedule: List<ScheduleItem> = emptyList(),
+    val attendance: AttendanceDto? = null,
+    val leaves: List<LeaveItem> = emptyList(),
+    val tickets: List<TicketItem> = emptyList(),
     val earnings: List<EarningEntry> = emptyList(),
     val walletTxns: List<WalletTxn> = emptyList(),
     val documents: List<DocumentDto> = emptyList(),
+)
+
+/** Today's attendance snapshot (check-in / check-out). */
+data class AttendanceDto(
+    val checkedIn: Boolean = false,
+    val checkedOut: Boolean = false,
+    val checkInAt: String = "",
+    val checkOutAt: String = "",
+    val status: String = "Not checked in",
+)
+
+data class AttendanceBody(val lat: Double? = null, val lng: Double? = null)
+
+data class StatusBody(val state: String)
+data class TicketItem(val id: Int = 0, val subject: String = "", val message: String = "", val status: String = "Open", val created: String = "")
+data class TicketBody(val subject: String, val message: String)
+data class SosBody(val lat: Double? = null, val lng: Double? = null)
+data class SosResponse(val ok: Boolean = true, val message: String = "")
+data class LeaveBody(val fromDate: String, val toDate: String, val reason: String)
+data class LeaveItem(
+    val id: Int = 0,
+    val fromDate: String = "",
+    val toDate: String = "",
+    val reason: String = "",
+    val status: String = "Pending",
+)
+
+/** One row in Today's Schedule (timeline). All Strings default so a missing key never NPEs. */
+data class ScheduleItem(
+    val time: String = "",
+    val service: String = "",
+    val location: String = "",
+    val durationMins: Int = 0,
+    val customerName: String = "",
+    val paymentStatus: String = "",
+    val status: String = "",
 )
 
 data class DocumentsResponse(val ok: Boolean = true, val documents: List<DocumentDto> = emptyList())

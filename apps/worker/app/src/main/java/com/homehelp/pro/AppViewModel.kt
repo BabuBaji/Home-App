@@ -91,13 +91,16 @@ data class Job(
     val completedAt: String? = null,
 )
 
+// Nullable String fields are defensive: this is deserialized from JSON by Gson, which bypasses
+// Kotlin's constructor and will inject null for any key the backend omits — a non-null String
+// field would then NPE-crash the Bookings UI. Keep these nullable and render with `?: ""`.
 data class Booking(
-    val service: String,
-    val customerName: String,
-    val address: String,
-    val timeInfo: String,
-    val amount: Int,
-    val status: String,
+    val service: String? = null,
+    val customerName: String? = null,
+    val address: String? = null,
+    val timeInfo: String? = null,
+    val amount: Int = 0,
+    val status: String? = null,
 )
 
 data class EarningEntry(val date: String, val amount: Int, val paid: Boolean = true)
@@ -160,6 +163,8 @@ class AppViewModel : ViewModel() {
     var todayEarnings by mutableIntStateOf(0)
         private set
     var todayJobs by mutableIntStateOf(0)
+        private set
+    var todayCompleted by mutableIntStateOf(0)
         private set
     var walletBalance by mutableIntStateOf(0)
         private set
@@ -293,6 +298,7 @@ class AppViewModel : ViewModel() {
             bankRemarks = w.bankRemarks
             shiftStart = w.shiftStart
             shiftEnd = w.shiftEnd
+            if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
             if (w.availableDays.isNotEmpty()) {
                 availableDays.clear(); availableDays.putAll(w.availableDays)
             }
@@ -314,6 +320,10 @@ class AppViewModel : ViewModel() {
         }
         b.walletSummary?.let { applyWalletSummary(it) }
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
+        schedule.clear(); schedule.addAll(b.schedule)
+        b.attendance?.let { attendance = it }
+        leaves.clear(); leaves.addAll(b.leaves)
+        tickets.clear(); tickets.addAll(b.tickets)
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
         if (b.walletTxns.isNotEmpty()) { walletTxns.clear(); walletTxns.addAll(b.walletTxns) }
         if (b.documents.isNotEmpty()) {
@@ -380,6 +390,14 @@ class AppViewModel : ViewModel() {
             val b = api.bootstrap()
             applyBootstrap(b)
         }
+    }
+
+    /** Re-pull the backend snapshot (bookings, wallet, earnings, active job) without a re-login.
+     *  Called whenever the app returns to the foreground so a job the worker completed — or that
+     *  was completed/assigned server-side — shows up right away instead of after a full relaunch. */
+    fun refresh() {
+        if (!isLoggedIn) return
+        sync { applyBootstrap(api.bootstrap()) }
     }
 
     /** Clear the session and return to the login screen. */
@@ -509,6 +527,19 @@ class AppViewModel : ViewModel() {
         return true
     }
 
+    // Before-photo captured on arrival (module: Start Job → Before Photos). Held locally and
+    // attached to the completion payload; cleared when a new job starts.
+    var beforePhoto: String? = null
+        private set
+    fun setBeforePhoto(dataUrl: String) { beforePhoto = dataUrl }
+
+    // Worker's rating of the customer after a job (module: Customer Rating). Captured locally.
+    var lastCustomerRating by mutableIntStateOf(0)
+        private set
+    fun rateCustomer(stars: Int, comment: String) {
+        lastCustomerRating = stars.coerceIn(0, 5)
+    }
+
     fun endService(photo: String? = null) {
         jobStatus = JobStatus.COMPLETED
         serviceEndMs = System.currentTimeMillis()
@@ -549,6 +580,8 @@ class AppViewModel : ViewModel() {
         pendingAmount = s.pending
         holdBalance = s.hold
         todayEarnings = s.todayEarnings
+        todayJobs = s.todayJobs
+        todayCompleted = s.todayCompleted
         weekEarnings = s.weekEarnings
         monthEarnings = s.monthEarnings
         withdrawnTotal = s.totalWithdrawn
@@ -636,6 +669,62 @@ class AppViewModel : ViewModel() {
         api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))
     }
 
+    // ---- attendance (check-in / check-out) ----
+    var attendance by mutableStateOf(com.homehelp.pro.network.AttendanceDto())
+        private set
+    fun checkIn(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { attendance = api.checkIn(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            onDone()
+        }
+    }
+    fun checkOut(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { attendance = api.checkOut(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            onDone()
+        }
+    }
+
+    // ---- availability state (Available | Busy | Break | Offline | Leave) ----
+    var availabilityState by mutableStateOf("Offline")
+        private set
+    fun changeAvailabilityState(state: String) {
+        availabilityState = state
+        val online = state == "Available"
+        if (online != isOnline) goOnline(online)
+        sync { runCatching { api.setStatus(com.homehelp.pro.network.StatusBody(state)) } }
+    }
+
+    // ---- leave requests ----
+    val leaves = mutableStateListOf<com.homehelp.pro.network.LeaveItem>()
+    fun submitLeave(fromDate: String, toDate: String, reason: String, onDone: (String?) -> Unit) {
+        if (fromDate.isBlank()) { onDone("Pick a date"); return }
+        viewModelScope.launch {
+            try {
+                val list = api.requestLeave(com.homehelp.pro.network.LeaveBody(fromDate, toDate.ifBlank { fromDate }, reason))
+                leaves.clear(); leaves.addAll(list); backendConnected = true; onDone(null)
+            } catch (e: Exception) { onDone("Couldn't submit. Please try again.") }
+        }
+    }
+
+    // ---- support tickets + SOS ----
+    val tickets = mutableStateListOf<com.homehelp.pro.network.TicketItem>()
+    fun submitTicket(subject: String, message: String, onDone: (String?) -> Unit) {
+        if (subject.isBlank() && message.isBlank()) { onDone("Describe your issue"); return }
+        viewModelScope.launch {
+            try {
+                val list = api.raiseTicket(com.homehelp.pro.network.TicketBody(subject.ifBlank { "Support request" }, message))
+                tickets.clear(); tickets.addAll(list); backendConnected = true; onDone(null)
+            } catch (e: Exception) { onDone("Couldn't submit. Please try again.") }
+        }
+    }
+    fun sendSos(lat: Double?, lng: Double?, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            try { val r = api.sos(com.homehelp.pro.network.SosBody(lat, lng)); onDone(r.message.ifBlank { "Help is on the way." }) }
+            catch (e: Exception) { onDone("Alert sent. If urgent, call emergency services.") }
+        }
+    }
+
     fun savePreferences() = sync { api.updatePreferences(PreferencesBody(jobPreferences.toMap())) }
 
     fun saveNotifications() = sync {
@@ -657,6 +746,7 @@ class AppViewModel : ViewModel() {
 
     // ---- dynamic data — empty until populated from the backend; grows as jobs complete ----
     val bookings = mutableStateListOf<Booking>()
+    val schedule = mutableStateListOf<com.homehelp.pro.network.ScheduleItem>()
     val earnings = mutableStateListOf<EarningEntry>()
     val walletTxns = mutableStateListOf<WalletTxn>()
 }

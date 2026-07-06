@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapPin, CheckCircle2, Clock, Hash, Plus, Pencil, Trash2, Play, Pause } from 'lucide-react'
 import { fetchZones, createZone, updateZone, deleteZone, type Zone } from '../api'
 import { StatCard, Card, Badge, SearchBox, Loading, ErrorState, Modal, Field, useToast } from '../components/UI'
+import { CITIES, stateForCity } from '../cities'
 
 type Draft = { name: string; state: string; city: string; pincodes: string; status: Zone['status']; slaMinutes: string }
 const emptyDraft: Draft = { name: '', state: '', city: '', pincodes: '', status: 'planned', slaMinutes: '' }
@@ -147,8 +148,14 @@ export default function ServiceAreas() {
             <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Kondapur" />
           </Field>
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="State"><input value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} placeholder="Telangana" /></Field>
-            <Field label="City"><input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} placeholder="Hyderabad" /></Field>
+            <Field label="City">
+              <select value={draft.city} onChange={(e) => { const city = e.target.value; setDraft({ ...draft, city, state: stateForCity(city) || draft.state }) }}>
+                <option value="">— Select city —</option>
+                {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city} · {c.state}</option>)}
+                {draft.city && !CITIES.some((c) => c.city === draft.city) && <option value={draft.city}>{draft.city}</option>}
+              </select>
+            </Field>
+            <Field label="State"><input value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} placeholder="Auto-filled from city" /></Field>
           </div>
           <Field label="Pincodes (comma or space separated, 6-digit)">
             <textarea value={draft.pincodes} onChange={(e) => setDraft({ ...draft, pincodes: e.target.value })} rows={3}

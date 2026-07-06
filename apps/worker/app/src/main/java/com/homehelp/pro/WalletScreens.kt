@@ -66,13 +66,13 @@ private fun rupee(n: Int): String = "₹" + "%,d".format(n)
 fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.refreshWallet() }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        BellHeader("My Wallet")
+        BellHeader("My Wallet") { nav.navigate(Routes.P_NOTIFICATIONS) }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Hero — Available balance + the single most important action.
-            Box(Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(18.dp)).padding(20.dp)) {
+            Box(Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(18.dp)).padding(20.dp)) {
                 Column {
                     Text("Available Balance", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
                     Text(rupee(vm.walletBalance), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)

@@ -289,6 +289,67 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
+            // ---- Today's snapshot: the three numbers that matter (What / How much) ----
+            val ctxHome = LocalContext.current
+            Card {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    MiniStat("₹${vm.todayEarnings}", "Today's Earnings", null)
+                    MiniStat("${vm.todayJobs}", "Today's Jobs", null)
+                    MiniStat("${vm.todayCompleted}", "Completed", null)
+                }
+            }
+
+            // ---- Attendance status (check in to start your day) ----
+            Card(modifier = Modifier.clickable { nav.navigate(Routes.ATTENDANCE) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (vm.attendance.checkedIn && !vm.attendance.checkedOut) "🟢" else "⚪", fontSize = 20.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Attendance", fontSize = 12.sp, color = TextGray)
+                        Text(vm.attendance.status, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                    }
+                    Text(
+                        if (!vm.attendance.checkedIn) "Check In ›" else if (!vm.attendance.checkedOut) "Check Out ›" else "Done",
+                        color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                    )
+                }
+            }
+
+            // ---- Next job (What should I do next?) ----
+            val nextJob = vm.bookings.firstOrNull { it.status == "Upcoming" }
+            Card(modifier = if (nextJob != null) Modifier.clickable { nav.navigate(Routes.SCHEDULE) } else Modifier) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("⏰", fontSize = 22.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Next Job", fontSize = 12.sp, color = TextGray)
+                        Text(nextJob?.service ?: "No upcoming jobs", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                        Text(if (nextJob != null) (nextJob.timeInfo ?: "") else "You're all caught up", fontSize = 12.sp, color = TextGray)
+                    }
+                    if (nextJob != null) Text("View ›", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+            }
+
+            // ---- Quick actions (Go Online · Take Break · View Schedule) ----
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                QuickAction(Modifier.weight(1f), if (vm.isOnline) "⏸️" else "▶️", if (vm.isOnline) "Go Offline" else "Go Online") { vm.goOnline(!vm.isOnline) }
+                QuickAction(Modifier.weight(1f), "☕", "Take Break") { vm.goOnline(false); toast(ctxHome, "You're on a break — go online when ready") }
+                QuickAction(Modifier.weight(1f), "📅", "Schedule") { nav.navigate(Routes.SCHEDULE) }
+            }
+
+            // ---- Wallet quick view (How much have I earned?) ----
+            Card(modifier = Modifier.clickable { nav.navigate(Routes.WALLET) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("👛", fontSize = 22.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Wallet Balance", fontSize = 12.sp, color = TextGray)
+                        Text("₹${vm.walletBalance}", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
+                    }
+                    Text("›", color = TextGray, fontSize = 20.sp)
+                }
+            }
+
             // Online hero — the primary action, with a genuine live "online today" timer.
             val online = vm.isOnline
             Surface(
@@ -365,7 +426,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 if (vm.hasIncomingJob) {
                     // A real customer has booked — show the New Job Request notification.
                     Box(
-                        Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp))
+                        Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(16.dp))
                             .clickable {
                                 vm.requestJob { found ->
                                     if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
@@ -443,6 +504,23 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+// Compact tappable tile for the Home "Quick Actions" row (Go Online / Take Break / Schedule).
+@Composable
+private fun QuickAction(modifier: Modifier, emoji: String, label: String, onClick: () -> Unit) {
+    Surface(
+        modifier = modifier.clickable { onClick() },
+        shape = RoundedCornerShape(14.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Divider),
+    ) {
+        Column(Modifier.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(emoji, fontSize = 22.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextDark)
+        }
+    }
+}
+
 // Slide-out menu opened by the Home top-bar hamburger. Quick links to the profile
 // sub-screens plus logout — each closes the drawer first, then navigates.
 @Composable
@@ -459,6 +537,8 @@ private fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Un
         DrawerLink(Icons.Filled.Home, "Personal Info") { go(Routes.P_PERSONAL) }
         DrawerLink(Icons.Filled.Description, "Documents") { go(Routes.P_DOCUMENTS) }
         DrawerLink(Icons.Filled.AccountBalance, "Bank Details") { go(Routes.P_BANK) }
+        DrawerLink(Icons.Filled.CalendarMonth, "Attendance") { go(Routes.ATTENDANCE) }
+        DrawerLink(Icons.Filled.CalendarMonth, "Leave") { go(Routes.LEAVE) }
         DrawerLink(Icons.Filled.CalendarMonth, "Availability") { go(Routes.P_AVAILABILITY) }
         DrawerLink(Icons.Filled.Tune, "Preferences") { go(Routes.P_PREFERENCES) }
         DrawerLink(Icons.Filled.Notifications, "Notification Settings") { go(Routes.P_NOTIFICATIONS) }

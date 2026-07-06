@@ -14,6 +14,8 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
+const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
+const WALLET_URL = (process.env.WALLET_URL || 'http://localhost:4009').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[worker] unhandledRejection:', e?.message || e))
 
@@ -47,9 +49,35 @@ async function init() {
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `CREATE INDEX IF NOT EXISTS ix_shift_worker ON shifts(worker_id)`,
+    // Daily attendance: one row per worker per day with check-in/out times + GPS.
+    `CREATE TABLE IF NOT EXISTS attendance (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, day DATE NOT NULL,
+      check_in TIMESTAMPTZ, check_out TIMESTAMPTZ,
+      in_lat REAL, in_lng REAL, out_lat REAL, out_lng REAL,
+      UNIQUE(worker_id, day)
+    )`,
+    // Leave requests (worker submits; admin/ops approves — status Pending|Approved|Rejected).
+    `CREATE TABLE IF NOT EXISTS leave_requests (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL,
+      from_date DATE, to_date DATE, reason TEXT,
+      status TEXT NOT NULL DEFAULT 'Pending', created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    // Support tickets raised by the worker (ops resolves — status Open|Resolved).
+    `CREATE TABLE IF NOT EXISTS support_tickets (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, subject TEXT, message TEXT,
+      status TEXT NOT NULL DEFAULT 'Open', created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
   ])
   const seeded = (await pool.query('SELECT COUNT(*)::int n FROM workers')).rows[0].n
   if (!seeded) {
+    // Every ACTIVE pro is qualified for the full Cleaning catalogue so any booked service matches
+    // and can be push auto-assigned out of the box. These MUST equal the catalog `name`s exactly,
+    // because dispatch matches (booking item name === worker service name), case-insensitively.
+    const ALL_SERVICES = [
+      'Sweeping & Mopping', 'Dusting Furniture', 'Dishwashing', 'Bathroom Cleaning', 'Kitchen Cleaning',
+      'Laundry Washing & Folding', 'Window Cleaning', 'Fan Cleaning', 'Bed Making', 'Garbage Disposal',
+      'Basic Home Organization', 'Ironing', 'Deep Cleaning', 'Refrigerator Cleaning', 'Home Sanitization',
+    ]
     const W = [
       ['Rakesh Kumar', 'Cleaning,Bathroom', 'Mumbai', 'active', true, 4.9, 312, 84200],
       ['Pooja Mehta', 'Beauty,Salon', 'Delhi', 'active', true, 4.8, 221, 61500],
@@ -62,16 +90,29 @@ async function init() {
       ['Sunita Devi', 'Care,Cooking', 'Jaipur', 'active', true, 4.9, 154, 38600],
       ['Manish Tiwari', 'Plumbing,Carpentry', 'Lucknow', 'pending', false, 4.3, 5, 1100],
     ]
+    const activeIds = []
     for (let i = 0; i < W.length; i++) {
       const [name, services, city, status, verified, rating, jobs, earnings] = W[i]
       const slug = name.toLowerCase().replace(/\s+/g, '.')
-      await pool.query(
+      // Active pros get the full catalogue; pending/inactive keep their original tags (they can't
+      // take jobs anyway, so their services never need to match).
+      const svc = status === 'active' ? ALL_SERVICES : services.split(',')
+      const { rows } = await pool.query(
         `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,jobs,earnings,balance)
-         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)`,
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11) RETURNING id`,
         [name, `+91 9${String(800000000 + i * 11111).slice(0, 9)}`, `${slug}@pros.homehelp.in`, city,
-          JSON.stringify(services.split(',')), status, verified, rating, jobs, earnings, Math.round(earnings * 0.1)])
+          JSON.stringify(svc), status, verified, rating, jobs, earnings, Math.round(earnings * 0.1)])
+      if (status === 'active') activeIds.push(rows[0].id)
     }
-    console.log(`[worker] seeded ${W.length} workers`)
+    // Roster every active pro on an all-day, every-day, zone-less shift (zone_id NULL matches any
+    // live zone), so push auto-assign has on-shift, online (available defaults true) supply on a
+    // fresh DB. Admins can refine the roster later via /api/admin/shifts.
+    for (const id of activeIds) {
+      for (let d = 0; d < 7; d++) {
+        await pool.query('INSERT INTO shifts (worker_id,zone_id,weekday,start_min,end_min) VALUES ($1,NULL,$2,0,1439)', [id, d])
+      }
+    }
+    console.log(`[worker] seeded ${W.length} workers + all-day shifts for ${activeIds.length} active pros`)
   }
   console.log('[worker] Postgres ready (workers, worker_documents)')
 }
@@ -80,7 +121,51 @@ async function init() {
 const rowToWorker = (w) => w && ({ ...w, verified: !!w.verified, available: !!w.available })
 const workerDto = (w) => w && ({ id: w.id, name: w.name, phone: w.phone, email: w.email, city: w.city, services: w.services, avatar: w.avatar, status: w.status, verified: !!w.verified, rating: w.rating, jobs: w.jobs, available: !!w.available, bankStatus: w.bank_status, ...(w.profile || {}) })
 const walletDto = (w) => ({ balance: w.balance, pending: w.pending, hold: w.hold, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding, earnings: w.earnings })
-const walletSummary = (w) => ({ available: w.balance, pending: w.pending, onHold: w.hold, totalEarned: w.earnings, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding, thisWeek: 0, thisMonth: 0 })
+const walletSummary = (w) => ({ available: w.balance, pending: w.pending, onHold: w.hold, totalEarned: w.earnings, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding })
+// Real period earnings for the wallet/earnings dashboard: the worker's 80% share of jobs
+// COMPLETED today / in the last 7 days / this calendar month, in IST. Field names match the
+// worker app's WalletSummaryDto (todayEarnings/weekEarnings/monthEarnings) so they render live.
+function periodEarnings(bookings) {
+  const shareOf = (b) => Math.round((b.total || 0) * 0.8)
+  const istDay = (d) => { try { return new Date(new Date(d).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) } catch { return '' } }
+  const nowIstMs = Date.now() + 5.5 * 3600 * 1000
+  const todayStr = new Date(nowIstMs).toISOString().slice(0, 10)
+  const monthStr = todayStr.slice(0, 7)
+  const weekAgoStr = new Date(nowIstMs - 6 * 86400 * 1000).toISOString().slice(0, 10)
+  let todayEarnings = 0, weekEarnings = 0, monthEarnings = 0, todayCompleted = 0, todayJobs = 0
+  for (const b of bookings || []) {
+    // Today's job count = everything scheduled/created today that wasn't cancelled.
+    if (istDay(b.date || b.created) === todayStr && b.status !== 'cancelled') todayJobs++
+    if (b.status !== 'completed') continue
+    const day = istDay(b.completed_at || b.created)
+    if (!day) continue
+    const amt = shareOf(b)
+    if (day === todayStr) { todayEarnings += amt; todayCompleted++ }
+    if (day >= weekAgoStr) weekEarnings += amt
+    if (day.startsWith(monthStr)) monthEarnings += amt
+  }
+  return { todayEarnings, weekEarnings, monthEarnings, todayCompleted, todayJobs }
+}
+// IST calendar date (YYYY-MM-DD) and 12-hour clock label for a timestamp — used by Today's Schedule.
+const istDateStr = (d) => { try { return new Date(new Date(d).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) } catch { return '' } }
+const istClock = (d) => { try { const t = new Date(new Date(d).getTime() + 5.5 * 3600 * 1000); let h = t.getUTCHours(); const m = String(t.getUTCMinutes()).padStart(2, '0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${h}:${m} ${ap}` } catch { return '' } }
+// Build Today's Schedule timeline from the worker's non-cancelled jobs dated today, in order.
+function todaySchedule(bookings, custNames) {
+  const today = istDateStr(Date.now())
+  const inProgress = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+  return (bookings || [])
+    .filter((b) => b.status !== 'cancelled' && istDateStr(b.date || b.created) === today)
+    .sort((a, b) => new Date(a.created) - new Date(b.created))
+    .map((b) => ({
+      time: b.time || istClock(b.created),
+      service: (b.items || []).map((i) => i.name).join(', ') || 'Service',
+      location: b.address || '—',
+      durationMins: bookingDurationMinutes(b),
+      customerName: (custNames && custNames[b.user_id]) || 'Customer',
+      paymentStatus: b.payment_status === 'paid' ? 'Paid' : (String(b.payment || '').toLowerCase() === 'cash' ? 'Cash' : 'Pending'),
+      status: b.status === 'completed' ? 'Completed' : (inProgress.includes(b.status) ? 'In progress' : 'Upcoming'),
+    }))
+}
 async function getWorker(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM workers WHERE id=$1', [id]); return rows[0] || null }
 // If the same phone maps to more than one worker (e.g. a stray pending placeholder alongside a
 // real onboarded pro), prefer the active + verified account so login isn't shadowed by the dupe.
@@ -137,13 +222,88 @@ async function bootstrap(wid) {
   const mine = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wid}`, [])
   const active = mine.find((b) => ['worker_assigned', 'on_the_way', 'arrived', 'in_progress'].includes(b.status)) || null
   const STATUS_TO_ENUM = { worker_assigned: 'ACCEPTED', on_the_way: 'ON_THE_WAY', arrived: 'ARRIVED', in_progress: 'IN_PROGRESS', completed: 'COMPLETED' }
+  // Resolve customer names once per unique user (the worker app's Booking card shows them).
+  const uids = [...new Set(mine.map((b) => b.user_id).filter(Boolean))]
+  const custNames = {}, custPhones = {}
+  await Promise.all(uids.map(async (id) => {
+    const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null)
+    if (u?.user?.name) custNames[id] = u.user.name
+    if (u?.user?.phone) custPhones[id] = u.user.phone
+  }))
+  // Every field the worker app's Booking model requires is non-null here — the Compose UI treats
+  // them as non-null String, and a missing key would deserialize to null and crash the Bookings tab.
+  const bookingDto = (b) => ({
+    service: (b.items || []).map((i) => i.name).join(', ') || 'Service',
+    customerName: custNames[b.user_id] || 'Customer',
+    address: b.address || '—',
+    timeInfo: [b.date, b.time].filter(Boolean).join(' • ') || (b.created ? new Date(b.created).toLocaleDateString('en-IN') : ''),
+    amount: Math.round((b.total || 0) * 0.8),
+    status: b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : 'Upcoming',
+  })
+  // Prefer the wallet service's real ledger summary (balance from actual completed services);
+  // fall back to the local snapshot only if the wallet service is unreachable.
+  const wsum = await tryGet(WALLET_URL, `/internal/summary/${wid}`, null)
+  const pe = periodEarnings(mine)
+  const walletSummaryOut = wsum ? { ...wsum, todayJobs: pe.todayJobs, todayCompleted: pe.todayCompleted } : { ...walletSummary(w), ...pe }
   return {
-    worker: workerDto(w), wallet: walletDto(w), walletSummary: walletSummary(w),
+    worker: workerDto(w), wallet: walletDto(w), walletSummary: walletSummaryOut,
     jobStatus: active ? (STATUS_TO_ENUM[active.status] || 'NONE') : 'NONE',
-    activeJob: active ? { id: active.ref, bookingId: active.id, services: (active.items || []).map((i) => i.name), durationMinutes: bookingDurationMinutes(active), address: active.address, otp: active.service_otp, startedAt: active.started_at, completedAt: active.completed_at } : null,
-    bookings: mine.map((b) => ({ service: (b.items || []).map((i) => i.name).join(', '), address: b.address, amount: Math.round((b.total || 0) * 0.8), status: b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : 'Upcoming' })),
+    // Full activeJob so the worker app's (non-null) Job model never deserializes a null field —
+    // a missing key here NPE-crashes the In-Progress / Job screens.
+    activeJob: active ? (() => {
+      const nm = custNames[active.user_id] || 'Customer'
+      const initials = (nm.split(/\s+/).map((s) => s[0]).filter(Boolean).slice(0, 2).join('') || 'C').toUpperCase()
+      const addr = active.address || '—'
+      return {
+        id: active.ref || `#${active.id}`, bookingId: active.id,
+        customerName: nm, initials, customerPhone: custPhones[active.user_id] || '',
+        customerRating: 5.0,
+        services: (active.items || []).map((i) => i.name),
+        dateTime: [active.date, active.time].filter(Boolean).join(', ') || istClock(active.created),
+        durationHours: Math.max(1, Math.round(bookingDurationMinutes(active) / 60)),
+        durationMinutes: bookingDurationMinutes(active),
+        address: addr, area: addr, distanceKm: 0,
+        earnings: Math.round((active.total || 0) * 0.8),
+        otp: active.service_otp || '',
+        lat: active.cust_lat || 0, lng: active.cust_lng || 0,
+        startedAt: active.started_at, completedAt: active.completed_at,
+      }
+    })() : null,
+    bookings: mine.map(bookingDto),
+    schedule: todaySchedule(mine, custNames),
+    attendance: await attendanceToday(wid),
+    leaves: await leaveList(wid),
+    tickets: await ticketList(wid),
     documents: await documents(wid),
   }
+}
+
+// Today's attendance snapshot for a worker (check-in/out times + derived status).
+async function attendanceToday(wid) {
+  const day = istDateStr(Date.now())
+  const { rows } = await pool.query('SELECT * FROM attendance WHERE worker_id=$1 AND day=$2', [wid, day])
+  const r = rows[0]
+  const checkedIn = !!(r && r.check_in)
+  const checkedOut = !!(r && r.check_out)
+  return {
+    checkedIn, checkedOut,
+    checkInAt: r && r.check_in ? istClock(r.check_in) : '',
+    checkOutAt: r && r.check_out ? istClock(r.check_out) : '',
+    status: checkedOut ? 'Checked out' : (checkedIn ? 'Checked in' : 'Not checked in'),
+  }
+}
+
+// A worker's support tickets, newest first.
+async function ticketList(wid) {
+  const { rows } = await pool.query('SELECT id, subject, message, status, created FROM support_tickets WHERE worker_id=$1 ORDER BY id DESC', [wid])
+  return rows.map((r) => ({ id: r.id, subject: r.subject || '', message: r.message || '', status: r.status, created: r.created ? new Date(r.created).toISOString().slice(0, 10) : '' }))
+}
+
+// A worker's leave requests, newest first.
+async function leaveList(wid) {
+  const { rows } = await pool.query('SELECT id, from_date, to_date, reason, status FROM leave_requests WHERE worker_id=$1 ORDER BY id DESC', [wid])
+  const d = (v) => (v ? new Date(v).toISOString().slice(0, 10) : '')
+  return rows.map((r) => ({ id: r.id, fromDate: d(r.from_date), toDate: d(r.to_date), reason: r.reason || '', status: r.status }))
 }
 
 const app = express()
@@ -175,6 +335,61 @@ app.get('/api/worker/bootstrap', auth, async (req, res) => res.json(await bootst
 app.put('/api/worker/profile', auth, async (req, res) => { const b = req.body || {}; await pool.query('UPDATE workers SET name=COALESCE($1,name), email=COALESCE($2,email), city=COALESCE($3,city), avatar=COALESCE($4,avatar) WHERE id=$5', [b.name ?? null, b.email ?? null, b.city ?? null, b.avatar ?? null, req.worker.id]); res.json(workerDto(await getWorker(req.worker.id))) })
 app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (pending verification)' }); res.json(workerDto(await getWorker(req.worker.id))) })
 app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
+
+/* ---------- attendance (check-in / check-out) ---------- */
+app.post('/api/worker/attendance/checkin', auth, async (req, res) => {
+  const b = req.body || {}, day = istDateStr(Date.now())
+  await pool.query(
+    `INSERT INTO attendance (worker_id, day, check_in, in_lat, in_lng) VALUES ($1,$2,now(),$3,$4)
+     ON CONFLICT (worker_id, day) DO UPDATE SET check_in = COALESCE(attendance.check_in, now()),
+       in_lat = COALESCE(attendance.in_lat, $3), in_lng = COALESCE(attendance.in_lng, $4)`,
+    [req.worker.id, day, b.lat ?? null, b.lng ?? null])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'attendance.checkin', entityType: 'worker', entityId: req.worker.id, detail: 'Checked in' })
+  res.json(await attendanceToday(req.worker.id))
+})
+app.post('/api/worker/attendance/checkout', auth, async (req, res) => {
+  const b = req.body || {}, day = istDateStr(Date.now())
+  await pool.query('UPDATE attendance SET check_out=now(), out_lat=$2, out_lng=$3 WHERE worker_id=$1 AND day=$4',
+    [req.worker.id, b.lat ?? null, b.lng ?? null, day])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'attendance.checkout', entityType: 'worker', entityId: req.worker.id, detail: 'Checked out' })
+  res.json(await attendanceToday(req.worker.id))
+})
+
+/* ---------- availability state (Available | Busy | Break | Offline | Leave) ---------- */
+// Only 'Available' workers are online for job matching (available=true drives auto-assign/pull).
+app.post('/api/worker/status', auth, async (req, res) => {
+  const state = String(req.body?.state || 'Offline')
+  await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [state === 'Available', req.worker.id])
+  await mergeProfile(req.worker.id, { availabilityState: state })
+  res.json(workerDto(await getWorker(req.worker.id)))
+})
+
+/* ---------- leave requests ---------- */
+app.get('/api/worker/leave', auth, async (req, res) => res.json(await leaveList(req.worker.id)))
+app.post('/api/worker/leave', auth, async (req, res) => {
+  const b = req.body || {}
+  await pool.query('INSERT INTO leave_requests (worker_id, from_date, to_date, reason) VALUES ($1,$2,$3,$4)',
+    [req.worker.id, b.fromDate || null, b.toDate || b.fromDate || null, b.reason || ''])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'leave.request', entityType: 'worker', entityId: req.worker.id, detail: `Requested leave ${b.fromDate || ''}` })
+  res.json(await leaveList(req.worker.id))
+})
+
+/* ---------- support tickets + SOS ---------- */
+app.get('/api/worker/support', auth, async (req, res) => res.json(await ticketList(req.worker.id)))
+app.post('/api/worker/support', auth, async (req, res) => {
+  const b = req.body || {}
+  await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3)', [req.worker.id, b.subject || 'Support request', b.message || ''])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'support.ticket', entityType: 'worker', entityId: req.worker.id, detail: `Raised a ticket: ${b.subject || ''}` })
+  res.json(await ticketList(req.worker.id))
+})
+// SOS — emergency alert. Broadcasts to ops (activity monitor) with the worker's live location.
+app.post('/api/worker/sos', auth, async (req, res) => {
+  const b = req.body || {}
+  const w = await getWorker(req.worker.id)
+  const loc = (b.lat != null && b.lng != null) ? ` @ ${b.lat},${b.lng}` : ''
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: req.worker.id, detail: `🆘 SOS raised${loc}`, meta: { lat: b.lat ?? null, lng: b.lng ?? null } })
+  res.json({ ok: true, message: 'Help is on the way. Our team has been alerted.' })
+})
 app.put('/api/worker/preferences', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { preferences: req.body || {} }))))
 app.put('/api/worker/notifications', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { notifications: req.body || {} }))))
 app.get('/api/worker/documents', auth, async (req, res) => res.json(await documents(req.worker.id)))

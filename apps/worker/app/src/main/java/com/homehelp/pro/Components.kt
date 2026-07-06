@@ -31,24 +31,46 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** White rounded card container with a hairline border (flat, professional). */
+/** White rounded card — soft shadow + ultra-light outline (Advanced Light Premium surface). */
 @Composable
 fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Composable () -> Unit) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(22.dp),
         color = Color.White,
-        border = BorderStroke(1.dp, Divider),
-        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, CardBorder),
+        shadowElevation = 3.dp,
     ) {
         Column(Modifier.padding(padding.value)) { content() }
     }
+}
+
+/** Full-bleed rounded hero banner with the brand (or given) gradient and a soft violet glow. */
+@Composable
+fun GradientBanner(
+    modifier: Modifier = Modifier,
+    gradient: Brush = BrandGradient,
+    radius: Int = 22,
+    padding: Int = 18,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .shadow(16.dp, RoundedCornerShape(radius.dp), spotColor = Purple, ambientColor = Purple)
+            .clip(RoundedCornerShape(radius.dp))
+            .background(gradient)
+            .padding(padding.dp),
+        content = content,
+    )
 }
 
 enum class Dp16(val value: androidx.compose.ui.unit.Dp) { S(12.dp), M(16.dp) }
@@ -86,32 +108,42 @@ fun HairlineDivider(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun BellHeader(title: String) {
+fun BellHeader(title: String, onBell: (() -> Unit)? = null) {
     Header(title, trailing = {
-        Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark, modifier = Modifier.size(22.dp))
+        val base = Modifier.size(22.dp)
+        Icon(
+            Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark,
+            modifier = if (onBell != null) base.clickable { onBell() } else base,
+        )
     })
 }
 
+/** Gradient primary CTA — brand gradient fill, soft press target, greyed when disabled. */
 @Composable
 fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.fillMaxWidth().height(52.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Purple, contentColor = Color.White),
+    val fill = if (enabled) BrandGradient else Brush.linearGradient(listOf(Color(0xFFCBC9D6), Color(0xFFCBC9D6)))
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .then(if (enabled) Modifier.shadow(14.dp, RoundedCornerShape(15.dp), spotColor = Purple, ambientColor = Purple) else Modifier)
+            .clip(RoundedCornerShape(15.dp))
+            .background(fill)
+            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 fun OutlineButton(text: String, modifier: Modifier = Modifier, color: Color = Purple, onClick: () -> Unit) {
     Surface(
-        modifier = modifier.height(52.dp).clickable { onClick() },
-        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.height(54.dp).clickable { onClick() },
+        shape = RoundedCornerShape(15.dp),
         color = Color.White,
-        border = BorderStroke(1.5.dp, color),
+        border = BorderStroke(2.dp, color),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(text, color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
@@ -209,8 +241,8 @@ fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
 
 @Composable
 fun StatusPill(text: String, bg: Color, fg: Color) {
-    Surface(shape = RoundedCornerShape(50), color = bg) {
-        Text(text, color = fg, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+    Surface(shape = RoundedCornerShape(10.dp), color = bg) {
+        Text(text, color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
     }
 }
 
@@ -224,10 +256,10 @@ fun RatingStars(rating: Double, size: Int = 14) {
 }
 
 @Composable
-fun LabeledRow(label: String, value: String, valueColor: Color = TextDark) {
+fun LabeledRow(label: String, value: String?, valueColor: Color = TextDark) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = TextGray, fontSize = 14.sp)
-        Text(value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(value ?: "", color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

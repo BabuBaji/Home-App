@@ -4,6 +4,7 @@ import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices, 
 import type { Worker } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, shortDate } from '../components/UI'
 import { useStore, can } from '../store'
+import { CITIES } from '../cities'
 
 type Stats = { total: number; active: number; pending: number; inactive: number }
 
@@ -111,7 +112,7 @@ export default function Workers() {
           </select>
           <select className="select flt" value={city} onChange={(e) => { setCity(e.target.value); setPage(1) }}>
             <option value="all">All Cities</option>
-            <option>Mumbai</option><option>Delhi</option><option>Bangalore</option>
+            {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city}</option>)}
           </select>
           <select className="select flt" value={service} onChange={(e) => { setService(e.target.value); setPage(1) }}>
             <option value="all">All Services</option>
@@ -251,7 +252,13 @@ function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChan
       <Field label="Name"><input value={draft.name} onChange={(e) => set('name', e.target.value)} placeholder="Full name" /></Field>
       <Field label="Mobile Number"><input value={draft.phone} onChange={(e) => set('phone', e.target.value)} placeholder="Phone" /></Field>
       <Field label="Email"><input value={draft.email} onChange={(e) => set('email', e.target.value)} placeholder="Email" /></Field>
-      <Field label="City"><input value={draft.city} onChange={(e) => set('city', e.target.value)} placeholder="City" /></Field>
+      <Field label="City">
+        <select value={draft.city} onChange={(e) => set('city', e.target.value)}>
+          <option value="">— Select city —</option>
+          {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city} · {c.state}</option>)}
+          {draft.city && !CITIES.some((c) => c.city === draft.city) && <option value={draft.city}>{draft.city}</option>}
+        </select>
+      </Field>
       <Field label="Service Zone (home area)">
         <select value={draft.zone_id ?? ''} onChange={(e) => onChange({ ...draft, zone_id: e.target.value ? Number(e.target.value) : null })}>
           <option value="">— Unassigned —</option>

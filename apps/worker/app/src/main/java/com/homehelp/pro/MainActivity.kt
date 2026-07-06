@@ -51,6 +51,11 @@ object Routes {
     const val LOGIN = "login"
     const val HOME = "home"
     const val BOOKINGS = "bookings"
+    const val SCHEDULE = "schedule"
+    const val ATTENDANCE = "attendance"
+    const val LEAVE = "leave"
+    const val PERFORMANCE = "performance"
+    const val SETTINGS = "settings"
     const val EARNINGS = "earnings"
     const val WALLET = "wallet"
     const val WITHDRAW = "wallet_withdraw"
@@ -98,6 +103,16 @@ fun AppRoot() {
 
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
+    // Re-pull backend data every time the app comes to the foreground, so a completed job /
+    // updated earnings appear immediately instead of only after a full relaunch.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
     val startDestination = if (Session.isLoggedIn) Routes.HOME else Routes.LOGIN
 
     Scaffold(
@@ -111,8 +126,12 @@ fun AppRoot() {
         ) {
             composable(Routes.LOGIN) { LoginScreen(vm, nav) }
             composable(Routes.HOME) { HomeScreen(vm, nav) }
-            composable(Routes.BOOKINGS) { BookingsScreen(vm) }
-            composable(Routes.EARNINGS) { EarningsScreen(vm) }
+            composable(Routes.BOOKINGS) { BookingsScreen(vm, nav) }
+            composable(Routes.SCHEDULE) { ScheduleScreen(vm, nav) }
+            composable(Routes.ATTENDANCE) { AttendanceScreen(vm, nav) }
+            composable(Routes.LEAVE) { LeaveScreen(vm, nav) }
+            composable(Routes.PERFORMANCE) { PerformanceScreen(vm, nav) }
+            composable(Routes.EARNINGS) { EarningsScreen(vm, nav) }
             composable(Routes.WALLET) { WalletScreen(vm, nav) }
             composable(Routes.WITHDRAW) { WithdrawScreen(vm, nav) }
             composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
@@ -138,8 +157,9 @@ fun AppRoot() {
             composable(Routes.P_AVAILABILITY) { AvailabilityScreen(vm, nav) }
             composable(Routes.P_PREFERENCES) { PreferencesScreen(vm, nav) }
             composable(Routes.P_NOTIFICATIONS) { NotificationsScreen(vm, nav) }
-            composable(Routes.P_HELP) { HelpSupportScreen(nav) }
+            composable(Routes.P_HELP) { HelpSupportScreen(vm, nav) }
             composable(Routes.P_ABOUT) { AboutScreen(nav) }
+            composable(Routes.SETTINGS) { SettingsScreen(vm, nav) }
         }
     }
 }

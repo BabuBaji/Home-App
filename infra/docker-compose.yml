@@ -190,6 +190,7 @@ services:
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
+      WALLET_URL: http://wallet:4009
       WORKER_DEV_OTP: ${WORKER_DEV_OTP}
     ports: ["4004:4004"]
     depends_on:

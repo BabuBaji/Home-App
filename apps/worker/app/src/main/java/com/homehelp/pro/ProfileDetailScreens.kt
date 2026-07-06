@@ -326,6 +326,210 @@ private val PART_TIME_SHIFTS = listOf(
     ShiftPreset("Evening", "06:00 PM", "10:00 PM"),
 )
 
+// Performance & Incentives — all figures are real (from the worker's own activity/earnings).
+@Composable
+fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
+    DetailScaffold("Performance", nav) {
+        Card {
+            Column {
+                Text("Your Rating", fontSize = 12.sp, color = TextGray)
+                Text(if (vm.jobsCompleted > 0) "${vm.workerRating} ★" else "New Partner", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 26.sp)
+                Text("${vm.jobsCompleted} jobs completed all-time", fontSize = 12.sp, color = TextGray)
+            }
+        }
+        Card {
+            Text("Activity", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                PerfTile(Modifier.weight(1f), "${vm.todayJobs}", "Jobs Today")
+                PerfTile(Modifier.weight(1f), "${vm.todayCompleted}", "Completed")
+                PerfTile(Modifier.weight(1f), "₹${vm.todayEarnings}", "Today")
+            }
+            Spacer(Modifier.height(12.dp)); HairlineDivider(); Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                PerfTile(Modifier.weight(1f), "₹${vm.weekEarnings}", "This Week")
+                PerfTile(Modifier.weight(1f), "₹${vm.monthEarnings}", "This Month")
+                PerfTile(Modifier.weight(1f), "₹${vm.totalEarned}", "Lifetime")
+            }
+        }
+        Card {
+            Text("Incentives & Goals", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(12.dp))
+            Text("Daily earnings goal", fontSize = 13.sp, color = TextDark, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            ProgressBar(vm.goalProgress, fill = if (vm.goalProgress >= 1f) GreenSuccess else Purple, height = 10)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (vm.goalProgress >= 1f) "Goal reached 🎉  ₹${vm.todayEarnings} of ₹${vm.dailyGoal}"
+                else "₹${(vm.dailyGoal - vm.todayEarnings).coerceAtLeast(0)} to go  ·  ₹${vm.todayEarnings} of ₹${vm.dailyGoal}",
+                fontSize = 12.sp, color = TextGray,
+            )
+            Spacer(Modifier.height(16.dp))
+            val next = WorkerTier.next(vm.tier)
+            if (next != null && vm.jobsToNextTier > 0) {
+                Text("Next tier: ${next.label} ${next.emoji}", fontSize = 13.sp, color = TextDark, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(6.dp))
+                val span = (next.minJobs - vm.tier.minJobs).coerceAtLeast(1)
+                val tp = ((vm.jobsCompleted - vm.tier.minJobs).toFloat() / span).coerceIn(0f, 1f)
+                ProgressBar(tp, fill = Purple)
+                Spacer(Modifier.height(6.dp))
+                Text("${vm.jobsToNextTier} more jobs to reach ${next.label}", fontSize = 12.sp, color = TextGray)
+            } else {
+                Text("You're at the top tier — ${vm.tier.label} ${vm.tier.emoji} 🏆", fontSize = 13.sp, color = TextDark)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PerfTile(modifier: Modifier, value: String, label: String) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(label, fontSize = 11.sp, color = TextGray)
+    }
+}
+
+// Leave: submit a leave request (date + reason) and see the status of past requests.
+@Composable
+fun LeaveScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    var from by remember { mutableStateOf("") }
+    var to by remember { mutableStateOf("") }
+    var reason by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    DetailScaffold("Leave", nav) {
+        Card {
+            Text("Request Leave", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(from, { from = it }, label = { Text("From (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(to, { to = it }, label = { Text("To (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(reason, { reason = it }, label = { Text("Reason") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton(if (busy) "Submitting…" else "Submit Request") {
+                if (!busy) {
+                    busy = true
+                    vm.submitLeave(from.trim(), to.trim(), reason.trim()) { err ->
+                        busy = false
+                        toast(ctx, err ?: "Leave request submitted")
+                        if (err == null) { from = ""; to = ""; reason = "" }
+                    }
+                }
+            }
+        }
+        Card {
+            Text("My Requests", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(6.dp))
+            if (vm.leaves.isEmpty()) {
+                Text("No leave requests yet.", fontSize = 13.sp, color = TextGray, modifier = Modifier.padding(vertical = 8.dp))
+            } else {
+                vm.leaves.forEach { lv ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (lv.toDate.isNotBlank() && lv.toDate != lv.fromDate) "${lv.fromDate} → ${lv.toDate}" else lv.fromDate,
+                                fontWeight = FontWeight.Medium, color = TextDark, fontSize = 14.sp,
+                            )
+                            if (lv.reason.isNotBlank()) Text(lv.reason, fontSize = 12.sp, color = TextGray)
+                        }
+                        val (bg, fg) = when (lv.status) {
+                            "Approved" -> GreenLight to GreenSuccess
+                            "Rejected" -> Color(0xFFFDE7E7) to RedCancel
+                            else -> GoldLight to Gold
+                        }
+                        StatusPill(lv.status, bg, fg)
+                    }
+                    Divider(color = Divider)
+                }
+            }
+        }
+    }
+}
+
+// Attendance: check in / out for the day with best-effort GPS capture.
+@Composable
+fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    val att = vm.attendance
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            permLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+    fun lastLoc(): Pair<Double?, Double?> = try {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            loc?.latitude to loc?.longitude
+        } else null to null
+    } catch (_: Exception) { null to null }
+
+    DetailScaffold("Attendance", nav) {
+        Card {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val (dot, label) = when {
+                    att.checkedOut -> GreenSuccess to "Checked Out"
+                    att.checkedIn -> GreenSuccess to "Checked In · Working"
+                    else -> TextGray to "Not Checked In"
+                }
+                Box(Modifier.size(12.dp).background(dot, RoundedCornerShape(50)))
+                Spacer(Modifier.width(10.dp))
+                Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(12.dp)); HairlineDivider(); Spacer(Modifier.height(10.dp))
+            LabeledRow("Check-in time", att.checkInAt.ifBlank { "—" })
+            LabeledRow("Check-out time", att.checkOutAt.ifBlank { "—" })
+            LabeledRow("Shift", if (vm.shiftStart.isNotBlank()) "${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
+        }
+        // Availability state — only "Available" receives new jobs.
+        Card {
+            Text("Availability", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Text("Only “Available” receives new jobs.", fontSize = 12.sp, color = TextGray)
+            Spacer(Modifier.height(10.dp))
+            listOf("Available", "Busy", "Break", "Offline", "Leave").chunked(3).forEach { rowStates ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rowStates.forEach { st ->
+                        val sel = vm.availabilityState == st
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                                .background(if (sel) Purple else Color.White)
+                                .border(1.dp, if (sel) Purple else Divider, RoundedCornerShape(10.dp))
+                                .clickable { vm.changeAvailabilityState(st) }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(st, color = if (sel) Color.White else TextDark, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    repeat(3 - rowStates.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            Text(
+                "Request Leave ›", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                modifier = Modifier.clickable { nav.navigate(Routes.LEAVE) }.padding(top = 2.dp),
+            )
+        }
+        Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(12.dp)).padding(12.dp)) {
+            Text("📍 Your location is captured at check-in / check-out for verification.", fontSize = 12.sp, color = TextDark)
+        }
+        when {
+            !att.checkedIn -> PrimaryButton("Check In") { val (la, ln) = lastLoc(); vm.checkIn(la, ln) { toast(ctx, "Checked in ✓") } }
+            !att.checkedOut -> PrimaryButton("Check Out") { val (la, ln) = lastLoc(); vm.checkOut(la, ln) { toast(ctx, "Checked out ✓") } }
+            else -> Box(Modifier.fillMaxWidth().background(GreenLight, RoundedCornerShape(12.dp)).padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Shift complete for today. See you tomorrow!", color = GreenSuccess, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ShiftChip(title: String, subtitle: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Column(
@@ -370,8 +574,28 @@ fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
 
 @Composable
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
-    DetailScaffold("Notification Settings", nav) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshNotifications(); vm.markNotificationsRead() }
+    DetailScaffold("Notifications", nav) {
+        if (vm.notifications.isNotEmpty()) {
+            Card {
+                Text("Recent", fontWeight = FontWeight.SemiBold, color = TextDark)
+                Spacer(Modifier.height(6.dp))
+                vm.notifications.take(25).forEach { n ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔔", fontSize = 16.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(n.text, fontSize = 13.sp, color = TextDark)
+                            if (n.date.isNotBlank()) Text(n.date, fontSize = 11.sp, color = TextGray)
+                        }
+                    }
+                    Divider(color = Divider)
+                }
+            }
+        }
         Card {
+            Text("Notification Settings", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(4.dp))
             NotifRow("New job alerts", vm.notifNewJobs) { vm.notifNewJobs = it; vm.saveNotifications() }
             Divider(color = Divider)
             NotifRow("Payment updates", vm.notifPayments) { vm.notifPayments = it; vm.saveNotifications() }
@@ -393,9 +617,41 @@ private fun NotifRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 }
 
 @Composable
-fun HelpSupportScreen(nav: NavHostController) {
+fun HelpSupportScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
+    var subject by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var sosMsg by remember { mutableStateOf<String?>(null) }
+    fun lastLoc(): Pair<Double?, Double?> = try {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            (lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER) ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)).let { it?.latitude to it?.longitude }
+        } else null to null
+    } catch (_: Exception) { null to null }
+    sosMsg?.let { m ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { sosMsg = null },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { sosMsg = null }) { Text("OK") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { sosMsg = null; runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112"))) } }) { Text("Call 112") } },
+            title = { Text("🆘 SOS sent", fontWeight = FontWeight.Bold) },
+            text = { Text(m) },
+        )
+    }
     DetailScaffold("Help & Support", nav) {
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(RedCancel)
+                .clickable { val (la, ln) = lastLoc(); vm.sendSos(la, ln) { sosMsg = it } }.padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🆘", fontSize = 26.sp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Emergency SOS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("Alerts our team & shares your location", color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp)
+                }
+            }
+        }
         Card {
             Row(Modifier.fillMaxWidth().clickable {
                     runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:18001234567"))) }
@@ -425,16 +681,62 @@ fun HelpSupportScreen(nav: NavHostController) {
             }
         }
         Card {
+            Text("Raise a Ticket", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(subject, { subject = it }, label = { Text("Subject") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(message, { message = it }, label = { Text("Describe your issue") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton(if (busy) "Submitting…" else "Submit Ticket") {
+                if (!busy) {
+                    busy = true
+                    vm.submitTicket(subject.trim(), message.trim()) { err ->
+                        busy = false; toast(ctx, err ?: "Ticket submitted")
+                        if (err == null) { subject = ""; message = "" }
+                    }
+                }
+            }
+        }
+        if (vm.tickets.isNotEmpty()) {
+            Card {
+                Text("My Tickets", fontWeight = FontWeight.SemiBold, color = TextDark)
+                Spacer(Modifier.height(6.dp))
+                vm.tickets.forEach { t ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(t.subject.ifBlank { "Support request" }, fontWeight = FontWeight.Medium, color = TextDark, fontSize = 14.sp)
+                            if (t.message.isNotBlank()) Text(t.message, fontSize = 12.sp, color = TextGray, maxLines = 1)
+                        }
+                        val (bg, fg) = if (t.status == "Resolved") GreenLight to GreenSuccess else GoldLight to Gold
+                        StatusPill(t.status, bg, fg)
+                    }
+                    Divider(color = Divider)
+                }
+            }
+        }
+        Card {
             Text("FAQs", fontWeight = FontWeight.SemiBold, color = TextDark)
             Spacer(Modifier.height(8.dp))
-            listOf(
-                "How do I receive jobs?",
-                "When do I get paid?",
-                "How is my rating calculated?",
-                "How do I withdraw my earnings?",
-            ).forEach {
-                Text("•  $it", color = TextDark, fontSize = 14.sp,
-                    modifier = Modifier.fillMaxWidth().clickable { toast(ctx, "Opening: $it") }.padding(vertical = 8.dp))
+            val faqs = listOf(
+                "How do I receive jobs?" to "Go online from the Home screen. When a nearby job matches your services and shift, it's offered to you — tap Accept, then navigate to the customer.",
+                "When do I get paid?" to "Earnings for a completed job are credited to your wallet right away. Withdraw to your bank anytime from the Wallet tab.",
+                "How is my rating calculated?" to "It's the average of the star ratings customers leave after each completed job. A higher rating gets you more job offers.",
+                "How do I withdraw my earnings?" to "Open the Wallet tab → Withdraw, enter the amount and confirm. Add and verify your bank details first under Profile → Bank Details.",
+            )
+            val open = remember { mutableStateOf(-1) }
+            faqs.forEachIndexed { i, (q, a) ->
+                Column(
+                    Modifier.fillMaxWidth().clickable { open.value = if (open.value == i) -1 else i }.padding(vertical = 8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(q, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Text(if (open.value == i) "▲" else "▼", color = TextGray, fontSize = 12.sp)
+                    }
+                    if (open.value == i) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(a, color = TextGray, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                }
                 Divider(color = Divider)
             }
         }
@@ -443,6 +745,7 @@ fun HelpSupportScreen(nav: NavHostController) {
 
 @Composable
 fun AboutScreen(nav: NavHostController) {
+    val ctx = LocalContext.current
     DetailScaffold("About Us", nav) {
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -465,13 +768,85 @@ fun AboutScreen(nav: NavHostController) {
             )
         }
         Card {
-            LabeledRow("Terms & Conditions", "›")
-            Divider(color = Divider)
-            LabeledRow("Privacy Policy", "›")
-            Divider(color = Divider)
-            LabeledRow("Licenses", "›")
+            val links = listOf(
+                "Terms & Conditions" to "https://homehelp.pro/terms",
+                "Privacy Policy" to "https://homehelp.pro/privacy",
+                "Licenses" to "https://homehelp.pro/licenses",
+            )
+            links.forEachIndexed { i, (label, url) ->
+                Row(
+                    Modifier.fillMaxWidth().clickable {
+                        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                            .onFailure { toast(ctx, "No browser app found") }
+                    }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(label, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text("›", color = TextGray, fontSize = 16.sp)
+                }
+                if (i < links.lastIndex) Divider(color = Divider)
+            }
         }
         Text("© 2026 HomeHelp Technologies", color = TextGray, fontSize = 12.sp,
             modifier = Modifier.fillMaxWidth(), )
+    }
+}
+
+// Settings — language, notifications, privacy, app version, logout.
+@Composable
+fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    var lang by remember { mutableStateOf(Session.language) }
+    val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "1.0" }
+    DetailScaffold("Settings", nav) {
+        Card {
+            Text("Language", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("English", "हिंदी", "తెలుగు").forEach { l ->
+                    val sel = lang == l
+                    Box(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                            .background(if (sel) Purple else Color.White)
+                            .border(1.dp, if (sel) Purple else Divider, RoundedCornerShape(10.dp))
+                            .clickable { lang = l; Session.language = l; toast(ctx, "Language: $l") }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(l, color = if (sel) Color.White else TextDark, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+        Card {
+            SettingsRow("Notifications") { nav.navigate(Routes.P_NOTIFICATIONS) }
+            Divider(color = Divider)
+            SettingsRow("Privacy Policy") {
+                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://homehelp.pro/privacy"))) }
+                    .onFailure { toast(ctx, "No browser app found") }
+            }
+            Divider(color = Divider)
+            Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("App Version", color = TextDark, modifier = Modifier.weight(1f))
+                Text("v$version", color = TextGray)
+            }
+        }
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White)
+                .border(1.dp, Divider, RoundedCornerShape(12.dp))
+                .clickable { vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } } }
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Logout", color = RedCancel, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun SettingsRow(label: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TextDark, modifier = Modifier.weight(1f))
+        Text("›", color = TextGray, fontSize = 18.sp)
     }
 }

@@ -44,6 +44,17 @@ async function init() {
     const [id, name, icon, price, category] = SERVICES_SEED[i]
     await pool.query(up, [id, name, icon, price, category, i])
   }
+  // Seed one launch zone so instant bookings get a zone_id and push auto-assign can fire on a
+  // fresh DB. Only when NO zones exist — once an admin creates any zone, zones are the source of
+  // truth (see serviceability logic below) and we must not re-inject this one.
+  const zoneCount = (await pool.query('SELECT COUNT(*)::int n FROM zones')).rows[0].n
+  if (!zoneCount) {
+    const pins = Array.from({ length: 115 }, (_, i) => `560${String(i + 1).padStart(3, '0')}`).join(',')
+    await pool.query(
+      `INSERT INTO zones (name,state,city,pincodes,status,sla_minutes) VALUES ($1,$2,$3,$4,'live',$5)`,
+      ['Bengaluru Central', 'Karnataka', 'Bengaluru', pins, 60])
+    console.log('[catalog] seeded live zone "Bengaluru Central" (pincodes 560001-560115)')
+  }
   console.log(`[catalog] Postgres ready, seeded ${SERVICES_SEED.length} services`)
 }
 

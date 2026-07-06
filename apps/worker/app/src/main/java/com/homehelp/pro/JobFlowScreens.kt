@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
@@ -110,7 +111,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
             Text("Respond within time to accept the job", fontSize = 13.sp, color = TextGray)
             Spacer(Modifier.height(20.dp))
 
-            InfoRow(Icons.Filled.CameraAlt, job.services.first(), if (job.services.size > 1) "+${job.services.size - 1} more service" else null)
+            InfoRow(Icons.Filled.CameraAlt, job.services.firstOrNull() ?: "Service", if (job.services.size > 1) "+${job.services.size - 1} more service" else null)
             InfoRow(Icons.Filled.LocationOn, job.address, null)
             InfoRow(Icons.Filled.Navigation, "${job.distanceKm} km away", null)
             InfoRow(Icons.Filled.Schedule, "₹${job.earnings}", "Estimated Earnings")
@@ -404,6 +405,19 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
     var error by remember { mutableStateOf(false) }
     var showCancel by remember { mutableStateOf(false) }
 
+    // Before-photo capture (module: Start Job → Before Photos).
+    var beforeShot by remember { mutableStateOf(vm.beforePhoto != null) }
+    val beforeCam = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp ->
+        if (bmp != null) { vm.setBeforePhoto(bitmapToDataUrl(bmp)); beforeShot = true; toast(ctx, "Before photo captured") }
+    }
+    val beforePerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) beforeCam.launch(null) else toast(ctx, "Camera permission is needed for the before photo")
+    }
+    fun captureBefore() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) beforeCam.launch(null)
+        else beforePerm.launch(Manifest.permission.CAMERA)
+    }
+
     if (showCancel) {
         CancelDialog(onDismiss = { showCancel = false }) { reason ->
             showCancel = false
@@ -468,6 +482,21 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Text("Call Customer", color = Purple, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clickable { dialNumber(ctx, job.customerPhone) })
             Spacer(Modifier.height(16.dp))
+            Surface(
+                Modifier.fillMaxWidth().clickable { captureBefore() },
+                shape = RoundedCornerShape(12.dp),
+                color = if (beforeShot) GreenLight else PurpleLight,
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = if (beforeShot) GreenSuccess else Purple, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (beforeShot) "Before photo captured ✓" else "Take Before Photo (optional)",
+                        color = if (beforeShot) GreenSuccess else Purple, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
             PrimaryButton("Start Service", enabled = otp.length == 4) {
                 if (vm.verifyOtpAndStart(otp)) nav.navigate(Routes.IN_PROGRESS) else error = true
             }
@@ -502,6 +531,22 @@ private fun parseIsoMillis(s: String?): Long? {
         } catch (_: Exception) { /* try next pattern */ }
     }
     return null
+}
+
+// Per-service task checklist shown during the job (module: Service Checklist).
+private fun checklistFor(service: String): List<String> {
+    val s = service.lowercase()
+    return when {
+        "bathroom" in s -> listOf("Mirror", "Sink", "Floor", "Toilet", "Bucket", "Drain", "Door")
+        "kitchen" in s -> listOf("Countertop", "Sink", "Stove", "Cabinets", "Floor", "Dustbin")
+        "dish" in s -> listOf("Wash utensils", "Rinse & stack", "Clean sink", "Wipe counter")
+        "sweep" in s || "mop" in s -> listOf("Sweep floors", "Mop floors", "Corners & edges", "Under furniture")
+        "laundry" in s -> listOf("Sort clothes", "Wash", "Dry", "Fold & stack")
+        "window" in s -> listOf("Glass panes", "Frames", "Sills", "Grills")
+        "fan" in s -> listOf("Blades", "Motor housing", "Wipe down", "Test run")
+        "fridge" in s || "refriger" in s -> listOf("Empty shelves", "Clean interior", "Wipe seals", "Restock")
+        else -> listOf("Prepare area", "Perform service", "Clean up", "Final check")
+    }
 }
 
 @Composable
@@ -587,6 +632,29 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                         modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })
                 }
             }
+            // Service checklist — tick tasks as you finish them (builds customer confidence).
+            val tasks = remember(job.services) { checklistFor(job.services.firstOrNull() ?: "") }
+            var doneSet by remember(job.services) { mutableStateOf(setOf<Int>()) }
+            Card {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Service Checklist", fontWeight = FontWeight.SemiBold, color = TextDark)
+                    Text("${doneSet.size}/${tasks.size}", fontWeight = FontWeight.Bold, color = if (doneSet.size == tasks.size) GreenSuccess else Purple)
+                }
+                Spacer(Modifier.height(4.dp))
+                tasks.forEachIndexed { i, t ->
+                    val ticked = i in doneSet
+                    Row(
+                        Modifier.fillMaxWidth().clickable { doneSet = if (ticked) doneSet - i else doneSet + i }.padding(vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (ticked) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
+                        else Box(Modifier.size(22.dp).border(1.5.dp, Divider, RoundedCornerShape(50)))
+                        Spacer(Modifier.width(12.dp))
+                        Text(t, fontSize = 14.sp, color = if (ticked) TextGray else TextDark, modifier = Modifier.weight(1f))
+                    }
+                    if (i < tasks.lastIndex) Divider(color = Divider)
+                }
+            }
             SafetyCard()
             Text(
                 "📷 Tap “End Service” to take a live proof-of-work photo. The customer gets it and is asked to rate the service.",
@@ -657,23 +725,47 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                 Divider(color = Divider)
                 LabeledRow("Earnings", "₹${job.earnings}", valueColor = GreenSuccess)
             }
+            var stars by remember { mutableStateOf(0) }
+            var comment by remember { mutableStateOf("") }
+            var rated by remember { mutableStateOf(false) }
             Card {
-                Text("Customer Rating", fontWeight = FontWeight.SemiBold, color = TextDark)
-                Spacer(Modifier.height(8.dp))
+                Text("Rate the Customer", fontWeight = FontWeight.SemiBold, color = TextDark)
+                Spacer(Modifier.height(2.dp))
+                Text("Optional — helps us match you better next time.", fontSize = 12.sp, color = TextGray)
+                Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     repeat(5) { i ->
                         Icon(
-                            Icons.Filled.CheckCircle,
+                            Icons.Filled.Star,
                             contentDescription = null,
-                            tint = if (i < 4) Gold else Color(0xFFE0E0E6),
-                            modifier = Modifier.size(28.dp),
+                            tint = if (i < stars) Gold else Color(0xFFE0E0E6),
+                            modifier = Modifier.size(34.dp).clickable(enabled = !rated) { stars = i + 1 },
+                        )
+                        if (i < 4) Spacer(Modifier.width(6.dp))
+                    }
+                }
+                if (!rated) {
+                    Spacer(Modifier.height(12.dp))
+                    Box(Modifier.fillMaxWidth().border(1.dp, Divider, RoundedCornerShape(10.dp)).padding(12.dp)) {
+                        BasicTextField(
+                            value = comment, onValueChange = { comment = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                if (comment.isEmpty()) Text("Add a note (optional)", color = TextGray, fontSize = 14.sp)
+                                inner()
+                            },
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text("4.0", fontWeight = FontWeight.Bold, color = TextDark)
+                    Spacer(Modifier.height(12.dp))
+                    OutlineButton("Submit Rating", modifier = Modifier.fillMaxWidth()) {
+                        if (stars == 0) toast(ctx, "Tap the stars to rate") else {
+                            vm.rateCustomer(stars, comment); rated = true; toast(ctx, "Thanks for your feedback!")
+                        }
+                    }
+                } else {
+                    Spacer(Modifier.height(10.dp))
+                    Text("✓ Rating submitted — thank you!", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Spacer(Modifier.height(6.dp))
-                Text("We value your feedback! Your rating helps us improve.", fontSize = 12.sp, color = TextGray)
             }
             SafetyCard()
         }

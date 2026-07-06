@@ -29,6 +29,30 @@ interface ApiService {
     @PUT("api/worker/availability")
     suspend fun updateAvailability(@Body body: AvailabilityBody): WorkerDto
 
+    @POST("api/worker/attendance/checkin")
+    suspend fun checkIn(@Body body: AttendanceBody): AttendanceDto
+
+    @POST("api/worker/attendance/checkout")
+    suspend fun checkOut(@Body body: AttendanceBody): AttendanceDto
+
+    @POST("api/worker/status")
+    suspend fun setStatus(@Body body: StatusBody): WorkerDto
+
+    @GET("api/worker/leave")
+    suspend fun getLeaves(): List<LeaveItem>
+
+    @POST("api/worker/leave")
+    suspend fun requestLeave(@Body body: LeaveBody): List<LeaveItem>
+
+    @GET("api/worker/support")
+    suspend fun getSupport(): List<TicketItem>
+
+    @POST("api/worker/support")
+    suspend fun raiseTicket(@Body body: TicketBody): List<TicketItem>
+
+    @POST("api/worker/sos")
+    suspend fun sos(@Body body: SosBody): SosResponse
+
     @PUT("api/worker/preferences")
     suspend fun updatePreferences(@Body body: PreferencesBody): WorkerDto
 

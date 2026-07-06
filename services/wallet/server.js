@@ -7,7 +7,7 @@
 // worker wallet screens and the admin wallet actions.
 import express from 'express'
 import {
-  makePool, migrate, internalGet, internalPost, tryGet, publishEvent, subscribeEvents,
+  makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents,
   makeAdminAuth, getSettingInt,
 } from '@homehelp/shared'
 
@@ -60,11 +60,27 @@ async function settleBooking(b) {
   publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: b.worker_id, detail: `Credited ₹${share} for ${b.ref || b.id}`, meta: { amount: share } })
 }
 
+// Everything is derived from the real LEDGER (worker_income / withdrawals / deductions), so the
+// balance reflects only actual completed-service earnings — never a stale/seeded snapshot.
+// Field names match the worker app's WalletSummaryDto (weekEarnings/monthEarnings/todayEarnings/
+// hold/totalWithdrawn); legacy aliases (thisWeek/onHold/withdrawn) are kept for the admin panel.
 async function summary(wid) {
-  const w = await workerSnapshot(wid)
-  const wk = (await pool.query("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '7 days'", [wid])).rows[0].s
-  const mo = (await pool.query("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '30 days'", [wid])).rows[0].s
-  return { available: w.balance || 0, pending: w.pending || 0, onHold: w.hold || 0, totalEarned: w.earnings || 0, withdrawn: w.withdrawn || 0, advanceOutstanding: w.advance_outstanding || 0, thisWeek: wk, thisMonth: mo }
+  const s = async (sql) => (await pool.query(sql, [wid])).rows[0].s
+  const earned = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1")
+  const weekEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '7 days'")
+  const monthEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '30 days'")
+  const todayEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND (created AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date")
+  const totalWithdrawn = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status='Paid'")
+  const hold = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status='Pending'")
+  const ded = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_deductions WHERE worker_id=$1")
+  const advanceOutstanding = await s("SELECT COALESCE(SUM(COALESCE(outstanding, amount)),0)::int s FROM worker_advances WHERE worker_id=$1 AND status<>'Cleared'")
+  const available = Math.max(0, earned - totalWithdrawn - hold - ded)
+  return {
+    available, pending: 0, hold, onHold: hold,
+    totalEarned: earned, totalWithdrawn, withdrawn: totalWithdrawn,
+    advanceOutstanding, todayEarnings, weekEarnings, monthEarnings,
+    thisWeek: weekEarnings, thisMonth: monthEarnings, nextPayout: '',
+  }
 }
 const rowsFor = async (table, wid) => (await pool.query(`SELECT * FROM ${table} WHERE worker_id=$1 ORDER BY id DESC`, [wid])).rows
 async function walletState(wid) {
@@ -90,6 +106,10 @@ function auth(req, res, next) {
   next()
 }
 
+// Internal: ledger summary for a worker (used by the worker service's bootstrap so Home shows
+// the same real balance as the Wallet screen).
+app.get('/internal/summary/:wid', internalOnly, async (req, res) => res.json(await summary(Number(req.params.wid))))
+
 /* ---------- worker wallet ---------- */
 app.get('/api/worker/wallet/summary', auth, async (req, res) => res.json(await summary(req.wid)))
 app.get('/api/worker/wallet/state', auth, async (req, res) => res.json(await walletState(req.wid)))
@@ -98,7 +118,11 @@ app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(awai
 app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await rowsFor('worker_income', req.wid)))
 app.get('/api/worker/wallet/withdrawals', auth, async (req, res) => res.json(await rowsFor('worker_withdrawals', req.wid)))
 app.get('/api/worker/wallet/advances', auth, async (req, res) => res.json(await rowsFor('worker_advances', req.wid)))
-app.get('/api/worker/wallet/notifications', auth, async (req, res) => res.json(await rowsFor('worker_notifications', req.wid)))
+app.get('/api/worker/wallet/notifications', auth, async (req, res) => {
+  const rows = await rowsFor('worker_notifications', req.wid)
+  const items = rows.map((r) => ({ id: r.id, text: r.body ? `${r.title} — ${r.body}` : (r.title || ''), kind: 'info', read: !!r.read, time: '', date: r.created ? new Date(r.created).toISOString().slice(0, 10) : '' }))
+  res.json({ items, unread: items.filter((i) => !i.read).length })
+})
 app.post('/api/worker/wallet/notifications/read', auth, async (req, res) => { await pool.query('UPDATE worker_notifications SET read=true WHERE worker_id=$1', [req.wid]); res.json({ ok: true }) })
 app.get('/api/worker/wallet/payslip', auth, async (req, res) => { const s = await summary(req.wid); res.json({ month: req.query.month || 'This month', gross: s.thisMonth, deductions: 0, net: s.thisMonth }) })
 app.get('/api/worker/wallet/payslips', auth, async (req, res) => res.json(await rowsFor('worker_payslips', req.wid)))
@@ -107,9 +131,9 @@ app.post('/api/worker/wallet/payslip/generate', auth, async (req, res) => { cons
 app.post('/api/worker/wallet/withdraw/request-otp', auth, (_q, res) => res.json({ ok: true, devOtp: process.env.WORKER_DEV_OTP || '1234' }))
 app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)
-  const w = await workerSnapshot(req.wid)
+  const avail = (await summary(req.wid)).available
   if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
-  if (amount > (w.balance || 0)) return res.json({ ok: false, error: 'Amount exceeds available balance' })
+  if (amount > avail) return res.json({ ok: false, error: 'Amount exceeds available balance' })
   const autoBelow = await getSettingInt(ADMIN_URL, 'auto_approve_withdrawal_below', 2000)
   const status = amount <= autoBelow ? 'Paid' : 'Pending'
   await pool.query('INSERT INTO worker_withdrawals (worker_id,amount,method,status) VALUES ($1,$2,$3,$4)', [req.wid, amount, req.body?.method || 'bank', status])
