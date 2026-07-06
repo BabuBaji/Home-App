@@ -1,11 +1,14 @@
 package com.homehelp.pro
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -267,16 +271,74 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
         Card {
-            Text("Working Hours", fontWeight = FontWeight.SemiBold, color = TextDark)
-            Spacer(Modifier.height(8.dp))
-            LabeledRow("Shift Start", vm.shiftStart)
-            LabeledRow("Shift End", vm.shiftEnd)
+            Text("Preferred Shift", fontWeight = FontWeight.SemiBold, color = TextDark)
+            Text("Pick full-time or a 4-hour part-time slot.", fontSize = 12.sp, color = TextGray)
+            Spacer(Modifier.height(12.dp))
+
+            // Start on the type that matches the worker's current shift (part-time slots are 4h).
+            var shiftType by remember {
+                mutableStateOf(if (PART_TIME_SHIFTS.any { it.start == vm.shiftStart && it.end == vm.shiftEnd }) "Part Time" else "Full Time")
+            }
+            SegmentedTabs(listOf("Full Time", "Part Time"), shiftType) { shiftType = it }
+            Spacer(Modifier.height(12.dp))
+
+            val presets = if (shiftType == "Part Time") PART_TIME_SHIFTS else FULL_TIME_SHIFTS
+            presets.chunked(2).forEach { rowItems ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rowItems.forEach { s ->
+                        val selected = vm.shiftStart == s.start && vm.shiftEnd == s.end
+                        ShiftChip(s.label, "${s.start} – ${s.end}", selected, Modifier.weight(1f)) {
+                            vm.shiftStart = s.start; vm.shiftEnd = s.end
+                        }
+                    }
+                    if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+            val shiftSet = vm.shiftStart.isNotBlank() && vm.shiftEnd.isNotBlank()
+            LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
         }
         PrimaryButton("Save Availability") {
             vm.saveAvailability()
             val active = vm.availableDays.count { it.value }
-            toast(ctx, "Availability saved • $active days/week")
+            val shift = if (vm.shiftStart.isNotBlank()) " • ${vm.shiftStart}–${vm.shiftEnd}" else ""
+            toast(ctx, "Saved • $active days/week$shift")
         }
+    }
+}
+
+/** A selectable shift window the worker can choose from on the Availability screen. */
+private data class ShiftPreset(val label: String, val start: String, val end: String)
+
+// Full-time shifts (longer windows) vs part-time 4-hour slots. The worker first picks a
+// type, then a slot within it.
+private val FULL_TIME_SHIFTS = listOf(
+    ShiftPreset("Morning", "06:00 AM", "02:00 PM"),
+    ShiftPreset("Day", "08:00 AM", "08:00 PM"),
+    ShiftPreset("Evening", "02:00 PM", "10:00 PM"),
+    ShiftPreset("Full Day", "05:00 AM", "10:00 PM"),
+)
+
+private val PART_TIME_SHIFTS = listOf(
+    ShiftPreset("Early", "06:00 AM", "10:00 AM"),
+    ShiftPreset("Midday", "10:00 AM", "02:00 PM"),
+    ShiftPreset("Afternoon", "02:00 PM", "06:00 PM"),
+    ShiftPreset("Evening", "06:00 PM", "10:00 PM"),
+)
+
+@Composable
+private fun ShiftChip(title: String, subtitle: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) PurpleLight else Color.White)
+            .border(BorderStroke(1.5.dp, if (selected) Purple else Divider), RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+    ) {
+        Text(title, fontWeight = FontWeight.SemiBold, color = if (selected) Purple else TextDark, fontSize = 14.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(subtitle, fontSize = 11.sp, color = TextGray)
     }
 }
 
@@ -335,7 +397,10 @@ fun HelpSupportScreen(nav: NavHostController) {
     val ctx = LocalContext.current
     DetailScaffold("Help & Support", nav) {
         Card {
-            Row(Modifier.fillMaxWidth().clickable { toast(ctx, "Calling support: 1800-123-456") }
+            Row(Modifier.fillMaxWidth().clickable {
+                    runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:18001234567"))) }
+                        .onFailure { toast(ctx, "No dialer app found") }
+                }
                 .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Phone, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(12.dp))
@@ -345,7 +410,11 @@ fun HelpSupportScreen(nav: NavHostController) {
                 }
             }
             Divider(color = Divider)
-            Row(Modifier.fillMaxWidth().clickable { toast(ctx, "Opening email to support@homehelp.pro") }
+            Row(Modifier.fillMaxWidth().clickable {
+                    val i = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:support@homehelp.pro"))
+                        .putExtra(Intent.EXTRA_SUBJECT, "HomeHelp Pro — Support")
+                    runCatching { ctx.startActivity(i) }.onFailure { toast(ctx, "No email app found") }
+                }
                 .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Email, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(12.dp))
