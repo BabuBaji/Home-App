@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
 import { ToastHost } from './components/UI'
+import SosAlert from './components/SosAlert'
 import Layout from './components/Layout'
 import { useStore } from './store'
 import { fetchMe, getToken } from './api'
@@ -37,6 +38,7 @@ export default function App() {
 
   return (
     <ToastHost>
+      {admin && <SosAlert />}
       <Routes>
         <Route path="/login" element={admin ? <Navigate to="/dashboard" replace /> : <Login />} />
         <Route element={<Guard authed={!!admin} />}>

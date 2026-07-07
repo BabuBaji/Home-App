@@ -188,6 +188,9 @@ export const createAdminUser = (body: Record<string, unknown>) => req<Admin>('/a
 export const updateAdminUser = (id: number, body: Record<string, unknown>) => req<Admin>(`/admins/${id}`, patch(body))
 export const deleteAdminUser = (id: number) => req<{ ok: boolean }>(`/admins/${id}`, { method: 'DELETE' })
 
+export const runShaktiSettlement = (month?: string) =>
+  req<{ ok: boolean; month: string; qualified: number; error?: string }>('/shakti/settle', post('/shakti/settle', { month }))
+
 /* socket */
 let socket: Socket | null = null
 export function getSocket(): Socket {

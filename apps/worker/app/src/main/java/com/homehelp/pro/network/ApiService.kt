@@ -146,6 +146,28 @@ interface ApiService {
     @GET("api/worker/wallet/payslip")
     suspend fun payslip(): PayslipDto
 
+    @GET("api/worker/wallet/rewards")
+    suspend fun walletRewards(): RewardsDto
+
+    // ---- refer & earn / insurance / merch ----
+    @GET("api/worker/referral")
+    suspend fun referral(): ReferralDto
+
+    @GET("api/worker/insurance")
+    suspend fun insurance(): InsuranceDto
+
+    @POST("api/worker/insurance/claim")
+    suspend fun claimInsurance(@Body body: ClaimBody): SimpleResult
+
+    @GET("api/worker/shakti-bonus")
+    suspend fun shaktiBonus(): ShaktiBonusDto
+
+    @GET("api/worker/merch")
+    suspend fun merch(): MerchResponse
+
+    @POST("api/worker/merch/order")
+    suspend fun orderMerch(@Body body: MerchOrderBody): SimpleResult
+
     @GET("api/worker/wallet/notifications")
     suspend fun walletNotifications(): NotificationsResponse
 

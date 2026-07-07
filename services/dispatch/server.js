@@ -134,7 +134,7 @@ app.post('/api/worker/jobs/accept', auth, async (req, res) => {
   if (!offeredId) return res.status(409).json({ ok: false, error: 'Job no longer available' })
   const claim = await internalPost(BOOKING_URL, `/api/internal/bookings/${offeredId}/assign`, { worker_id: req.worker.id, pro_name: req.worker.name, pro_rating: req.worker.rating })
   if (!claim.ok) return res.status(409).json({ ok: false, error: 'Job already taken by another expert' })
-  publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id })
+  publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id, ref: claim.booking?.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.accept', entityType: 'booking', entityId: offeredId, ref: claim.booking?.ref, detail: `${req.worker.name} accepted the job` })
   res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: await jobFromBooking(claim.booking) })
 })
@@ -170,6 +170,8 @@ app.post('/api/worker/jobs/verify-otp', auth, async (req, res) => {
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
   if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
   await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'in_progress' })
+  // Domain event: the wallet service uses this to decide the on-time-start incentive vs late penalty.
+  publishEvent(REDIS_URL, 'job.start', { bookingId: b.id, workerId: req.worker.id, ref: b.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)' })
   res.json({ ok: true, jobStatus: 'IN_PROGRESS', activeJob: await jobFromBooking({ ...b, status: 'in_progress' }) })
 })

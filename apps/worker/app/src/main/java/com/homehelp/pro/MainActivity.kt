@@ -31,6 +31,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,6 +82,13 @@ object Routes {
     const val P_NOTIFICATIONS = "profile_notifications"
     const val P_HELP = "profile_help"
     const val P_ABOUT = "profile_about"
+    const val RATE_CARD = "ratecard"
+    const val REFER = "refer"
+    const val INSURANCE = "insurance"
+    const val MERCH = "merch"
+    const val REWARDS = "rewards"
+    const val LANGUAGE = "language"
+    const val SHAKTI = "shakti"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -92,6 +100,26 @@ private val tabs = listOf(
     Tab(Routes.WALLET, "Wallet", Icons.Filled.AccountBalanceWallet),
     Tab(Routes.PROFILE, "Profile", Icons.Filled.Person),
 )
+
+val TAB_ROUTES = setOf(Routes.HOME, Routes.BOOKINGS, Routes.EARNINGS, Routes.WALLET, Routes.PROFILE)
+
+/**
+ * Navigate to a destination. For the five bottom-nav tabs, use the SAME single-top /
+ * save-and-restore-state options the bottom bar uses — so reaching a tab from anywhere (e.g. the
+ * drawer's "Monthly Earnings") keeps the back stack consistent and tapping Home afterwards works.
+ * Detail screens are pushed normally.
+ */
+fun NavHostController.navigateApp(route: String) {
+    if (route in TAB_ROUTES) {
+        navigate(route) {
+            popUpTo(Routes.HOME) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    } else {
+        navigate(route)
+    }
+}
 
 @Composable
 fun AppRoot() {
@@ -115,6 +143,20 @@ fun AppRoot() {
     }
     val startDestination = if (Session.isLoggedIn) Routes.HOME else Routes.LOGIN
 
+    // App-wide side drawer, reachable via the ☰ menu on every screen's header.
+    val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val drawerReady = route != null && route != Routes.LOGIN
+
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = drawerReady,
+        drawerContent = { if (drawerReady) HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },
+    ) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalDrawerOpen provides { scope.launch { drawerState.open() } },
+        LocalNav provides nav,
+    ) {
     Scaffold(
         containerColor = ScreenBg,
         bottomBar = { if (showBottomBar) BottomBar(nav, route) },
@@ -159,8 +201,16 @@ fun AppRoot() {
             composable(Routes.P_NOTIFICATIONS) { NotificationsScreen(vm, nav) }
             composable(Routes.P_HELP) { HelpSupportScreen(vm, nav) }
             composable(Routes.P_ABOUT) { AboutScreen(nav) }
+            composable(Routes.RATE_CARD) { RateCardScreen(vm, nav) }
+            composable(Routes.REFER) { ReferEarnScreen(vm, nav) }
+            composable(Routes.INSURANCE) { ClaimInsuranceScreen(vm, nav) }
+            composable(Routes.MERCH) { MerchStoreScreen(vm, nav) }
+            composable(Routes.REWARDS) { RewardsScreen(vm, nav) }
+            composable(Routes.SHAKTI) { ShaktiBonusScreen(vm, nav) }
             composable(Routes.SETTINGS) { SettingsScreen(vm, nav) }
         }
+    }
+    }
     }
 }
 
@@ -172,17 +222,9 @@ private fun BottomBar(nav: NavHostController, current: String?) {
         tabs.forEach { tab ->
             NavigationBarItem(
                 selected = current == tab.route,
-                onClick = {
-                    if (current != tab.route) {
-                        nav.navigate(tab.route) {
-                            popUpTo(Routes.HOME) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                },
+                onClick = { if (current != tab.route) nav.navigateApp(tab.route) },
                 icon = { Icon(tab.icon, contentDescription = tab.label) },
-                label = { Text(tab.label) },
+                label = { Text(tr(tab.label)) },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = Purple,
                     selectedTextColor = Purple,

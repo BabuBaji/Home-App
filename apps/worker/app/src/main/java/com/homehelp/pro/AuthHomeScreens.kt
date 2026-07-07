@@ -26,17 +26,29 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Redeem
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
@@ -172,8 +184,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
 
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    val openDrawer = LocalDrawerOpen.current
     val appCtx = LocalContext.current.applicationContext
 
     // Ask for notification permission (Android 13+) so background job alerts can show.
@@ -210,12 +221,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val greeting = when { greetHour < 12 -> "Good morning"; greetHour < 17 -> "Good afternoon"; else -> "Good evening" }
     val firstName = vm.workerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "Partner" }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = { HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },
-    ) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // Greeting header with earned tier badge + notifications bell.
+        // Greeting header with notifications, wallet & profile shortcuts.
         Column(Modifier.fillMaxWidth().background(Color.White)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -223,27 +230,26 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             ) {
                 Icon(
                     Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark,
-                    modifier = Modifier.size(24.dp).clickable { scope.launch { drawerState.open() } },
+                    modifier = Modifier.size(24.dp).clickable { openDrawer() },
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(greeting, fontSize = 12.sp, color = TextGray)
                     Text(firstName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark)
                 }
-                TierBadge(vm.tier)
-                Spacer(Modifier.width(10.dp))
                 Box {
                     Icon(
                         Icons.Filled.Notifications, contentDescription = "Notifications", tint = TextDark,
                         modifier = Modifier.size(24.dp).clickable { nav.navigate(Routes.P_NOTIFICATIONS) },
                     )
                     if (vm.unreadNotifications > 0) {
-                        Box(
-                            Modifier.align(Alignment.TopEnd).size(9.dp)
-                                .background(RedCancel, RoundedCornerShape(50)),
-                        )
+                        Box(Modifier.align(Alignment.TopEnd).size(9.dp).background(RedCancel, RoundedCornerShape(50)))
                     }
                 }
+                Spacer(Modifier.width(16.dp))
+                Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = Purple, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.WALLET) })
+                Spacer(Modifier.width(16.dp))
+                Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Purple, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.PROFILE) })
             }
             HairlineDivider()
         }
@@ -305,7 +311,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     Text(if (vm.attendance.checkedIn && !vm.attendance.checkedOut) "🟢" else "⚪", fontSize = 20.sp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Attendance", fontSize = 12.sp, color = TextGray)
+                        Text(tr("Attendance"), fontSize = 12.sp, color = TextGray)
                         Text(vm.attendance.status, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
                     }
                     Text(
@@ -322,7 +328,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     Text("⏰", fontSize = 22.sp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Next Job", fontSize = 12.sp, color = TextGray)
+                        Text(tr("Next Job"), fontSize = 12.sp, color = TextGray)
                         Text(nextJob?.service ?: "No upcoming jobs", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
                         Text(if (nextJob != null) (nextJob.timeInfo ?: "") else "You're all caught up", fontSize = 12.sp, color = TextGray)
                     }
@@ -338,12 +344,12 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             }
 
             // ---- Wallet quick view (How much have I earned?) ----
-            Card(modifier = Modifier.clickable { nav.navigate(Routes.WALLET) }) {
+            Card(modifier = Modifier.clickable { nav.navigateApp(Routes.WALLET) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("👛", fontSize = 22.sp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Wallet Balance", fontSize = 12.sp, color = TextGray)
+                        Text(tr("Wallet Balance"), fontSize = 12.sp, color = TextGray)
                         Text("₹${vm.walletBalance}", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
                     }
                     Text("›", color = TextGray, fontSize = 20.sp)
@@ -364,7 +370,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(9.dp).background(if (online) GreenSuccess else TextGray, RoundedCornerShape(50)))
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (online) "You're Online" else "You're Offline", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
+                                Text(tr(if (online) "You're Online" else "You're Offline"), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
                             }
                             Spacer(Modifier.height(4.dp))
                             Text(
@@ -382,11 +388,11 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                         Spacer(Modifier.height(14.dp)); HairlineDivider(); Spacer(Modifier.height(12.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
-                                Text("Online today", fontSize = 12.sp, color = TextGray)
+                                Text(tr("Online today"), fontSize = 12.sp, color = TextGray)
                                 Text(fmtOnline(vm.onlineTodayMs(nowMs)), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDark)
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text("Jobs today", fontSize = 12.sp, color = TextGray)
+                                Text(tr("Jobs today"), fontSize = 12.sp, color = TextGray)
                                 Text("${vm.todayJobs}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDark)
                             }
                         }
@@ -501,7 +507,6 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.height(8.dp))
         }
     }
-    }
 }
 
 // Compact tappable tile for the Home "Quick Actions" row (Go Online / Take Break / Schedule).
@@ -516,51 +521,145 @@ private fun QuickAction(modifier: Modifier, emoji: String, label: String, onClic
         Column(Modifier.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(emoji, fontSize = 22.sp)
             Spacer(Modifier.height(6.dp))
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextDark)
+            Text(tr(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextDark)
         }
     }
 }
 
-// Slide-out menu opened by the Home top-bar hamburger. Quick links to the profile
-// sub-screens plus logout — each closes the drawer first, then navigates.
+// Slide-out menu opened by the Home top-bar hamburger — premium partner drawer:
+// a gradient identity header (avatar + tier + rating), a highlighted "ratings" card, and
+// colour-coded rows for every module. Each row closes the drawer first, then navigates.
 @Composable
-private fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
-    ModalDrawerSheet(drawerContainerColor = Color.White) {
-        Column(Modifier.background(PurpleLight).fillMaxWidth().padding(20.dp)) {
-            Text(vm.workerName.ifBlank { "HomeHelp Pro" }, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark)
-            Text(vm.workerPhone.ifBlank { "Partner" }, fontSize = 13.sp, color = TextGray)
-        }
-        Spacer(Modifier.height(8.dp))
+fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
+    fun go(route: String) { close(); nav.navigateApp(route) }
+    val initials = vm.workerName.trim().split(Regex("\\s+"))
+        .mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase().ifBlank { "P" }
+    val role = vm.jobPreferences.entries.firstOrNull { it.value }?.key ?: "Home Services Pro"
 
-        fun go(route: String) { close(); nav.navigate(route) }
-        DrawerLink(Icons.Filled.Person, "My Profile") { go(Routes.PROFILE) }
-        DrawerLink(Icons.Filled.Home, "Personal Info") { go(Routes.P_PERSONAL) }
-        DrawerLink(Icons.Filled.Description, "Documents") { go(Routes.P_DOCUMENTS) }
-        DrawerLink(Icons.Filled.AccountBalance, "Bank Details") { go(Routes.P_BANK) }
-        DrawerLink(Icons.Filled.CalendarMonth, "Attendance") { go(Routes.ATTENDANCE) }
-        DrawerLink(Icons.Filled.CalendarMonth, "Leave") { go(Routes.LEAVE) }
-        DrawerLink(Icons.Filled.CalendarMonth, "Availability") { go(Routes.P_AVAILABILITY) }
-        DrawerLink(Icons.Filled.Tune, "Preferences") { go(Routes.P_PREFERENCES) }
-        DrawerLink(Icons.Filled.Notifications, "Notification Settings") { go(Routes.P_NOTIFICATIONS) }
-        DrawerLink(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { go(Routes.P_HELP) }
-        DrawerLink(Icons.Filled.Info, "About Us") { go(Routes.P_ABOUT) }
-        Spacer(Modifier.height(8.dp)); HairlineDivider(); Spacer(Modifier.height(8.dp))
-        DrawerLink(Icons.Filled.Logout, "Logout", tint = RedCancel) {
-            close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
+    ModalDrawerSheet(drawerContainerColor = Color.White, modifier = Modifier.fillMaxWidth(0.87f)) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            // ---- gradient identity header (brand violet/indigo) ----
+            Box(Modifier.fillMaxWidth().background(BrandGradient).padding(20.dp)) {
+                // Decorative star medallion (top-right), like the reference.
+                Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 34.dp, y = (-26).dp).size(130.dp)
+                        .background(Color.White.copy(alpha = 0.13f), RoundedCornerShape(50)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Star, null, tint = Color.White.copy(alpha = 0.28f), modifier = Modifier.size(70.dp)) }
+
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(contentAlignment = Alignment.BottomCenter) {
+                            Avatar(initials, size = 66, bg = Color.White, fg = Purple)
+                            Surface(
+                                shape = RoundedCornerShape(50), color = TextDark,
+                                modifier = Modifier.offset(y = 9.dp),
+                            ) {
+                                Text(
+                                    vm.tier.label.uppercase(), color = Color.White, fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                vm.workerName.ifBlank { "HomeHelp Pro" }.uppercase(),
+                                color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 2,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text("${vm.tier.emoji}  $role", color = Color.White.copy(alpha = 0.95f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⭐", fontSize = 13.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("${vm.workerRating} rating · ${vm.jobsCompleted} jobs done", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
+            // ---- highlighted "Check your ratings" ----
+            Surface(
+                Modifier.fillMaxWidth().padding(16.dp).clickable { go(Routes.PERFORMANCE) },
+                shape = RoundedCornerShape(14.dp), color = GoldLight,
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(38.dp).background(Gold, RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Star, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Text("Check your ratings", Modifier.weight(1f), color = Color(0xFFB7791F), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("›", color = Color(0xFFB7791F), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // ---- modules (colour-coded) ----
+            DrawerSection("Earnings")
+            DrawerRow(Icons.Filled.CurrencyRupee, "Monthly Earnings", GreenSuccess) { go(Routes.EARNINGS) }
+            DrawerRow(Icons.Filled.AccountBalanceWallet, "My Wallet", Purple) { go(Routes.WALLET) }
+            DrawerRow(Icons.Filled.Description, "Rate Card", Color(0xFF16A34A)) { go(Routes.RATE_CARD) }
+            DrawerRow(Icons.Filled.Savings, "Early Payout", Amber) { go(Routes.SALARY_ADVANCE) }
+            DrawerRow(Icons.Filled.History, "Transaction History", Color(0xFFEC4899)) { go(Routes.WALLET_HISTORY) }
+            DrawerRow(Icons.Filled.Star, "Rewards & Penalties", Gold) { go(Routes.REWARDS) }
+            DrawerRow(Icons.Filled.EmojiEvents, "Sitara Bonus", Color(0xFFCD7F32)) { go(Routes.SHAKTI) }
+            DrawerRow(Icons.Filled.Description, "Payslip", Color(0xFF7C6DF7)) { go(Routes.PAYSLIP) }
+
+            DrawerSection("Perks")
+            DrawerRow(Icons.Filled.Redeem, "Refer & Earn", Color(0xFFEC4899)) { go(Routes.REFER) }
+            DrawerRow(Icons.Filled.Storefront, "Merch Store", Color(0xFF7C6DF7)) { go(Routes.MERCH) }
+            DrawerRow(Icons.Filled.Shield, "Claim Insurance", Color(0xFF0EA5E9)) { go(Routes.INSURANCE) }
+
+            DrawerSection("Work")
+            DrawerRow(Icons.Filled.Schedule, "Attendance", GreenSuccess) { go(Routes.ATTENDANCE) }
+            DrawerRow(Icons.Filled.CalendarMonth, "Leaves", Color(0xFF3B82F6)) { go(Routes.LEAVE) }
+            DrawerRow(Icons.Filled.Tune, "Availability", Amber) { go(Routes.P_AVAILABILITY) }
+
+            DrawerSection("Account")
+            DrawerRow(Icons.Filled.Person, "My Profile", Purple) { go(Routes.PROFILE) }
+            DrawerRow(Icons.Filled.Description, "Documents", Color(0xFF0EA5E9)) { go(Routes.P_DOCUMENTS) }
+            DrawerRow(Icons.Filled.AccountBalance, "Bank Details", Color(0xFF14B8A6)) { go(Routes.P_BANK) }
+            DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
+            DrawerRow(Icons.Filled.Notifications, "Notifications", PurpleMid) { go(Routes.P_NOTIFICATIONS) }
+
+            DrawerSection("Support")
+            DrawerRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support", Purple) { go(Routes.P_HELP) }
+            DrawerRow(Icons.Filled.Info, "About Us", TextGray) { go(Routes.P_ABOUT) }
+
+            Spacer(Modifier.height(8.dp)); HairlineDivider(Modifier.padding(horizontal = 20.dp)); Spacer(Modifier.height(8.dp))
+            DrawerRow(Icons.Filled.Logout, "Logout", RedCancel) {
+                close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text("App version 1.0.0", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 20.dp, bottom = 22.dp))
         }
-        Spacer(Modifier.height(12.dp))
     }
 }
 
+// One drawer row: a tinted circular icon + label (matches the reference's colour-coded list).
 @Composable
-private fun DrawerLink(icon: ImageVector, label: String, tint: Color = Purple, onClick: () -> Unit) {
-    NavigationDrawerItem(
-        icon = { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp)) },
-        label = { Text(label, color = if (tint == RedCancel) RedCancel else TextDark, fontWeight = FontWeight.Medium) },
-        selected = false,
-        onClick = onClick,
-        colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.White),
-        modifier = Modifier.padding(horizontal = 12.dp),
+private fun DrawerRow(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 20.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).background(tint.copy(alpha = 0.13f), RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(tr(label), color = if (tint == RedCancel) RedCancel else TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// Small grey section label between drawer groups.
+@Composable
+private fun DrawerSection(title: String) {
+    Text(
+        tr(title).uppercase(), color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 2.dp),
     )
 }
 
@@ -568,7 +667,7 @@ private fun DrawerLink(icon: ImageVector, label: String, tint: Color = Purple, o
 private fun MiniStat(value: String, label: String, delta: String?) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = TextGray, fontSize = 12.sp)
+        Text(tr(label), color = TextGray, fontSize = 12.sp)
         if (delta != null) Text(delta, color = GreenSuccess, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }

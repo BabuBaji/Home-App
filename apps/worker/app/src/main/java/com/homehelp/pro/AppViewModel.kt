@@ -18,6 +18,13 @@ import com.homehelp.pro.network.AvailabilityBody
 import com.homehelp.pro.network.BankBody
 import com.homehelp.pro.network.BootstrapResponse
 import com.homehelp.pro.network.BreakupItem
+import com.homehelp.pro.network.ClaimBody
+import com.homehelp.pro.network.InsuranceDto
+import com.homehelp.pro.network.MerchOrderBody
+import com.homehelp.pro.network.MerchProduct
+import com.homehelp.pro.network.ReferralDto
+import com.homehelp.pro.network.RewardsDto
+import com.homehelp.pro.network.ShaktiBonusDto
 import com.homehelp.pro.network.DeductionEntry
 import com.homehelp.pro.network.EndBody
 import com.homehelp.pro.network.LedgerEntry
@@ -479,14 +486,23 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    // Wall-clock stamp when the worker accepted the current job. Drives the in-app "start within
+    // 15 min" countdown. The backend independently enforces the same window (+₹15 on-time bonus /
+    // −₹15 late-start penalty), so this is purely to inform the worker.
+    var jobAcceptedAtMs by mutableStateOf(0L)
+        private set
+    val startWindowMinutes = 15
+
     fun acceptJob() {
         jobStatus = JobStatus.ACCEPTED
+        jobAcceptedAtMs = System.currentTimeMillis()
         sync { api.acceptJob() }
     }
 
     fun rejectJob() {
         activeJob = null
         jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
         sync { api.rejectJob() }
     }
 
@@ -514,6 +530,7 @@ class AppViewModel : ViewModel() {
         val job = activeJob ?: return false
         if (input != job.otp) return false
         jobStatus = JobStatus.IN_PROGRESS
+        jobAcceptedAtMs = 0L                           // start window met — hide the countdown banner
         serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
         serviceEndMs = 0L
         viewModelScope.launch {
@@ -556,6 +573,7 @@ class AppViewModel : ViewModel() {
             "${job.dateTime} • ${job.durationHours} hours", job.earnings, "Completed"))
         activeJob = null
         jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
         // Reconcile with the authoritative server totals (earnings stay 0 until the customer confirms).
         sync {
             val r = api.settle()
@@ -571,6 +589,7 @@ class AppViewModel : ViewModel() {
         }
         activeJob = null
         jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
         sync { api.cancel(ReasonBody(reason)) }
     }
 
@@ -648,6 +667,38 @@ class AppViewModel : ViewModel() {
     }
 
     fun loadPayslip() = sync { payslip = api.payslip() }
+
+    // ---- Refer & Earn / Insurance / Merch / Rewards / Language (additive modules) ----
+    var referral by mutableStateOf<ReferralDto?>(null)
+        private set
+    fun loadReferral() = sync { referral = api.referral() }
+
+    var insurance by mutableStateOf<InsuranceDto?>(null)
+        private set
+    fun loadInsurance() = sync { insurance = api.insurance() }
+    fun claimInsurance(reason: String, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            try { onDone(api.claimInsurance(ClaimBody(reason)).message.ifBlank { "Claim submitted." }) }
+            catch (e: Exception) { onDone("Couldn't submit. Please try again.") }
+        }
+    }
+
+    val merch = mutableStateListOf<MerchProduct>()
+    fun loadMerch() = sync { val r = api.merch(); merch.clear(); merch.addAll(r.products) }
+    fun orderMerch(id: String, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            try { onDone(api.orderMerch(MerchOrderBody(id)).message.ifBlank { "Order placed." }) }
+            catch (e: Exception) { onDone("Couldn't place the order. Please try again.") }
+        }
+    }
+
+    var rewards by mutableStateOf<RewardsDto?>(null)
+        private set
+    fun loadRewards() = sync { rewards = api.walletRewards() }
+
+    var shaktiBonus by mutableStateOf<ShaktiBonusDto?>(null)
+        private set
+    fun loadShaktiBonus() = sync { shaktiBonus = api.shaktiBonus() }
 
     var withdrawalReceipt by mutableStateOf<com.homehelp.pro.network.WithdrawalReceiptDto?>(null)
         private set

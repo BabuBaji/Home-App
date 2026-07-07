@@ -100,7 +100,7 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
             // Recent earnings, most recent first.
             Card {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Recent Earnings", fontWeight = FontWeight.SemiBold, color = TextDark)
+                    Text(tr("Recent Earnings"), fontWeight = FontWeight.SemiBold, color = TextDark)
                     Text("₹${vm.earnings.sumOf { it.amount }}", fontWeight = FontWeight.Bold, color = Purple)
                 }
                 Spacer(Modifier.height(8.dp))
@@ -128,7 +128,7 @@ private fun EarnTile(modifier: Modifier, label: String, amount: Int, valueColor:
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text("₹$amount", fontWeight = FontWeight.Bold, color = valueColor, fontSize = 19.sp)
         Spacer(Modifier.height(2.dp))
-        Text(label, fontSize = 11.sp, color = TextGray)
+        Text(tr(label), fontSize = 11.sp, color = TextGray)
     }
 }
 
@@ -175,7 +175,7 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
         val (bg, fg) = statusChipColors(b.status)
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { detail = null },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { detail = null }) { Text("Close") } },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { detail = null }) { Text(tr("Close")) } },
             title = { Text(b.service ?: "Booking", fontWeight = FontWeight.Bold, color = TextDark) },
             text = {
                 Column {
@@ -301,7 +301,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Verified Partner", fontSize = 12.sp, color = Purple)
+                                Text(tr("Verified Partner"), fontSize = 12.sp, color = Purple)
                             }
                         }
                         Text(
@@ -315,7 +315,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             if (vm.monthEarnings > 0 || vm.jobsCompleted > 0 || vm.walletBalance > 0) {
                 Box(Modifier.fillMaxWidth().background(Purple, RoundedCornerShape(16.dp)).padding(16.dp)) {
                     Column {
-                        Text("Overview", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(tr("Overview"), color = Color.White, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(12.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             SplitStat("₹${vm.monthEarnings}", "This Month")
@@ -349,7 +349,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Center) {
                     Icon(Icons.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Logout", color = RedCancel, fontWeight = FontWeight.SemiBold)
+                    Text(tr("Logout"), color = RedCancel, fontWeight = FontWeight.SemiBold)
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -375,7 +375,7 @@ private fun shareInvite(ctx: Context) {
 private fun SplitStat(value: String, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
+        Text(tr(label), color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
     }
 }
 
@@ -393,7 +393,7 @@ private fun MenuItem(icon: ImageVector, label: String, divider: Boolean = true, 
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(14.dp))
-            Text(label, color = TextDark, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(tr(label), color = TextDark, fontSize = 15.sp, modifier = Modifier.weight(1f))
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextGray, modifier = Modifier.size(20.dp))
         }
         if (divider) Divider(color = Divider)

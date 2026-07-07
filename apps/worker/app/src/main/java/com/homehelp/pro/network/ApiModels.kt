@@ -252,6 +252,50 @@ data class WalletOpResponse(
     val walletTxns: List<WalletTxn> = emptyList(),
 )
 
+/* ---------- Refer & Earn / Insurance / Merch / Rewards ---------- */
+data class ReferralItem(val amount: Int = 0, val label: String = "", val date: String = "")
+data class ReferralDto(
+    val code: String = "",
+    val bonus: Int = 0,
+    val lifetimeEarnings: Int = 0,
+    val referrals: List<ReferralItem> = emptyList(),
+    val shareMessage: String = "",
+)
+data class InsuranceDto(
+    val activated: Boolean = false,
+    val coverage: String = "",
+    val policyNo: String = "",
+    val helpline: String = "",
+)
+data class MerchProduct(val id: String = "", val name: String = "", val emoji: String = "", val price: Int = 0, val desc: String = "")
+data class MerchResponse(val products: List<MerchProduct> = emptyList())
+data class RewardItem(val label: String = "", val amount: Int = 0, val date: String = "")
+data class RewardsDto(
+    val goldCoins: Int = 0,
+    val coinValue: Int = 0,
+    val redCards: Int = 0,
+    val cardValue: Int = 0,
+    val coinItems: List<RewardItem> = emptyList(),
+    val cardItems: List<RewardItem> = emptyList(),
+)
+data class ShaktiTier(val name: String = "", val amount: Int = 0, val days: Int = 0, val sundays: Int = 0)
+data class ShaktiBonusDto(
+    val tiers: List<ShaktiTier> = emptyList(),
+    val workingDays: Int = 0,
+    val sundays: Int = 0,
+    val rating: Double = 0.0,
+    val ratingTarget: Double = 4.5,
+    val ratingMet: Boolean = false,
+    val currentTier: String = "",
+    val nextTier: String = "",
+    val daysToNext: Int = 0,
+    val sundaysToNext: Int = 0,
+    val lastUpdated: String = "",
+)
+data class SimpleResult(val ok: Boolean = false, val error: String? = null, val message: String = "")
+data class ClaimBody(val reason: String)
+data class MerchOrderBody(val productId: String)
+
 // ---- request bodies ----
 data class AuthRequest(val phone: String, val otp: String? = null)
 data class OtpBody(val otp: String)

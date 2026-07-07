@@ -74,7 +74,7 @@ fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
             // Hero — Available balance + the single most important action.
             Box(Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(18.dp)).padding(20.dp)) {
                 Column {
-                    Text("Available Balance", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                    Text(tr("Available Balance"), color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
                     Text(rupee(vm.walletBalance), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -90,7 +90,7 @@ fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.ArrowUpward, null, tint = Purple, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Withdraw Money", color = Purple, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(tr("Withdraw Money"), color = Purple, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                     }
                 }
@@ -146,7 +146,7 @@ fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
                 if (vm.deductionTotal > 0) {
                     Divider(color = Divider)
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Total Deductions", fontWeight = FontWeight.Bold, color = TextDark)
+                        Text(tr("Total Deductions"), fontWeight = FontWeight.Bold, color = TextDark)
                         Text("- ${rupee(vm.deductionTotal)}", fontWeight = FontWeight.Bold, color = RedCancel)
                     }
                 }
@@ -215,7 +215,7 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             Box(Modifier.fillMaxWidth().background(GreenLight, RoundedCornerShape(14.dp)).padding(16.dp)) {
                 Column {
-                    Text("Available to withdraw", color = TextGray, fontSize = 12.sp)
+                    Text(tr("Available to withdraw"), color = TextGray, fontSize = 12.sp)
                     Text(rupee(vm.walletBalance), color = GreenSuccess, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -507,7 +507,7 @@ fun EarningsBreakupScreen(vm: AppViewModel, nav: NavHostController) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(Modifier.fillMaxWidth().background(GreenLight, RoundedCornerShape(14.dp)).padding(16.dp)) {
                 Column {
-                    Text("Total Income", color = TextGray, fontSize = 12.sp)
+                    Text(tr("Total Income"), color = TextGray, fontSize = 12.sp)
                     Text(rupee(total), color = GreenSuccess, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -530,7 +530,7 @@ fun DeductionsScreen(vm: AppViewModel, nav: NavHostController) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(Modifier.fillMaxWidth().background(Color(0xFFFDECEC), RoundedCornerShape(14.dp)).padding(16.dp)) {
                 Column {
-                    Text("Total Deductions", color = TextGray, fontSize = 12.sp)
+                    Text(tr("Total Deductions"), color = TextGray, fontSize = 12.sp)
                     Text("- ${rupee(vm.deductionTotal)}", color = RedCancel, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                     Text("Every deduction is itemised below — nothing is hidden.", color = TextGray, fontSize = 11.sp)
                 }
@@ -609,9 +609,9 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
 private fun BalanceChip(modifier: Modifier, label: String, amount: Int, fg: Color, bg: Color, why: String) {
     Box(modifier.background(bg, RoundedCornerShape(14.dp)).padding(12.dp)) {
         Column {
-            Text(label, color = TextGray, fontSize = 11.sp)
+            Text(tr(label), color = TextGray, fontSize = 11.sp)
             Text(rupee(amount), color = fg, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text(why, color = TextGray, fontSize = 9.sp)
+            Text(tr(why), color = TextGray, fontSize = 9.sp)
         }
     }
 }
@@ -633,7 +633,7 @@ private fun BigAction(modifier: Modifier, icon: ImageVector, label: String, onCl
         Column(Modifier.padding(horizontal = 6.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Icon(icon, null, tint = Purple, modifier = Modifier.size(26.dp))
             Spacer(Modifier.height(6.dp))
-            Text(label, color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
+            Text(tr(label), color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
         }
     }
 }
@@ -641,8 +641,8 @@ private fun BigAction(modifier: Modifier, icon: ImageVector, label: String, onCl
 @Composable
 private fun RowHeader(title: String, action: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, fontWeight = FontWeight.SemiBold, color = TextDark)
-        Text(action, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.clickable { onClick() })
+        Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark)
+        Text(tr(action), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.clickable { onClick() })
     }
 }
 
@@ -703,7 +703,7 @@ private fun ChoicePill(modifier: Modifier, text: String, selected: Boolean, onCl
         border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Purple else Divider),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(text, color = if (selected) Color.White else TextGray, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(tr(text), color = if (selected) Color.White else TextGray, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
     }
 }
@@ -737,13 +737,13 @@ private fun InfoNote(text: String) {
     ) {
         Icon(Icons.Filled.Info, null, tint = Purple, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text, color = TextDark, fontSize = 12.sp)
+        Text(tr(text), color = TextDark, fontSize = 12.sp)
     }
 }
 
 @Composable
 private fun EmptyHint(text: String) {
-    Text(text, color = TextGray, fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp))
+    Text(tr(text), color = TextGray, fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp))
 }
 
 // Status -> pill colours (shared across history, withdrawals, advances).

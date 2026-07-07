@@ -134,6 +134,9 @@ io.on('connection', (socket) => {
     .catch(() => {})
   socket.on('booking:join', (id) => socket.join(`booking:${Number(id)}`))
   socket.on('booking:leave', (id) => socket.leave(`booking:${Number(id)}`))
+  // Admin control-tower room — receives ops broadcasts (e.g. worker SOS) in real time.
+  socket.on('admin:join', () => socket.join('admin'))
+  socket.on('admin:leave', () => socket.leave('admin'))
 })
 
 // Relay realtime messages published by any service.

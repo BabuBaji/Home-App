@@ -6,7 +6,7 @@
 // service owns the earnings LEDGER and adjusts the balance snapshot here via /internal.
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents,
+  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime,
 } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4004)
@@ -388,8 +388,144 @@ app.post('/api/worker/sos', auth, async (req, res) => {
   const w = await getWorker(req.worker.id)
   const loc = (b.lat != null && b.lng != null) ? ` @ ${b.lat},${b.lng}` : ''
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: req.worker.id, detail: `🆘 SOS raised${loc}`, meta: { lat: b.lat ?? null, lng: b.lng ?? null } })
+  // Real-time push to the admin control tower (siren + alert modal in the admin panel).
+  publishRealtime(REDIS_URL, 'admin', 'sos', {
+    workerId: req.worker.id, workerName: w?.name || `Worker #${req.worker.id}`, phone: w?.phone || '',
+    lat: b.lat ?? null, lng: b.lng ?? null, at: new Date().toISOString(),
+  })
   res.json({ ok: true, message: 'Help is on the way. Our team has been alerted.' })
 })
+
+/* ---------- Refer & Earn ---------- */
+const REFERRAL_BONUS = Number(process.env.REFERRAL_BONUS || 1500)
+const referralCode = (w) => `HHP${String(1000 + Number(w.id))}`
+app.get('/api/worker/referral', auth, async (req, res) => {
+  const w = req.worker
+  const code = referralCode(w)
+  // Referrals credited as wallet income of category 'Referral' (kept in the wallet ledger).
+  const lifetime = await tryGet(WALLET_URL, `/internal/referral-total/${w.id}`, { total: 0, items: [] })
+  res.json({
+    code,
+    bonus: REFERRAL_BONUS,
+    lifetimeEarnings: lifetime.total || 0,
+    referrals: lifetime.items || [],
+    shareMessage: `Join me as a HomeHelp Pro! Use my referral code ${code} when you sign up and we both earn ₹${REFERRAL_BONUS}. Download: https://homehelp.in/pro`,
+  })
+})
+
+/* ---------- Claim Insurance / Health Card ---------- */
+app.get('/api/worker/insurance', auth, async (req, res) => {
+  const w = req.worker
+  const activated = !!(w.profile && w.profile.insurance_activated)
+  res.json({
+    activated,
+    coverage: '₹2,00,000 accidental cover + ₹50,000 hospitalisation',
+    policyNo: activated ? `HH-INS-${1000 + Number(w.id)}` : '',
+    helpline: '1800-123-4567',
+  })
+})
+app.post('/api/worker/insurance/claim', auth, async (req, res) => {
+  const b = req.body || {}
+  await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3)', [req.worker.id, 'Insurance claim', b.reason || b.message || 'Insurance claim request'])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'insurance.claim', entityType: 'worker', entityId: req.worker.id, detail: `Raised an insurance claim: ${b.reason || ''}` })
+  res.json({ ok: true, message: 'Claim submitted. Our team will contact you within 24 hours.' })
+})
+
+/* ---------- Merch Store ---------- */
+const MERCH = [
+  { id: 'tshirt', name: 'Branded T-Shirt', emoji: '👕', price: 299, desc: 'Official HomeHelp Pro tee' },
+  { id: 'cap', name: 'Cap', emoji: '🧢', price: 149, desc: 'Sun-protection cap' },
+  { id: 'bag', name: 'Kit Bag', emoji: '🎒', price: 499, desc: 'Carry your supplies' },
+  { id: 'apron', name: 'Work Apron', emoji: '🦺', price: 249, desc: 'Durable service apron' },
+  { id: 'shoes', name: 'Safety Shoes', emoji: '👟', price: 899, desc: 'Anti-slip work shoes' },
+  { id: 'bottle', name: 'Water Bottle', emoji: '🧴', price: 199, desc: 'Insulated 1L bottle' },
+]
+app.get('/api/worker/merch', auth, (_req, res) => res.json({ products: MERCH }))
+app.post('/api/worker/merch/order', auth, async (req, res) => {
+  const p = MERCH.find((m) => m.id === (req.body || {}).productId)
+  if (!p) return res.json({ ok: false, error: 'Product not found' })
+  await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3)', [req.worker.id, 'Merch order', `Ordered ${p.name} (₹${p.price})`])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'merch.order', entityType: 'worker', entityId: req.worker.id, detail: `Ordered merch: ${p.name} (₹${p.price})`, meta: { amount: p.price } })
+  res.json({ ok: true, message: `Order placed for ${p.name}. Cost is deducted from your next payout.` })
+})
+
+/* ---------- Shakti Bonus (monthly performance bonus, mapped to our per-job model) ---------- */
+// "Sitara Bonus" — monthly bonus based on WORKING DAYS + rating (Gold also needs Sundays worked).
+// Bronze 25 days · Silver 27 days · Gold 28 days incl. 4 Sundays. All require ≥ rating gate.
+const SHAKTI = [
+  { name: 'Bronze', amount: Number(process.env.SHAKTI_BRONZE || 3500), days: Number(process.env.SHAKTI_BRONZE_DAYS || 25), sundays: Number(process.env.SHAKTI_BRONZE_SUNDAYS || 0) },
+  { name: 'Silver', amount: Number(process.env.SHAKTI_SILVER || 4500), days: Number(process.env.SHAKTI_SILVER_DAYS || 27), sundays: Number(process.env.SHAKTI_SILVER_SUNDAYS || 0) },
+  { name: 'Gold', amount: Number(process.env.SHAKTI_GOLD || 5500), days: Number(process.env.SHAKTI_GOLD_DAYS || 28), sundays: Number(process.env.SHAKTI_GOLD_SUNDAYS || 4) },
+]
+const SHAKTI_RATING = Number(process.env.SHAKTI_RATING || 4.5)
+
+// Distinct working (checked-in) days + Sundays worked in [start,end); highest tier reached.
+async function computeShakti(wid, rating, start, end) {
+  const s = start.toISOString().slice(0, 10), e = end.toISOString().slice(0, 10)
+  const wd = (await pool.query(
+    'SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND day >= $2 AND day < $3',
+    [wid, s, e])).rows[0].n
+  const su = (await pool.query(
+    'SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND day >= $2 AND day < $3 AND EXTRACT(DOW FROM day) = 0',
+    [wid, s, e])).rows[0].n
+  let currentIdx = -1
+  for (let i = 0; i < SHAKTI.length; i++) if (wd >= SHAKTI[i].days && su >= SHAKTI[i].sundays && rating >= SHAKTI_RATING) currentIdx = i
+  return { workingDays: wd, sundays: su, currentIdx }
+}
+
+app.get('/api/worker/shakti-bonus', auth, async (req, res) => {
+  const w = req.worker
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), 1)
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const rating = Number(w.rating || 0)
+  const { workingDays, sundays, currentIdx } = await computeShakti(w.id, rating, start, end)
+  const next = currentIdx + 1 < SHAKTI.length ? SHAKTI[currentIdx + 1] : null
+  res.json({
+    tiers: SHAKTI,
+    workingDays,
+    sundays,
+    rating,
+    ratingTarget: SHAKTI_RATING,
+    ratingMet: rating >= SHAKTI_RATING,
+    currentTier: currentIdx >= 0 ? SHAKTI[currentIdx].name : '',
+    nextTier: next ? next.name : '',
+    daysToNext: next ? Math.max(0, next.days - workingDays) : 0,
+    sundaysToNext: next ? Math.max(0, next.sundays - sundays) : 0,
+    lastUpdated: now.toISOString().slice(0, 10),
+  })
+})
+
+// Month-end settlement: for each worker who met a Shakti tier that month (jobs + rating),
+// publish a shakti.bonus event; the wallet service credits it idempotently (once per month).
+async function settleShaktiForMonth(y, m) {
+  const monthStr = `${y}-${String(m + 1).padStart(2, '0')}`
+  const start = new Date(y, m, 1), end = new Date(y, m + 1, 1)
+  const { rows: workers } = await pool.query('SELECT id, rating FROM workers')
+  let paid = 0
+  for (const w of workers) {
+    const rating = Number(w.rating || 0)
+    if (rating < SHAKTI_RATING) continue
+    const { currentIdx } = await computeShakti(w.id, rating, start, end)
+    if (currentIdx < 0) continue
+    const tier = SHAKTI[currentIdx]
+    publishEvent(REDIS_URL, 'shakti.bonus', { workerId: w.id, amount: tier.amount, tier: tier.name, month: monthStr })
+    paid++
+  }
+  console.log(`[worker] shakti settlement ${monthStr}: ${paid} worker(s) qualified`)
+  return { month: monthStr, qualified: paid }
+}
+
+// Manual trigger (admin/testing). Body { month:'YYYY-MM' } — defaults to the current month.
+app.post('/internal/shakti/settle', internalOnly, async (req, res) => {
+  let y, m
+  const mth = req.body?.month
+  if (mth && /^\d{4}-\d{2}$/.test(mth)) { const [yy, mm] = mth.split('-').map(Number); y = yy; m = mm - 1 }
+  else { const n = new Date(); y = n.getFullYear(); m = n.getMonth() }
+  res.json({ ok: true, ...(await settleShaftiSafe(y, m)) })
+})
+const settleShaftiSafe = (y, m) => settleShaktiForMonth(y, m).catch((e) => { console.error('[worker] shakti settle error:', e.message); return { error: e.message } })
+
 app.put('/api/worker/preferences', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { preferences: req.body || {} }))))
 app.put('/api/worker/notifications', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { notifications: req.body || {} }))))
 app.get('/api/worker/documents', auth, async (req, res) => res.json(await documents(req.worker.id)))
@@ -497,6 +633,23 @@ app.post('/api/admin/workers/:id/bank/reject', adminAuth, async (req, res) => { 
 /* ---------- events ---------- */
 subscribeEvents(REDIS_URL, 'worker', async (_type, _data) => { /* reserved for future reactions */ })
 
+// Auto-settle Shakti bonuses at the start of each month (pays out the PREVIOUS month).
+// Runs daily but only acts on the 1st–2nd; the wallet credit is idempotent per worker/month.
+function scheduleShaktiSettlement() {
+  const tick = () => {
+    const now = new Date()
+    if (now.getDate() <= 2) {
+      const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      settleShaftiSafe(prev.getFullYear(), prev.getMonth())
+    }
+  }
+  setInterval(tick, 24 * 3600 * 1000) // once a day
+  setTimeout(tick, 15000) // and shortly after boot (catches a missed run)
+}
+
 init()
-  .then(() => app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`)))
+  .then(() => {
+    app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
+    scheduleShaktiSettlement()
+  })
   .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) })

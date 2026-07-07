@@ -20,8 +20,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.navigation.NavHostController
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -75,27 +80,38 @@ fun GradientBanner(
 
 enum class Dp16(val value: androidx.compose.ui.unit.Dp) { S(12.dp), M(16.dp) }
 
-/** Simple top header with optional back button and a hairline separator below. */
+// Opens the app-wide side drawer (provided by AppRoot). Default no-op so previews don't crash.
+val LocalDrawerOpen = staticCompositionLocalOf<() -> Unit> { {} }
+// The app's NavController (provided by AppRoot) so shared chrome can navigate (wallet/profile).
+val LocalNav = staticCompositionLocalOf<NavHostController?> { null }
+
+/**
+ * Standard top header, present on every screen: ☰ menu (opens the side drawer) on the left,
+ * optional back arrow, the title, an optional screen-specific trailing slot, and quick
+ * Wallet + Profile shortcuts on the right.
+ */
 @Composable
 fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
+    val openDrawer = LocalDrawerOpen.current
+    val nav = LocalNav.current
     Column(Modifier.fillMaxWidth().background(Color.White)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(24.dp).clickable { openDrawer() })
+            Spacer(Modifier.width(10.dp))
             if (onBack != null) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = TextDark,
-                    modifier = Modifier.size(24.dp).clickable { onBack() },
-                )
-                Spacer(Modifier.width(12.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp).clickable { onBack() })
+                Spacer(Modifier.width(8.dp))
             }
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-            if (trailing != null) trailing() else Spacer(Modifier.width(24.dp))
+            Text(tr(title), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+            if (trailing != null) { trailing(); Spacer(Modifier.width(14.dp)) }
+            Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = Purple, modifier = Modifier.size(23.dp).clickable { nav?.navigateApp(Routes.WALLET) })
+            Spacer(Modifier.width(16.dp))
+            Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Purple, modifier = Modifier.size(23.dp).clickable { nav?.navigateApp(Routes.PROFILE) })
         }
         HairlineDivider()
     }
@@ -133,7 +149,7 @@ fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean 
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(tr(text), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -146,7 +162,7 @@ fun OutlineButton(text: String, modifier: Modifier = Modifier, color: Color = Pu
         border = BorderStroke(2.dp, color),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(text, color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr(text), color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -167,7 +183,7 @@ fun SegmentedTabs(
         Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             options.forEach { opt ->
                 val isSel = opt == selected
-                val label = counts?.get(opt)?.let { "$opt ($it)" } ?: opt
+                val label = counts?.get(opt)?.let { "${tr(opt)} ($it)" } ?: tr(opt)
                 Surface(
                     modifier = Modifier.weight(1f).height(38.dp).clickable { onSelect(opt) },
                     shape = RoundedCornerShape(9.dp),
@@ -197,9 +213,9 @@ fun EmptyState(emoji: String, title: String, subtitle: String) {
     ) {
         Text(emoji, fontSize = 40.sp)
         Spacer(Modifier.height(10.dp))
-        Text(title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 16.sp)
+        Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 16.sp)
         Spacer(Modifier.height(4.dp))
-        Text(subtitle, color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        Text(tr(subtitle), color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
     }
 }
 
@@ -242,7 +258,7 @@ fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
 @Composable
 fun StatusPill(text: String, bg: Color, fg: Color) {
     Surface(shape = RoundedCornerShape(10.dp), color = bg) {
-        Text(text, color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+        Text(tr(text), color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
     }
 }
 
@@ -258,7 +274,7 @@ fun RatingStars(rating: Double, size: Int = 14) {
 @Composable
 fun LabeledRow(label: String, value: String?, valueColor: Color = TextDark) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = TextGray, fontSize = 14.sp)
+        Text(tr(label), color = TextGray, fontSize = 14.sp)
         Text(value ?: "", color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -275,7 +291,7 @@ fun Avatar(initials: String, size: Int = 44, bg: Color = PurpleLight, fg: Color 
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.padding(vertical = 4.dp))
+    Text(tr(text), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.padding(vertical = 4.dp))
 }
 
 fun toast(context: Context, message: String) {

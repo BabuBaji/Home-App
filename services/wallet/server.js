@@ -16,6 +16,14 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
+const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
+
+// On-time-start rule: after accepting a job, the worker must START the service (enter the
+// customer OTP) within START_WINDOW_MIN. On time → ON_TIME_INCENTIVE credited; otherwise
+// LATE_PENALTY is deducted. Both land in the worker's wallet history.
+const START_WINDOW_MIN = Number(process.env.START_WINDOW_MIN || 15)
+const ON_TIME_INCENTIVE = Number(process.env.ONTIME_INCENTIVE || 15)
+const LATE_PENALTY = Number(process.env.LATE_START_PENALTY || 15)
 
 process.on('unhandledRejection', (e) => console.error('[wallet] unhandledRejection:', e?.message || e))
 
@@ -30,6 +38,9 @@ async function init() {
     `CREATE TABLE IF NOT EXISTS worker_advances (id SERIAL PRIMARY KEY, worker_id INTEGER, amount INTEGER, outstanding INTEGER, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_payslips (id SERIAL PRIMARY KEY, worker_id INTEGER, month TEXT, gross INTEGER, deductions INTEGER, net INTEGER, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_notifications (id SERIAL PRIMARY KEY, worker_id INTEGER, title TEXT, body TEXT, read BOOLEAN DEFAULT false, created TIMESTAMPTZ DEFAULT now())`,
+    // Tracks the 15-min "start service by OTP" window per accepted job. resolved: NULL (pending),
+    // 'incentive' (started on time), 'penalty' (started late / never started), 'skipped' (cancelled).
+    `CREATE TABLE IF NOT EXISTS worker_start_deadlines (booking_id INTEGER PRIMARY KEY, worker_id INTEGER, ref TEXT, accepted_at TIMESTAMPTZ DEFAULT now(), deadline TIMESTAMPTZ, resolved TEXT)`,
     // Plain unique (NULLs are distinct in Postgres, so bonus/penalty rows with no ref_id are fine),
     // so `INSERT ... ON CONFLICT (worker_id, ref_id)` can use it as the arbiter for idempotent settlement.
     `DROP INDEX IF EXISTS ux_income_ref`,
@@ -60,6 +71,112 @@ async function settleBooking(b) {
   publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: b.worker_id, detail: `Credited ₹${share} for ${b.ref || b.id}`, meta: { amount: share } })
 }
 
+/* ---------- on-time-start incentive / late-start penalty ---------- */
+// Start (or reset) the 15-min start window when a job is accepted / auto-assigned.
+async function openStartWindow({ bookingId, workerId, ref }) {
+  if (!bookingId || !workerId) return
+  await pool.query(
+    `INSERT INTO worker_start_deadlines (booking_id, worker_id, ref, accepted_at, deadline, resolved)
+     VALUES ($1, $2, $3, now(), now() + make_interval(mins => $4), NULL)
+     ON CONFLICT (booking_id) DO UPDATE SET worker_id = EXCLUDED.worker_id, ref = EXCLUDED.ref,
+       accepted_at = now(), deadline = EXCLUDED.deadline, resolved = NULL`,
+    [bookingId, workerId, ref || `#${bookingId}`, START_WINDOW_MIN])
+}
+
+// Credit the on-time-start bonus (idempotent on ref_id → shows as a credit in wallet history).
+async function creditOnTimeIncentive(row) {
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
+     VALUES ($1, 'Incentive', $2, $3, $4, 'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [row.worker_id, `On-time start · ${row.ref}`, ON_TIME_INCENTIVE, `ontime-${row.booking_id}`])
+  if (!ins.rowCount) return
+  await adjustBalance(row.worker_id, { balance: ON_TIME_INCENTIVE, earnings: ON_TIME_INCENTIVE })
+  await notify(row.worker_id, 'On-time bonus', `+₹${ON_TIME_INCENTIVE} for starting ${row.ref} within ${START_WINDOW_MIN} min`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.incentive', entityType: 'worker', entityId: row.worker_id, detail: `On-time start bonus ₹${ON_TIME_INCENTIVE} for ${row.ref}`, meta: { amount: ON_TIME_INCENTIVE } })
+}
+
+// Deduct the late-start penalty (shows as a debit in wallet history + the Deductions screen).
+async function applyLatePenalty(row) {
+  await pool.query(
+    `INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1, 'Late Start Penalty', $2, $3)`,
+    [row.worker_id, `Late start · ${row.ref} (not started within ${START_WINDOW_MIN} min)`, LATE_PENALTY])
+  await adjustBalance(row.worker_id, { balance: -LATE_PENALTY })
+  await notify(row.worker_id, 'Late-start penalty', `−₹${LATE_PENALTY}: service for ${row.ref} not started within ${START_WINDOW_MIN} min`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: row.worker_id, detail: `Late-start penalty ₹${LATE_PENALTY} for ${row.ref}`, meta: { amount: LATE_PENALTY } })
+}
+
+// Worker started the service (OTP verified). Atomically claim the row so the sweep can't also fire.
+async function resolveOnStart({ bookingId }) {
+  if (!bookingId) return
+  const row = (await pool.query(
+    `UPDATE worker_start_deadlines SET resolved = CASE WHEN now() <= deadline THEN 'incentive' ELSE 'penalty' END
+     WHERE booking_id = $1 AND resolved IS NULL RETURNING *`, [bookingId])).rows[0]
+  if (!row) return // no window, or already resolved by the sweep
+  if (row.resolved === 'incentive') await creditOnTimeIncentive(row)
+  else await applyLatePenalty(row)
+}
+
+// Periodic sweep: penalize jobs accepted >15 min ago that were never started — but only if the
+// booking is still assigned-and-not-started (skip cancelled / released / completed jobs).
+const NOT_STARTED = ['worker_assigned', 'on_the_way', 'arrived']
+async function sweepLateStarts() {
+  const { rows } = await pool.query("SELECT * FROM worker_start_deadlines WHERE resolved IS NULL AND deadline < now()")
+  for (const row of rows) {
+    const b = await tryGet(BOOKING_URL, `/api/internal/bookings/${row.booking_id}`, null)
+    const stillWaiting = NOT_STARTED.includes(b?.status)
+    // Claim the row atomically (guards against a concurrent job.start resolving it).
+    const claimed = (await pool.query(
+      "UPDATE worker_start_deadlines SET resolved = $2 WHERE booking_id = $1 AND resolved IS NULL RETURNING *",
+      [row.booking_id, stillWaiting ? 'penalty' : 'skipped'])).rows[0]
+    if (claimed && stillWaiting) await applyLatePenalty(claimed)
+  }
+}
+
+// ISO date/time parts for a ledger row (UTC — good enough for the demo history list).
+function fmtDate(ts) { const d = new Date(ts); return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) } }
+
+// Unified, newest-first transaction history: earnings + incentives (credit), penalties/deductions
+// and withdrawals (debit) — so the worker sees incentives AND deductions in one place.
+async function historyLedger(wid) {
+  const inc = (await pool.query('SELECT * FROM worker_income WHERE worker_id=$1', [wid])).rows
+  const ded = (await pool.query('SELECT * FROM worker_deductions WHERE worker_id=$1', [wid])).rows
+  const wds = (await pool.query('SELECT * FROM worker_withdrawals WHERE worker_id=$1', [wid])).rows
+  const adv = (await pool.query('SELECT * FROM worker_advances WHERE worker_id=$1', [wid])).rows
+  const out = []
+  for (const r of inc) { const f = fmtDate(r.created); out.push({ id: r.id, ts: +new Date(r.created), date: f.date, time: f.time, type: r.category || 'Earnings', refId: r.label || r.ref_id || '', amount: r.amount, isCredit: true, status: 'Success', method: '', remarks: r.label || '' }) }
+  for (const r of ded) { const f = fmtDate(r.created); out.push({ id: 200000 + r.id, ts: +new Date(r.created), date: f.date, time: f.time, type: r.category || 'Deduction', refId: r.label || '', amount: r.amount, isCredit: false, status: 'Debited', method: '', remarks: r.label || '' }) }
+  for (const r of wds) { const f = fmtDate(r.created); out.push({ id: 400000 + r.id, ts: +new Date(r.created), date: f.date, time: f.time, type: 'Withdrawal', refId: r.reference || '', amount: r.amount, isCredit: false, status: r.status || 'Pending', method: r.method || '', remarks: '' }) }
+  for (const r of adv) { const f = fmtDate(r.created); out.push({ id: 600000 + r.id, ts: +new Date(r.created), date: f.date, time: f.time, type: 'Salary Advance', refId: '', amount: r.amount, isCredit: true, status: r.status || 'Approved', method: '', remarks: 'Recovered from future earnings' }) }
+  out.sort((a, b) => b.ts - a.ts)
+  return out.map(({ ts, ...e }) => e)
+}
+
+// Deductions grouped for the app's Deductions screen (summary by category + itemised detail).
+async function deductionsDto(wid) {
+  const rows = (await pool.query('SELECT * FROM worker_deductions WHERE worker_id=$1 ORDER BY id DESC', [wid])).rows
+  const total = rows.reduce((s, r) => s + (r.amount || 0), 0)
+  const byCat = new Map()
+  for (const r of rows) byCat.set(r.category || 'Other', (byCat.get(r.category || 'Other') || 0) + (r.amount || 0))
+  const summary = [...byCat.entries()].map(([category, amount]) => ({ category, amount }))
+  const detail = rows.map((r) => ({ category: r.category || 'Other', label: r.label || '', amount: r.amount || 0, date: fmtDate(r.created).date }))
+  return { summary, detail, total }
+}
+
+// Credit a month-end Shakti Bonus (idempotent per worker per month via ref_id).
+async function creditShaktiBonus(d) {
+  const amt = Math.max(0, Number(d.amount) || 0)
+  if (!d.workerId || amt <= 0) return
+  const ref = `shakti-${d.workerId}-${d.month}`
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
+     VALUES ($1, 'Sitara Bonus', $2, $3, $4, 'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [d.workerId, `${d.tier || ''} Sitara Bonus · ${d.month}`, amt, ref])
+  if (!ins.rowCount) return // already paid this month
+  await adjustBalance(d.workerId, { balance: amt, earnings: amt })
+  await notify(d.workerId, 'Sitara Bonus credited', `₹${amt} ${d.tier || ''} bonus for ${d.month}`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.sitara', entityType: 'worker', entityId: d.workerId, detail: `Sitara Bonus ₹${amt} (${d.tier}) for ${d.month}`, meta: { amount: amt } })
+}
+
 // Everything is derived from the real LEDGER (worker_income / withdrawals / deductions), so the
 // balance reflects only actual completed-service earnings — never a stale/seeded snapshot.
 // Field names match the worker app's WalletSummaryDto (weekEarnings/monthEarnings/todayEarnings/
@@ -83,14 +200,16 @@ async function summary(wid) {
   }
 }
 const rowsFor = async (table, wid) => (await pool.query(`SELECT * FROM ${table} WHERE worker_id=$1 ORDER BY id DESC`, [wid])).rows
+const earningsBreakupDto = async (wid) => (await pool.query(
+  "SELECT category, SUM(amount)::int amount FROM worker_income WHERE worker_id=$1 GROUP BY category ORDER BY amount DESC", [wid])).rows
 async function walletState(wid) {
   return {
     walletSummary: await summary(wid),
-    earningsBreakup: await rowsFor('worker_income', wid),
-    deductions: await rowsFor('worker_deductions', wid),
-    history: await rowsFor('worker_income', wid),
-    withdrawals: await rowsFor('worker_withdrawals', wid),
-    advances: await rowsFor('worker_advances', wid),
+    earningsBreakup: await earningsBreakupDto(wid),
+    deductions: await deductionsDto(wid),
+    history: await historyLedger(wid),
+    withdrawals: (await rowsFor('worker_withdrawals', wid)).map((r) => ({ id: r.id, amount: r.amount, method: r.method || '', destination: '', status: r.status || 'Pending', remarks: '', reference: r.reference || '', date: fmtDate(r.created).date })),
+    advances: (await rowsFor('worker_advances', wid)).map((r) => ({ id: r.id, amount: r.amount, status: r.status || 'Pending', recovered: Math.max(0, (r.amount || 0) - (r.outstanding || 0)), remarks: '', date: fmtDate(r.created).date })),
   }
 }
 
@@ -109,13 +228,35 @@ function auth(req, res, next) {
 // Internal: ledger summary for a worker (used by the worker service's bootstrap so Home shows
 // the same real balance as the Wallet screen).
 app.get('/internal/summary/:wid', internalOnly, async (req, res) => res.json(await summary(Number(req.params.wid))))
+// Referral earnings total (worker_income rows of category 'Referral') for the worker service.
+app.get('/internal/referral-total/:wid', internalOnly, async (req, res) => {
+  const wid = Number(req.params.wid)
+  const rows = (await pool.query("SELECT amount, label, created FROM worker_income WHERE worker_id=$1 AND category='Referral' ORDER BY id DESC", [wid])).rows
+  const total = rows.reduce((s, r) => s + (r.amount || 0), 0)
+  res.json({ total, items: rows.map((r) => ({ amount: r.amount, label: r.label || '', date: fmtDate(r.created).date })) })
+})
+
+// Gold Coins (this-month rewards: Incentive/Bonus) + Red Cards (this-month penalties/deductions).
+async function rewardsDto(wid) {
+  const coins = (await pool.query("SELECT category, label, amount, created FROM worker_income WHERE worker_id=$1 AND category IN ('Incentive','Bonus') AND created > now()-interval '30 days' ORDER BY id DESC", [wid])).rows
+  const cards = (await pool.query("SELECT category, label, amount, created FROM worker_deductions WHERE worker_id=$1 AND created > now()-interval '30 days' ORDER BY id DESC", [wid])).rows
+  return {
+    goldCoins: coins.length,
+    coinValue: coins.reduce((s, r) => s + (r.amount || 0), 0),
+    redCards: cards.length,
+    cardValue: cards.reduce((s, r) => s + (r.amount || 0), 0),
+    coinItems: coins.map((r) => ({ label: r.label || r.category, amount: r.amount || 0, date: fmtDate(r.created).date })),
+    cardItems: cards.map((r) => ({ label: r.label || r.category, amount: r.amount || 0, date: fmtDate(r.created).date })),
+  }
+}
 
 /* ---------- worker wallet ---------- */
 app.get('/api/worker/wallet/summary', auth, async (req, res) => res.json(await summary(req.wid)))
 app.get('/api/worker/wallet/state', auth, async (req, res) => res.json(await walletState(req.wid)))
-app.get('/api/worker/wallet/earnings-breakup', auth, async (req, res) => res.json(await rowsFor('worker_income', req.wid)))
-app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(await rowsFor('worker_deductions', req.wid)))
-app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await rowsFor('worker_income', req.wid)))
+app.get('/api/worker/wallet/earnings-breakup', auth, async (req, res) => res.json(await earningsBreakupDto(req.wid)))
+app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(await deductionsDto(req.wid)))
+app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await historyLedger(req.wid)))
+app.get('/api/worker/wallet/rewards', auth, async (req, res) => res.json(await rewardsDto(req.wid)))
 app.get('/api/worker/wallet/withdrawals', auth, async (req, res) => res.json(await rowsFor('worker_withdrawals', req.wid)))
 app.get('/api/worker/wallet/advances', auth, async (req, res) => res.json(await rowsFor('worker_advances', req.wid)))
 app.get('/api/worker/wallet/notifications', auth, async (req, res) => {
@@ -168,6 +309,10 @@ app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, asyn
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
+  else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
+  else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })
+  else if (type === 'job.start') await resolveOnStart({ bookingId: data.bookingId })
+  else if (type === 'shakti.bonus') await creditShaktiBonus(data)
   else if (type === 'booking.cancelled' && data.booking?.worker_id && data.quote?.workerComp > 0) {
     const b = data.booking, comp = data.quote.workerComp
     const ins = await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Compensation',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id", [b.worker_id, `Comp ${b.ref}`, comp, `comp-${b.id}`])
@@ -178,5 +323,9 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
 })
 
 init()
-  .then(() => app.listen(PORT, () => console.log(`[wallet] service on http://localhost:${PORT}`)))
+  .then(() => {
+    app.listen(PORT, () => console.log(`[wallet] service on http://localhost:${PORT}`))
+    // Sweep for jobs never started within the window (applies the late-start penalty).
+    setInterval(() => sweepLateStarts().catch((e) => console.error('[wallet] late-start sweep:', e.message)), 30000)
+  })
   .catch((e) => { console.error('[wallet] failed to start:', e.message); process.exit(1) })

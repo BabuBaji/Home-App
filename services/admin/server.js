@@ -141,6 +141,16 @@ app.post('/api/admin/login', async (req, res) => {
 })
 app.get('/api/admin/me', admin, (req, res) => res.json({ admin: publicAdmin(req.admin) }))
 
+// Run the month-end Shakti Bonus settlement (delegates to the worker service, which credits
+// each qualifying worker's tier bonus via the wallet — idempotent per worker/month).
+app.post('/api/admin/shakti/settle', admin, async (req, res) => {
+  try {
+    const r = await internalPost(U.worker, '/internal/shakti/settle', { month: req.body?.month })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: req.admin?.name || 'Admin', action: 'sitara.settle', entityType: 'system', entityId: 0, detail: `Ran Sitara Bonus settlement for ${r.month} — ${r.qualified} worker(s) qualified` })
+    res.json(r)
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+})
+
 /* ---------- settings (config) ---------- */
 app.get('/api/admin/settings', admin, async (_q, res) => res.json(await getPublicSettings()))
 app.patch('/api/admin/settings', admin, requireRole('admin'), async (req, res) => {
