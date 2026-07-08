@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -58,6 +59,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -77,6 +79,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -92,93 +95,143 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
     var otp by remember { mutableStateOf("") }
     var otpSent by remember { mutableStateOf(false) }
 
+    // Filled, soft-bordered field styling — shared by both inputs (enterprise form spec).
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = FieldFill,
+        unfocusedContainerColor = FieldFill,
+        focusedBorderColor = Purple,
+        unfocusedBorderColor = Color.Transparent,
+        focusedLabelColor = Purple,
+        unfocusedLabelColor = TextGray,
+        cursorColor = Purple,
+    )
+
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color.White)
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(ScreenBg)
+            .verticalScroll(rememberScrollState()),
     ) {
-        Spacer(Modifier.height(40.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(36.dp).background(Purple, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text("HomeHelp", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextDark)
-            Text(" Pro", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Purple)
-        }
-        Spacer(Modifier.height(40.dp))
-        Text("Hello Pro!", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextDark, modifier = Modifier.fillMaxWidth())
-        Text("Login to continue", fontSize = 15.sp, color = TextGray, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = phone,
-            onValueChange = { if (it.length <= 10 && it.all(Char::isDigit)) phone = it },
-            leadingIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(8.dp))
-                    Icon(Icons.Filled.Phone, contentDescription = null, tint = TextGray, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("+91", color = TextDark, fontWeight = FontWeight.Medium)
-                }
-            },
-            placeholder = { Text("Enter mobile number") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        )
-        Spacer(Modifier.height(16.dp))
-
-        if (otpSent) {
-            OutlinedTextField(
-                value = otp,
-                onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
-                placeholder = { Text("Enter 4-digit OTP") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            )
-            Text("Enter the OTP sent to your mobile", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            if (vm.loginError != null) {
-                Text(
-                    vm.loginError!!,
-                    color = Color(0xFFD92D20), fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            PrimaryButton(if (vm.loggingIn) "Verifying…" else "Verify & Continue", enabled = otp.length == 4 && !vm.loggingIn) {
-                vm.login(phone, otp)
-            }
-            // Navigate to Home ONLY after the backend confirms the worker is registered & active.
-            LaunchedEffect(vm.isLoggedIn) {
-                if (vm.isLoggedIn) nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
-            }
-        } else {
-            PrimaryButton("Get OTP", enabled = phone.length == 10) { otpSent = true }
-        }
-
-        Spacer(Modifier.height(40.dp))
-        Box(
-            Modifier.fillMaxWidth().height(180.dp).background(PurpleLight, RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center,
+        // ---- Gradient brand header (rounded bottom, floating logo tile) ----
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp))
+                .background(BrandGradient)
+                .padding(horizontal = Space.xxl)
+                .padding(top = 68.dp, bottom = 44.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("🧹  House Help Professional", color = Purple, fontWeight = FontWeight.SemiBold)
+            Box(
+                Modifier.size(72.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(20.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(38.dp))
+            }
+            Spacer(Modifier.height(18.dp))
+            Row {
+                Text("HomeHelp", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(" Pro", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.82f))
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("Your daily workforce companion", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
         }
-        Spacer(Modifier.height(24.dp))
-        Text(
-            "By continuing, you agree to our",
-            color = TextGray, fontSize = 12.sp, textAlign = TextAlign.Center,
-        )
-        Text(
-            "Terms & Conditions & Privacy Policy",
-            color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
-        )
+
+        Column(Modifier.fillMaxWidth().padding(Space.xxl)) {
+            Text("Welcome back 👋", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextDark)
+            Spacer(Modifier.height(4.dp))
+            Text("Sign in to continue to your dashboard", fontSize = 15.sp, color = TextGray)
+            Spacer(Modifier.height(28.dp))
+
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { if (it.length <= 10 && it.all(Char::isDigit)) phone = it },
+                label = { Text("Mobile number") },
+                leadingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.width(10.dp))
+                        Icon(Icons.Filled.Phone, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("+91", color = TextDark, fontWeight = FontWeight.SemiBold)
+                    }
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(Radius.field),
+                colors = fieldColors,
+            )
+            Spacer(Modifier.height(16.dp))
+
+            if (otpSent) {
+                OutlinedTextField(
+                    value = otp,
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
+                    label = { Text("4-digit OTP") },
+                    leadingIcon = { Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(Radius.field),
+                    colors = fieldColors,
+                )
+                Text("Enter the OTP sent to your mobile", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp))
+                if (vm.loginError != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        shape = RoundedCornerShape(Radius.field),
+                        color = RedLight,
+                    ) {
+                        Text(
+                            vm.loginError!!,
+                            color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                PrimaryButton("Verify & Continue", enabled = otp.length == 4 && !vm.loggingIn, loading = vm.loggingIn) {
+                    vm.login(phone, otp)
+                }
+                // Navigate to Home ONLY after the backend confirms the worker is registered & active.
+                LaunchedEffect(vm.isLoggedIn) {
+                    if (vm.isLoggedIn) nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
+                }
+            } else {
+                Spacer(Modifier.height(4.dp))
+                PrimaryButton("Get OTP", enabled = phone.length == 10) { otpSent = true }
+            }
+
+            Spacer(Modifier.height(28.dp))
+            // Trust strip — enterprise credibility row.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TrustItem("🛡️", "Secure")
+                TrustItem("⚡", "Instant OTP")
+                TrustItem("🤝", "Trusted")
+            }
+            Spacer(Modifier.height(28.dp))
+            Text(
+                "By continuing, you agree to our",
+                color = TextGray, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Terms & Conditions & Privacy Policy",
+                color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrustItem(emoji: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(emoji, fontSize = 20.sp)
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -221,42 +274,53 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val greeting = when { greetHour < 12 -> "Good morning"; greetHour < 17 -> "Good afternoon"; else -> "Good evening" }
     val firstName = vm.workerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "Partner" }
 
+    val homeInitials = remember(vm.workerName) {
+        vm.workerName.trim().split(Regex("\\s+")).mapNotNull { it.firstOrNull()?.toString() }
+            .take(2).joinToString("").uppercase().ifBlank { "P" }
+    }
+
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // Greeting header with notifications, wallet & profile shortcuts.
-        Column(Modifier.fillMaxWidth().background(Color.White)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        // ---- Gradient greeting header: avatar + time-of-day greeting, with menu,
+        // notifications (unread dot), wallet & profile shortcuts in white. ----
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(bottomStart = Radius.sheet, bottomEnd = Radius.sheet))
+                .background(BrandGradient)
+                .padding(horizontal = Space.l)
+                .padding(top = 14.dp, bottom = Space.l),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark,
-                    modifier = Modifier.size(24.dp).clickable { openDrawer() },
+                    Icons.Filled.Menu, contentDescription = "Menu", tint = Color.White,
+                    modifier = Modifier.size(26.dp).clickable { openDrawer() },
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(14.dp))
+                Avatar(homeInitials, size = 44, bg = Color.White.copy(alpha = 0.22f), fg = Color.White)
+                Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
-                    Text(greeting, fontSize = 12.sp, color = TextGray)
-                    Text(firstName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark)
+                    Text(greeting, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                    Text(firstName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.2).sp)
                 }
                 Box {
                     Icon(
-                        Icons.Filled.Notifications, contentDescription = "Notifications", tint = TextDark,
+                        Icons.Filled.Notifications, contentDescription = "Notifications", tint = Color.White,
                         modifier = Modifier.size(24.dp).clickable { nav.navigate(Routes.P_NOTIFICATIONS) },
                     )
                     if (vm.unreadNotifications > 0) {
-                        Box(Modifier.align(Alignment.TopEnd).size(9.dp).background(RedCancel, RoundedCornerShape(50)))
+                        Box(Modifier.align(Alignment.TopEnd).size(9.dp).background(Coral, RoundedCornerShape(50)))
                     }
                 }
-                Spacer(Modifier.width(16.dp))
-                Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = Purple, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.WALLET) })
-                Spacer(Modifier.width(16.dp))
-                Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Purple, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.PROFILE) })
+                Spacer(Modifier.width(18.dp))
+                Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = Color.White, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.WALLET) })
+                Spacer(Modifier.width(18.dp))
+                Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Color.White, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.PROFILE) })
             }
-            HairlineDivider()
         }
 
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             // Active job — keep the in-progress service reachable from Home so the worker
             // can jump back to the timer / OTP / end-service screen after navigating away.
@@ -278,101 +342,101 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     else -> "Active job"
                 }
                 if (resumeRoute != null) {
+                    // Full-bleed green "resume active job" hero — the highest-priority CTA on Home.
                     Box(
-                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(16.dp))
+                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(Radius.card))
                             .clickable { nav.navigate(resumeRoute) }
-                            .padding(18.dp),
+                            .padding(Space.l),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🛠", fontSize = 20.sp)
-                            Spacer(Modifier.width(12.dp))
+                            Box(
+                                Modifier.size(44.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
+                                contentAlignment = Alignment.Center,
+                            ) { Text("🛠", fontSize = 20.sp) }
+                            Spacer(Modifier.width(Space.m))
                             Column(Modifier.weight(1f)) {
                                 Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text("${job.services.joinToString(", ")} · tap to resume", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                             }
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
                         }
                     }
                 }
             }
 
-            // ---- Today's snapshot: the three numbers that matter (What / How much) ----
+            // ---- Today's snapshot: the three numbers that matter, as tinted stat tiles ----
             val ctxHome = LocalContext.current
-            Card {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    MiniStat("₹${vm.todayEarnings}", "Today's Earnings", null)
-                    MiniStat("${vm.todayJobs}", "Today's Jobs", null)
-                    MiniStat("${vm.todayCompleted}", "Completed", null)
-                }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.CurrencyRupee, "₹${vm.todayEarnings}", "Earnings", GreenSuccess, GreenLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Schedule, "${vm.todayJobs}", "Jobs Today", Purple, Primary50)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.CheckCircle, "${vm.todayCompleted}", "Completed", GreenSuccess, GreenLight)
             }
 
             // ---- Attendance status (check in to start your day) ----
-            Card(modifier = Modifier.clickable { nav.navigate(Routes.ATTENDANCE) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (vm.attendance.checkedIn && !vm.attendance.checkedOut) "🟢" else "⚪", fontSize = 20.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Attendance"), fontSize = 12.sp, color = TextGray)
-                        Text(vm.attendance.status, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
-                    }
-                    Text(
-                        if (!vm.attendance.checkedIn) "Check In ›" else if (!vm.attendance.checkedOut) "Check Out ›" else "Done",
-                        color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                    )
-                }
-            }
+            val attnOn = vm.attendance.checkedIn && !vm.attendance.checkedOut
+            StatusListRow(
+                icon = Icons.Filled.Schedule,
+                iconTint = if (attnOn) GreenSuccess else TextGray,
+                iconBg = if (attnOn) GreenLight else FieldFill,
+                title = "Attendance",
+                subtitle = vm.attendance.status,
+                subtitleColor = if (attnOn) GreenSuccess else TextGray,
+                value = if (!vm.attendance.checkedIn) "Check In" else if (!vm.attendance.checkedOut) "Check Out" else "Done",
+                valueColor = Purple,
+                onClick = { nav.navigate(Routes.ATTENDANCE) },
+            )
 
             // ---- Next job (What should I do next?) ----
             val nextJob = vm.bookings.firstOrNull { it.status == "Upcoming" }
-            Card(modifier = if (nextJob != null) Modifier.clickable { nav.navigate(Routes.SCHEDULE) } else Modifier) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("⏰", fontSize = 22.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Next Job"), fontSize = 12.sp, color = TextGray)
-                        Text(nextJob?.service ?: "No upcoming jobs", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
-                        Text(if (nextJob != null) (nextJob.timeInfo ?: "") else "You're all caught up", fontSize = 12.sp, color = TextGray)
-                    }
-                    if (nextJob != null) Text("View ›", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                }
-            }
+            StatusListRow(
+                icon = Icons.Filled.CalendarMonth,
+                iconTint = if (nextJob != null) Purple else TextMuted,
+                iconBg = if (nextJob != null) Primary50 else FieldFill,
+                title = nextJob?.service ?: "No upcoming jobs",
+                subtitle = if (nextJob != null) (nextJob.timeInfo ?: "Scheduled") else "You're all caught up",
+                subtitleColor = TextGray,
+                value = if (nextJob != null) "View" else "",
+                valueColor = Purple,
+                onClick = if (nextJob != null) ({ nav.navigate(Routes.SCHEDULE) }) else null,
+            )
 
             // ---- Quick actions (Go Online · Take Break · View Schedule) ----
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 QuickAction(Modifier.weight(1f), if (vm.isOnline) "⏸️" else "▶️", if (vm.isOnline) "Go Offline" else "Go Online") { vm.goOnline(!vm.isOnline) }
                 QuickAction(Modifier.weight(1f), "☕", "Take Break") { vm.goOnline(false); toast(ctxHome, "You're on a break — go online when ready") }
                 QuickAction(Modifier.weight(1f), "📅", "Schedule") { nav.navigate(Routes.SCHEDULE) }
             }
 
             // ---- Wallet quick view (How much have I earned?) ----
-            Card(modifier = Modifier.clickable { nav.navigateApp(Routes.WALLET) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("👛", fontSize = 22.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Wallet Balance"), fontSize = 12.sp, color = TextGray)
-                        Text("₹${vm.walletBalance}", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
-                    }
-                    Text("›", color = TextGray, fontSize = 20.sp)
-                }
-            }
+            StatusListRow(
+                icon = Icons.Filled.AccountBalanceWallet,
+                iconTint = Purple,
+                iconBg = PurpleLight,
+                title = "Wallet Balance",
+                subtitle = "Tap to view transactions",
+                subtitleColor = TextGray,
+                value = "₹${vm.walletBalance}",
+                valueColor = TextDark,
+                onClick = { nav.navigateApp(Routes.WALLET) },
+            )
 
             // Online hero — the primary action, with a genuine live "online today" timer.
             val online = vm.isOnline
             Surface(
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(Radius.card),
                 color = if (online) GreenLight else Color.White,
                 border = BorderStroke(1.dp, if (online) GreenSuccess.copy(alpha = 0.35f) else Divider),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.padding(18.dp)) {
+                Column(Modifier.padding(Space.l)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(9.dp).background(if (online) GreenSuccess else TextGray, RoundedCornerShape(50)))
-                                Spacer(Modifier.width(8.dp))
+                                Box(Modifier.size(9.dp).background(if (online) GreenSuccess else TextGray, RoundedCornerShape(Radius.pill)))
+                                Spacer(Modifier.width(Space.s))
                                 Text(tr(if (online) "You're Online" else "You're Offline"), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
                             }
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(Space.xs))
                             Text(
                                 if (online) "Receiving job requests nearby" else "Go online to start receiving jobs",
                                 fontSize = 13.sp, color = TextGray,
@@ -385,7 +449,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                         )
                     }
                     if (online) {
-                        Spacer(Modifier.height(14.dp)); HairlineDivider(); Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.m))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
                                 Text(tr("Online today"), fontSize = 12.sp, color = TextGray)
@@ -400,30 +464,31 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            // Today's earnings + daily goal progress (goal is worker-set and persisted).
-            Card {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                    Column {
-                        Text("Today's Earnings", fontSize = 13.sp, color = TextGray)
-                        Text("₹${vm.todayEarnings}", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextDark)
+            // Today's earnings summary — signature money banner + a connected goal-progress
+            // breakdown (goal is worker-set and persisted).
+            val reached = vm.goalProgress >= 1f
+            ElevatedGroup {
+                MoneyBanner("Today's Earnings", vm.todayEarnings)
+                Column(Modifier.padding(Space.l)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Daily goal · ₹${vm.dailyGoal}", fontSize = 13.sp, color = TextGray)
+                        Text(
+                            "Edit goal",
+                            fontSize = 13.sp, color = Purple, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable { showGoalDialog = true }.padding(Space.xs),
+                        )
                     }
-                    Text(
-                        "Edit goal",
-                        fontSize = 13.sp, color = Purple, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable { showGoalDialog = true }.padding(4.dp),
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                val reached = vm.goalProgress >= 1f
-                ProgressBar(vm.goalProgress, fill = if (reached) GreenSuccess else Purple, height = 10)
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("₹${vm.todayEarnings} of ₹${vm.dailyGoal} goal", fontSize = 12.sp, color = TextGray)
-                    Text(
-                        if (reached) "Goal reached 🎉" else "${(vm.goalProgress * 100).toInt()}%",
-                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                        color = if (reached) GreenSuccess else Purple,
-                    )
+                    Spacer(Modifier.height(Space.m))
+                    ProgressBar(vm.goalProgress, fill = if (reached) GreenSuccess else Purple, height = 10)
+                    Spacer(Modifier.height(Space.s))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("₹${vm.todayEarnings} of ₹${vm.dailyGoal} goal", fontSize = 12.sp, color = TextGray)
+                        Text(
+                            if (reached) "Goal reached 🎉" else "${(vm.goalProgress * 100).toInt()}%",
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (reached) GreenSuccess else Purple,
+                        )
+                    }
                 }
             }
 
@@ -432,25 +497,33 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 if (vm.hasIncomingJob) {
                     // A real customer has booked — show the New Job Request notification.
                     Box(
-                        Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(16.dp))
+                        Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(Radius.card))
                             .clickable {
                                 vm.requestJob { found ->
                                     if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
                                 }
                             }
-                            .padding(18.dp),
+                            .padding(Space.l),
                     ) {
-                        Column {
-                            Text("🔔  New Job Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                            Text("A customer needs your service — tap to view", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(44.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Filled.Notifications, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+                            Spacer(Modifier.width(Space.m))
+                            Column(Modifier.weight(1f)) {
+                                Text("New Job Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                Text("A customer needs your service — tap to view", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                            }
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
                         }
                     }
                 } else {
                     // Online and idle — waiting for a real booking (no fake/demo jobs).
-                    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(16.dp)).padding(18.dp)) {
+                    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(Radius.card)).padding(Space.l)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🟢", fontSize = 18.sp)
-                            Spacer(Modifier.width(10.dp))
+                            Box(Modifier.size(9.dp).background(GreenSuccess, RoundedCornerShape(Radius.pill)))
+                            Spacer(Modifier.width(Space.m))
                             Column(Modifier.weight(1f)) {
                                 Text("Waiting for job requests…", color = TextDark, fontWeight = FontWeight.SemiBold)
                                 Text("You'll be notified when a customer books", color = TextGray, fontSize = 12.sp)
@@ -471,40 +544,43 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Earnings snapshot — real period figures; hidden until there's something to show.
             if (vm.weekEarnings > 0 || vm.monthEarnings > 0 || vm.walletBalance > 0) {
-                Card {
-                    SectionTitle("Earnings")
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        MiniStat("₹${vm.weekEarnings}", "This Week", null)
-                        MiniStat("₹${vm.monthEarnings}", "This Month", null)
-                        MiniStat("₹${vm.walletBalance}", "Balance", null)
-                    }
+                SectionTitle("Earnings")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    MiniStatCard(Modifier.weight(1f), Icons.Filled.CurrencyRupee, "₹${vm.weekEarnings}", "This Week", Purple, Primary50)
+                    MiniStatCard(Modifier.weight(1f), Icons.Filled.CalendarMonth, "₹${vm.monthEarnings}", "This Month", GreenSuccess, GreenLight)
+                    MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, "₹${vm.walletBalance}", "Balance", Amber, GoldLight)
                 }
             }
 
             // Performance + progress to the next tier (all derived from real figures).
-            Card {
-                SectionTitle("Performance")
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    MiniStat("${vm.workerRating} ★", "Rating", null)
-                    MiniStat("${vm.jobsCompleted}", "Jobs Done", null)
-                    MiniStat(vm.tier.label, "Tier", null)
-                }
-                val next = WorkerTier.next(vm.tier)
-                if (next != null && vm.jobsToNextTier > 0) {
-                    Spacer(Modifier.height(14.dp))
+            SectionTitle("Performance")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Star, "${vm.workerRating}", "Rating", Gold, GoldLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.CheckCircle, "${vm.jobsCompleted}", "Jobs Done", GreenSuccess, GreenLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.EmojiEvents, vm.tier.label, "Tier", Purple, PurpleLight)
+            }
+            val next = WorkerTier.next(vm.tier)
+            if (next != null && vm.jobsToNextTier > 0) {
+                Card {
                     val span = (next.minJobs - vm.tier.minJobs).coerceAtLeast(1)
                     val tierProgress = ((vm.jobsCompleted - vm.tier.minJobs).toFloat() / span).coerceIn(0f, 1f)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(38.dp).background(PurpleLight, RoundedCornerShape(Radius.field)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.EmojiEvents, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(Space.m))
+                        Text("Next tier · ${next.label} ${next.emoji}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
+                    }
+                    Spacer(Modifier.height(Space.m))
                     ProgressBar(tierProgress, fill = Purple)
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(Space.s))
                     Text(
                         "${vm.jobsToNextTier} more jobs to ${next.label} ${next.emoji}",
                         fontSize = 12.sp, color = TextGray,
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Space.s))
         }
     }
 }
@@ -514,13 +590,16 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
 private fun QuickAction(modifier: Modifier, emoji: String, label: String, onClick: () -> Unit) {
     Surface(
         modifier = modifier.clickable { onClick() },
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(Radius.button),
         color = Color.White,
         border = BorderStroke(1.dp, Divider),
     ) {
         Column(Modifier.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(emoji, fontSize = 22.sp)
-            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier.size(40.dp).background(Primary50, RoundedCornerShape(Radius.pill)),
+                contentAlignment = Alignment.Center,
+            ) { Text(emoji, fontSize = 20.sp) }
+            Spacer(Modifier.height(Space.s))
             Text(tr(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextDark)
         }
     }
@@ -539,7 +618,7 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
     ModalDrawerSheet(drawerContainerColor = Color.White, modifier = Modifier.fillMaxWidth(0.87f)) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             // ---- gradient identity header (brand violet/indigo) ----
-            Box(Modifier.fillMaxWidth().background(BrandGradient).padding(20.dp)) {
+            Box(Modifier.fillMaxWidth().background(BrandGradient).padding(Space.xl)) {
                 // Decorative star medallion (top-right), like the reference.
                 Box(
                     Modifier.align(Alignment.TopEnd).offset(x = 34.dp, y = (-26).dp).size(130.dp)
@@ -583,11 +662,11 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
 
             // ---- highlighted "Check your ratings" ----
             Surface(
-                Modifier.fillMaxWidth().padding(16.dp).clickable { go(Routes.PERFORMANCE) },
-                shape = RoundedCornerShape(14.dp), color = GoldLight,
+                Modifier.fillMaxWidth().padding(Space.l).clickable { go(Routes.PERFORMANCE) },
+                shape = RoundedCornerShape(Radius.button), color = GoldLight,
             ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(38.dp).background(Gold, RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(38.dp).background(Gold, RoundedCornerShape(Radius.pill)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.Star, null, tint = Color.White, modifier = Modifier.size(22.dp))
                     }
                     Spacer(Modifier.width(14.dp))
@@ -643,14 +722,15 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
 @Composable
 private fun DrawerRow(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 20.dp, vertical = 11.dp),
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = Space.l, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(40.dp).background(tint.copy(alpha = 0.13f), RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(40.dp).background(tint.copy(alpha = 0.13f), RoundedCornerShape(Radius.pill)), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         }
-        Spacer(Modifier.width(16.dp))
-        Text(tr(label), color = if (tint == RedCancel) RedCancel else TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(Space.l))
+        Text(tr(label), Modifier.weight(1f), color = if (tint == RedCancel) RedCancel else TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -698,7 +778,14 @@ private fun GoalDialog(current: Int, onDismiss: () -> Unit, onConfirm: (Int) -> 
                     placeholder = { Text("1000") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(Radius.field),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = FieldFill,
+                        unfocusedContainerColor = FieldFill,
+                        focusedBorderColor = Purple,
+                        unfocusedBorderColor = Color.Transparent,
+                        cursorColor = Purple,
+                    ),
                 )
             }
         },
@@ -710,3 +797,42 @@ private fun GoalDialog(current: Int, onDismiss: () -> Unit, onConfirm: (Int) -> 
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextGray) } },
     )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI CHANGE LOG — AuthHomeScreens.kt
+// Premium gig/partner-app (Urban Company / Snabbit style) restyle in our violet brand,
+// built on the shared reference-pattern widgets and design tokens. UI-ONLY.
+//
+// LoginScreen:
+//  • Gradient brand header (floating logo tile + tagline); filled, floating-label
+//    OutlinedTextFields (FieldFill / Purple focus, Radius.field); soft error surface;
+//    PrimaryButton (Get OTP / Verify) keeps its exact enabled/loading logic; trust strip.
+//  • Paddings moved to Space tokens.
+//
+// HomeScreen (flagship dashboard):
+//  • Gradient greeting header (avatar + time-of-day greeting, menu / notifications with
+//    unread dot / wallet / profile) — tokenised to Radius.sheet + Space.
+//  • Active-job resume banner → green hero with tinted icon chip + trailing chevron.
+//  • Today's snapshot → 3-up MiniStatCard strip (Earnings / Jobs Today / Completed).
+//  • Attendance, Next Job & Wallet → shared StatusListRow (colored status circle,
+//    title + colored subtitle, value, chevron).
+//  • Quick actions → tinted-chip Cards (Go Online / Take Break / Schedule).
+//  • Online hero switch card retained (green when online) with the live "online today"
+//    timer; tokenised.
+//  • Today's earnings → ElevatedGroup { MoneyBanner + goal-progress breakdown }.
+//  • Incoming / waiting-for-job banners → tinted-icon rows with chevrons.
+//  • Earnings & Performance → MiniStatCard strips; next-tier progress in its own Card.
+//
+// HomeDrawer:
+//  • Gradient identity header (avatar + tier + rating) and highlighted ratings card
+//    retained; menu rows now carry a trailing ChevronRight; tokenised radii/spacing.
+//
+// Helpers: QuickAction wraps its emoji in a tinted chip; GoalDialog field uses the
+// filled-field style; all raw radii/spacing replaced with Radius / Space tokens.
+//
+// NO functionality/logic/flow changed: every @Composable signature is identical; all
+// state (phone/otp/otpSent, online service effects, live timer, goal dialog, active-job
+// resume, attendance/next-job/wallet/tier derivations), validations (10-digit phone,
+// 4-digit OTP), vm.* calls, onClick handlers, navigation routes and the login
+// LaunchedEffect are exactly as before — only layout, colours and styling changed.
+// ─────────────────────────────────────────────────────────────────────────────

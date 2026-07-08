@@ -2,16 +2,21 @@ package com.homehelp.pro
 
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,34 +30,44 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.navigation.NavHostController
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
 
-/** White rounded card — soft shadow + ultra-light outline (Advanced Light Premium surface). */
+/** White rounded card — soft enterprise shadow + ultra-light outline (18dp radius). */
 @Composable
 fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Composable () -> Unit) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = Color.White,
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 2.dp,
+                shape = RoundedCornerShape(Radius.card),
+                spotColor = Color(0x0D101828),
+                ambientColor = Color(0x0A101828),
+            ),
+        shape = RoundedCornerShape(Radius.card),
+        color = CardBg,
         border = BorderStroke(1.dp, CardBorder),
-        shadowElevation = 3.dp,
     ) {
         Column(Modifier.padding(padding.value)) { content() }
     }
@@ -63,14 +78,14 @@ fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Compos
 fun GradientBanner(
     modifier: Modifier = Modifier,
     gradient: Brush = BrandGradient,
-    radius: Int = 22,
+    radius: Int = 20,
     padding: Int = 18,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     Column(
         modifier
             .fillMaxWidth()
-            .shadow(16.dp, RoundedCornerShape(radius.dp), spotColor = Purple, ambientColor = Purple)
+            .shadow(18.dp, RoundedCornerShape(radius.dp), spotColor = Purple, ambientColor = Purple)
             .clip(RoundedCornerShape(radius.dp))
             .background(gradient)
             .padding(padding.dp),
@@ -78,7 +93,7 @@ fun GradientBanner(
     )
 }
 
-enum class Dp16(val value: androidx.compose.ui.unit.Dp) { S(12.dp), M(16.dp) }
+enum class Dp16(val value: Dp) { S(12.dp), M(16.dp) }
 
 // Opens the app-wide side drawer (provided by AppRoot). Default no-op so previews don't crash.
 val LocalDrawerOpen = staticCompositionLocalOf<() -> Unit> { {} }
@@ -94,30 +109,56 @@ val LocalNav = staticCompositionLocalOf<NavHostController?> { null }
 fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
     val openDrawer = LocalDrawerOpen.current
     val nav = LocalNav.current
-    Column(Modifier.fillMaxWidth().background(Color.White)) {
+    Column(Modifier.fillMaxWidth().background(CardBg)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = Space.l, vertical = Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(24.dp).clickable { openDrawer() })
-            Spacer(Modifier.width(10.dp))
+            HeaderIcon(Icons.Filled.Menu, "Menu", tint = TextDark) { openDrawer() }
+            Spacer(Modifier.width(Space.s))
             if (onBack != null) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp).clickable { onBack() })
-                Spacer(Modifier.width(8.dp))
+                HeaderIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextDark) { onBack() }
+                Spacer(Modifier.width(Space.xs))
             }
-            Text(tr(title), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-            if (trailing != null) { trailing(); Spacer(Modifier.width(14.dp)) }
-            Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = Purple, modifier = Modifier.size(23.dp).clickable { nav?.navigateApp(Routes.WALLET) })
-            Spacer(Modifier.width(16.dp))
-            Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Purple, modifier = Modifier.size(23.dp).clickable { nav?.navigateApp(Routes.PROFILE) })
+            Text(
+                tr(title),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextDark,
+                letterSpacing = (-0.2).sp,
+                modifier = Modifier.weight(1f),
+            )
+            if (trailing != null) { trailing(); Spacer(Modifier.width(Space.s)) }
+            HeaderIcon(Icons.Filled.AccountBalanceWallet, "Wallet", tint = Purple) { nav?.navigateApp(Routes.WALLET) }
+            Spacer(Modifier.width(Space.xs))
+            HeaderIcon(Icons.Filled.Person, "Profile", tint = Purple) { nav?.navigateApp(Routes.PROFILE) }
         }
         HairlineDivider()
     }
 }
 
-/** 1px hairline divider used to separate surfaces on the white UI. */
+/** 40dp circular tap target for header actions — accessible touch size + subtle press tint. */
+@Composable
+private fun HeaderIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(Radius.pill))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(23.dp))
+    }
+}
+
+/** 1px hairline divider used to separate surfaces. */
 @Composable
 fun HairlineDivider(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(Divider))
@@ -126,40 +167,56 @@ fun HairlineDivider(modifier: Modifier = Modifier) {
 @Composable
 fun BellHeader(title: String, onBell: (() -> Unit)? = null) {
     Header(title, trailing = {
-        val base = Modifier.size(22.dp)
-        Icon(
-            Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark,
-            modifier = if (onBell != null) base.clickable { onBell() } else base,
-        )
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill))
+                .then(if (onBell != null) Modifier.clickable { onBell() } else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark, modifier = Modifier.size(23.dp))
+        }
     })
 }
 
-/** Gradient primary CTA — brand gradient fill, soft press target, greyed when disabled. */
+/**
+ * Gradient primary CTA — brand gradient fill, ripple, greyed when disabled, and an
+ * optional loading state (spinner + non-interactive) for async actions.
+ */
 @Composable
-fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    val fill = if (enabled) BrandGradient else Brush.linearGradient(listOf(Color(0xFFCBC9D6), Color(0xFFCBC9D6)))
+fun PrimaryButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val active = enabled && !loading
+    val fill = if (enabled) BrandGradient else Brush.linearGradient(listOf(Color(0xFFCBD5E1), Color(0xFFCBD5E1)))
     Box(
         modifier
             .fillMaxWidth()
             .height(54.dp)
-            .then(if (enabled) Modifier.shadow(14.dp, RoundedCornerShape(15.dp), spotColor = Purple, ambientColor = Purple) else Modifier)
-            .clip(RoundedCornerShape(15.dp))
+            .then(if (active) Modifier.shadow(14.dp, RoundedCornerShape(Radius.button), spotColor = Purple, ambientColor = Purple) else Modifier)
+            .clip(RoundedCornerShape(Radius.button))
             .background(fill)
-            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 16.dp),
+            .clickable(enabled = active, onClick = onClick)
+            .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text(tr(text), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        if (loading) {
+            CircularProgressIndicator(color = Color.White, strokeWidth = 2.4.dp, modifier = Modifier.size(22.dp))
+        } else {
+            Text(tr(text), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
 @Composable
 fun OutlineButton(text: String, modifier: Modifier = Modifier, color: Color = Purple, onClick: () -> Unit) {
     Surface(
-        modifier = modifier.height(54.dp).clickable { onClick() },
-        shape = RoundedCornerShape(15.dp),
-        color = Color.White,
-        border = BorderStroke(2.dp, color),
+        modifier = modifier.height(54.dp).clip(RoundedCornerShape(Radius.button)).clickable { onClick() },
+        shape = RoundedCornerShape(Radius.button),
+        color = CardBg,
+        border = BorderStroke(1.5.dp, color),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(tr(text), color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
@@ -179,16 +236,16 @@ fun SegmentedTabs(
     counts: Map<String, Int>? = null,
     onSelect: (String) -> Unit,
 ) {
-    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = Color(0xFFF2F2F5)) {
-        Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.field), color = FieldFill) {
+        Row(Modifier.padding(Space.xs), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             options.forEach { opt ->
                 val isSel = opt == selected
                 val label = counts?.get(opt)?.let { "${tr(opt)} ($it)" } ?: tr(opt)
                 Surface(
                     modifier = Modifier.weight(1f).height(38.dp).clickable { onSelect(opt) },
                     shape = RoundedCornerShape(9.dp),
-                    color = if (isSel) Color.White else Color.Transparent,
-                    shadowElevation = if (isSel) 1.dp else 0.dp,
+                    color = if (isSel) CardBg else Color.Transparent,
+                    shadowElevation = if (isSel) 2.dp else 0.dp,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
@@ -208,23 +265,82 @@ fun SegmentedTabs(
 @Composable
 fun EmptyState(emoji: String, title: String, subtitle: String) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 56.dp),
+        Modifier.fillMaxWidth().padding(vertical = 56.dp, horizontal = Space.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(emoji, fontSize = 40.sp)
-        Spacer(Modifier.height(10.dp))
-        Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 16.sp)
-        Spacer(Modifier.height(4.dp))
-        Text(tr(subtitle), color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        Box(
+            Modifier.size(84.dp).clip(RoundedCornerShape(Radius.pill)).background(Primary50),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(emoji, fontSize = 38.sp)
+        }
+        Spacer(Modifier.height(Space.l))
+        Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 17.sp)
+        Spacer(Modifier.height(Space.xs))
+        Text(tr(subtitle), color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 18.sp)
     }
 }
 
-/** Rounded, flat progress bar for goals/tier progress on the white UI. */
+/** Full-screen centered loader for initial data fetches. */
+@Composable
+fun LoadingScreen(message: String = "Loading…") {
+    Column(
+        Modifier.fillMaxSize().background(ScreenBg),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator(color = Purple, strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(Space.l))
+        Text(tr(message), color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Centered error state with an optional retry action. */
+@Composable
+fun ErrorState(title: String = "Something went wrong", subtitle: String = "Please try again.", onRetry: (() -> Unit)? = null) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 56.dp, horizontal = Space.xxl),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(84.dp).clip(RoundedCornerShape(Radius.pill)).background(RedLight),
+            contentAlignment = Alignment.Center,
+        ) { Text("⚠️", fontSize = 34.sp) }
+        Spacer(Modifier.height(Space.l))
+        Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 17.sp)
+        Spacer(Modifier.height(Space.xs))
+        Text(tr(subtitle), color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        if (onRetry != null) {
+            Spacer(Modifier.height(Space.l))
+            OutlineButton("Retry", modifier = Modifier.width(160.dp), onClick = onRetry)
+        }
+    }
+}
+
+/** Animated shimmer placeholder block — use while content loads (skeleton lists/cards). */
+@Composable
+fun ShimmerBox(modifier: Modifier = Modifier, height: Dp = 16.dp, corner: Dp = 8.dp) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val x by transition.animateFloat(
+        initialValue = -2f,
+        targetValue = 2f,
+        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Restart),
+        label = "shimmerX",
+    )
+    val brush = Brush.linearGradient(
+        colors = listOf(Color(0xFFEDEFF3), Color(0xFFF6F7F9), Color(0xFFEDEFF3)),
+        start = Offset(x * 200f, 0f),
+        end = Offset(x * 200f + 400f, 0f),
+    )
+    Box(modifier.height(height).clip(RoundedCornerShape(corner)).background(brush))
+}
+
+/** Rounded, flat progress bar for goals/tier progress. */
 @Composable
 fun ProgressBar(progress: Float, modifier: Modifier = Modifier, track: Color = Divider, fill: Color = Purple, height: Int = 8) {
     val p = progress.coerceIn(0f, 1f)
-    Box(modifier.fillMaxWidth().height(height.dp).clip(RoundedCornerShape(50)).background(track)) {
-        Box(Modifier.fillMaxWidth(p).height(height.dp).clip(RoundedCornerShape(50)).background(fill))
+    Box(modifier.fillMaxWidth().height(height.dp).clip(RoundedCornerShape(Radius.pill)).background(track)) {
+        Box(Modifier.fillMaxWidth(p).height(height.dp).clip(RoundedCornerShape(Radius.pill)).background(fill))
     }
 }
 
@@ -240,12 +356,12 @@ fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
     val bg = when (tier) {
         WorkerTier.BRONZE -> Color(0xFFF4EBE1)
         WorkerTier.SILVER -> Color(0xFFEEF0F3)
-        WorkerTier.GOLD -> Color(0xFFFDF3DC)
+        WorkerTier.GOLD -> GoldLight
         WorkerTier.PLATINUM -> PurpleLight
     }
-    Surface(shape = RoundedCornerShape(50), color = bg, modifier = modifier) {
+    Surface(shape = RoundedCornerShape(Radius.pill), color = bg, modifier = modifier) {
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            Modifier.padding(horizontal = Space.m, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(tier.emoji, fontSize = 12.sp)
@@ -257,8 +373,8 @@ fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
 
 @Composable
 fun StatusPill(text: String, bg: Color, fg: Color) {
-    Surface(shape = RoundedCornerShape(10.dp), color = bg) {
-        Text(tr(text), color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+    Surface(shape = RoundedCornerShape(Radius.field), color = bg) {
+        Text(tr(text), color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = Space.m, vertical = 5.dp))
     }
 }
 
@@ -282,7 +398,7 @@ fun LabeledRow(label: String, value: String?, valueColor: Color = TextDark) {
 @Composable
 fun Avatar(initials: String, size: Int = 44, bg: Color = PurpleLight, fg: Color = Purple) {
     Box(
-        Modifier.size(size.dp).clip(RoundedCornerShape(50)).background(bg),
+        Modifier.size(size.dp).clip(RoundedCornerShape(Radius.pill)).background(bg),
         contentAlignment = Alignment.Center,
     ) {
         Text(initials, color = fg, fontWeight = FontWeight.Bold, fontSize = (size / 2.6).sp)
@@ -291,9 +407,26 @@ fun Avatar(initials: String, size: Int = 44, bg: Color = PurpleLight, fg: Color 
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(tr(text), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.padding(vertical = 4.dp))
+    Text(tr(text), fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = TextDark, letterSpacing = (-0.2).sp, modifier = Modifier.padding(vertical = Space.xs))
 }
 
 fun toast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI CHANGE LOG — Components.kt
+// UI improvements (all shared widgets — changes propagate app-wide):
+//  • Card: 18dp radius + softer, layered enterprise shadow.
+//  • PrimaryButton: 14dp radius, ripple, disabled state, and a new optional
+//    loading state (spinner) — added as a defaulted param, fully backward-compatible.
+//  • OutlineButton / StatusPill / SegmentedTabs / ProgressBar / Avatar / TierBadge:
+//    aligned to the new radius, spacing and colour tokens.
+//  • Header: larger bold title + 40dp circular accessible tap targets for actions.
+//  • EmptyState: friendlier tinted icon medallion + larger type.
+//  • Added LoadingScreen, ErrorState (with retry) and ShimmerBox skeleton helpers.
+//  • SectionTitle raised to the 20/SemiBold enterprise section scale.
+// No functionality changed: every function signature is preserved (new params are
+// optional with defaults); these are presentational widgets with no business
+// logic, API, navigation, or state.
+// ─────────────────────────────────────────────────────────────────────────────
