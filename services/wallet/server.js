@@ -319,8 +319,47 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
     if (ins.rowCount) await adjustBalance(b.worker_id, { balance: comp, earnings: comp })
   } else if (type === 'payout.completed' && data.withdrawalId) {
     await pool.query("UPDATE worker_withdrawals SET status='Paid' WHERE id=$1", [data.withdrawalId])
-  }
+  } else if (type === 'shift.late') await applyShiftLatePenalty(data)
+  else if (type === 'shift.settle') await settleMinGuarantee(data)
+  else if (type === 'geofence.breach') await notifyGeofenceBreach(data)
 })
+
+// Worker left their assigned apartment radius → drop a persistent alert in their notifications.
+async function notifyGeofenceBreach({ workerId, siteName, distance, radius }) {
+  if (!workerId) return
+  await notify(workerId, 'Left assigned area',
+    `You are ${distance} m from ${siteName || 'your assigned apartment'} (allowed ${radius} m). Please return to your assigned area.`)
+}
+
+// Late shift check-in → deduct the shift's penalty from the worker's wallet.
+async function applyShiftLatePenalty({ workerId, amount, shiftName, lateMinutes }) {
+  const amt = Math.max(0, parseInt(amount, 10) || 0)
+  if (!workerId || !amt) return
+  await pool.query(
+    "INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1,'Shift Late Penalty',$2,$3)",
+    [workerId, `Late shift check-in · ${shiftName || 'shift'} (${lateMinutes || 0} min late)`, amt])
+  await adjustBalance(workerId, { balance: -amt })
+  await notify(workerId, 'Late check-in penalty', `−₹${amt}: you checked in ${lateMinutes || 0} min after your ${shiftName || ''} shift start`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Shift late penalty ₹${amt} (${lateMinutes || 0} min late)`, meta: { amount: amt } })
+}
+
+// Shift checkout → guarantee a minimum day's pay: top up if job earnings fell short (idempotent/day).
+async function settleMinGuarantee({ workerId, minG, day }) {
+  const g = Math.max(0, parseInt(minG, 10) || 0)
+  if (!workerId || !g || !day) return
+  const earned = (await pool.query(
+    "SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND category='Job Earnings' AND (created AT TIME ZONE 'Asia/Kolkata')::date = $2",
+    [workerId, day])).rows[0].s
+  const topUp = g - earned
+  if (topUp <= 0) return
+  const ins = await pool.query(
+    "INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Min Guarantee',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id",
+    [workerId, `Shift minimum guarantee top-up (${day})`, topUp, `ming-${workerId}-${day}`])
+  if (!ins.rowCount) return
+  await adjustBalance(workerId, { balance: topUp, earnings: topUp })
+  await notify(workerId, 'Minimum guarantee', `+₹${topUp} top-up to meet your ₹${g} shift minimum for ${day}`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: workerId, detail: `Min-guarantee top-up ₹${topUp} for ${day}`, meta: { amount: topUp } })
+}
 
 init()
   .then(() => {

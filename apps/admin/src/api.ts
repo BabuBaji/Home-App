@@ -157,6 +157,21 @@ export interface Shift { id: number; worker_id: number; worker_name: string; zon
 export const fetchShifts = () => req<Shift[]>('/shifts')
 export const createShift = (body: Record<string, unknown>) => req<{ ok: boolean; added: number }>('/shifts', post('', body))
 export const deleteShift = (id: number) => req<{ ok: boolean }>(`/shifts/${id}`, { method: 'DELETE' })
+
+/* shift PLANS (min-guarantee) + attendance */
+export interface ShiftDef { id: number; code: string; name: string; start: string; end: string; graceMin: number; penalty: number; minGWeekday: number; minGWeekend: number; active: boolean }
+export interface AttendanceRow { workerId: number; workerName: string; shift: string; checkIn: string; checkOut: string; onTime: boolean | null; lateMinutes: number; penalty: number; minG: number; site?: string; geoBreaches?: number }
+export const fetchShiftDefs = () => req<ShiftDef[]>('/shift-defs')
+export const updateShiftDef = (id: number, body: Partial<ShiftDef>) => req<{ ok: boolean }>(`/shift-defs/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+export const fetchAttendance = (day?: string) => req<{ day: string; rows: AttendanceRow[] }>(`/attendance${day ? `?day=${day}` : ''}`)
+
+/* apartments (geofence sites) */
+export interface Site { id: number; name: string; address: string; lat: number; lng: number; radius: number; active: boolean; assigned: number }
+export const fetchSites = () => req<Site[]>('/sites')
+export const createSite = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/sites', post('', body))
+export const updateSite = (id: number, body: Partial<Site>) => req<{ ok: boolean }>(`/sites/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+export const deleteSite = (id: number) => req<{ ok: boolean }>(`/sites/${id}`, { method: 'DELETE' })
+export const assignWorkerSite = (workerId: number, siteId: number | null) => req<{ ok: boolean }>(`/workers/${workerId}/site`, post('', { siteId }))
 export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
 export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
 export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })

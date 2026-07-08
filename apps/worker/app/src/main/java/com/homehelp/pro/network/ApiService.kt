@@ -35,6 +35,15 @@ interface ApiService {
     @POST("api/worker/attendance/checkout")
     suspend fun checkOut(@Body body: AttendanceBody): AttendanceDto
 
+    @GET("api/worker/shifts")
+    suspend fun getShifts(): ShiftInfo
+
+    @POST("api/worker/shift")
+    suspend fun selectShift(@Body body: SelectShiftBody): AttendanceDto
+
+    @POST("api/worker/geofence/report")
+    suspend fun reportGeofence(@Body body: GeofenceReportBody): GeofenceStatus
+
     @POST("api/worker/status")
     suspend fun setStatus(@Body body: StatusBody): WorkerDto
 

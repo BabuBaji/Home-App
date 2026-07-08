@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
@@ -652,6 +653,28 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
     } catch (_: Exception) { null to null }
 
     DetailScaffold("Attendance", nav) {
+        // ── Shift plan picker (min-guarantee model) ──
+        Card {
+            SectionLabel("Your Shift Plan")
+            Text(
+                "Pick one shift. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 10)} min of the start time — later check-ins are penalised.",
+                fontSize = 12.sp, color = TextGray,
+            )
+            Spacer(Modifier.height(Space.m))
+            if (vm.shifts.isEmpty()) {
+                Text("No shifts available yet.", fontSize = 13.sp, color = TextMuted)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    vm.shifts.forEach { s ->
+                        ShiftOption(s, vm.selectedShiftId == s.id) {
+                            vm.selectShift(s.id) { toast(ctx, "Shift set: ${s.name}") }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Today's attendance status (judged against the chosen shift) ──
         Card {
             val (dot, label) = when {
                 att.checkedOut -> GreenSuccess to "Checked Out"
@@ -663,14 +686,81 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
-                    Text("Today's shift status", fontSize = 12.sp, color = TextGray)
+                    Text(
+                        if (att.shiftName.isNotBlank()) "${att.shiftName} shift · ${att.shiftStart}–${att.shiftEnd}" else "Choose a shift plan above",
+                        fontSize = 12.sp, color = TextGray,
+                    )
                 }
                 Box(Modifier.size(12.dp).background(dot, RoundedCornerShape(Radius.pill)))
+            }
+            // On-time / late banner once the worker has checked in.
+            if (att.checkedIn && att.shiftName.isNotBlank()) {
+                Spacer(Modifier.height(Space.m))
+                val onTime = att.onTime
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
+                        .background(if (onTime) GreenLight else RedLight).padding(Space.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (onTime) Icons.Filled.CheckCircle else Icons.Filled.Close,
+                        contentDescription = null,
+                        tint = if (onTime) GreenSuccess else RedCancel,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(Space.s))
+                    Text(
+                        if (onTime) "On time — no penalty" else "Late by ${att.lateMinutes} min · −₹${att.penalty} deducted",
+                        color = if (onTime) GreenSuccess else RedCancel, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                    )
+                }
             }
             Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.s))
             LabeledRow("Check-in time", att.checkInAt.ifBlank { "—" })
             LabeledRow("Check-out time", att.checkOutAt.ifBlank { "—" })
-            LabeledRow("Shift", if (vm.shiftStart.isNotBlank()) "${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
+            LabeledRow("Shift", if (att.shiftName.isNotBlank()) "${att.shiftName} · ${att.shiftStart}–${att.shiftEnd}" else "Not set")
+            if (att.minGuarantee > 0) LabeledRow("Minimum guarantee", "₹${att.minGuarantee}", GreenSuccess)
+            LabeledRow("Days attended this month", "${att.attendedThisMonth} ${if (att.attendedThisMonth == 1) "day" else "days"}", Purple)
+        }
+        // ── Assigned apartment (geofence): must stay within the radius during the shift ──
+        if (att.siteName.isNotBlank()) {
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconChip(Icons.Filled.LocationOn, Purple, PurpleLight)
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text("Assigned Apartment", fontSize = 12.sp, color = TextGray)
+                        Text(att.siteName, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
+                        if (att.siteAddress.isNotBlank()) Text(att.siteAddress, fontSize = 12.sp, color = TextGray)
+                    }
+                }
+                Spacer(Modifier.height(Space.m))
+                val g = vm.geofence
+                val outside = g?.let { !it.inside } ?: att.geoOutside
+                val bg = if (!att.geoActive) FieldFill else if (outside) RedLight else GreenLight
+                val fg = if (!att.geoActive) TextGray else if (outside) RedCancel else GreenSuccess
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(bg).padding(Space.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (!att.geoActive) Icons.Filled.LocationOn else if (outside) Icons.Filled.Close else Icons.Filled.CheckCircle,
+                        contentDescription = null, tint = fg, modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(Space.s))
+                    Text(
+                        when {
+                            !att.geoActive -> "Check in here — then stay within ${att.geofenceM} m all day."
+                            outside -> "Outside your area${g?.let { " · ${it.distance} m away" } ?: ""} (limit ${att.geofenceM} m)"
+                            else -> "Inside your area${g?.let { " · ${it.distance} m from centre" } ?: ""}"
+                        },
+                        color = fg, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, lineHeight = 16.sp,
+                    )
+                }
+                Spacer(Modifier.height(Space.s))
+                LabeledRow("Allowed radius", "${att.geofenceM} m")
+                if (att.geoBreaches > 0) LabeledRow("Times you left the area today", "${att.geoBreaches}", RedCancel)
+            }
         }
         // Availability state — only "Available" receives new jobs.
         Card {
@@ -719,6 +809,34 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.width(Space.s))
                 Text("Shift complete for today. See you tomorrow!", color = GreenSuccess, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
+        }
+    }
+}
+
+/** A selectable shift-plan row — radio + name/window + minimum-guarantee. Violet when chosen. */
+@Composable
+private fun ShiftOption(s: com.homehelp.pro.network.ShiftDto, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
+            .background(if (selected) PurpleLight else FieldFill)
+            .then(if (selected) Modifier.border(1.5.dp, Purple, RoundedCornerShape(Radius.field)) else Modifier)
+            .clickable { onClick() }
+            .padding(Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(20.dp).clip(RoundedCornerShape(Radius.pill))
+                .border(2.dp, if (selected) Purple else TextMuted, RoundedCornerShape(Radius.pill)),
+            contentAlignment = Alignment.Center,
+        ) { if (selected) Box(Modifier.size(10.dp).background(Purple, RoundedCornerShape(Radius.pill))) }
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.weight(1f)) {
+            Text("${s.name} Shift", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 15.sp)
+            Text("${s.start} – ${s.end} · ${s.hours}h · ${s.graceMin}m grace", fontSize = 12.sp, color = TextGray)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("₹${s.minGuarantee}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 15.sp)
+            Text("min. guarantee", fontSize = 10.sp, color = TextGray)
         }
     }
 }

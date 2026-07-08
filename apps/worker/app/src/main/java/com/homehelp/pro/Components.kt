@@ -4,9 +4,11 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,8 +39,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,6 +105,10 @@ enum class Dp16(val value: Dp) { S(12.dp), M(16.dp) }
 val LocalDrawerOpen = staticCompositionLocalOf<() -> Unit> { {} }
 // The app's NavController (provided by AppRoot) so shared chrome can navigate (wallet/profile).
 val LocalNav = staticCompositionLocalOf<NavHostController?> { null }
+// Live wallet balance + worker initials, provided by AppRoot, so the shared Header's top-right
+// chips can show the running balance and an avatar without threading the VM into every screen.
+val LocalWalletBalance = compositionLocalOf { 0 }
+val LocalWorkerInitials = compositionLocalOf { "" }
 
 /**
  * Standard top header, present on every screen: ☰ menu (opens the side drawer) on the left,
@@ -131,9 +141,9 @@ fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable (
                 modifier = Modifier.weight(1f),
             )
             if (trailing != null) { trailing(); Spacer(Modifier.width(Space.s)) }
-            HeaderIcon(Icons.Filled.AccountBalanceWallet, "Wallet", tint = Purple) { nav?.navigateApp(Routes.WALLET) }
-            Spacer(Modifier.width(Space.xs))
-            HeaderIcon(Icons.Filled.Person, "Profile", tint = Purple) { nav?.navigateApp(Routes.PROFILE) }
+            WalletChip(LocalWalletBalance.current) { nav?.navigateApp(Routes.WALLET) }
+            Spacer(Modifier.width(Space.s))
+            ProfileChip(LocalWorkerInitials.current) { nav?.navigateApp(Routes.PROFILE) }
         }
         HairlineDivider()
     }
@@ -155,6 +165,51 @@ private fun HeaderIcon(
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(23.dp))
+    }
+}
+
+/** Top-right wallet action rendered as a pill that shows the live balance ON the icon —
+ *  a compact "₹1,250" chip. `onDark` switches to a translucent-white look for gradient headers. */
+@Composable
+fun WalletChip(balance: Int, onDark: Boolean = false, onClick: () -> Unit) {
+    val bg = if (onDark) Color.White.copy(alpha = 0.18f) else PurpleLight
+    val fg = if (onDark) Color.White else Purple
+    Surface(
+        shape = RoundedCornerShape(Radius.pill),
+        color = bg,
+        modifier = Modifier.clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = fg, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(
+                "₹" + java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(balance),
+                color = fg, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+            )
+        }
+    }
+}
+
+/** Top-right profile action rendered as a gradient avatar with the worker's initials
+ *  (falls back to a person glyph). `onDark` gives a translucent-white avatar on gradients. */
+@Composable
+fun ProfileChip(initials: String, onDark: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(Radius.pill))
+            .then(if (onDark) Modifier.background(Color.White.copy(alpha = 0.22f)) else Modifier.background(BrandGradient))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (initials.isBlank()) {
+            Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Color.White, modifier = Modifier.size(20.dp))
+        } else {
+            Text(initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
     }
 }
 
@@ -412,6 +467,16 @@ fun SectionTitle(text: String) {
 
 fun toast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+/** Tactile press feedback: springs the element down to 93% while pressed (ripple-free).
+ *  Makes tiles/cards feel interactive. Use in place of `.clickable { }` on visual tiles. */
+fun Modifier.bounceClick(onClick: () -> Unit): Modifier = composed {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.93f else 1f, label = "bounce")
+    graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(interactionSource = interaction, indication = null, onClick = onClick)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

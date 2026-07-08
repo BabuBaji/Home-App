@@ -108,6 +108,10 @@ data class Booking(
     val timeInfo: String? = null,
     val amount: Int = 0,
     val status: String? = null,
+    // Booking reference (e.g. "#HH12345") — matches the wallet ledger's Job Earnings label,
+    // so the Earnings calendar can resolve each ledger entry to its real service name.
+    // Kept LAST so existing positional Booking(...) constructions stay valid.
+    val ref: String? = null,
 )
 
 data class EarningEntry(val date: String, val amount: Int, val paid: Boolean = true)
@@ -329,6 +333,7 @@ class AppViewModel : ViewModel() {
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
         schedule.clear(); schedule.addAll(b.schedule)
         b.attendance?.let { attendance = it }
+        b.shift?.let { shifts.clear(); shifts.addAll(it.shifts); selectedShiftId = it.selectedId }
         leaves.clear(); leaves.addAll(b.leaves)
         tickets.clear(); tickets.addAll(b.tickets)
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
@@ -718,6 +723,40 @@ class AppViewModel : ViewModel() {
 
     fun saveAvailability() = sync {
         api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))
+    }
+
+    // ---- shift plans (min-guarantee) ----
+    val shifts = mutableStateListOf<com.homehelp.pro.network.ShiftDto>()
+    var selectedShiftId by mutableStateOf<Int?>(null)
+        private set
+    /** Sign the worker up for a shift plan; the server re-derives attendance/guarantee status. */
+    fun selectShift(id: Int, onDone: () -> Unit = {}) {
+        selectedShiftId = id
+        viewModelScope.launch {
+            try { attendance = api.selectShift(com.homehelp.pro.network.SelectShiftBody(id)); backendConnected = true } catch (_: Exception) {}
+            onDone()
+        }
+    }
+
+    // ---- geofence (assigned-apartment radius) ----
+    var geofence by mutableStateOf<com.homehelp.pro.network.GeofenceStatus?>(null)
+        private set
+    // Non-null while an "you left your assigned area" alert should be shown app-wide.
+    var geofenceAlert by mutableStateOf<String?>(null)
+        private set
+    fun dismissGeofenceAlert() { geofenceAlert = null }
+    /** Report the worker's live location; raises an alert the first time they leave the radius. */
+    fun reportGeofence(lat: Double, lng: Double) {
+        viewModelScope.launch {
+            try {
+                val g = api.reportGeofence(com.homehelp.pro.network.GeofenceReportBody(lat, lng))
+                geofence = g
+                if (g.justBreached) {
+                    geofenceAlert = "You've left ${g.siteName.ifBlank { "your assigned apartment" }}. " +
+                        "You're ${g.distance} m away (allowed ${g.radius} m). Please return to your assigned area."
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     // ---- attendance (check-in / check-out) ----

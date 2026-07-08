@@ -182,6 +182,7 @@ data class BootstrapResponse(
     val bookings: List<Booking> = emptyList(),
     val schedule: List<ScheduleItem> = emptyList(),
     val attendance: AttendanceDto? = null,
+    val shift: ShiftInfo? = null,
     val leaves: List<LeaveItem> = emptyList(),
     val tickets: List<TicketItem> = emptyList(),
     val earnings: List<EarningEntry> = emptyList(),
@@ -189,14 +190,68 @@ data class BootstrapResponse(
     val documents: List<DocumentDto> = emptyList(),
 )
 
-/** Today's attendance snapshot (check-in / check-out). */
+/** Today's attendance snapshot (check-in / check-out) + the worker's shift-plan status. */
 data class AttendanceDto(
     val checkedIn: Boolean = false,
     val checkedOut: Boolean = false,
     val checkInAt: String = "",
     val checkOutAt: String = "",
     val status: String = "Not checked in",
+    val attendedThisMonth: Int = 0,
+    // Shift-plan context: which shift, its start window, and today's on-time / penalty / guarantee.
+    val shiftId: Int? = null,
+    val shiftName: String = "",
+    val shiftStart: String = "",
+    val shiftEnd: String = "",
+    val graceMin: Int = 0,
+    val onTime: Boolean = true,
+    val lateMinutes: Int = 0,
+    val penalty: Int = 0,
+    val minGuarantee: Int = 0,
+    // Assigned apartment (geofence): centre + radius the worker must stay within for the day.
+    val siteName: String = "",
+    val siteAddress: String = "",
+    val siteLat: Double? = null,
+    val siteLng: Double? = null,
+    val geofenceM: Int = 300,
+    val geoActive: Boolean = false,
+    val geoOutside: Boolean = false,
+    val geoBreaches: Int = 0,
 )
+
+data class GeofenceReportBody(val lat: Double, val lng: Double)
+
+/** Result of reporting the worker's live location against their assigned-apartment radius. */
+data class GeofenceStatus(
+    val active: Boolean = false,
+    val inside: Boolean = true,
+    val distance: Int = 0,
+    val radius: Int = 0,
+    val siteName: String = "",
+    val breaches: Int = 0,
+    val justBreached: Boolean = false,
+)
+
+/** A selectable shift plan (min-guarantee model). */
+data class ShiftDto(
+    val id: Int = 0,
+    val code: String = "",
+    val name: String = "",
+    val start: String = "",
+    val end: String = "",
+    val hours: Int = 8,
+    val graceMin: Int = 10,
+    val penalty: Int = 50,
+    val minGuarantee: Int = 0,
+)
+
+/** The available shift plans + which one the worker has selected. */
+data class ShiftInfo(
+    val selectedId: Int? = null,
+    val shifts: List<ShiftDto> = emptyList(),
+)
+
+data class SelectShiftBody(val shiftId: Int)
 
 data class AttendanceBody(val lat: Double? = null, val lng: Double? = null)
 

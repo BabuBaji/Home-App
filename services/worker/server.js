@@ -56,6 +56,37 @@ async function init() {
       in_lat REAL, in_lng REAL, out_lat REAL, out_lng REAL,
       UNIQUE(worker_id, day)
     )`,
+    // Shift PLANS (min-guarantee model): the named shifts a worker signs up for. A worker picks
+    // one; attendance/check-in is judged against its start_min (+ grace_min); late → penalty; and
+    // the day is topped up to min_g_* if job earnings fall short. Admin-editable.
+    `CREATE TABLE IF NOT EXISTS shift_defs (
+      id SERIAL PRIMARY KEY, code TEXT UNIQUE, name TEXT NOT NULL,
+      start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
+      grace_min INTEGER NOT NULL DEFAULT 10, penalty INTEGER NOT NULL DEFAULT 50,
+      min_g_weekday INTEGER NOT NULL DEFAULT 850, min_g_weekend INTEGER NOT NULL DEFAULT 950,
+      active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0
+    )`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS shift_def_id INTEGER`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS shift_def_id INTEGER`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_minutes INTEGER`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS on_time BOOLEAN`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS penalty INTEGER DEFAULT 0`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS min_g INTEGER DEFAULT 0`,
+    // Assigned APARTMENTS/sites (geofence): a worker is assigned an apartment for the day; the
+    // app alerts if they wander beyond `radius` metres of it. Admin-managed.
+    `CREATE TABLE IF NOT EXISTS worker_sites (
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, address TEXT,
+      lat REAL NOT NULL, lng REAL NOT NULL, radius INTEGER NOT NULL DEFAULT 300,
+      active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ DEFAULT now()
+    )`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS site_id INTEGER`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_id INTEGER`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_name TEXT`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_lat REAL`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_lng REAL`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS geofence_m INTEGER`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS geo_outside BOOLEAN DEFAULT false`,
+    `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS geo_breaches INTEGER DEFAULT 0`,
     // Leave requests (worker submits; admin/ops approves — status Pending|Approved|Rejected).
     `CREATE TABLE IF NOT EXISTS leave_requests (
       id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL,
@@ -113,6 +144,28 @@ async function init() {
       }
     }
     console.log(`[worker] seeded ${W.length} workers + all-day shifts for ${activeIds.length} active pros`)
+  }
+  // Seed the 3 selectable shift PLANS once (8h each, spanning 05:00–22:00). Admin can edit these.
+  if (!(await pool.query('SELECT COUNT(*)::int n FROM shift_defs')).rows[0].n) {
+    const S = [
+      ['morning', 'Morning', 300, 780, 1],    // 05:00 – 13:00
+      ['afternoon', 'Afternoon', 720, 1200, 2], // 12:00 – 20:00
+      ['evening', 'Evening', 840, 1320, 3],    // 14:00 – 22:00
+    ]
+    for (const [code, name, sm, em, sort] of S)
+      await pool.query('INSERT INTO shift_defs (code,name,start_min,end_min,sort) VALUES ($1,$2,$3,$4,$5)', [code, name, sm, em, sort])
+    console.log('[worker] seeded 3 shift plans (Morning/Afternoon/Evening)')
+  }
+  // Seed a couple of sample apartments (geofence sites, 300 m) — admin can add/edit more.
+  if (!(await pool.query('SELECT COUNT(*)::int n FROM worker_sites')).rows[0].n) {
+    const A = [
+      ['Brigade Citadel', 'Moosapet, Hyderabad', 17.4517, 78.4308, 300],
+      ['My Home Avatar', 'Narsingi, Hyderabad', 17.3936, 78.3711, 300],
+      ['Aparna Sarovar', 'Nallagandla, Hyderabad', 17.4720, 78.3050, 300],
+    ]
+    for (const [name, addr, lat, lng, r] of A)
+      await pool.query('INSERT INTO worker_sites (name,address,lat,lng,radius) VALUES ($1,$2,$3,$4,$5)', [name, addr, lat, lng, r])
+    console.log('[worker] seeded 3 sample apartments (geofence sites)')
   }
   console.log('[worker] Postgres ready (workers, worker_documents)')
 }
@@ -178,6 +231,28 @@ function istNow() { const d = new Date(Date.now() + 5.5 * 3600 * 1000); return {
 const onShiftNow = (rows) => { const { weekday, minutes } = istNow(); return rows.some((s) => s.weekday === weekday && s.start_min <= minutes && minutes < s.end_min) }
 const toMin = (t) => { const [h, m] = String(t || '').split(':').map(Number); return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0) }
 const toHHMM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+
+// ---- shift plans (min-guarantee) ----
+const isWeekend = (weekday) => weekday === 0 || weekday === 6
+// App DTO for a shift plan; minGuarantee resolves to weekday/weekend rate for the given day.
+const shiftDefDto = (s, weekday) => ({
+  id: s.id, code: s.code, name: s.name,
+  start: toHHMM(s.start_min), end: toHHMM(s.end_min),
+  hours: Math.round((s.end_min - s.start_min) / 60),
+  graceMin: s.grace_min, penalty: s.penalty,
+  minGuarantee: isWeekend(weekday) ? s.min_g_weekend : s.min_g_weekday,
+})
+const getShiftDef = async (id) => (id ? (await pool.query('SELECT * FROM shift_defs WHERE id=$1', [id])).rows[0] || null : null)
+
+// ---- geofence (assigned apartment) ----
+const getSite = async (id) => (id ? (await pool.query('SELECT * FROM worker_sites WHERE id=$1', [id])).rows[0] || null : null)
+// Great-circle distance in METRES between two lat/lng points (Haversine).
+function distanceM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)))
+}
 async function shiftsByWorker() {
   const rows = (await pool.query('SELECT worker_id, weekday, start_min, end_min FROM shifts')).rows
   const by = {}; for (const s of rows) (by[s.worker_id] ||= []).push(s); return by
@@ -233,6 +308,7 @@ async function bootstrap(wid) {
   // Every field the worker app's Booking model requires is non-null here — the Compose UI treats
   // them as non-null String, and a missing key would deserialize to null and crash the Bookings tab.
   const bookingDto = (b) => ({
+    ref: b.ref,
     service: (b.items || []).map((i) => i.name).join(', ') || 'Service',
     customerName: custNames[b.user_id] || 'Customer',
     address: b.address || '—',
@@ -272,25 +348,65 @@ async function bootstrap(wid) {
     bookings: mine.map(bookingDto),
     schedule: todaySchedule(mine, custNames),
     attendance: await attendanceToday(wid),
+    shift: await shiftPlans(wid),
     leaves: await leaveList(wid),
     tickets: await ticketList(wid),
     documents: await documents(wid),
   }
 }
 
-// Today's attendance snapshot for a worker (check-in/out times + derived status).
+// Today's attendance snapshot for a worker (check-in/out times + derived status + shift plan).
 async function attendanceToday(wid) {
   const day = istDateStr(Date.now())
   const { rows } = await pool.query('SELECT * FROM attendance WHERE worker_id=$1 AND day=$2', [wid, day])
   const r = rows[0]
   const checkedIn = !!(r && r.check_in)
   const checkedOut = !!(r && r.check_out)
+  const w = await getWorker(wid)
+  const sd = await getShiftDef(w?.shift_def_id)
+  const { weekday } = istNow()
+  // How many days the worker has attended (checked in) this IST calendar month.
+  const attendedThisMonth = (await pool.query(
+    "SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND day >= date_trunc('month', (now() AT TIME ZONE 'Asia/Kolkata')::date)",
+    [wid])).rows[0].n
+  // Assigned apartment (geofence): while checked in use the day's snapshot; otherwise show the
+  // admin-assigned site so the worker knows where they'll be posted.
+  const assigned = await getSite(w?.site_id)
+  const geoActive = checkedIn && r && r.site_lat != null
   return {
     checkedIn, checkedOut,
+    attendedThisMonth,
+    // Assigned apartment + geofence.
+    siteName: (r && r.site_name) || assigned?.name || '',
+    siteAddress: assigned?.address || '',
+    siteLat: (r && r.site_lat != null ? r.site_lat : assigned?.lat) ?? null,
+    siteLng: (r && r.site_lng != null ? r.site_lng : assigned?.lng) ?? null,
+    geofenceM: (r && r.geofence_m) || assigned?.radius || 300,
+    geoActive: !!geoActive,
+    geoOutside: !!(r && r.geo_outside),
+    geoBreaches: (r && r.geo_breaches) || 0,
     checkInAt: r && r.check_in ? istClock(r.check_in) : '',
     checkOutAt: r && r.check_out ? istClock(r.check_out) : '',
     status: checkedOut ? 'Checked out' : (checkedIn ? 'Checked in' : 'Not checked in'),
+    // Shift plan the worker signed up for + today's on-time / penalty / guarantee status.
+    shiftId: sd ? sd.id : null,
+    shiftName: sd ? sd.name : '',
+    shiftStart: sd ? toHHMM(sd.start_min) : '',
+    shiftEnd: sd ? toHHMM(sd.end_min) : '',
+    graceMin: sd ? sd.grace_min : 0,
+    onTime: r && r.on_time != null ? !!r.on_time : true,
+    lateMinutes: r && r.late_minutes ? r.late_minutes : 0,
+    penalty: r && r.penalty ? r.penalty : 0,
+    minGuarantee: sd ? (isWeekend(weekday) ? sd.min_g_weekend : sd.min_g_weekday) : 0,
   }
+}
+
+// The selectable shift plans + which one this worker picked (for the app's shift picker).
+async function shiftPlans(wid) {
+  const { weekday } = istNow()
+  const { rows } = await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')
+  const w = await getWorker(wid)
+  return { selectedId: w?.shift_def_id || null, shifts: rows.map((s) => shiftDefDto(s, weekday)) }
 }
 
 // A worker's support tickets, newest first.
@@ -336,23 +452,95 @@ app.put('/api/worker/profile', auth, async (req, res) => { const b = req.body ||
 app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (pending verification)' }); res.json(workerDto(await getWorker(req.worker.id))) })
 app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
 
+/* ---------- shift plans (min-guarantee) ---------- */
+app.get('/api/worker/shifts', auth, async (req, res) => {
+  const { weekday } = istNow()
+  const { rows } = await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')
+  const w = await getWorker(req.worker.id)
+  res.json({ selectedId: w?.shift_def_id || null, shifts: rows.map((s) => shiftDefDto(s, weekday)) })
+})
+app.post('/api/worker/shift', auth, async (req, res) => {
+  const id = Number(req.body?.shiftId) || null
+  await pool.query('UPDATE workers SET shift_def_id=$1 WHERE id=$2', [id, req.worker.id])
+  const sd = await getShiftDef(id)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'shift.select', entityType: 'worker', entityId: req.worker.id, detail: `Chose ${sd ? sd.name + ' shift' : 'no shift'}` })
+  res.json(await attendanceToday(req.worker.id))
+})
+
 /* ---------- attendance (check-in / check-out) ---------- */
 app.post('/api/worker/attendance/checkin', auth, async (req, res) => {
   const b = req.body || {}, day = istDateStr(Date.now())
+  // Judge the check-in against the worker's chosen shift: on-time within grace, else a penalty.
+  const w = await getWorker(req.worker.id)
+  const sd = await getShiftDef(w?.shift_def_id)
+  const { weekday, minutes } = istNow()
+  const minG = sd ? (isWeekend(weekday) ? sd.min_g_weekend : sd.min_g_weekday) : 0
+  let lateMin = 0, onTime = true, penalty = 0
+  if (sd) {
+    lateMin = Math.max(0, minutes - sd.start_min)
+    if (minutes - sd.start_min > sd.grace_min) { onTime = false; penalty = sd.penalty }
+  }
+  // Assign the day's APARTMENT/geofence: the worker's admin-assigned site if set, else the
+  // check-in location becomes the centre. The worker must stay within `geofence_m` metres.
+  const site = await getSite(w?.site_id)
+  const siteLat = site ? site.lat : (b.lat ?? null)
+  const siteLng = site ? site.lng : (b.lng ?? null)
+  const geofenceM = site ? site.radius : 300
+  const siteName = site ? site.name : (b.lat != null ? 'Check-in area' : '')
+  // Apply shift rules only on the FIRST check-in of the day (never re-penalize a re-tap).
+  const existing = (await pool.query('SELECT check_in FROM attendance WHERE worker_id=$1 AND day=$2', [req.worker.id, day])).rows[0]
+  const firstCheckin = !existing?.check_in
   await pool.query(
-    `INSERT INTO attendance (worker_id, day, check_in, in_lat, in_lng) VALUES ($1,$2,now(),$3,$4)
+    `INSERT INTO attendance (worker_id, day, check_in, in_lat, in_lng, shift_def_id, late_minutes, on_time, penalty, min_g,
+       site_id, site_name, site_lat, site_lng, geofence_m, geo_outside, geo_breaches)
+     VALUES ($1,$2,now(),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,false,0)
      ON CONFLICT (worker_id, day) DO UPDATE SET check_in = COALESCE(attendance.check_in, now()),
        in_lat = COALESCE(attendance.in_lat, $3), in_lng = COALESCE(attendance.in_lng, $4)`,
-    [req.worker.id, day, b.lat ?? null, b.lng ?? null])
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'attendance.checkin', entityType: 'worker', entityId: req.worker.id, detail: 'Checked in' })
+    [req.worker.id, day, b.lat ?? null, b.lng ?? null, sd?.id ?? null, lateMin, onTime, firstCheckin ? penalty : 0, minG,
+      site?.id ?? null, siteName, siteLat, siteLng, geofenceM])
+  if (firstCheckin && penalty > 0) {
+    // Wallet service owns the ledger — it deducts the penalty on this event.
+    publishEvent(REDIS_URL, 'shift.late', { workerId: req.worker.id, amount: penalty, shiftName: sd.name, lateMinutes: lateMin })
+  }
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'attendance.checkin', entityType: 'worker', entityId: req.worker.id, detail: onTime ? 'Checked in (on time)' : `Checked in ${lateMin} min late — ₹${penalty} penalty` })
   res.json(await attendanceToday(req.worker.id))
 })
 app.post('/api/worker/attendance/checkout', auth, async (req, res) => {
   const b = req.body || {}, day = istDateStr(Date.now())
   await pool.query('UPDATE attendance SET check_out=now(), out_lat=$2, out_lng=$3 WHERE worker_id=$1 AND day=$4',
     [req.worker.id, b.lat ?? null, b.lng ?? null, day])
+  // On checkout, settle the shift's minimum guarantee (wallet tops up if the day fell short).
+  const att = (await pool.query('SELECT min_g FROM attendance WHERE worker_id=$1 AND day=$2', [req.worker.id, day])).rows[0]
+  if (att?.min_g > 0) publishEvent(REDIS_URL, 'shift.settle', { workerId: req.worker.id, minG: att.min_g, day })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'attendance.checkout', entityType: 'worker', entityId: req.worker.id, detail: 'Checked out' })
   res.json(await attendanceToday(req.worker.id))
+})
+
+/* ---------- geofence (assigned-apartment radius) ---------- */
+// The app reports the worker's live location; we return whether they're inside their assigned
+// apartment's radius. Edge-triggered: the FIRST time they leave, fire an alert (notification +
+// activity); returning inside re-arms it. Only active once checked in with a site.
+app.post('/api/worker/geofence/report', auth, async (req, res) => {
+  const { lat, lng } = req.body || {}
+  const day = istDateStr(Date.now())
+  const a = (await pool.query('SELECT * FROM attendance WHERE worker_id=$1 AND day=$2', [req.worker.id, day])).rows[0]
+  if (!a || !a.check_in || a.site_lat == null || a.site_lng == null || lat == null || lng == null) {
+    return res.json({ active: false, inside: true, distance: 0, radius: a?.geofence_m || 0, siteName: a?.site_name || '', breaches: a?.geo_breaches || 0 })
+  }
+  const radius = a.geofence_m || 300
+  const distance = Math.round(distanceM(a.site_lat, a.site_lng, lat, lng))
+  const inside = distance <= radius
+  let breached = false
+  if (!inside && !a.geo_outside) {
+    // Rising edge: worker just left the assigned area → alert.
+    breached = true
+    await pool.query('UPDATE attendance SET geo_outside=true, geo_breaches=geo_breaches+1 WHERE id=$1', [a.id])
+    publishEvent(REDIS_URL, 'geofence.breach', { workerId: req.worker.id, siteName: a.site_name || 'your assigned area', distance, radius })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Geofence', action: 'geofence.breach', entityType: 'worker', entityId: req.worker.id, detail: `Left ${a.site_name || 'assigned area'} — ${distance} m away (limit ${radius} m)` })
+  } else if (inside && a.geo_outside) {
+    await pool.query('UPDATE attendance SET geo_outside=false WHERE id=$1', [a.id])
+  }
+  res.json({ active: true, inside, distance, radius, siteName: a.site_name || '', breaches: (a.geo_breaches || 0) + (breached ? 1 : 0), justBreached: breached })
 })
 
 /* ---------- availability state (Available | Busy | Break | Offline | Leave) ---------- */
@@ -576,6 +764,78 @@ app.post('/api/admin/shifts', adminAuth, async (req, res) => {
   res.status(201).json({ ok: true, added })
 })
 app.delete('/api/admin/shifts/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM shifts WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+
+/* ---------- shift PLANS + attendance (admin control) ---------- */
+app.get('/api/admin/shift-defs', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM shift_defs ORDER BY sort, start_min')
+  res.json(rows.map((s) => ({
+    id: s.id, code: s.code, name: s.name, start: toHHMM(s.start_min), end: toHHMM(s.end_min),
+    graceMin: s.grace_min, penalty: s.penalty, minGWeekday: s.min_g_weekday, minGWeekend: s.min_g_weekend, active: !!s.active,
+  })))
+})
+app.put('/api/admin/shift-defs/:id', adminAuth, async (req, res) => {
+  const b = req.body || {}
+  const sm = b.start != null ? toMin(b.start) : null
+  const em = b.end != null ? toMin(b.end) : null
+  if (sm != null && em != null && !(em > sm)) return res.status(400).json({ error: 'End time must be after start time' })
+  await pool.query(
+    `UPDATE shift_defs SET name=COALESCE($1,name), start_min=COALESCE($2,start_min), end_min=COALESCE($3,end_min),
+       grace_min=COALESCE($4,grace_min), penalty=COALESCE($5,penalty), min_g_weekday=COALESCE($6,min_g_weekday),
+       min_g_weekend=COALESCE($7,min_g_weekend), active=COALESCE($8,active) WHERE id=$9`,
+    [b.name ?? null, sm, em, b.graceMin ?? null, b.penalty ?? null, b.minGWeekday ?? null, b.minGWeekend ?? null,
+      b.active === undefined ? null : !!b.active, Number(req.params.id)])
+  res.json({ ok: true })
+})
+app.get('/api/admin/attendance', adminAuth, async (req, res) => {
+  const day = req.query.day || istDateStr(Date.now())
+  const { rows } = await pool.query(
+    `SELECT a.*, w.name worker_name, sd.name shift_name FROM attendance a
+       JOIN workers w ON w.id=a.worker_id LEFT JOIN shift_defs sd ON sd.id=a.shift_def_id
+     WHERE a.day=$1 ORDER BY a.check_in DESC NULLS LAST`, [day])
+  res.json({
+    day,
+    rows: rows.map((a) => ({
+      workerId: a.worker_id, workerName: a.worker_name, shift: a.shift_name || '—',
+      checkIn: a.check_in ? istClock(a.check_in) : '', checkOut: a.check_out ? istClock(a.check_out) : '',
+      onTime: a.on_time, lateMinutes: a.late_minutes || 0, penalty: a.penalty || 0, minG: a.min_g || 0,
+      site: a.site_name || '—', geoBreaches: a.geo_breaches || 0, geoOutside: !!a.geo_outside,
+    })),
+  })
+})
+
+/* ---------- apartments / geofence sites (admin control) ---------- */
+app.get('/api/admin/sites', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT s.*, (SELECT COUNT(*)::int FROM workers w WHERE w.site_id = s.id) AS assigned FROM worker_sites s ORDER BY s.id`)
+  res.json(rows.map((s) => ({ id: s.id, name: s.name, address: s.address || '', lat: s.lat, lng: s.lng, radius: s.radius, active: !!s.active, assigned: s.assigned })))
+})
+app.post('/api/admin/sites', adminAuth, async (req, res) => {
+  const b = req.body || {}
+  if (!b.name || b.lat == null || b.lng == null) return res.status(400).json({ error: 'name, lat, lng are required' })
+  const { rows } = await pool.query('INSERT INTO worker_sites (name,address,lat,lng,radius) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [b.name, b.address || '', Number(b.lat), Number(b.lng), Number(b.radius) || 300])
+  res.status(201).json({ ok: true, id: rows[0].id })
+})
+app.put('/api/admin/sites/:id', adminAuth, async (req, res) => {
+  const b = req.body || {}
+  await pool.query(
+    `UPDATE worker_sites SET name=COALESCE($1,name), address=COALESCE($2,address), lat=COALESCE($3,lat),
+       lng=COALESCE($4,lng), radius=COALESCE($5,radius), active=COALESCE($6,active) WHERE id=$7`,
+    [b.name ?? null, b.address ?? null, b.lat ?? null, b.lng ?? null, b.radius ?? null,
+      b.active === undefined ? null : !!b.active, Number(req.params.id)])
+  res.json({ ok: true })
+})
+app.delete('/api/admin/sites/:id', adminAuth, async (req, res) => {
+  await pool.query('UPDATE workers SET site_id=NULL WHERE site_id=$1', [Number(req.params.id)])
+  await pool.query('DELETE FROM worker_sites WHERE id=$1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
+// Assign (or clear) a worker's apartment for their shifts.
+app.post('/api/admin/workers/:id/site', adminAuth, async (req, res) => {
+  const siteId = req.body?.siteId ? Number(req.body.siteId) : null
+  await pool.query('UPDATE workers SET site_id=$1 WHERE id=$2', [siteId, Number(req.params.id)])
+  res.json({ ok: true })
+})
 
 /* Internal: on-shift qualified workers now (for auto-assign / live-ops). */
 app.get('/internal/on-shift', internalOnly, async (req, res) => {

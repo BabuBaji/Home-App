@@ -127,7 +127,6 @@ fun AppRoot() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
-    val showBottomBar = route in tabs.map { it.route }
 
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
@@ -153,13 +152,18 @@ fun AppRoot() {
         gesturesEnabled = drawerReady,
         drawerContent = { if (drawerReady) HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },
     ) {
+    val headerInitials = vm.workerName.trim().split(Regex("\\s+"))
+        .mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase()
     androidx.compose.runtime.CompositionLocalProvider(
         LocalDrawerOpen provides { scope.launch { drawerState.open() } },
         LocalNav provides nav,
+        LocalWalletBalance provides vm.walletBalance,
+        LocalWorkerInitials provides headerInitials,
     ) {
+    // Footer (bottom navigation) removed — navigation is via the ☰ drawer, the Home
+    // Quick-Actions grid, and the header wallet/profile chips.
     Scaffold(
         containerColor = ScreenBg,
-        bottomBar = { if (showBottomBar) BottomBar(nav, route) },
     ) { padding ->
         NavHost(
             navController = nav,
@@ -210,9 +214,43 @@ fun AppRoot() {
             composable(Routes.SETTINGS) { SettingsScreen(vm, nav) }
         }
     }
+
+    // ── Geofence monitor: while checked in with an assigned apartment, poll the worker's
+    // location and alert (dialog + heads-up notification) the first time they leave the radius. ──
+    val geoCtx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(vm.attendance.checkedIn, vm.attendance.siteLat) {
+        while (vm.attendance.checkedIn && vm.attendance.siteLat != null) {
+            lastKnownLoc(geoCtx)?.let { vm.reportGeofence(it.first, it.second) }
+            kotlinx.coroutines.delay(20_000)
+        }
+    }
+    vm.geofenceAlert?.let { msg ->
+        androidx.compose.runtime.LaunchedEffect(msg) { JobAlertService.notifyGeofence(geoCtx, msg) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.dismissGeofenceAlert() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.dismissGeofenceAlert() }) { Text("OK", color = Purple) }
+            },
+            title = { Text("⚠  Left your assigned area", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(msg) },
+        )
+    }
     }
     }
 }
+
+/** Best-effort last known location (lat,lng) for the geofence monitor; null without permission/fix. */
+private fun lastKnownLoc(ctx: android.content.Context): Pair<Double, Double>? = try {
+    if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        null
+    } else {
+        val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.PASSIVE_PROVIDER)
+        loc?.let { it.latitude to it.longitude }
+    }
+} catch (_: Exception) { null }
 
 @Composable
 private fun BottomBar(nav: NavHostController, current: String?) {

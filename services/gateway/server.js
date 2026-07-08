@@ -42,7 +42,7 @@ function pickTarget(url) {
   if (p('/api/admin/activity')) return U.notification
   if (p('/api/admin/notifications')) return U.notification
   if (/^\/api\/admin\/workers\/[^/]+\/wallet/.test(u)) return U.wallet
-  if (p('/api/admin/workers') || p('/api/admin/shifts')) return U.worker
+  if (p('/api/admin/workers') || p('/api/admin/shifts') || p('/api/admin/shift-defs') || p('/api/admin/attendance') || p('/api/admin/sites')) return U.worker
   if (p('/api/admin/bookings')) return U.booking
   if (p('/api/admin/finance') || p('/api/admin/payments') || p('/api/admin/refunds')) return U.payment
   if (p('/api/admin/tickets') || p('/api/admin/complaints')) return U.notification

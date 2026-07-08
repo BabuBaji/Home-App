@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
@@ -65,6 +68,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -73,20 +77,47 @@ import androidx.navigation.NavHostController
 fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
     // Pull the latest wallet snapshot so today/week/month totals are populated from the server.
     LaunchedEffect(Unit) { vm.refreshWallet() }
+    val entries = vm.earnings
+    // Which working day the calendar has selected (0 = most recent). Resets when data loads.
+    var selectedIdx by remember(entries.size) { mutableStateOf(0) }
+    val sel = entries.getOrNull(selectedIdx)
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         BellHeader("Earnings") { nav.navigate(Routes.P_NOTIFICATIONS) }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
-            // Hero: green "Total Earnings" money banner connected to a white breakdown card.
+            // Working-days calendar strip — tap a date to see that day's income below.
+            if (entries.isNotEmpty()) {
+                Column {
+                    SectionTitle("Daily Earnings")
+                    Spacer(Modifier.height(Space.s))
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    ) {
+                        entries.forEachIndexed { i, e ->
+                            DateChip(e.date, "₹${e.amount}", e.paid, selectedIdx == i) { selectedIdx = i }
+                        }
+                    }
+                }
+            }
+
+            // Hero: the selected day's income (green banner) + that day's breakdown.
             ElevatedGroup {
-                MoneyBanner("Today's Earnings", vm.todayEarnings)
+                MoneyBanner(sel?.date ?: "Today's Earnings", sel?.amount ?: vm.todayEarnings)
                 Column(Modifier.background(CardBg).padding(Space.l)) {
+                    if (sel != null) {
+                        BreakdownRow(
+                            "Payment status",
+                            if (sel.paid) "Paid" else "Pending",
+                            valueColor = if (sel.paid) GreenSuccess else Gold,
+                        )
+                    }
                     BreakdownRow("This Week", "₹${vm.weekEarnings}")
                     BreakdownRow("This Month", "₹${vm.monthEarnings}", valueColor = Purple)
                     Spacer(Modifier.height(Space.s))
-                    // Inset sub-breakdown box.
+                    // Inset sub-breakdown box (overall context).
                     Column(Modifier.fillMaxWidth().background(FieldFill, RoundedCornerShape(Radius.field)).padding(Space.m)) {
                         InsetRow("Jobs today", "${vm.todayJobs}")
                         Spacer(Modifier.height(Space.s))
@@ -104,29 +135,312 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
             }
             PrimaryButton("Withdraw to Bank") { nav.navigate(Routes.WITHDRAW) }
 
-            // Recent earnings — status-list rows, most recent first.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Recent Earnings")
-                Text("₹${vm.earnings.sumOf { it.amount }}", fontWeight = FontWeight.Bold, color = Purple, fontSize = 15.sp)
+            // Recent Earnings — live calendar; tap a day to see that day's services + income.
+            SectionTitle("Recent Earnings")
+            RecentEarningsCalendar(vm)
+            Spacer(Modifier.height(Space.s))
+        }
+    }
+}
+
+/** Calendar day chip for the Earnings date strip — shows the date + that day's amount. */
+@Composable
+private fun DateChip(date: String, amount: String, paid: Boolean, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(Radius.field),
+        color = if (selected) Purple else FieldFill,
+        modifier = Modifier.clip(RoundedCornerShape(Radius.field)).clickable { onClick() },
+    ) {
+        Column(
+            Modifier.padding(horizontal = Space.l, vertical = Space.m),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                date,
+                color = if (selected) Color.White else TextDark,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(Space.xs))
+            Text(
+                amount,
+                color = if (selected) Color.White.copy(alpha = 0.9f) else if (paid) GreenSuccess else Gold,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+// ── Recent-Earnings calendar (month grid + per-day service/income breakdown) ──
+// Scoped entirely to the "Recent Earnings" section: a live month calendar whose days
+// are lit when the worker earned, and a detail card that lists that day's individual
+// services (per-service amount), other income and deductions. Data is derived from the
+// wallet LEDGER (vm.walletHistory), which stamps every entry with an ISO yyyy-MM-dd date.
+
+@Composable
+private fun RecentEarningsCalendar(vm: AppViewModel) {
+    val byDate = vm.walletHistory.groupBy { it.date }
+    val earnedByDate = byDate.mapValues { (_, es) -> es.filter { it.isCredit }.sumOf { it.amount } }
+
+    val now = remember { java.util.Calendar.getInstance() }
+    val todayIso = remember {
+        isoDate(now.get(java.util.Calendar.YEAR), now.get(java.util.Calendar.MONTH), now.get(java.util.Calendar.DAY_OF_MONTH))
+    }
+    var year by remember { mutableStateOf(now.get(java.util.Calendar.YEAR)) }
+    var month by remember { mutableStateOf(now.get(java.util.Calendar.MONTH)) } // 0-based
+    var selected by remember { mutableStateOf(todayIso) }
+
+    // Resolve each Job Earnings ledger entry to its real service via the booking ref
+    // (ledger label == booking ref, e.g. "#HH12345"), so rows show the actual service name.
+    val bookingsByRef = vm.bookings.filter { !it.ref.isNullOrBlank() }.associateBy { it.ref }
+
+    val entries = byDate[selected].orEmpty()
+    val services = entries.filter { it.isCredit && it.type.equals("Job Earnings", ignoreCase = true) }
+    val otherIncome = entries.filter { it.isCredit && !it.type.equals("Job Earnings", ignoreCase = true) }
+    val deductions = entries.filter { !it.isCredit }
+    val dayTotal = entries.filter { it.isCredit }.sumOf { it.amount }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        // Calendar card: ‹ Month YYYY › + Mon-first grid (earned days green, selected violet).
+        Card(padding = Dp16.S) {
+            MonthNavigator(
+                label = monthLabel(year, month),
+                onPrev = { if (month == 0) { month = 11; year-- } else month-- },
+                onNext = { if (month == 11) { month = 0; year++ } else month++ },
+            )
+            Spacer(Modifier.height(Space.m))
+            EarningsCalendar(year, month, earnedByDate, selected, todayIso) { selected = it }
+            Spacer(Modifier.height(Space.m))
+            HairlineDivider()
+            Spacer(Modifier.height(Space.s))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LegendDot(GreenSuccess); Spacer(Modifier.width(Space.xs))
+                Text("Worked", fontSize = 11.5.sp, color = TextGray)
+                Spacer(Modifier.width(Space.l))
+                LegendDot(Purple); Spacer(Modifier.width(Space.xs))
+                Text("Selected", fontSize = 11.5.sp, color = TextGray)
+                Spacer(Modifier.weight(1f))
+                Text("Tap a day", fontSize = 11.5.sp, color = TextMuted)
             }
-            if (vm.earnings.isEmpty()) {
-                Card { EmptyState("📅", "No earnings yet", "Completed jobs will show up here.") }
+        }
+
+        // Selected-day detail: services done + per-service amounts + income summary.
+        Card {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text(if (selected == todayIso) "Today" else prettyDate(selected), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
+                    Text(
+                        "${services.size} ${if (services.size == 1) "service" else "services"} done",
+                        fontSize = 12.sp, color = TextGray,
+                    )
+                }
+                Text("₹${inr(dayTotal)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 20.sp)
+            }
+            if (entries.isEmpty()) {
+                Spacer(Modifier.height(Space.m))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (selected > todayIso) "🗓️" else "🛌", fontSize = 20.sp)
+                    Spacer(Modifier.width(Space.m))
+                    Text(
+                        if (selected > todayIso) "No work scheduled yet." else "No work on this day — it was an off day.",
+                        fontSize = 13.sp, color = TextGray,
+                    )
+                }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    vm.earnings.forEach { e ->
-                        StatusListRow(
-                            icon = if (e.paid) Icons.Filled.Check else Icons.Filled.Schedule,
-                            iconTint = if (e.paid) GreenSuccess else Gold,
-                            iconBg = if (e.paid) GreenLight else GoldLight,
-                            title = e.date,
-                            subtitle = if (e.paid) "Paid" else "Pending",
-                            subtitleColor = if (e.paid) GreenSuccess else Gold,
-                            value = "₹${e.amount}",
+                Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.s))
+                if (services.isNotEmpty()) {
+                    Text("Services", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    services.forEachIndexed { i, e ->
+                        ServiceRow(i + 1, e, bookingsByRef[e.remarks.ifBlank { e.refId }])
+                    }
+                }
+                if (otherIncome.isNotEmpty()) {
+                    Spacer(Modifier.height(Space.s))
+                    Text("Other income", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    otherIncome.forEach { IncomeLine(it.type.ifBlank { "Incentive" }, "+₹${inr(it.amount)}", GreenSuccess) }
+                }
+                if (deductions.isNotEmpty()) {
+                    Spacer(Modifier.height(Space.s))
+                    Text("Deductions", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    deductions.forEach { IncomeLine(it.type.ifBlank { "Deduction" }, "−₹${inr(it.amount)}", RedCancel) }
+                }
+                Spacer(Modifier.height(Space.s)); HairlineDivider(); Spacer(Modifier.height(Space.s))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Total income", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                    Text("₹${inr(dayTotal)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+/** One completed service on the selected day: index chip + real service name, customer/time
+ *  and that job's amount. `booking` is the ref-matched booking (null → falls back to ref). */
+@Composable
+private fun ServiceRow(index: Int, e: com.homehelp.pro.network.LedgerEntry, booking: Booking?) {
+    val ref = e.remarks.ifBlank { e.refId }
+    val name = booking?.service?.takeIf { it.isNotBlank() } ?: "Service $index"
+    val subParts = listOfNotNull(
+        booking?.customerName?.takeIf { it.isNotBlank() } ?: ref.takeIf { it.isNotBlank() },
+        e.time.takeIf { it.isNotBlank() },
+    )
+    Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(34.dp).background(Primary50, RoundedCornerShape(Radius.field)),
+            contentAlignment = Alignment.Center,
+        ) { Text("$index", color = Purple, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.weight(1f)) {
+            Text(name, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp, maxLines = 2)
+            if (subParts.isNotEmpty()) Text(subParts.joinToString(" • "), fontSize = 11.sp, color = TextGray, maxLines = 1)
+        }
+        Spacer(Modifier.width(Space.s))
+        Text("+₹${inr(e.amount)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 14.sp)
+    }
+}
+
+/** A muted label / signed-amount line for the other-income & deduction groups. */
+@Composable
+private fun IncomeLine(label: String, value: String, valueColor: Color) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = TextGray, fontSize = 13.sp)
+        Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+private val MONTH_NAMES = arrayOf(
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+private fun monthLabel(year: Int, month0: Int) = "${MONTH_NAMES[month0]} $year"
+
+/** ISO "yyyy-MM-dd" for a Y/M(0-based)/D — matches the ledger's date keys. */
+private fun isoDate(year: Int, month0: Int, day: Int) =
+    String.format(java.util.Locale.US, "%04d-%02d-%02d", year, month0 + 1, day)
+
+/** Indian-grouped integer, e.g. 30685 → "30,685". */
+private fun inr(n: Int): String =
+    java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(n)
+
+/** Short amount for a calendar cell, e.g. 850 → "850", 1200 → "1.2k". */
+private fun compactAmount(n: Int): String = when {
+    n >= 100000 -> String.format(java.util.Locale.US, "%.1fL", n / 100000.0).replace(".0L", "L")
+    n >= 1000 -> String.format(java.util.Locale.US, "%.1fk", n / 1000.0).replace(".0k", "k")
+    else -> n.toString()
+}
+
+/** Friendly label for an ISO date, e.g. "Mon, 6 Jul". Falls back to the raw string. */
+private fun prettyDate(iso: String): String = runCatching {
+    val d = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(iso)!!
+    java.text.SimpleDateFormat("EEE, d MMM", java.util.Locale.US).format(d)
+}.getOrDefault(iso)
+
+@Composable
+private fun LegendDot(color: Color) {
+    Box(Modifier.size(10.dp).clip(RoundedCornerShape(Radius.pill)).background(color))
+}
+
+/** ‹ Month YYYY › navigator row. */
+@Composable
+private fun MonthNavigator(label: String, onPrev: () -> Unit, onNext: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        NavArrow(Icons.Filled.ChevronLeft, onPrev)
+        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
+        NavArrow(Icons.Filled.ChevronRight, onNext)
+    }
+}
+
+@Composable
+private fun NavArrow(icon: ImageVector, onClick: () -> Unit) {
+    Box(
+        Modifier.size(38.dp).clip(RoundedCornerShape(Radius.field)).background(Primary50).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp)) }
+}
+
+/** Month grid (Mon-first): earned days tinted green with the amount, selected day violet, today ringed. */
+@Composable
+private fun EarningsCalendar(
+    year: Int,
+    month: Int,
+    earnedByDate: Map<String, Int>,
+    selected: String,
+    today: String,
+    onSelect: (String) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth()) {
+        listOf("M", "T", "W", "T", "F", "S", "S").forEach { d ->
+            Text(d, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+        }
+    }
+    Spacer(Modifier.height(Space.s))
+
+    val cal = java.util.Calendar.getInstance().apply { clear(); set(year, month, 1) }
+    val firstDow = cal.get(java.util.Calendar.DAY_OF_WEEK) // 1=Sun..7=Sat
+    val lead = (firstDow + 5) % 7                           // Mon-first leading blanks
+    val days = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+    val rows = (lead + days + 6) / 7
+
+    var day = 1
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        repeat(rows) { r ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                repeat(7) { c ->
+                    val idx = r * 7 + c
+                    if (idx < lead || day > days) {
+                        Box(Modifier.weight(1f).height(46.dp))
+                    } else {
+                        val iso = isoDate(year, month, day)
+                        DayCell(
+                            day = day,
+                            earned = earnedByDate[iso] ?: 0,
+                            isSelected = iso == selected,
+                            isToday = iso == today,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onSelect(iso) },
                         )
+                        day++
                     }
                 }
             }
-            Spacer(Modifier.height(Space.s))
+        }
+    }
+}
+
+@Composable
+private fun DayCell(day: Int, earned: Int, isSelected: Boolean, isToday: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val hasEarned = earned > 0
+    val bg = when {
+        isSelected -> Purple
+        hasEarned -> GreenLight
+        else -> Color.Transparent
+    }
+    val fg = when {
+        isSelected -> Color.White
+        hasEarned -> GreenSuccess
+        else -> TextDark
+    }
+    Box(
+        modifier
+            .height(46.dp)
+            .clip(RoundedCornerShape(Radius.field))
+            .background(bg)
+            .then(if (isToday && !isSelected) Modifier.border(1.5.dp, Purple, RoundedCornerShape(Radius.field)) else Modifier)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("$day", color = fg, fontWeight = if (hasEarned || isSelected) FontWeight.Bold else FontWeight.Medium, fontSize = 14.sp)
+            if (hasEarned) {
+                Text(
+                    "₹${compactAmount(earned)}",
+                    color = if (isSelected) Color.White.copy(alpha = 0.9f) else GreenSuccess,
+                    fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -155,23 +469,35 @@ fun ElevatedGroup(content: @Composable androidx.compose.foundation.layout.Column
     )
 }
 
-/** Brand-indigo "total" money banner with a ₹ coin chip — the shared hero for every
- *  money total, consistent with the gradient heroes on Wallet / Performance / Profile. */
+/** Signature mint-green "total" money banner with a ₹ coin chip and a Canvas-drawn
+ *  scalloped (receipt-notch) bottom edge — the reference look for every money total. */
 @Composable
 fun MoneyBanner(label: String, amount: Int) {
-    Row(
-        Modifier.fillMaxWidth()
-            .background(BrandGradient)
-            .padding(horizontal = Space.l, vertical = Space.xl),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(36.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
-            contentAlignment = Alignment.Center,
-        ) { Text("₹", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
-        Spacer(Modifier.width(Space.m))
-        Text(tr(label), color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Medium, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        Text("₹$amount", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth()
+                .background(GreenLight)
+                .padding(horizontal = Space.l, vertical = Space.l),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(36.dp).background(GreenSuccess, RoundedCornerShape(Radius.pill)),
+                contentAlignment = Alignment.Center,
+            ) { Text("₹", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+            Spacer(Modifier.width(Space.m))
+            Text(tr(label), color = GreenSuccess, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text("₹$amount", color = GreenSuccess, fontWeight = FontWeight.Bold, fontSize = 27.sp)
+        }
+        // Scalloped seam: white half-moon notches punched into the green base.
+        Canvas(Modifier.fillMaxWidth().height(9.dp)) {
+            drawRect(color = GreenLight)
+            val r = size.height
+            var x = r
+            while (x < size.width) {
+                drawCircle(color = CardBg, radius = r, center = Offset(x, size.height))
+                x += r * 2
+            }
+        }
     }
 }
 

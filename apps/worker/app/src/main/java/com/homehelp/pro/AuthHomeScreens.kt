@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -240,6 +241,9 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val openDrawer = LocalDrawerOpen.current
     val appCtx = LocalContext.current.applicationContext
 
+    // Pull the wallet ledger so the Home "Last 7 Days" chart + balance chip have live data.
+    LaunchedEffect(Unit) { vm.refreshWallet() }
+
     // Ask for notification permission (Android 13+) so background job alerts can show.
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -280,15 +284,15 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // ---- Gradient greeting header: avatar + time-of-day greeting, with menu,
-        // notifications (unread dot), wallet & profile shortcuts in white. ----
+        // ---- Premium gradient hero: menu + greeting + notifications + avatar profile,
+        // then a translucent "glass" summary strip (today's earnings, online status, wallet). ----
         Column(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(bottomStart = Radius.sheet, bottomEnd = Radius.sheet))
                 .background(BrandGradient)
                 .padding(horizontal = Space.l)
-                .padding(top = 14.dp, bottom = Space.l),
+                .padding(top = 14.dp, bottom = Space.xl),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -296,11 +300,9 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     modifier = Modifier.size(26.dp).clickable { openDrawer() },
                 )
                 Spacer(Modifier.width(14.dp))
-                Avatar(homeInitials, size = 44, bg = Color.White.copy(alpha = 0.22f), fg = Color.White)
-                Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(greeting, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
-                    Text(firstName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.2).sp)
+                    Text(firstName, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.2).sp)
                 }
                 Box {
                     Icon(
@@ -311,10 +313,31 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                         Box(Modifier.align(Alignment.TopEnd).size(9.dp).background(Coral, RoundedCornerShape(50)))
                     }
                 }
-                Spacer(Modifier.width(18.dp))
-                Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = Color.White, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.WALLET) })
-                Spacer(Modifier.width(18.dp))
-                Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Color.White, modifier = Modifier.size(24.dp).clickable { nav.navigateApp(Routes.PROFILE) })
+                Spacer(Modifier.width(Space.m))
+                ProfileChip(homeInitials, onDark = true) { nav.navigateApp(Routes.PROFILE) }
+            }
+            Spacer(Modifier.height(Space.l))
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(Radius.card))
+                    .padding(Space.l),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Today's Earnings", fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+                    Spacer(Modifier.height(2.dp))
+                    Text("₹${vm.todayEarnings}", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.5).sp)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(if (vm.isOnline) GreenSuccess else Color.White.copy(alpha = 0.55f), RoundedCornerShape(50)))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (vm.isOnline) "Online · ${vm.todayJobs} ${if (vm.todayJobs == 1) "job" else "jobs"} today" else "Offline · go online to earn",
+                            fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f),
+                        )
+                    }
+                }
+                WalletChip(vm.walletBalance, onDark = true) { nav.navigateApp(Routes.WALLET) }
             }
         }
 
@@ -372,6 +395,30 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 MiniStatCard(Modifier.weight(1f), Icons.Filled.CheckCircle, "${vm.todayCompleted}", "Completed", GreenSuccess, GreenLight)
             }
 
+            // ---- Primary status actions (Go Online · Take Break · Schedule) — before the grid ----
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                QuickAction(Modifier.weight(1f), if (vm.isOnline) "⏸️" else "▶️", if (vm.isOnline) "Go Offline" else "Go Online") { vm.goOnline(!vm.isOnline) }
+                QuickAction(Modifier.weight(1f), "☕", "Take Break") { vm.goOnline(false); toast(ctxHome, "You're on a break — go online when ready") }
+                QuickAction(Modifier.weight(1f), "📅", "Schedule") { nav.navigate(Routes.SCHEDULE) }
+            }
+
+            // ---- Quick actions grid — one-tap access to key modules ----
+            SectionTitle("Quick Actions")
+            HomeQuickGrid(nav)
+
+            // ---- Advanced: last-7-days earnings mini bar chart (from the wallet ledger) ----
+            val last7 = remember(vm.walletHistory.toList()) {
+                val credited = vm.walletHistory.filter { it.isCredit }
+                    .groupBy { it.date }.mapValues { (_, v) -> v.sumOf { it.amount } }
+                val dfIso = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                val dfDay = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
+                (6 downTo 0).map { off ->
+                    val c = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -off) }
+                    Triple(dfDay.format(c.time), credited[dfIso.format(c.time)] ?: 0, off == 0)
+                }
+            }
+            SevenDayEarningsCard(last7)
+
             // ---- Attendance status (check in to start your day) ----
             val attnOn = vm.attendance.checkedIn && !vm.attendance.checkedOut
             StatusListRow(
@@ -399,13 +446,6 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 valueColor = Purple,
                 onClick = if (nextJob != null) ({ nav.navigate(Routes.SCHEDULE) }) else null,
             )
-
-            // ---- Quick actions (Go Online · Take Break · View Schedule) ----
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                QuickAction(Modifier.weight(1f), if (vm.isOnline) "⏸️" else "▶️", if (vm.isOnline) "Go Offline" else "Go Online") { vm.goOnline(!vm.isOnline) }
-                QuickAction(Modifier.weight(1f), "☕", "Take Break") { vm.goOnline(false); toast(ctxHome, "You're on a break — go online when ready") }
-                QuickAction(Modifier.weight(1f), "📅", "Schedule") { nav.navigate(Routes.SCHEDULE) }
-            }
 
             // ---- Wallet quick view (How much have I earned?) ----
             StatusListRow(
@@ -552,34 +592,6 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            // Performance + progress to the next tier (all derived from real figures).
-            SectionTitle("Performance")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Star, "${vm.workerRating}", "Rating", Gold, GoldLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.CheckCircle, "${vm.jobsCompleted}", "Jobs Done", GreenSuccess, GreenLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.EmojiEvents, vm.tier.label, "Tier", Purple, PurpleLight)
-            }
-            val next = WorkerTier.next(vm.tier)
-            if (next != null && vm.jobsToNextTier > 0) {
-                Card {
-                    val span = (next.minJobs - vm.tier.minJobs).coerceAtLeast(1)
-                    val tierProgress = ((vm.jobsCompleted - vm.tier.minJobs).toFloat() / span).coerceIn(0f, 1f)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(38.dp).background(PurpleLight, RoundedCornerShape(Radius.field)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Filled.EmojiEvents, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(Space.m))
-                        Text("Next tier · ${next.label} ${next.emoji}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
-                    }
-                    Spacer(Modifier.height(Space.m))
-                    ProgressBar(tierProgress, fill = Purple)
-                    Spacer(Modifier.height(Space.s))
-                    Text(
-                        "${vm.jobsToNextTier} more jobs to ${next.label} ${next.emoji}",
-                        fontSize = 12.sp, color = TextGray,
-                    )
-                }
-            }
             Spacer(Modifier.height(Space.s))
         }
     }
@@ -601,6 +613,88 @@ private fun QuickAction(modifier: Modifier, emoji: String, label: String, onClic
             ) { Text(emoji, fontSize = 20.sp) }
             Spacer(Modifier.height(Space.s))
             Text(tr(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextDark)
+        }
+    }
+}
+
+// ---- Home "Quick Actions" launcher grid (advanced feature) --------------------------------
+private data class QuickItem(val icon: ImageVector, val label: String, val route: String, val tint: Color, val bg: Color)
+
+@Composable
+private fun HomeQuickGrid(nav: NavHostController) {
+    val items = listOf(
+        QuickItem(Icons.Filled.CalendarMonth, "Bookings", Routes.BOOKINGS, Purple, PurpleLight),
+        QuickItem(Icons.Filled.Redeem, "Refer & Earn", Routes.REFER, Coral, CoralLight),
+        QuickItem(Icons.Filled.EmojiEvents, "Rewards", Routes.REWARDS, Gold, GoldLight),
+        QuickItem(Icons.Filled.Schedule, "Attendance", Routes.ATTENDANCE, GreenSuccess, GreenLight),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(Space.l)) {
+        items.chunked(4).forEach { rowItems ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                rowItems.forEach { qi -> QuickTile(Modifier.weight(1f), qi) { nav.navigateApp(qi.route) } }
+                repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickTile(modifier: Modifier, item: QuickItem, onClick: () -> Unit) {
+    Column(modifier.bounceClick(onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(54.dp).background(item.bg, RoundedCornerShape(Radius.card)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(item.icon, contentDescription = item.label, tint = item.tint, modifier = Modifier.size(24.dp)) }
+        Spacer(Modifier.height(6.dp))
+        Text(tr(item.label), fontSize = 11.sp, color = TextDark, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2)
+    }
+}
+
+// Short ₹ label for chart bars, e.g. 850 → "850", 1200 → "1.2k".
+private fun shortInr(n: Int): String = when {
+    n >= 1000 -> String.format(java.util.Locale.US, "%.1fk", n / 1000.0).replace(".0k", "k")
+    else -> n.toString()
+}
+
+/** Advanced: last-7-days daily-earnings mini bar chart. `days` = (weekday, amount, isToday). */
+@Composable
+private fun SevenDayEarningsCard(days: List<Triple<String, Int, Boolean>>) {
+    val max = (days.maxOfOrNull { it.second } ?: 0).coerceAtLeast(1)
+    val total = days.sumOf { it.second }
+    Card {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("Last 7 Days", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                Text("Daily earnings", fontSize = 12.sp, color = TextGray)
+            }
+            Text("₹${shortInr(total)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 18.sp)
+        }
+        Spacer(Modifier.height(Space.l))
+        Row(
+            Modifier.fillMaxWidth().height(120.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            days.forEach { (label, amt, today) ->
+                Column(
+                    Modifier.weight(1f).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom,
+                ) {
+                    if (amt > 0) {
+                        Text("₹${shortInr(amt)}", fontSize = 9.sp, color = if (today) Purple else TextGray, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Spacer(Modifier.height(3.dp))
+                    }
+                    val h = if (amt <= 0) 4 else (10 + 78 * amt / max)
+                    Box(
+                        Modifier.fillMaxWidth(0.62f).height(h.dp)
+                            .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                            .then(if (today) Modifier.background(BrandGradient) else Modifier.background(if (amt > 0) Purple.copy(alpha = 0.35f) else Divider)),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(label, fontSize = 10.sp, color = if (today) Purple else TextMuted, fontWeight = if (today) FontWeight.Bold else FontWeight.Medium)
+                }
+            }
         }
     }
 }
