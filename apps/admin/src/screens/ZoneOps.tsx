@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Globe, Building2, CheckCircle2, Layers, HardHat, UserCheck, Gauge, Boxes,
   TrendingUp, IndianRupee, MapPin, Plus, ChevronLeft, ChevronRight, Check, Brain, Wand2, Zap,
@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { MiniMap, SumBars, useToast } from '../components/UI'
 import { BarChart, Donut } from '../components/Charts'
-import { createSite, updateSite, deleteSite } from '../api'
+import { createSite, updateSite, deleteSite, createZone, updateZone, fetchWorkers, updateWorker, assignWorkerSite } from '../api'
 import { ZoneMap } from '../zones/ZoneMap'
 import {
   useZones, computeMetrics, readiness, isReady, recommendations,
@@ -203,6 +203,7 @@ const STEPS = [
   { key: 'equipment', title: 'Equipment', sub: 'Kits & tools', Icon: Truck },
   { key: 'team', title: 'Zone Team', sub: 'Assign roles', Icon: Users },
   { key: 'readiness', title: 'Readiness & Activation', sub: 'Checklist · approve', Icon: Rocket },
+  { key: 'onboarding', title: 'Worker Onboarding', sub: 'Assign zone · site', Icon: HardHat },
 ] as const
 
 function ZoneSetup({ zone, onBack, upsert }: { zone: Zone; onBack: () => void; upsert: (z: Zone) => void }) {
@@ -238,11 +239,33 @@ function ZoneSetup({ zone, onBack, upsert }: { zone: Zone; onBack: () => void; u
     const apts = await provisionApts()
     if (apts) { const nz = { ...z, apartments: apts }; setZ(nz); upsert(nz); toast(`Provisioned ${apts.length} apartments → worker sites`, 'ok') }
   }
+  // ── Persist the zone itself into the backend catalog `zones` table so workers can be
+  //    onboarded into it (workers.zone_id points here). status map: active→live. ──
+  const [syncingZone, setSyncingZone] = useState(false)
+  const zoneBody = (status: ZoneStatus) => ({
+    name: z.name || 'Untitled Zone', state: z.state, city: z.city,
+    pincodes: z.pincodes.map((p) => p.code).filter(Boolean).join(','),
+    status: status === 'active' ? 'live' : status === 'inactive' ? 'paused' : 'planned',
+    slaMinutes: (() => { const on = z.services.filter((s) => s.on); return on.length ? Math.round(on.reduce((a, s) => a + s.sla, 0) / on.length) : null })(),
+  })
+  const syncZone = async (status: ZoneStatus): Promise<number | null> => {
+    setSyncingZone(true)
+    try {
+      if (z.backendZoneId) { await updateZone(z.backendZoneId, zoneBody(status)); setSyncingZone(false); return z.backendZoneId }
+      const created = await createZone(zoneBody(status)); setSyncingZone(false); return (created as { id: number }).id
+    } catch { setSyncingZone(false); toast('Zone backend sync failed — check backend / admin role', 'err'); return null }
+  }
+  const syncZoneNow = async () => {
+    if (!z.name || !z.city) { toast('Enter zone name and city first', 'err'); return }
+    const id = await syncZone(z.status)
+    if (id) { const nz = { ...z, backendZoneId: id }; setZ(nz); upsert(nz); toast(`Zone linked to backend · #${id}`, 'ok') }
+  }
   const activate = async () => {
+    const zoneId = await syncZone('active')
     const apts = await provisionApts()
-    const nz: Zone = { ...z, ...(apts ? { apartments: apts } : {}), status: 'active' }
+    const nz: Zone = { ...z, ...(apts ? { apartments: apts } : {}), ...(zoneId ? { backendZoneId: zoneId } : {}), status: 'active' }
     setZ(nz); upsert(nz)
-    toast('Zone activated — apartments are live in the worker app; onboarding can begin 🚀', 'ok')
+    toast('Zone activated & linked to backend — onboarding can begin 🚀', 'ok')
   }
 
   return (
@@ -277,7 +300,8 @@ function ZoneSetup({ zone, onBack, upsert }: { zone: Zone; onBack: () => void; u
               <span className="sub">Step {step + 1} of {STEPS.length}</span>
             </div>
             <StepPanel step={cur.key} z={z} m={m} patch={patch} checks={checks} ready={ready} toast={toast}
-              onProvision={syncNow} provisioning={provisioning} onActivate={activate} />
+              onProvision={syncNow} provisioning={provisioning} onActivate={activate}
+              onSyncZone={syncZoneNow} syncingZone={syncingZone} />
           </div>
           <div className="zo-wiz-foot">
             <button className="zo-btn line" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}><ChevronLeft size={16} /> Back</button>
@@ -307,6 +331,7 @@ function stepDone(key: string, z: Zone, checks: ReturnType<typeof readiness>): b
     case 'equipment': return !!find('equipment')
     case 'team': return !!find('team')
     case 'readiness': return z.status === 'active'
+    case 'onboarding': return z.status === 'active' && !!z.backendZoneId
     default: return false
   }
 }
@@ -320,10 +345,11 @@ function MTile({ l, v, s }: { l: string; v: ReactNode; s?: string }) {
 }
 
 /* ═══════════════════ STEP PANELS ═══════════════════ */
-function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provisioning, onActivate }: {
+function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provisioning, onActivate, onSyncZone, syncingZone }: {
   step: string; z: Zone; m: ReturnType<typeof computeMetrics>; patch: (u: Partial<Zone>) => void
   checks: ReturnType<typeof readiness>; ready: boolean; toast: (s: string, k?: 'ok' | 'err') => void
   onProvision: () => void; provisioning: boolean; onActivate: () => void
+  onSyncZone: () => void; syncingZone: boolean
 }) {
   /* ---- LOCATION ---- */
   if (step === 'location') return (
@@ -351,6 +377,10 @@ function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provi
       <div>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--zink)' }}>Zone Center · {z.radiusKm} km radius</span>
         <div style={{ marginTop: 8 }}><MiniMap lat={z.lat} lng={z.lng} height={240} label={z.name} /></div>
+        <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="zo-btn ghost" disabled={syncingZone} onClick={onSyncZone}>{syncingZone ? 'Linking…' : <><Layers size={15} /> Save & link to backend</>}</button>
+          {z.backendZoneId ? <span className="zo-chip active"><i />linked · zone #{z.backendZoneId}</span> : <span className="zo-chip planning"><i />not linked</span>}
+        </div>
       </div>
     </div>
   )
@@ -727,7 +757,95 @@ function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provi
     )
   }
 
+  if (step === 'onboarding') return <OnboardingPanel z={z} />
+
   return null
+}
+
+/* ═══════════════════════════════════ WORKER ONBOARDING ═══════════════════════════════════ */
+type WorkerLite = { id: number; name: string; phone?: string; city?: string; status?: string; zone_id?: number | null }
+function OnboardingPanel({ z }: { z: Zone }) {
+  const toast = useToast()
+  const [workers, setWorkers] = useState<WorkerLite[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<number | null>(null)
+  const [pick, setPick] = useState<Record<number, string>>({})
+  const [assigned, setAssigned] = useState<Record<number, string>>({})
+  const provisioned = z.apartments.filter((a) => a.siteId)
+
+  useEffect(() => {
+    let live = true
+    setLoading(true)
+    fetchWorkers('', 'all', z.city || 'all')
+      .then((r) => { if (live) setWorkers((r.workers || []) as WorkerLite[]) })
+      .catch(() => { if (live) toast('Could not load workers', 'err') })
+      .finally(() => { if (live) setLoading(false) })
+    return () => { live = false }
+  }, [z.city])
+
+  const assign = async (w: WorkerLite) => {
+    if (!z.backendZoneId) { toast('Link the zone to the backend first (Zone Details → Save & link)', 'err'); return }
+    const aptId = pick[w.id] || provisioned[0]?.id
+    const apt = provisioned.find((a) => a.id === aptId)
+    if (!apt?.siteId) { toast('Sync apartments to worker sites first', 'err'); return }
+    setBusy(w.id)
+    try {
+      await updateWorker(w.id, { zone_id: z.backendZoneId })
+      await assignWorkerSite(w.id, apt.siteId)
+      setAssigned((a) => ({ ...a, [w.id]: apt.name || `Apt` }))
+      toast(`${w.name} → ${z.name} · ${apt.name}`, 'ok')
+    } catch { toast('Assignment failed', 'err') } finally { setBusy(null) }
+  }
+
+  if (z.status !== 'active') return <Empty emoji="🚀" text="Activate the zone first (Readiness & Activation) — then onboard workers here." />
+  if (!z.backendZoneId) return <Empty emoji="🔗" text="Zone isn't linked to the backend yet. Go to Zone Details → “Save & link to backend”, or re-run Activate & Provision." />
+
+  return (
+    <div>
+      <div className="zo-hero" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div className="row" style={{ alignItems: 'center', gap: 10 }}><HardHat size={20} /><b style={{ fontSize: 16 }}>Onboard workers into {z.name}</b></div>
+            <p style={{ margin: '6px 0 0', opacity: .92, fontSize: 13 }}>Backend zone #{z.backendZoneId} · {provisioned.length} apartments live as geofence sites. Assigning sets the worker's zone &amp; apartment in the worker app.</p>
+          </div>
+          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 30, fontWeight: 800 }}>{Object.keys(assigned).length}</div><div style={{ fontSize: 11, opacity: .9 }}>assigned</div></div>
+        </div>
+      </div>
+
+      {loading ? <div className="zo-empty"><div className="spinner" /><p style={{ marginTop: 10 }}>Loading workers…</p></div>
+        : workers.length === 0 ? <Empty emoji="🧑‍🔧" text={`No workers found${z.city ? ` in ${z.city}` : ''}. Create workers in Workers (Pros), then assign them here.`} />
+          : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="zo-table">
+                <thead><tr><th>Worker</th><th>Phone</th><th>City</th><th>Status</th><th>Assign to apartment</th><th></th></tr></thead>
+                <tbody>
+                  {workers.map((w) => {
+                    const done = assigned[w.id]
+                    return (
+                      <tr key={w.id} style={{ cursor: 'default' }}>
+                        <td><b>{w.name}</b></td>
+                        <td>{w.phone || '—'}</td>
+                        <td>{w.city || '—'}</td>
+                        <td><span className={'zo-chip ' + (w.status === 'active' ? 'active' : 'pending')}><i />{w.status || '—'}</span></td>
+                        <td>
+                          <select className="zo-mini" style={{ width: 170, textAlign: 'left' }} value={pick[w.id] || provisioned[0]?.id || ''} onChange={(e) => setPick((p) => ({ ...p, [w.id]: e.target.value }))} disabled={!!done}>
+                            {provisioned.map((a) => <option key={a.id} value={a.id}>{a.name || `Apt #${a.siteId}`}</option>)}
+                          </select>
+                        </td>
+                        <td>
+                          {done
+                            ? <span className="zo-chip active"><i /><Check size={12} /> {done}</span>
+                            : <button className="zo-btn" style={{ padding: '8px 14px' }} disabled={busy === w.id} onClick={() => assign(w)}>{busy === w.id ? 'Assigning…' : <><UserCheck size={15} /> Assign</>}</button>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+    </div>
+  )
 }
 
 /* ═══════════════════════════════════ CONTROL TOWER (Screen 14) ═══════════════════════════════════ */

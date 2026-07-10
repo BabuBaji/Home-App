@@ -42,6 +42,8 @@ export interface Zone {
   pincodes: Pincode[]; apartments: Apartment[]; clusters: Cluster[]
   services: ServiceCfg[]; shifts: Shift[]; inventory: InvItem[]; team: TeamRole[]
   approved: boolean; createdAt: string
+  // Backend catalog zones id once persisted, so workers can be onboarded into this zone.
+  backendZoneId?: number
 }
 
 export const SERVICE_CATALOG: { key: string; name: string; duration: number; price: number; skill: string; sla: number }[] = [
