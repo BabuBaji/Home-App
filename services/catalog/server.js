@@ -38,6 +38,11 @@ async function init() {
       status TEXT NOT NULL DEFAULT 'planned', sla_minutes INTEGER,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Zone code (e.g. MDP001) + full 9-screen onboarding-wizard config (coverage,
+    // apartments, services, capacity/SLA, pricing, working hours, holidays, team,
+    // go-live toggles) persisted server-side as JSON.
+    `ALTER TABLE zones ADD COLUMN IF NOT EXISTS code TEXT`,
+    `ALTER TABLE zones ADD COLUMN IF NOT EXISTS config JSONB NOT NULL DEFAULT '{}'`,
   ])
   const up = `INSERT INTO services (id,name,icon,price,category,available,sort)
     VALUES ($1,$2,$3,$4,$5,true,$6)
@@ -360,7 +365,7 @@ app.delete('/api/admin/services/:id', adminAuth, requireRole('admin'), async (re
   res.json({ ok: true })
 })
 /* ---------- admin: Service Zones (area-by-area onboarding) ---------- */
-const zoneOut = (z) => ({ ...z, pincodeList: normPins(z.pincodes), pincodeCount: normPins(z.pincodes).length })
+const zoneOut = (z) => ({ ...z, config: z.config || {}, pincodeList: normPins(z.pincodes), pincodeCount: normPins(z.pincodes).length })
 app.get('/api/admin/zones', adminAuth, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
   res.json(rows.map(zoneOut))
@@ -370,19 +375,22 @@ app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) =
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
   const status = ['planned', 'live', 'paused'].includes(b.status) ? b.status : 'planned'
   const { rows } = await pool.query(
-    'INSERT INTO zones (name,state,city,pincodes,status,sla_minutes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-    [String(b.name).trim(), String(b.state || '').trim(), String(b.city || '').trim(), normPins(b.pincodes).join(','), status, b.slaMinutes ? Number(b.slaMinutes) : null])
+    'INSERT INTO zones (name,state,city,pincodes,status,sla_minutes,code,config) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *',
+    [String(b.name).trim(), String(b.state || '').trim(), String(b.city || '').trim(), normPins(b.pincodes).join(','), status,
+      b.slaMinutes ? Number(b.slaMinutes) : null, b.code ? String(b.code).trim() : null, JSON.stringify(b.config || {})])
   res.status(201).json(zoneOut(rows[0]))
 })
 app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Zone not found' })
   const z = cur.rows[0], b = req.body || {}
-  await pool.query('UPDATE zones SET name=$1,state=$2,city=$3,pincodes=$4,status=$5,sla_minutes=$6 WHERE id=$7', [
+  await pool.query('UPDATE zones SET name=$1,state=$2,city=$3,pincodes=$4,status=$5,sla_minutes=$6,code=$7,config=$8::jsonb WHERE id=$9', [
     b.name ?? z.name, b.state ?? z.state, b.city ?? z.city,
     b.pincodes !== undefined ? normPins(b.pincodes).join(',') : z.pincodes,
     b.status && ['planned', 'live', 'paused'].includes(b.status) ? b.status : z.status,
-    b.slaMinutes !== undefined ? (b.slaMinutes ? Number(b.slaMinutes) : null) : z.sla_minutes, req.params.id])
+    b.slaMinutes !== undefined ? (b.slaMinutes ? Number(b.slaMinutes) : null) : z.sla_minutes,
+    b.code !== undefined ? (b.code ? String(b.code).trim() : null) : z.code,
+    b.config !== undefined ? JSON.stringify(b.config) : JSON.stringify(z.config || {}), req.params.id])
   res.json(zoneOut((await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])).rows[0]))
 })
 app.delete('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
