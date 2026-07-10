@@ -15,6 +15,7 @@ import Bookings from './screens/Bookings'
 import Services from './screens/Services'
 import ServiceAreas from './screens/ServiceAreas'
 import ZoneOnboarding from './screens/ZoneOnboarding'
+import { CitiesPage, ClustersPage, ApartmentsPage, InventoryPage, PricingPage, ServiceCoveragePage } from './screens/ZoneEntities'
 import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
 import Shifts from './screens/Shifts'
@@ -53,6 +54,12 @@ export default function App() {
           <Route path="/services" element={<Page><Services /></Page>} />
           <Route path="/service-areas" element={<Page><ServiceAreas /></Page>} />
           <Route path="/zones" element={<Page><ZoneOnboarding /></Page>} />
+          <Route path="/zones/cities" element={<Page><CitiesPage /></Page>} />
+          <Route path="/zones/clusters" element={<Page><ClustersPage /></Page>} />
+          <Route path="/zones/apartments" element={<Page><ApartmentsPage /></Page>} />
+          <Route path="/zones/pricing" element={<Page><PricingPage /></Page>} />
+          <Route path="/zones/coverage" element={<Page><ServiceCoveragePage /></Page>} />
+          <Route path="/zones/inventory" element={<Page><InventoryPage /></Page>} />
           <Route path="/live-ops" element={<Page><LiveOps /></Page>} />
           <Route path="/roster" element={<Page><Roster /></Page>} />
           <Route path="/shift-plans" element={<Page><Shifts /></Page>} />

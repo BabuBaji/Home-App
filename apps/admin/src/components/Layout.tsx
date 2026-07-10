@@ -4,13 +4,14 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes,
+  Building2, Layers, Package, Map as MapIcon,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, can } from '../store'
 import { fetchAlerts } from '../api'
 import { Avatar } from './UI'
 
-type NavItem = { to: string; label: string; Icon: LucideIcon; chev?: boolean; min?: string }
+type NavItem = { to: string; label: string; Icon: LucideIcon; chev?: boolean; min?: string; end?: boolean }
 type NavGroup = { section: string; items: NavItem[] }
 
 const NAV: NavGroup[] = [
@@ -24,8 +25,16 @@ const NAV: NavGroup[] = [
     { to: '/payments', label: 'Payments', Icon: CreditCard, chev: true },
     { to: '/refunds', label: 'Refunds', Icon: RotateCcw, chev: true },
   ] },
+  { section: 'Zone Operations', items: [
+    { to: '/zones', label: 'Zone Dashboard', Icon: LayoutDashboard, min: 'admin', end: true },
+    { to: '/zones/cities', label: 'Cities', Icon: Building2, min: 'admin' },
+    { to: '/zones/clusters', label: 'Clusters', Icon: Layers, min: 'admin' },
+    { to: '/zones/apartments', label: 'Apartments', Icon: Boxes, min: 'admin' },
+    { to: '/zones/pricing', label: 'Pricing', Icon: Tag, min: 'admin' },
+    { to: '/zones/coverage', label: 'Service Coverage', Icon: MapIcon, min: 'admin' },
+    { to: '/zones/inventory', label: 'Inventory', Icon: Package, min: 'admin' },
+  ] },
   { section: 'Operations', items: [
-    { to: '/zones', label: 'Zone Planning', Icon: Boxes, min: 'admin' },
     { to: '/live-ops', label: 'Live Ops', Icon: Radio, min: 'admin' },
     { to: '/service-areas', label: 'Service Areas', Icon: MapPin, min: 'admin' },
     { to: '/roster', label: 'Shifts / Roster', Icon: CalendarClock, min: 'admin' },
@@ -81,7 +90,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <div key={grp.section} className="navgrp">
               <span className="navgrp-title">{grp.section}</span>
               {grp.items.filter((it) => !it.min || can(admin?.role, it.min)).map((it) => (
-                <NavLink key={it.to} to={it.to} className={({ isActive }) => 'navitem' + (isActive ? ' active' : '')} onClick={() => setOpen(false)}>
+                <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => 'navitem' + (isActive ? ' active' : '')} onClick={() => setOpen(false)}>
                   <it.Icon size={19} /> <span>{it.label}</span>
                   {it.chev && <ChevronRight className="nav-chev" size={15} />}
                 </NavLink>
