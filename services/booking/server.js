@@ -5,6 +5,8 @@
 // reads addresses / moves the customer wallet via the auth service, and emits booking.* events
 // (consumed by dispatch, wallet, payment and notification). Realtime booking:update messages
 // are published to Redis and relayed by the gateway's socket hub.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly,
@@ -552,4 +554,4 @@ setInterval(sweepUnacceptedBookings, 30_000)
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[booking] service on http://localhost:${PORT}`)))
-  .catch((e) => { console.error('[booking] failed to start:', e.message); process.exit(1) })
+  .catch((e) => { console.error('[booking] failed to start:', e.message); process.exit(1) });
