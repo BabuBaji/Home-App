@@ -14,6 +14,7 @@ import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
 import ServiceAreas from './screens/ServiceAreas'
+import ZoneOps from './screens/ZoneOps'
 import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
 import Shifts from './screens/Shifts'
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/cancellations" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
           <Route path="/service-areas" element={<Page><ServiceAreas /></Page>} />
+          <Route path="/zones" element={<Page><ZoneOps /></Page>} />
           <Route path="/live-ops" element={<Page><LiveOps /></Page>} />
           <Route path="/roster" element={<Page><Roster /></Page>} />
           <Route path="/shift-plans" element={<Page><Shifts /></Page>} />
