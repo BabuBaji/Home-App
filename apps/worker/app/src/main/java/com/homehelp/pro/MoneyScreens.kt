@@ -630,20 +630,35 @@ private fun bookingStatusVisual(status: String?): Triple<ImageVector, Color, Col
     else -> Triple(Icons.Filled.Close, RedCancel, RedLight)
 }
 
-// Booking row — status circle + service + status subtitle; tap for full details.
+// Premium booking card — service icon chip, customer + time meta, amount and a status pill.
 @Composable
 private fun BookingCard(b: Booking, onClick: () -> Unit) {
     val (icon, tint, tintBg) = bookingStatusVisual(b.status)
-    StatusListRow(
-        icon = icon,
-        iconTint = tint,
-        iconBg = tintBg,
-        title = b.service ?: "Booking",
-        subtitle = b.status ?: "",
-        subtitleColor = tint,
-        value = "₹${b.amount}",
-        onClick = onClick,
-    )
+    Card(modifier = Modifier.clickable { onClick() }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(tintBg),
+                contentAlignment = Alignment.Center,
+            ) { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp)) }
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text(b.service ?: "Booking", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp, maxLines = 1)
+                if (!b.customerName.isNullOrBlank()) {
+                    Spacer(Modifier.height(1.dp))
+                    Text(b.customerName!!, color = TextGray, fontSize = 12.5.sp, maxLines = 1)
+                }
+                if (!b.timeInfo.isNullOrBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text("🕐 ${b.timeInfo}", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                }
+            }
+            Spacer(Modifier.width(Space.s))
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (b.amount > 0) Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 16.sp)
+                StatusPill(b.status ?: "", tintBg, tint)
+            }
+        }
+    }
 }
 
 // ---- Today's Schedule (timeline) ------------------------------------------------------------

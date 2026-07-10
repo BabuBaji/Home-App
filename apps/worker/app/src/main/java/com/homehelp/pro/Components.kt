@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -79,7 +80,8 @@ fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Compos
     }
 }
 
-/** Full-bleed rounded hero banner with the brand (or given) gradient and a soft violet glow. */
+/** Full-bleed rounded premium hero banner: the brand (or given) gradient, a soft violet
+ *  glow, and two decorative light "glow orbs" for depth — matching the Home hero. */
 @Composable
 fun GradientBanner(
     modifier: Modifier = Modifier,
@@ -88,15 +90,19 @@ fun GradientBanner(
     padding: Int = 18,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
-    Column(
+    Box(
         modifier
             .fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(radius.dp), spotColor = Purple, ambientColor = Purple)
+            .shadow(18.dp, RoundedCornerShape(radius.dp), spotColor = Violet, ambientColor = Violet)
             .clip(RoundedCornerShape(radius.dp))
-            .background(gradient)
-            .padding(padding.dp),
-        content = content,
-    )
+            .background(gradient),
+    ) {
+        Box(Modifier.align(Alignment.TopEnd).offset(x = 34.dp, y = (-34).dp).size(120.dp)
+            .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(Radius.pill)))
+        Box(Modifier.align(Alignment.BottomStart).offset(x = (-28).dp, y = 30.dp).size(94.dp)
+            .background(Color.White.copy(alpha = 0.07f), RoundedCornerShape(Radius.pill)))
+        Column(Modifier.padding(padding.dp), content = content)
+    }
 }
 
 enum class Dp16(val value: Dp) { S(12.dp), M(16.dp) }
@@ -119,33 +125,41 @@ val LocalWorkerInitials = compositionLocalOf { "" }
 fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
     val openDrawer = LocalDrawerOpen.current
     val nav = LocalNav.current
-    Column(Modifier.fillMaxWidth().background(CardBg)) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp), spotColor = Purple.copy(alpha = 0.30f), ambientColor = Purple.copy(alpha = 0.14f))
+            .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+            .background(HeroGradient),
+    ) {
+        // subtle glow orb for depth
+        Box(Modifier.align(Alignment.TopEnd).offset(x = 30.dp, y = (-28).dp).size(110.dp)
+            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(Radius.pill)))
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Space.l, vertical = Space.m),
+                .padding(horizontal = Space.l)
+                .padding(top = 12.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeaderIcon(Icons.Filled.Menu, "Menu", tint = TextDark) { openDrawer() }
-            Spacer(Modifier.width(Space.s))
+            HeaderIcon(Icons.Filled.Menu, "Menu", tint = Color.White) { openDrawer() }
             if (onBack != null) {
-                HeaderIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextDark) { onBack() }
                 Spacer(Modifier.width(Space.xs))
+                HeaderIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) { onBack() }
             }
             Text(
                 tr(title),
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextDark,
+                color = Color.White,
                 letterSpacing = (-0.2).sp,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(start = Space.xs),
             )
             if (trailing != null) { trailing(); Spacer(Modifier.width(Space.s)) }
-            WalletChip(LocalWalletBalance.current) { nav?.navigateApp(Routes.WALLET) }
+            WalletChip(LocalWalletBalance.current, onDark = true) { nav?.navigateApp(Routes.WALLET) }
             Spacer(Modifier.width(Space.s))
-            ProfileChip(LocalWorkerInitials.current) { nav?.navigateApp(Routes.PROFILE) }
+            ProfileChip(LocalWorkerInitials.current, onDark = true) { nav?.navigateApp(Routes.PROFILE) }
         }
-        HairlineDivider()
     }
 }
 
@@ -224,10 +238,11 @@ fun BellHeader(title: String, onBell: (() -> Unit)? = null) {
     Header(title, trailing = {
         Box(
             Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill))
+                .background(Color.White.copy(alpha = 0.16f))
                 .then(if (onBell != null) Modifier.clickable { onBell() } else Modifier),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark, modifier = Modifier.size(23.dp))
+            Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = Color.White, modifier = Modifier.size(21.dp))
         }
     })
 }

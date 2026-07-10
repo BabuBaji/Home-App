@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
@@ -475,6 +476,7 @@ private val PART_TIME_SHIFTS = listOf(
 // Performance & Incentives — all figures are real (from the worker's own activity/earnings).
 @Composable
 fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadShaktiBonus() }
     DetailScaffold("Performance", nav) {
         // Rating / tier hero.
         GradientBanner {
@@ -515,32 +517,47 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
             HairlineDivider()
             BreakdownRow("Lifetime", "₹${vm.totalEarned}", GreenSuccess)
         }
+        // Daily goal with an animated progress ring.
+        SectionTitle("Today's Goal")
         Card {
-            SectionLabel("Incentives & Goals")
-            Spacer(Modifier.height(Space.m))
-            Text("Daily earnings goal", fontSize = 13.sp, color = TextDark, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(Space.s))
-            ProgressBar(vm.goalProgress, fill = if (vm.goalProgress >= 1f) GreenSuccess else Purple, height = 10)
-            Spacer(Modifier.height(Space.s))
-            Text(
-                if (vm.goalProgress >= 1f) "Goal reached 🎉  ₹${vm.todayEarnings} of ₹${vm.dailyGoal}"
-                else "₹${(vm.dailyGoal - vm.todayEarnings).coerceAtLeast(0)} to go  ·  ₹${vm.todayEarnings} of ₹${vm.dailyGoal}",
-                fontSize = 12.sp, color = TextGray,
-            )
-            Spacer(Modifier.height(Space.l)); HairlineDivider(); Spacer(Modifier.height(Space.l))
-            val next = WorkerTier.next(vm.tier)
-            if (next != null && vm.jobsToNextTier > 0) {
-                Text("Next tier: ${next.label} ${next.emoji}", fontSize = 13.sp, color = TextDark, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(Space.s))
-                val span = (next.minJobs - vm.tier.minJobs).coerceAtLeast(1)
-                val tp = ((vm.jobsCompleted - vm.tier.minJobs).toFloat() / span).coerceIn(0f, 1f)
-                ProgressBar(tp, fill = Purple)
-                Spacer(Modifier.height(Space.s))
-                Text("${vm.jobsToNextTier} more jobs to reach ${next.label}", fontSize = 12.sp, color = TextGray)
-            } else {
-                Text("You're at the top tier — ${vm.tier.label} ${vm.tier.emoji} 🏆", fontSize = 13.sp, color = TextDark)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularGoalRing(vm.goalProgress, ringSize = 88.dp) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${(vm.goalProgress * 100).toInt()}%", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Text(if (vm.goalProgress >= 1f) "🎉" else "Goal", color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.width(Space.l))
+                Column(Modifier.weight(1f)) {
+                    Text("₹${vm.todayEarnings} of ₹${vm.dailyGoal}", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
+                    Spacer(Modifier.height(Space.xs))
+                    Text(
+                        if (vm.goalProgress >= 1f) "Goal reached — great work today!"
+                        else "₹${(vm.dailyGoal - vm.todayEarnings).coerceAtLeast(0)} to go to hit today's target",
+                        fontSize = 12.5.sp, color = TextGray,
+                    )
+                }
             }
         }
+
+        // Performance metrics.
+        val completionPct = if (vm.todayJobs > 0) vm.todayCompleted * 100 / vm.todayJobs else 0
+        SectionTitle("Metrics")
+        Card {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                PerformanceMetric(Modifier.weight(1f), "Rating", if (vm.workerRating > 0) "${vm.workerRating}" else "—", Gold, meter = if (vm.workerRating > 0) (vm.workerRating / 5.0).toFloat() else null, icon = Icons.Filled.Star)
+                PerformanceMetric(Modifier.weight(1f), "Completion", if (vm.todayJobs > 0) "$completionPct%" else "—", GreenSuccess, meter = if (vm.todayJobs > 0) completionPct / 100f else null, icon = Icons.Filled.CheckCircle)
+            }
+            Spacer(Modifier.height(Space.m))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                PerformanceMetric(Modifier.weight(1f), "Jobs Done", "${vm.jobsCompleted}", Purple, icon = Icons.Filled.EmojiEvents)
+                PerformanceMetric(Modifier.weight(1f), "Lifetime", "₹${vm.totalEarned}", Violet, icon = Icons.Filled.Payments)
+            }
+        }
+
+        // Sitara Bonus — real working-days / Sundays / rating reward ladder.
+        SectionTitle("Sitara Bonus")
+        SitaraBonusCard(vm.shaktiBonus) { nav.navigate(Routes.SHAKTI) }
     }
 }
 

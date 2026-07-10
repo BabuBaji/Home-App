@@ -26,12 +26,15 @@ import androidx.compose.ui.unit.sp
 // so refining the values here recolours the whole app with zero layout changes.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ---- Brand (indigo-violet — unchanged hue, shared with customer & admin apps) ----
-val Purple = Color(0xFF5B51E8)        // primary — indigo-violet
-val PurpleDark = Color(0xFF4840C4)    // primary pressed / deep indigo (gradient end)
-val PurpleMid = Color(0xFF7C6DF7)     // gradient light stop
-val PurpleLight = Color(0xFFE7E3FD)   // primary tint — banners, indicators, nav pill
-val Primary50 = Color(0xFFF4F3FE)     // faint violet tint — icon chips, selected surfaces
+// ---- Brand (indigo → violet — exact premium spec) ----
+val Purple = Color(0xFF4F46E5)        // primary — indigo (#4F46E5)
+val PurpleDark = Color(0xFF4338CA)    // primary pressed / deep indigo
+val PurpleMid = Color(0xFF6366F1)     // gradient middle stop (#6366F1)
+val Violet = Color(0xFF7C3AED)        // brand violet — gradient end (#7C3AED)
+val VioletDeep = Color(0xFF5B21B6)    // deep violet — layered accents
+val IndigoNight = Color(0xFF312E81)   // dark indigo — hero depth / overlays
+val PurpleLight = Color(0xFFE7E5FB)   // primary tint — banners, indicators, nav pill
+val Primary50 = Color(0xFFF3F3FE)     // faint violet tint — icon chips, selected surfaces
 
 // ---- Accents ----
 val Coral = Color(0xFFFF7A59)         // warm accent — highlights / promos
@@ -56,9 +59,13 @@ val Divider = Color(0xFFE5E7EB)       // hairline borders / separators
 val CardBorder = Color(0xFFEEF0F4)    // ultra-light card outline under soft shadows
 val FieldFill = Color(0xFFF3F4F6)     // filled text-field / segmented-track background
 
-// ---- Signature brand gradients (buttons, hero banners) ----
-val BrandGradient = Brush.linearGradient(listOf(PurpleMid, Purple, PurpleDark))
-val BrandGradientH = Brush.horizontalGradient(listOf(PurpleMid, PurpleDark))
+// ---- Signature brand gradients (buttons, hero banners) — exact indigo→violet spec ----
+// #4F46E5 → #6366F1 → #7C3AED
+val BrandGradient = Brush.linearGradient(listOf(Purple, PurpleMid, Violet))
+val BrandGradientH = Brush.horizontalGradient(listOf(Purple, Violet))
+// Deeper, layered hero gradient (dark indigo → indigo → violet) for premium depth.
+val HeroGradient = Brush.linearGradient(listOf(IndigoNight, Purple, Violet))
+val VioletGradient = Brush.linearGradient(listOf(PurpleMid, Violet))
 val CoralGradient = Brush.linearGradient(listOf(Color(0xFFFF9472), Coral))
 
 // ─────────────────────────────────────────────────────────────────────────────
