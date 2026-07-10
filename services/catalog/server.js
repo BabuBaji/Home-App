@@ -515,7 +515,7 @@ app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
     workers: ws.total || 0, online: ws.online || 0, busy: ws.busy || 0, offline: ws.offline || 0,
     orders: b.orders || 0, revenue: b.revenue || 0, completed: b.completed || 0,
     cancelled: b.cancelled || 0, pending: b.pending || 0, ordersTotal: b.orders_total || 0, revenueTotal: b.revenue_total || 0,
-    rating: b.rating || 0, trend: ops.trend || [], topServices,
+    rating: b.rating || 0, trend: ops.trend || [], topServices, recent: ops.recent || [],
   })
 })
 // Global operational overview (trend / revenue / top-services / worker-status / rating) for
@@ -527,7 +527,9 @@ app.get('/api/admin/ops-overview', adminAuth, async (_q, res) => {
   ])
   const svcNames = Object.fromEntries((await pool.query('SELECT id, name FROM services')).rows.map((s) => [s.id, s.name]))
   const topServices = (ops.topServices || []).slice(0, 6).map((t) => ({ name: svcNames[t.id] || t.id, count: t.count }))
-  res.json({ trend: ops.trend || [], revenueDaily: ops.revenueDaily || [], rating: ops.rating || 0, topServices, workerStatus: ws })
+  const zmap = Object.fromEntries((await pool.query('SELECT id, name FROM zones')).rows.map((z) => [z.id, z.name]))
+  const recent = (ops.recent || []).map((r) => ({ ...r, zone: zmap[r.zoneId] || '—' }))
+  res.json({ trend: ops.trend || [], revenueDaily: ops.revenueDaily || [], rating: ops.rating || 0, topServices, workerStatus: ws, recent })
 })
 // All-zones real metrics for the admin dashboard (apartments + real bookings per zone).
 app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {

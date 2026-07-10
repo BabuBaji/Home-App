@@ -68,11 +68,7 @@ export default function ZoneDashboard({ zone, onBack, onEdit }: { zone: BZone; o
   const topSvc: { name: string; count: number }[] = (real?.topServices?.length ? real.topServices : m.topServices)
   const ratingVal: number | string = real ? (real.rating > 0 ? real.rating : '—') : m.rating
   const etaVal = zone.config.capacity?.maxEtaMin ?? m.eta
-  const recent = (zone.config.apartments || []).slice(0, 5).map((a, i) => ({
-    id: '#BK' + (78912 - i), svc: m.topServices[i % Math.max(1, m.topServices.length)]?.name || 'Cleaning',
-    apt: a.name, time: ['09:32', '09:20', '09:05', '08:50', '08:45'][i] + ' AM',
-    status: ['Assigned', 'In Progress', 'Completed', 'Assigned', 'Pending'][i],
-  }))
+  const recent = (((real?.recent as any[]) || []).map((r) => ({ id: r.ref, svc: r.service, apt: zone.name, time: r.time, status: r.status })))
 
   return (
     <div className="zo">

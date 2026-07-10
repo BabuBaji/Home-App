@@ -441,7 +441,15 @@ app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
   const counts = {}
   for (const row of items) { let arr = []; try { arr = JSON.parse(row.items) } catch { /* ignore */ } for (const it of arr) counts[it.id] = (counts[it.id] || 0) + 1 }
   const topServices = Object.entries(counts).map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count)
-  res.json({ trend, revenueDaily, rating, topServices })
+  // Real recent-bookings feed (latest 6).
+  const recentRows = (await pool.query(
+    `SELECT ref, type, items, status, zone_id, to_char(created, 'HH12:MI AM') AS time
+     FROM bookings WHERE 1=1${zw} ORDER BY created DESC LIMIT 6`, params)).rows
+  const recent = recentRows.map((r) => {
+    let svc = r.type; try { const arr = JSON.parse(r.items); if (arr[0] && arr[0].name) svc = arr[0].name } catch { /* ignore */ }
+    return { ref: r.ref, service: svc, status: r.status, time: r.time, zoneId: r.zone_id }
+  })
+  res.json({ trend, revenueDaily, rating, topServices, recent })
 })
 app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json(await getBooking(Number(req.params.id))))
 // Dispatch: the open job pool (unclaimed confirmed bookings).

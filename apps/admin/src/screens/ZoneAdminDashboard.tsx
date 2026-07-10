@@ -12,7 +12,6 @@ import '../zones/zones.css'
 
 import type { BZone } from '../zones/types'
 
-const SVC: Record<string, string> = { sweep: 'Sweeping & Mopping', bath: 'Bathroom Cleaning', kitchen: 'Kitchen Cleaning', dust: 'Dusting', laundry: 'Laundry', fan: 'Fan Cleaning', window: 'Window Cleaning', sofa: 'Sofa Cleaning', deep: 'Deep Cleaning' }
 const money = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 const compact = (n: number) => n >= 1e5 ? '₹' + (n / 1e5).toFixed(2) + 'L' : money(n)
 
@@ -92,7 +91,7 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
   const revBars = (ops.revenueDaily?.length
     ? ops.revenueDaily.map((r: any) => ({ d: r.d, rev: r.rev }))
     : Array.from({ length: 7 }, (_, i) => ({ d: `Day ${i + 1}`, rev: 0 })))
-  const recent = per.flatMap(({ z, m }) => (z.config.services || []).slice(0, 1).map((k) => ({ id: '#BK' + (78912 - z.id), svc: SVC[k] || k, zone: z.name, status: ['Assigned', 'In Progress', 'Completed', 'Pending'][z.id % 4], time: '09:' + (10 + z.id) + ' AM' }))).slice(0, 5)
+  const recent: { id: string; svc: string; zone: string; status: string; time: string }[] = (ops.recent || []).map((r: any) => ({ id: r.ref, svc: r.service, zone: r.zone, status: r.status, time: r.time }))
 
   return (
     <div>
