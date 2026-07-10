@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { MiniMap, SumBars, useToast } from '../components/UI'
 import { BarChart, Donut } from '../components/Charts'
-import { createSite, updateSite, deleteSite, createZone, updateZone, fetchWorkers, updateWorker, assignWorkerSite, createShift } from '../api'
+import { createSite, updateSite, deleteSite, createZone, updateZone, fetchZones, fetchWorkers, updateWorker, assignWorkerSite, createShift } from '../api'
 import { ZoneMap } from '../zones/ZoneMap'
 import {
   useZones, computeMetrics, readiness, isReady, recommendations,
@@ -70,6 +70,20 @@ export default function ZoneOps() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [view, setView] = useState<'overview' | 'map' | 'tower'>('overview')
   const open = zones.find((z) => z.id === openId) || null
+
+  // Adopt existing backend zone ids for local zones (match by name+city), so the "linked"
+  // state survives a new browser session and we never create a duplicate catalog zone.
+  useEffect(() => {
+    fetchZones().then((bz) => {
+      const norm = (s?: string) => (s || '').trim().toLowerCase()
+      zones.forEach((z) => {
+        if (z.backendZoneId || !z.name) return
+        const m = bz.find((e) => norm(e.name) === norm(z.name) && norm((e as { city?: string }).city) === norm(z.city))
+        if (m) upsert({ ...z, backendZoneId: (m as { id: number }).id })
+      })
+    }).catch(() => { /* offline — stay local */ })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (open) return <ZoneSetup zone={open} onBack={() => setOpenId(null)} upsert={upsert} />
   return (
@@ -251,7 +265,17 @@ function ZoneSetup({ zone, onBack, upsert }: { zone: Zone; onBack: () => void; u
   const syncZone = async (status: ZoneStatus): Promise<number | null> => {
     setSyncingZone(true)
     try {
-      if (z.backendZoneId) { await updateZone(z.backendZoneId, zoneBody(status)); setSyncingZone(false); return z.backendZoneId }
+      let id = z.backendZoneId
+      if (!id) {
+        // Reuse an existing catalog zone with the same name+city instead of creating a duplicate.
+        try {
+          const norm = (s?: string) => (s || '').trim().toLowerCase()
+          const existing = await fetchZones()
+          const match = existing.find((e) => norm(e.name) === norm(z.name) && norm((e as { city?: string }).city) === norm(z.city))
+          if (match) id = (match as { id: number }).id
+        } catch { /* fall through to create */ }
+      }
+      if (id) { await updateZone(id, zoneBody(status)); setSyncingZone(false); return id }
       const created = await createZone(zoneBody(status)); setSyncingZone(false); return (created as { id: number }).id
     } catch { setSyncingZone(false); toast('Zone backend sync failed — check backend / admin role', 'err'); return null }
   }
