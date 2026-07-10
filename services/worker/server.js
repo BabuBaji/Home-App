@@ -100,6 +100,15 @@ async function init() {
       id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, subject TEXT, message TEXT,
       status TEXT NOT NULL DEFAULT 'Open', created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Always-available demo/QA worker so a clean phone login works out-of-the-box for testing
+    // (idempotent — matches on the last-10-digits of the phone, ignoring any +91/space format).
+    `INSERT INTO workers (name, phone, email, city, services, status, verified, rating)
+     SELECT 'Demo Partner', '9876543210', 'demo.partner@pros.homehelp.in', 'Hyderabad',
+            '["Utensil Wash","Mopping","Sweeping","Dusting","Bathroom Cleaning","Laundry","Kitchen Cleaning"]'::jsonb,
+            'active', true, 4.8
+     WHERE NOT EXISTS (
+       SELECT 1 FROM workers WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') LIKE '%9876543210'
+     )`,
   ])
   const seeded = (await pool.query('SELECT COUNT(*)::int n FROM workers')).rows[0].n
   if (!seeded) {
@@ -224,7 +233,16 @@ function todaySchedule(bookings, custNames) {
 async function getWorker(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM workers WHERE id=$1', [id]); return rows[0] || null }
 // If the same phone maps to more than one worker (e.g. a stray pending placeholder alongside a
 // real onboarded pro), prefer the active + verified account so login isn't shadowed by the dupe.
-async function getByPhone(phone) { const { rows } = await pool.query("SELECT * FROM workers WHERE phone=$1 ORDER BY (status='active') DESC, verified DESC, id DESC", [String(phone || '')]); return rows[0] || null }
+// Match by the last 10 digits, ignoring formatting (+91, spaces, dashes) on BOTH sides, so a
+// bare 10-digit app login lines up with a stored "+91 98xxxxxxxx". Prefer active + verified.
+async function getByPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '').slice(-10)
+  if (digits.length < 10) return null
+  const { rows } = await pool.query(
+    "SELECT * FROM workers WHERE right(regexp_replace(coalesce(phone,''), '\\D', '', 'g'), 10)=$1 ORDER BY (status='active') DESC, verified DESC, id DESC",
+    [digits])
+  return rows[0] || null
+}
 const serviceSet = (w) => new Set((w.services || []).map((s) => String(s).toLowerCase().trim()))
 
 /* ---------- shifts / roster (WFM) ---------- */
