@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '../components/UI'
 import { fetchZones, createZone, updateZone, fetchWorkers } from '../api'
+import ZoneDashboard from './ZoneDashboard'
 import '../zones/zones.css'
 
 /* ───────── types ───────── */
@@ -64,14 +65,15 @@ function defaultConfig(): ZoneConfig {
 export default function ZoneOnboarding() {
   const [zones, setZones] = useState<BZone[]>([])
   const [loading, setLoading] = useState(true)
-  const [mode, setMode] = useState<'list' | 'wizard'>('list')
+  const [mode, setMode] = useState<'list' | 'wizard' | 'dashboard'>('list')
   const [editing, setEditing] = useState<BZone | null>(null)
   const toast = useToast()
 
   const load = () => { setLoading(true); fetchZones().then((z) => setZones(z as unknown as BZone[])).catch(() => toast('Could not load zones', 'err')).finally(() => setLoading(false)) }
   useEffect(load, [])
 
-  if (mode === 'wizard') return <ZoneWizard zone={editing} onDone={() => { setMode('list'); setEditing(null); load() }} onCancel={() => { setMode('list'); setEditing(null) }} />
+  if (mode === 'wizard') return <ZoneWizard zone={editing} onDone={() => { setMode('list'); setEditing(null); load() }} onCancel={() => { setMode(editing ? 'dashboard' : 'list') }} />
+  if (mode === 'dashboard' && editing) return <ZoneDashboard zone={editing} onBack={() => { setMode('list'); setEditing(null); load() }} onEdit={() => setMode('wizard')} />
 
   return (
     <div className="zo">
@@ -89,7 +91,7 @@ export default function ZoneOnboarding() {
                 const svc = z.config?.services?.length || 0
                 const live = z.status === 'live'
                 return (
-                  <div key={z.id} className="zo-zcard" onClick={() => { setEditing(z); setMode('wizard') }}>
+                  <div key={z.id} className="zo-zcard" onClick={() => { setEditing(z); setMode('dashboard') }}>
                     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
                         <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--zink)' }}>{z.name}</div>
@@ -101,6 +103,10 @@ export default function ZoneOnboarding() {
                       <div className="zo-mtile" style={{ padding: 10 }}><div className="l">Apartments</div><div className="v" style={{ fontSize: 17 }}>{apts}</div></div>
                       <div className="zo-mtile" style={{ padding: 10 }}><div className="l">Services</div><div className="v" style={{ fontSize: 17 }}>{svc}</div></div>
                       <div className="zo-mtile" style={{ padding: 10 }}><div className="l">Pincodes</div><div className="v" style={{ fontSize: 17 }}>{z.pincodeList?.length || 0}</div></div>
+                    </div>
+                    <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                      <button className="zo-btn" style={{ flex: 1, padding: '8px 12px' }} onClick={(e) => { e.stopPropagation(); setEditing(z); setMode('dashboard') }}>Dashboard</button>
+                      <button className="zo-btn ghost" style={{ padding: '8px 12px' }} onClick={(e) => { e.stopPropagation(); setEditing(z); setMode('wizard') }}>Edit</button>
                     </div>
                   </div>
                 )
