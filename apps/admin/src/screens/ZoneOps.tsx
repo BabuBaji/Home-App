@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { MiniMap, SumBars, useToast } from '../components/UI'
 import { BarChart, Donut } from '../components/Charts'
-import { createSite, updateSite, deleteSite, createZone, updateZone, fetchWorkers, updateWorker, assignWorkerSite } from '../api'
+import { createSite, updateSite, deleteSite, createZone, updateZone, fetchWorkers, updateWorker, assignWorkerSite, createShift } from '../api'
 import { ZoneMap } from '../zones/ZoneMap'
 import {
   useZones, computeMetrics, readiness, isReady, recommendations,
@@ -770,8 +770,13 @@ function OnboardingPanel({ z }: { z: Zone }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<number | null>(null)
   const [pick, setPick] = useState<Record<number, string>>({})
+  const [shiftPick, setShiftPick] = useState<Record<number, string>>({})
   const [assigned, setAssigned] = useState<Record<number, string>>({})
   const provisioned = z.apartments.filter((a) => a.siteId)
+  const hm = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0) }
+  // Backend rejects overnight roster (end must be after start), so only day-shifts are rosterable.
+  const validShifts = z.shifts.filter((s) => hm(s.end) > hm(s.start))
+  const enabledServices = z.services.filter((s) => s.on).map((s) => s.name)
 
   useEffect(() => {
     let live = true
@@ -785,15 +790,19 @@ function OnboardingPanel({ z }: { z: Zone }) {
 
   const assign = async (w: WorkerLite) => {
     if (!z.backendZoneId) { toast('Link the zone to the backend first (Zone Details → Save & link)', 'err'); return }
-    const aptId = pick[w.id] || provisioned[0]?.id
-    const apt = provisioned.find((a) => a.id === aptId)
+    const apt = provisioned.find((a) => a.id === (pick[w.id] || provisioned[0]?.id))
     if (!apt?.siteId) { toast('Sync apartments to worker sites first', 'err'); return }
+    const sh = validShifts.find((s) => s.id === (shiftPick[w.id] || validShifts[0]?.id))
     setBusy(w.id)
     try {
-      await updateWorker(w.id, { zone_id: z.backendZoneId })
+      // zone + service catalogue → worker profile
+      await updateWorker(w.id, { zone_id: z.backendZoneId, services: enabledServices })
+      // apartment → geofence site
       await assignWorkerSite(w.id, apt.siteId)
-      setAssigned((a) => ({ ...a, [w.id]: apt.name || `Apt` }))
-      toast(`${w.name} → ${z.name} · ${apt.name}`, 'ok')
+      // weekly shift roster (all 7 days) for the chosen shift
+      if (sh) await createShift({ worker_id: w.id, zone_id: z.backendZoneId, weekdays: [0, 1, 2, 3, 4, 5, 6], start: sh.start, end: sh.end })
+      setAssigned((a) => ({ ...a, [w.id]: `${apt.name}${sh ? ` · ${sh.name}` : ''}` }))
+      toast(`${w.name} → ${z.name} · ${apt.name}${sh ? ` · ${sh.name} shift` : ''} · ${enabledServices.length} services`, 'ok')
     } catch { toast('Assignment failed', 'err') } finally { setBusy(null) }
   }
 
@@ -806,7 +815,7 @@ function OnboardingPanel({ z }: { z: Zone }) {
         <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div className="row" style={{ alignItems: 'center', gap: 10 }}><HardHat size={20} /><b style={{ fontSize: 16 }}>Onboard workers into {z.name}</b></div>
-            <p style={{ margin: '6px 0 0', opacity: .92, fontSize: 13 }}>Backend zone #{z.backendZoneId} · {provisioned.length} apartments live as geofence sites. Assigning sets the worker's zone &amp; apartment in the worker app.</p>
+            <p style={{ margin: '6px 0 0', opacity: .92, fontSize: 13 }}>Backend zone #{z.backendZoneId} · {provisioned.length} apartments · {enabledServices.length} services. Assigning sets the worker's <b>zone, apartment, weekly shift roster &amp; service catalogue</b> in the worker app.</p>
           </div>
           <div style={{ textAlign: 'center' }}><div style={{ fontSize: 30, fontWeight: 800 }}>{Object.keys(assigned).length}</div><div style={{ fontSize: 11, opacity: .9 }}>assigned</div></div>
         </div>
@@ -817,19 +826,23 @@ function OnboardingPanel({ z }: { z: Zone }) {
           : (
             <div style={{ overflowX: 'auto' }}>
               <table className="zo-table">
-                <thead><tr><th>Worker</th><th>Phone</th><th>City</th><th>Status</th><th>Assign to apartment</th><th></th></tr></thead>
+                <thead><tr><th>Worker</th><th>Phone</th><th>Status</th><th>Apartment</th><th>Shift</th><th></th></tr></thead>
                 <tbody>
                   {workers.map((w) => {
                     const done = assigned[w.id]
                     return (
                       <tr key={w.id} style={{ cursor: 'default' }}>
-                        <td><b>{w.name}</b></td>
+                        <td><b>{w.name}</b> <span style={{ color: 'var(--zmut)', fontSize: 11 }}>{w.city || ''}</span></td>
                         <td>{w.phone || '—'}</td>
-                        <td>{w.city || '—'}</td>
                         <td><span className={'zo-chip ' + (w.status === 'active' ? 'active' : 'pending')}><i />{w.status || '—'}</span></td>
                         <td>
-                          <select className="zo-mini" style={{ width: 170, textAlign: 'left' }} value={pick[w.id] || provisioned[0]?.id || ''} onChange={(e) => setPick((p) => ({ ...p, [w.id]: e.target.value }))} disabled={!!done}>
+                          <select className="zo-mini" style={{ width: 150, textAlign: 'left' }} value={pick[w.id] || provisioned[0]?.id || ''} onChange={(e) => setPick((p) => ({ ...p, [w.id]: e.target.value }))} disabled={!!done}>
                             {provisioned.map((a) => <option key={a.id} value={a.id}>{a.name || `Apt #${a.siteId}`}</option>)}
+                          </select>
+                        </td>
+                        <td>
+                          <select className="zo-mini" style={{ width: 120, textAlign: 'left' }} value={shiftPick[w.id] || validShifts[0]?.id || ''} onChange={(e) => setShiftPick((p) => ({ ...p, [w.id]: e.target.value }))} disabled={!!done || !validShifts.length}>
+                            {validShifts.length ? validShifts.map((s) => <option key={s.id} value={s.id}>{s.name} {s.start}–{s.end}</option>) : <option>No day shift</option>}
                           </select>
                         </td>
                         <td>
