@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
+  LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer,
 } from 'lucide-react'
@@ -20,7 +20,6 @@ const NAV: NavGroup[] = [
     { to: '/workers', label: 'Workers (Pros)', Icon: HardHat, chev: true },
     { to: '/bookings', label: 'Bookings', Icon: CalendarDays, chev: true },
     { to: '/services', label: 'Services', Icon: Sparkles, chev: true },
-    { to: '/pricing', label: 'Pricing', Icon: Tag, chev: true },
     { to: '/payments', label: 'Payments', Icon: CreditCard, chev: true },
     { to: '/refunds', label: 'Refunds', Icon: RotateCcw, chev: true },
   ] },
@@ -49,7 +48,7 @@ const NAV: NavGroup[] = [
 
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
-  services: 'Services', pricing: 'Pricing', payments: 'Payments', refunds: 'Refunds',
+  services: 'Services', payments: 'Payments', refunds: 'Refunds',
   'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', roles: 'Roles & Permissions',
 }
