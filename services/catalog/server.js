@@ -43,6 +43,31 @@ async function init() {
     // go-live toggles) persisted server-side as JSON.
     `ALTER TABLE zones ADD COLUMN IF NOT EXISTS code TEXT`,
     `ALTER TABLE zones ADD COLUMN IF NOT EXISTS config JSONB NOT NULL DEFAULT '{}'`,
+    // ── Zone-operations entities (real tables; the admin "Operations" submenu manages these) ──
+    `CREATE TABLE IF NOT EXISTS cities (
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, state TEXT NOT NULL DEFAULT '',
+      active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS clusters (
+      id SERIAL PRIMARY KEY, zone_id INTEGER, name TEXT NOT NULL, manager TEXT DEFAULT '',
+      color TEXT DEFAULT '#4F46E5', radius_km REAL DEFAULT 2.5, travel_min INTEGER DEFAULT 15,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS apartments (
+      id SERIAL PRIMARY KEY, zone_id INTEGER, cluster_id INTEGER, name TEXT NOT NULL,
+      type TEXT DEFAULT 'Apartment', builder TEXT DEFAULT '', units INTEGER DEFAULT 0,
+      occupied INTEGER DEFAULT 0, pincode TEXT DEFAULT '', lat REAL, lng REAL, aov INTEGER DEFAULT 0,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS inventory (
+      id SERIAL PRIMARY KEY, zone_id INTEGER, name TEXT NOT NULL, vendor TEXT DEFAULT '',
+      stock INTEGER DEFAULT 0, reorder INTEGER DEFAULT 0, unit TEXT DEFAULT 'pcs',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS zone_pricing (
+      id SERIAL PRIMARY KEY, zone_id INTEGER NOT NULL, service_id TEXT NOT NULL,
+      price INTEGER NOT NULL DEFAULT 0, discount INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true
+    )`,
   ])
   const up = `INSERT INTO services (id,name,icon,price,category,available,sort)
     VALUES ($1,$2,$3,$4,$5,true,$6)
@@ -61,6 +86,13 @@ async function init() {
       `INSERT INTO zones (name,state,city,pincodes,status,sla_minutes) VALUES ($1,$2,$3,$4,'live',$5)`,
       ['Bengaluru Central', 'Karnataka', 'Bengaluru', pins, 60])
     console.log('[catalog] seeded live zone "Bengaluru Central" (pincodes 560001-560115)')
+  }
+  // Seed serviceable cities (real table backing the Operations → Cities page + zone form).
+  const cityCount = (await pool.query('SELECT COUNT(*)::int n FROM cities')).rows[0].n
+  if (!cityCount) {
+    const seed = [['Hyderabad', 'Telangana'], ['Bengaluru', 'Karnataka'], ['Mumbai', 'Maharashtra'], ['Delhi', 'Delhi'], ['Chennai', 'Tamil Nadu'], ['Pune', 'Maharashtra'], ['Kolkata', 'West Bengal'], ['Ahmedabad', 'Gujarat'], ['Jaipur', 'Rajasthan']]
+    for (const [name, state] of seed) await pool.query('INSERT INTO cities (name, state) VALUES ($1, $2)', [name, state])
+    console.log('[catalog] seeded', seed.length, 'cities')
   }
   console.log(`[catalog] Postgres ready, seeded ${SERVICES_SEED.length} services`)
 }
@@ -407,6 +439,77 @@ app.patch('/api/services/:id', adminAuth, requireRole('manager'), async (req, re
     [req.body?.price ?? s.price, req.body?.available === undefined ? s.available : !!req.body.available, req.params.id])
   await broadcastServices()
   res.json(await getService(req.params.id))
+})
+
+/* ───────── Zone-operations entities: generic real CRUD (cities / clusters / apartments / inventory / zone_pricing) ───────── */
+// column allow-lists per table so we never interpolate arbitrary keys into SQL.
+const ENTITY = {
+  cities: { cols: ['name', 'state', 'active'], zoned: false },
+  clusters: { cols: ['zone_id', 'name', 'manager', 'color', 'radius_km', 'travel_min'], zoned: true },
+  apartments: { cols: ['zone_id', 'cluster_id', 'name', 'type', 'builder', 'units', 'occupied', 'pincode', 'lat', 'lng', 'aov'], zoned: true },
+  inventory: { cols: ['zone_id', 'name', 'vendor', 'stock', 'reorder', 'unit'], zoned: true },
+  zone_pricing: { cols: ['zone_id', 'service_id', 'price', 'discount', 'active'], zoned: true },
+}
+function entityRoutes(path, table) {
+  const def = ENTITY[table]
+  app.get(`/api/admin/${path}`, adminAuth, async (req, res) => {
+    const zone = req.query.zone_id ? Number(req.query.zone_id) : null
+    const { rows } = zone != null && def.zoned
+      ? await pool.query(`SELECT * FROM ${table} WHERE zone_id=$1 ORDER BY id`, [zone])
+      : await pool.query(`SELECT * FROM ${table} ORDER BY id`)
+    res.json(rows)
+  })
+  app.post(`/api/admin/${path}`, adminAuth, requireRole('manager'), async (req, res) => {
+    const b = req.body || {}
+    const cols = def.cols.filter((c) => b[c] !== undefined)
+    if (!cols.length) return res.status(400).json({ error: 'No fields provided' })
+    const vals = cols.map((c) => b[c])
+    const ph = cols.map((_, i) => `$${i + 1}`).join(',')
+    const { rows } = await pool.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) RETURNING *`, vals)
+    res.status(201).json(rows[0])
+  })
+  app.patch(`/api/admin/${path}/:id`, adminAuth, requireRole('manager'), async (req, res) => {
+    const b = req.body || {}
+    const cols = def.cols.filter((c) => b[c] !== undefined)
+    if (!cols.length) return res.json({ ok: true })
+    const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
+    const { rows } = await pool.query(`UPDATE ${table} SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => b[c]), Number(req.params.id)])
+    if (!rows.length) return res.status(404).json({ error: 'Not found' })
+    res.json(rows[0])
+  })
+  app.delete(`/api/admin/${path}/:id`, adminAuth, requireRole('manager'), async (req, res) => {
+    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [Number(req.params.id)])
+    res.json({ ok: true })
+  })
+}
+entityRoutes('cities', 'cities')
+entityRoutes('clusters', 'clusters')
+entityRoutes('apartments', 'apartments')
+entityRoutes('inventory', 'inventory')
+entityRoutes('zone-pricing', 'zone_pricing')
+
+/* Real per-zone operations metrics, aggregated from live DB (apartments, inventory, workers,
+ * bookings) — powers the dashboards with real numbers instead of derived estimates. */
+const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
+app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
+  const zoneId = Number(req.params.id)
+  const zoneRow = (await pool.query('SELECT * FROM zones WHERE id=$1', [zoneId])).rows[0]
+  if (!zoneRow) return res.status(404).json({ error: 'Zone not found' })
+  const [apts, inv] = await Promise.all([
+    pool.query('SELECT COUNT(*)::int n, COALESCE(SUM(units),0)::int units, COALESCE(SUM(occupied),0)::int occupied FROM apartments WHERE zone_id=$1', [zoneId]),
+    pool.query('SELECT COUNT(*)::int n, COUNT(*) FILTER (WHERE stock < reorder)::int low FROM inventory WHERE zone_id=$1', [zoneId]),
+  ])
+  // Real workers assigned to this zone (from the worker service).
+  const wk = await tryGet(WORKER_URL, `/internal/workers?zone_id=${zoneId}`, { workers: [] })
+  const workers = (wk.workers || [])
+  const total = workers.length
+  const online = workers.filter((w) => w.available && (w.status === 'active')).length
+  const busy = workers.filter((w) => w.offered_booking).length
+  res.json({
+    zoneId, apartments: apts.rows[0].n, units: apts.rows[0].units, occupied: apts.rows[0].occupied,
+    inventoryItems: inv.rows[0].n, lowStock: inv.rows[0].low,
+    workers: total, online, busy, offline: Math.max(0, total - online - busy),
+  })
 })
 
 init()
