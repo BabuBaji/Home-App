@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Check, X, TrendingUp, Shield, Headphones, Receipt, Lock, RotateCcw, BadgeIndianRupee, ChevronDown } from 'lucide-react'
-import { fetchSettings, updateSettings } from '../api'
-import { Card, Field, Loading, useToast, money } from '../components/UI'
+import { fetchSettings, updateSettings, fetchServices, updateService } from '../api'
+import type { AdminService } from '../types'
+import { Card, Field, Loading, useToast, money, Badge } from '../components/UI'
 import { useStore, can } from '../store'
 
 const PLANS = [
@@ -31,8 +32,19 @@ export default function Pricing() {
   const [s, setS] = useState<Record<string, string> | null>(null)
   const [yearly, setYearly] = useState(false)
   const editable = can(admin?.role, 'admin')
+
+  // Per-service price editing (writes to the catalogue; changes broadcast live to the customer app).
+  const canEditPrices = can(admin?.role, 'manager')
+  const [services, setServices] = useState<AdminService[] | null>(null)
+  const [priceEdits, setPriceEdits] = useState<Record<string, string>>({})
+  const [savingId, setSavingId] = useState('')
+
   const load = () => fetchSettings().then(setS).catch(() => {})
-  useEffect(() => { load() }, [])
+  const loadServices = () => fetchServices().then((rows) => {
+    setServices(rows)
+    setPriceEdits(Object.fromEntries(rows.map((r) => [r.id, String(r.price)])))
+  }).catch(() => {})
+  useEffect(() => { load(); loadServices() }, [])
 
   async function saveFees(e: React.FormEvent) {
     e.preventDefault()
@@ -40,6 +52,19 @@ export default function Pricing() {
   }
   const set = (k: string, v: string) => setS((p) => ({ ...p!, [k]: v }))
   const planPrice = (p: number) => yearly ? Math.round(p * 12 * 0.8) : p
+
+  async function saveServicePrice(svc: AdminService) {
+    const next = Math.round(Number(priceEdits[svc.id]))
+    if (!Number.isFinite(next) || next < 0) { toast('Enter a valid price', 'err'); return }
+    if (next === svc.price) return
+    setSavingId(svc.id)
+    try {
+      await updateService(svc.id, { name: svc.name, category: svc.category, icon: svc.icon, available: svc.available, price: next })
+      toast(`${svc.name} price updated to ${money(next)}`)
+      setServices((rows) => rows?.map((r) => (r.id === svc.id ? { ...r, price: next } : r)) ?? rows)
+    } catch (err: any) { toast(err.message, 'err') }
+    finally { setSavingId('') }
+  }
 
   return (
     <div className="cols" style={{ gap: 18 }}>
@@ -111,6 +136,65 @@ export default function Pricing() {
               <Field label="Worker commission (%)"><input disabled={!editable} value={s.commission_percent || ''} onChange={(e) => set('commission_percent', e.target.value)} type="number" /></Field>
               {editable && <div style={{ gridColumn: '1 / -1' }}><button className="btn">Save changes</button></div>}
             </form>
+          )}
+        </Card>
+
+        <Card
+          title="Service Pricing"
+          right={<span className="muted" style={{ fontSize: 12.5 }}>{canEditPrices ? 'Edit a base price and Save — the customer app updates live' : 'View only (manager access required)'}</span>}
+        >
+          {!services ? <Loading /> : services.length === 0 ? (
+            <p className="muted" style={{ margin: 0 }}>No services yet. Add services from the Services screen.</p>
+          ) : (
+            <div className="tablewrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Service</th>
+                    <th>Category</th>
+                    <th>Current Price</th>
+                    <th>New Base Price (₹)</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {services.map((svc) => {
+                    const edited = String(svc.price) !== (priceEdits[svc.id] ?? '')
+                    return (
+                      <tr key={svc.id}>
+                        <td>
+                          <div className="cell-user">
+                            <span style={{ fontSize: 20, lineHeight: 1 }}>{svc.icon}</span>
+                            <strong>{svc.name}</strong>
+                          </div>
+                        </td>
+                        <td className="muted">{svc.category}</td>
+                        <td className="num">{money(svc.price)}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            style={{ width: 120 }}
+                            disabled={!canEditPrices}
+                            value={priceEdits[svc.id] ?? ''}
+                            onChange={(e) => setPriceEdits((p) => ({ ...p, [svc.id]: e.target.value }))}
+                          />
+                        </td>
+                        <td><Badge tone={svc.available ? 'green' : 'red'}>{svc.available ? 'Active' : 'Inactive'}</Badge></td>
+                        <td>
+                          {canEditPrices && (
+                            <button className="btn" disabled={!edited || savingId === svc.id} onClick={() => saveServicePrice(svc)}>
+                              {savingId === svc.id ? 'Saving…' : 'Save'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>
