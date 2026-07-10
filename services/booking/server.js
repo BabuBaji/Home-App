@@ -416,9 +416,32 @@ app.get('/api/internal/zone-metrics', internalOnly, async (_q, res) => {
        COUNT(*) FILTER (WHERE status='cancelled' AND created::date = CURRENT_DATE)::int AS cancelled,
        COUNT(*) FILTER (WHERE status = ANY($1) AND created::date = CURRENT_DATE)::int AS pending,
        COUNT(*)::int AS orders_total,
-       COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue_total
+       COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue_total,
+       COALESCE(ROUND(AVG(rating) FILTER (WHERE rating IS NOT NULL), 1), 0)::float AS rating
      FROM bookings GROUP BY COALESCE(zone_id,0)`, [ACTIVE_STATES])
   res.json(rows)
+})
+// Real operational chart data (7-day trend, 14-day revenue, top services, avg rating).
+// Optional ?zone_id= scopes everything to one zone; otherwise global across zones.
+app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
+  const zoneId = req.query.zone_id != null && req.query.zone_id !== '' ? Number(req.query.zone_id) : null
+  const zw = zoneId != null ? ' AND zone_id=$1' : ''
+  const params = zoneId != null ? [zoneId] : []
+  const trend = (await pool.query(
+    `SELECT to_char(created::date, 'Dy') AS day, created::date AS d, COUNT(*)::int AS bookings,
+       COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue
+     FROM bookings WHERE created >= CURRENT_DATE - INTERVAL '6 days'${zw}
+     GROUP BY created::date ORDER BY created::date`, params)).rows
+  const revenueDaily = (await pool.query(
+    `SELECT to_char(created::date, 'DD Mon') AS d, COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS rev
+     FROM bookings WHERE created >= CURRENT_DATE - INTERVAL '13 days'${zw}
+     GROUP BY created::date ORDER BY created::date`, params)).rows
+  const rating = (await pool.query(`SELECT COALESCE(ROUND(AVG(rating), 1), 0)::float AS r FROM bookings WHERE rating IS NOT NULL${zw}`, params)).rows[0].r
+  const items = (await pool.query(`SELECT items FROM bookings WHERE 1=1${zw}`, params)).rows
+  const counts = {}
+  for (const row of items) { let arr = []; try { arr = JSON.parse(row.items) } catch { /* ignore */ } for (const it of arr) counts[it.id] = (counts[it.id] || 0) + 1 }
+  const topServices = Object.entries(counts).map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count)
+  res.json({ trend, revenueDaily, rating, topServices })
 })
 app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json(await getBooking(Number(req.params.id))))
 // Dispatch: the open job pool (unclaimed confirmed bookings).

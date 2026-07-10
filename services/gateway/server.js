@@ -40,7 +40,7 @@ function pickTarget(url) {
   const p = (s) => u === s || u.startsWith(s + '/') || u.startsWith(s)
 
   // ----- admin panel (BFF + per-domain admin routes) -----
-  if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing')) return U.catalog
+  if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/ops-overview')) return U.catalog
   if (p('/api/admin/activity')) return U.notification
   if (p('/api/admin/notifications')) return U.notification
   if (/^\/api\/admin\/workers\/[^/]+\/wallet/.test(u)) return U.wallet

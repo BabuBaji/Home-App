@@ -883,6 +883,20 @@ async function patchWorker(id, b, res) {
 
 /* ---------- internal (service-to-service) ---------- */
 app.get('/internal/workers', internalOnly, async (req, res) => res.json({ stats: await workerStats(), workers: await listWorkers(req.query) }))
+// Real worker-status breakdown (online / busy / offline) for the admin zone dashboards.
+app.get('/internal/worker-status', internalOnly, async (req, res) => {
+  const zoneId = req.query.zone_id != null && req.query.zone_id !== '' ? Number(req.query.zone_id) : null
+  const where = zoneId != null ? 'WHERE zone_id=$1' : ''
+  const params = zoneId != null ? [zoneId] : []
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE available AND status='active' AND offered_booking IS NULL)::int AS online,
+       COUNT(*) FILTER (WHERE offered_booking IS NOT NULL)::int AS busy,
+       COUNT(*) FILTER (WHERE NOT available AND status='active')::int AS offline
+     FROM workers ${where}`, params)
+  const r = rows[0]
+  res.json({ total: r.total, online: r.online, busy: r.busy, offline: r.offline, onBreak: 0 })
+})
 app.get('/internal/workers/active-for', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
   const rows = (await pool.query("SELECT services, available FROM workers WHERE status='active'")).rows

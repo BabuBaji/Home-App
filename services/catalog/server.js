@@ -500,21 +500,34 @@ app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
     pool.query('SELECT COUNT(*)::int n, COUNT(*) FILTER (WHERE stock < reorder)::int low FROM inventory WHERE zone_id=$1', [zoneId]),
   ])
   // Real workers assigned to this zone (from the worker service).
-  const wk = await tryGet(WORKER_URL, `/internal/workers?zone_id=${zoneId}`, { workers: [] })
-  const workers = (wk.workers || [])
-  const total = workers.length
-  const online = workers.filter((w) => w.available && (w.status === 'active')).length
-  const busy = workers.filter((w) => w.offered_booking).length
-  // Real booking figures from the booking service (today + lifetime), tagged by zone_id.
-  const bstats = await tryGet(BOOKING_URL, '/api/internal/zone-metrics', [])
+  // Real figures: bookings + worker-status + ops charts, all from live services.
+  const [bstats, ws, ops] = await Promise.all([
+    tryGet(BOOKING_URL, '/api/internal/zone-metrics', []),
+    tryGet(WORKER_URL, `/internal/worker-status?zone_id=${zoneId}`, {}),
+    tryGet(BOOKING_URL, `/api/internal/ops-stats?zone_id=${zoneId}`, {}),
+  ])
   const b = (Array.isArray(bstats) ? bstats : []).find((x) => Number(x.zone_id) === zoneId) || {}
+  const svcNames = Object.fromEntries((await pool.query('SELECT id, name FROM services')).rows.map((s) => [s.id, s.name]))
+  const topServices = (ops.topServices || []).slice(0, 6).map((t) => ({ name: svcNames[t.id] || t.id, count: t.count }))
   res.json({
     zoneId, apartments: apts.rows[0].n, units: apts.rows[0].units, occupied: apts.rows[0].occupied,
     inventoryItems: inv.rows[0].n, lowStock: inv.rows[0].low,
-    workers: total, online, busy, offline: Math.max(0, total - online - busy),
+    workers: ws.total || 0, online: ws.online || 0, busy: ws.busy || 0, offline: ws.offline || 0,
     orders: b.orders || 0, revenue: b.revenue || 0, completed: b.completed || 0,
     cancelled: b.cancelled || 0, pending: b.pending || 0, ordersTotal: b.orders_total || 0, revenueTotal: b.revenue_total || 0,
+    rating: b.rating || 0, trend: ops.trend || [], topServices,
   })
+})
+// Global operational overview (trend / revenue / top-services / worker-status / rating) for
+// the admin all-zones dashboard — all real from the booking + worker services.
+app.get('/api/admin/ops-overview', adminAuth, async (_q, res) => {
+  const [ops, ws] = await Promise.all([
+    tryGet(BOOKING_URL, '/api/internal/ops-stats', {}),
+    tryGet(WORKER_URL, '/internal/worker-status', {}),
+  ])
+  const svcNames = Object.fromEntries((await pool.query('SELECT id, name FROM services')).rows.map((s) => [s.id, s.name]))
+  const topServices = (ops.topServices || []).slice(0, 6).map((t) => ({ name: svcNames[t.id] || t.id, count: t.count }))
+  res.json({ trend: ops.trend || [], revenueDaily: ops.revenueDaily || [], rating: ops.rating || 0, topServices, workerStatus: ws })
 })
 // All-zones real metrics for the admin dashboard (apartments + real bookings per zone).
 app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
