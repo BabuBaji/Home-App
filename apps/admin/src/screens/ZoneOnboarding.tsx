@@ -8,25 +8,11 @@ import {
 import { useToast } from '../components/UI'
 import { fetchZones, createZone, updateZone, fetchWorkers } from '../api'
 import ZoneDashboard from './ZoneDashboard'
+import ZoneAdminDashboard from './ZoneAdminDashboard'
 import '../zones/zones.css'
 
 /* ───────── types ───────── */
-type Apt = { id: string; name: string; type: string; cluster?: string; units?: number; pincode?: string }
-type Person = { id: number; name: string }
-interface ZoneConfig {
-  description?: string
-  coverage?: { mode: 'radius' | 'pincodes'; radiusKm: number; lat: number; lng: number; pincodes: string[] }
-  apartments?: Apt[]
-  services?: string[]
-  pricing?: Record<string, number>
-  pricingExtras?: { gst: number; convenienceFee: number; minOrder: number; discount: number }
-  capacity?: { maxOrders: number; workersRequired: number; minOnline: number; maxEtaMin: number; maxTravelKm: number }
-  workingHours?: { is247: boolean; days: Record<string, { open: string; close: string; closed: boolean }> }
-  holidays?: { date: string; name: string }[]
-  team?: { manager?: Person; teamLeaders: Person[]; workers: Person[] }
-  goLive?: { enableBookings: boolean; instant: boolean; scheduled: boolean; autoAssign: boolean }
-}
-interface BZone { id: number; name: string; code?: string; state?: string; city?: string; status: string; sla_minutes?: number; config: ZoneConfig; pincodeList?: string[] }
+import type { Apt, Person, ZoneConfig, BZone } from '../zones/types'
 
 /* ───────── constants ───────── */
 const SERVICES = [
@@ -66,6 +52,7 @@ export default function ZoneOnboarding() {
   const [zones, setZones] = useState<BZone[]>([])
   const [loading, setLoading] = useState(true)
   const [mode, setMode] = useState<'list' | 'wizard' | 'dashboard'>('list')
+  const [tab, setTab] = useState<'overview' | 'zones'>('overview')
   const [editing, setEditing] = useState<BZone | null>(null)
   const toast = useToast()
 
@@ -75,14 +62,21 @@ export default function ZoneOnboarding() {
   if (mode === 'wizard') return <ZoneWizard zone={editing} onDone={() => { setMode('list'); setEditing(null); load() }} onCancel={() => { setMode(editing ? 'dashboard' : 'list') }} />
   if (mode === 'dashboard' && editing) return <ZoneDashboard zone={editing} onBack={() => { setMode('list'); setEditing(null); load() }} onEdit={() => setMode('wizard')} />
 
+  const openWizard = () => { setEditing(null); setMode('wizard') }
+  const openZone = (z: BZone) => { setEditing(z); setMode('dashboard') }
   return (
     <div className="zo">
       <div className="zo-top">
-        <div><h2>Zone Management</h2><p>Create and manage operational zones · {zones.length} zones</p></div>
+        <div><h2>Zone Operations</h2><p>{zones.length} zones · {zones.filter((z) => z.status === 'live').length} active</p></div>
         <div className="spacer" style={{ flex: 1 }} />
-        <button className="zo-btn" onClick={() => { setEditing(null); setMode('wizard') }}><Plus size={17} /> Create Zone</button>
+        <div className="zo-seg">
+          <button className={tab === 'overview' ? 'on' : ''} onClick={() => setTab('overview')}>Dashboard</button>
+          <button className={tab === 'zones' ? 'on' : ''} onClick={() => setTab('zones')}>All Zones</button>
+        </div>
+        <button className="zo-btn" onClick={openWizard}><Plus size={17} /> Create Zone</button>
       </div>
       {loading ? <div className="zo-empty"><div className="spinner" /><p style={{ marginTop: 10 }}>Loading zones…</p></div>
+        : tab === 'overview' ? <ZoneAdminDashboard zones={zones} onCreate={openWizard} onOpenZone={openZone} />
         : zones.length === 0 ? <div className="zo-empty"><div className="e">🗺️</div><p>No zones yet. Create your first operational zone.</p></div>
           : (
             <div className="zo-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>

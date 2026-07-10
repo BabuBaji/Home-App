@@ -8,17 +8,7 @@ import {
 import { Card, StatCard, Badge } from '../components/UI'
 import '../zones/zones.css'
 
-/* Same BZone/config shape the wizard writes. */
-interface ZoneConfig {
-  coverage?: { radiusKm: number; lat: number; lng: number }
-  apartments?: { name: string }[]
-  services?: string[]
-  pricing?: Record<string, number>
-  capacity?: { maxOrders: number; workersRequired: number; minOnline: number; maxEtaMin: number }
-  holidays?: { date: string; name: string }[]
-  team?: { manager?: { id: number; name: string }; workers: { id: number; name: string }[] }
-}
-interface BZone { id: number; name: string; code?: string; state?: string; city?: string; status: string; config: ZoneConfig }
+import type { BZone } from '../zones/types'
 
 const SERVICE_NAMES: Record<string, string> = {
   sweep: 'Sweeping & Mopping', bath: 'Bathroom Cleaning', kitchen: 'Kitchen Cleaning', dust: 'Dusting',
