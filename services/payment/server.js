@@ -105,6 +105,29 @@ app.post('/api/payment/verify', auth, async (req, res) => {
   verifiedPayments.set(String(razorpay_payment_id), { at: Date.now() })
   res.json({ ok: true, txnId: razorpay_payment_id })
 })
+// Verified wallet top-up. Credits the customer wallet ONLY after the gateway payment passed
+// server-side signature verification (done in /api/payment/verify). Idempotent by payment_id, so
+// a repeated call or a duplicate Razorpay webhook can never double-credit the wallet.
+app.post('/api/payment/wallet/topup', auth, async (req, res) => {
+  const amount = Math.max(1, Math.round(Number(req.body?.amount) || 0))
+  const paymentId = String(req.body?.paymentId || '').trim()
+  if (!amount || !paymentId) return res.status(400).json({ error: 'Missing amount or paymentId' })
+  const r = await rzp()
+  // Live gateway → the payment must have been verified (never trust frontend success alone).
+  if (r.live && !verifiedPayments.has(paymentId)) return res.status(400).json({ error: 'Payment not verified' })
+  // Idempotency guard — one gateway payment credits the wallet exactly once.
+  const dup = await pool.query("SELECT id FROM payments WHERE payment_id=$1 AND mode='wallet_topup'", [paymentId])
+  if (dup.rowCount) return res.json({ ok: true, duplicate: true })
+  let balance = null
+  try {
+    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: 'Added to wallet', amount, ref: paymentId })
+    balance = credited?.balance ?? null
+  } catch { return res.status(502).json({ error: 'Could not credit wallet' }) }
+  await pool.query("INSERT INTO payments (customer_id,amount,mode,gateway,payment_id,status) VALUES ($1,$2,'wallet_topup','razorpay',$3,'SUCCESS')", [req.user.id, amount, paymentId])
+  verifiedPayments.delete(paymentId)
+  res.json({ ok: true, balance })
+})
+
 app.post('/api/payment/charge', auth, async (req, res) => {
   const r = await rzp()
   if (r.live) return res.status(400).json({ error: 'Use the Razorpay checkout flow' })

@@ -19,6 +19,7 @@ const U = {
   booking: (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''),
   worker: (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, ''),
   payment: (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, ''),
+  catalog: (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, ''),
 }
 
 process.on('unhandledRejection', (e) => console.error('[admin] unhandledRejection:', e?.message || e))
@@ -42,10 +43,11 @@ const DEFAULT_SETTINGS = {
   platform_fee: '20', tax_percent: '5',
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
-  auto_assign: 'true', maintenance_mode: 'false',
+  auto_assign: 'true', maintenance_mode: 'false', dispatch_timeout_min: '5',
   razorpay_key_id: '', razorpay_key_secret: '', google_maps_key: '', msg91_key: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
+  serviceable_pincodes: '', service_cities: '',
   razorpay_webhook_secret: '', payment_webhook_secret: '', payout_webhook_secret: '', payout_provider: '',
   earnings_auto_release: 'true', advance_recovery_percent: '30', auto_approve_withdrawal_below: '2000', advance_max: '5000',
 }
@@ -139,6 +141,16 @@ app.post('/api/admin/login', async (req, res) => {
 })
 app.get('/api/admin/me', admin, (req, res) => res.json({ admin: publicAdmin(req.admin) }))
 
+// Run the month-end Shakti Bonus settlement (delegates to the worker service, which credits
+// each qualifying worker's tier bonus via the wallet — idempotent per worker/month).
+app.post('/api/admin/shakti/settle', admin, async (req, res) => {
+  try {
+    const r = await internalPost(U.worker, '/internal/shakti/settle', { month: req.body?.month })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: req.admin?.name || 'Admin', action: 'sitara.settle', entityType: 'system', entityId: 0, detail: `Ran Sitara Bonus settlement for ${r.month} — ${r.qualified} worker(s) qualified` })
+    res.json(r)
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+})
+
 /* ---------- settings (config) ---------- */
 app.get('/api/admin/settings', admin, async (_q, res) => res.json(await getPublicSettings()))
 app.patch('/api/admin/settings', admin, requireRole('admin'), async (req, res) => {
@@ -190,6 +202,47 @@ app.get('/api/admin/audit', admin, async (req, res) => {
 })
 
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
+// Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).
+app.get('/api/admin/live-ops', admin, async (_q, res) => {
+  const ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+  const [zones, wres, ops] = await Promise.all([
+    tryGet(U.catalog, '/api/internal/zones', []),
+    tryGet(U.worker, '/internal/workers', { workers: [] }),
+    tryGet(U.booking, '/api/internal/ops', []),
+  ])
+  const workers = wres.workers || []
+  const zoneRows = (zones || []).map((z) => {
+    const zw = workers.filter((w) => w.zone_id === z.id)
+    const online = zw.filter((w) => w.status === 'active' && w.available).length
+    const zb = (ops || []).filter((b) => b.zone_id === z.id)
+    const open = zb.filter((b) => b.status === 'confirmed' && !b.worker_id).length
+    const active = zb.filter((b) => ACTIVE.includes(b.status)).length
+    const demand = open + active
+    const health = z.status !== 'live' ? 'off'
+      : demand === 0 ? 'idle'
+      : online === 0 ? 'critical'
+      : demand > online ? 'short' : 'healthy'
+    return {
+      id: z.id, name: z.name, state: z.state, city: z.city, status: z.status, pincodeCount: z.pincodeCount,
+      supply: { assigned: zw.length, active: zw.filter((w) => w.status === 'active').length, online, onShift: zw.filter((w) => w.on_shift).length },
+      demand: { open, active, total: demand }, health,
+    }
+  })
+  const totals = {
+    openJobs: (ops || []).filter((b) => b.status === 'confirmed' && !b.worker_id).length,
+    activeJobs: (ops || []).filter((b) => ACTIVE.includes(b.status)).length,
+    onlineWorkers: workers.filter((w) => w.status === 'active' && w.available).length,
+    activeWorkers: workers.filter((w) => w.status === 'active').length,
+    zonesLive: (zones || []).filter((z) => z.status === 'live').length,
+    zonesTotal: (zones || []).length,
+  }
+  const unzoned = {
+    open: (ops || []).filter((b) => !b.zone_id && b.status === 'confirmed' && !b.worker_id).length,
+    active: (ops || []).filter((b) => !b.zone_id && ACTIVE.includes(b.status)).length,
+  }
+  res.json({ zones: zoneRows, unzoned, totals })
+})
+
 app.get('/api/admin/dashboard', admin, async (_q, res) => {
   const [customers, bookings, workers] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
@@ -369,22 +422,36 @@ app.get('/api/admin/customers', admin, async (_q, res) => {
 // Customer detail (View modal): { customer, addresses, bookings, transactions }.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings] = await Promise.all([
+  const [u, addresses, allBookings, transactions] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.auth, `/api/internal/users/${id}/transactions`, []),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
   const bookings = allBookings.filter((b) => b.user_id === id)
     .map((b) => ({ id: b.id, ref: b.ref, service: (b.items || []).map((i) => i.name).join(', '), total: b.total, status: b.status, created: b.created }))
-  res.json({ customer, addresses, bookings, transactions: [] })
+  res.json({ customer, addresses, bookings, transactions })
 })
 app.patch('/api/admin/customers/:id', admin, async (req, res) => {
   try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }
 })
+// Admin wallet adjustment — credit/debit any balance (cash/promo/points), bypasses wallet status.
 app.post('/api/admin/customers/:id/wallet', admin, async (req, res) => {
-  try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet`, { type: (Number(req.body?.amount) >= 0 ? 'credit' : 'debit'), title: req.body?.title || 'Admin adjustment', amount: Math.abs(Number(req.body?.amount) || 0) })) }
+  const amt = Number(req.body?.amount) || 0
+  const type = amt >= 0 ? 'credit' : 'debit'
+  const balance = ['cash', 'promo', 'points'].includes(req.body?.balance) ? req.body.balance : 'cash'
+  try {
+    res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet`, {
+      type, balance, admin: true, kind: type === 'credit' ? 'ADMIN_CREDIT' : 'ADMIN_DEBIT',
+      title: req.body?.title || (type === 'credit' ? 'Admin credit' : 'Admin debit'), amount: Math.abs(amt),
+    }))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+// Admin sets wallet status: active / frozen / blocked / inactive.
+app.post('/api/admin/customers/:id/wallet/status', admin, async (req, res) => {
+  try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet-status`, { status: req.body?.status })) }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
 

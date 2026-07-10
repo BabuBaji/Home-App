@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { ChevronLeft, House, CalendarDays, Wallet, User, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, House, CalendarDays, History, AlertTriangle } from 'lucide-react'
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string) => void>(() => {})
@@ -43,8 +43,6 @@ export function Header({ title, subtitle, right, back = true }: {
 const NAV = [
   { to: '/home', label: 'Home', Icon: House },
   { to: '/bookings', label: 'Bookings', Icon: CalendarDays },
-  { to: '/wallet', label: 'Wallet', Icon: Wallet },
-  { to: '/profile', label: 'Profile', Icon: User },
 ]
 export function BottomNav() {
   const { pathname } = useLocation()
@@ -58,6 +56,9 @@ export function BottomNav() {
           </Link>
         )
       })}
+      <Link to="/history" className={`bn-history ${pathname.startsWith('/history') ? 'active' : ''}`}>
+        <History size={20} strokeWidth={2.2} /><span>History</span>
+      </Link>
     </nav>
   )
 }

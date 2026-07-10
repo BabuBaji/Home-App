@@ -24,7 +24,7 @@ export interface Customer {
 }
 
 export interface Worker {
-  id: number; name: string; phone?: string; email?: string; city?: string
+  id: number; name: string; phone?: string; email?: string; city?: string; zone_id?: number | null
   services: string[]; avatar?: string | null; status: string; verified: boolean
   rating: number; jobs: number; earnings: number; joined: string
 }

@@ -38,11 +38,11 @@ function pickTarget(url) {
   const p = (s) => u === s || u.startsWith(s + '/') || u.startsWith(s)
 
   // ----- admin panel (BFF + per-domain admin routes) -----
-  if (p('/api/admin/services')) return U.catalog
+  if (p('/api/admin/services') || p('/api/admin/zones')) return U.catalog
   if (p('/api/admin/activity')) return U.notification
   if (p('/api/admin/notifications')) return U.notification
   if (/^\/api\/admin\/workers\/[^/]+\/wallet/.test(u)) return U.wallet
-  if (p('/api/admin/workers')) return U.worker
+  if (p('/api/admin/workers') || p('/api/admin/shifts') || p('/api/admin/shift-defs') || p('/api/admin/attendance') || p('/api/admin/sites')) return U.worker
   if (p('/api/admin/bookings')) return U.booking
   if (p('/api/admin/finance') || p('/api/admin/payments') || p('/api/admin/refunds')) return U.payment
   if (p('/api/admin/tickets') || p('/api/admin/complaints')) return U.notification
@@ -57,10 +57,10 @@ function pickTarget(url) {
   if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')) return U.auth
 
   // ----- catalogue / pricing / address search -----
-  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/home') || p('/api/referral') || p('/api/places')) return U.catalog
+  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/serviceable') || p('/api/eta') || p('/api/zones')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
-  if (p('/api/bookings') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
+  if (p('/api/bookings') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
 
   // ----- support tickets -----
   if (p('/api/tickets')) return U.notification
@@ -134,6 +134,9 @@ io.on('connection', (socket) => {
     .catch(() => {})
   socket.on('booking:join', (id) => socket.join(`booking:${Number(id)}`))
   socket.on('booking:leave', (id) => socket.leave(`booking:${Number(id)}`))
+  // Admin control-tower room — receives ops broadcasts (e.g. worker SOS) in real time.
+  socket.on('admin:join', () => socket.join('admin'))
+  socket.on('admin:leave', () => socket.leave('admin'))
 })
 
 // Relay realtime messages published by any service.

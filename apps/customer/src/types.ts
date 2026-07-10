@@ -58,6 +58,8 @@ export interface User {
   location?: string | null
   wallet: number
   rating: number
+  referralCode?: string | null
+  referredBy?: number | null
 }
 
 export interface Address {
@@ -117,6 +119,7 @@ export interface Booking {
   photo?: string
   cancel_reason?: string
   cancel_fee?: number
+  cancelled_by?: string
   refund?: number
   created: string
   dist?: number

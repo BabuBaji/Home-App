@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Users, UserCheck, UserPlus, Repeat, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
-import { fetchCustomers, fetchCustomer, createCustomer, updateCustomer, adjustWallet } from '../api'
+import { fetchCustomers, fetchCustomer, createCustomer, updateCustomer, adjustWallet, setWalletStatus } from '../api'
 import type { Customer } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
 
@@ -27,6 +27,10 @@ export default function Customers() {
   const [fundAmount, setFundAmount] = useState('')
   const [fundNote, setFundNote] = useState('')
   const [viewing, setViewing] = useState<any>(null)
+  const [wallet, setWallet] = useState<any>(null)
+  const [wAmt, setWAmt] = useState('')
+  const [wNote, setWNote] = useState('')
+  const [wBal, setWBal] = useState<'cash' | 'promo' | 'points'>('cash')
   const [busy, setBusy] = useState(false)
 
   const load = () => { setErr(''); fetchCustomers(q, status).then(setRows).catch((e: Error) => setErr(e.message)) }
@@ -99,6 +103,30 @@ export default function Customers() {
     try { setViewing(await fetchCustomer(c.id)) } catch (e) { toast((e as Error).message, 'err') }
   }
 
+  const openWallet = async (c: Customer) => {
+    setMenuId(null); setWAmt(''); setWNote(''); setWBal('cash')
+    try { setWallet(await fetchCustomer(c.id)) } catch (e) { toast((e as Error).message, 'err') }
+  }
+  const refreshWallet = async (id: number) => { try { setWallet(await fetchCustomer(id)) } catch { /* ignore */ } }
+  const walletAdjust = async (sign: 1 | -1) => {
+    const id = wallet?.customer?.id
+    const amt = Number(wAmt)
+    if (!id || !amt || isNaN(amt) || amt <= 0) { toast('Enter a valid amount', 'err'); return }
+    setBusy(true)
+    try {
+      await adjustWallet(id, sign * amt, wNote || (sign > 0 ? 'Admin credit' : 'Admin debit'), wBal)
+      toast(`${sign > 0 ? 'Credited' : 'Debited'} ${wBal === 'points' ? amt + ' pts' : money(amt)} · ${wBal}`)
+      setWAmt(''); setWNote(''); await refreshWallet(id); load()
+    } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
+  }
+  const walletStatus = async (status: 'active' | 'frozen' | 'blocked') => {
+    const id = wallet?.customer?.id
+    if (!id) return
+    setBusy(true)
+    try { await setWalletStatus(id, status); toast(`Wallet ${status}`); await refreshWallet(id) }
+    catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
+  }
+
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div className="stat-row">
@@ -163,6 +191,7 @@ export default function Customers() {
                         <button className="menu-item" style={MENU_ITEM} onClick={() => openView(c)}>View</button>
                         <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openEdit(c) }}>Edit</button>
                         <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); toggleBlock(c) }}>{(c.status || 'active') === 'active' ? 'Block' : 'Unblock'}</button>
+                        <button className="menu-item" style={MENU_ITEM} onClick={() => openWallet(c)}>Wallet</button>
                         <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); setFundAmount(''); setFundNote(''); setFunds(c) }}>Add funds</button>
                       </div>
                     )}
@@ -279,6 +308,55 @@ export default function Customers() {
                     </tr>
                   ))}
                   {(!viewing.transactions || viewing.transactions.length === 0) && <tr><td colSpan={4} className="muted">No transactions</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {wallet && (
+        <Modal title={`Wallet — ${wallet.customer?.name || ''}`} onClose={() => setWallet(null)} wide>
+          <div className="grid" style={{ gap: 14 }}>
+            <div className="stat-row">
+              <StatCard icon={<span>💵</span>} tint="#16a34a" label="Cash Balance" value={money(wallet.customer?.wallet || 0)} sub="added / refunds" />
+              <StatCard icon={<span>🎁</span>} tint="#5b51e8" label="Promo Balance" value={money(wallet.customer?.promoBalance || 0)} sub="cashback / referral" />
+              <StatCard icon={<span>⭐</span>} tint="#f59e0b" label="Reward Points" value={(wallet.customer?.rewardPoints || 0).toLocaleString('en-IN')} sub="loyalty" />
+            </div>
+
+            <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+              <span>Wallet status:</span>
+              <Badge tone={(wallet.customer?.walletStatus || 'active') === 'active' ? 'green' : wallet.customer?.walletStatus === 'blocked' ? 'red' : undefined}>{(wallet.customer?.walletStatus || 'active').toUpperCase()}</Badge>
+              <div className="tb-spacer" />
+              <button className="btn line" disabled={busy} onClick={() => walletStatus('active')}>Activate</button>
+              <button className="btn line" disabled={busy} onClick={() => walletStatus('frozen')}>Freeze</button>
+              <button className="btn line" disabled={busy} onClick={() => walletStatus('blocked')}>Block</button>
+            </div>
+
+            <div className="row" style={{ gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <Field label="Balance"><select className="select" value={wBal} onChange={(e) => setWBal(e.target.value as 'cash' | 'promo' | 'points')}><option value="cash">Cash</option><option value="promo">Promo</option><option value="points">Reward Points</option></select></Field>
+              <Field label={wBal === 'points' ? 'Points' : 'Amount (₹)'}><input type="number" value={wAmt} onChange={(e) => setWAmt(e.target.value)} placeholder={wBal === 'points' ? '100' : '500'} /></Field>
+              <Field label="Note / reason"><input value={wNote} onChange={(e) => setWNote(e.target.value)} placeholder="Reason / reference" /></Field>
+              <button className="btn" disabled={busy || !wAmt.trim()} onClick={() => walletAdjust(1)}>Credit</button>
+              <button className="btn line" disabled={busy || !wAmt.trim()} onClick={() => walletAdjust(-1)}>Debit</button>
+            </div>
+
+            <div className="field"><span>Transactions ({(wallet.transactions || []).length})</span></div>
+            <div className="tablewrap">
+              <table className="tbl">
+                <thead><tr><th>Title</th><th>Kind</th><th>Balance</th><th className="num">Amount</th><th className="num">Bal After</th><th>Date</th></tr></thead>
+                <tbody>
+                  {(wallet.transactions || []).slice(0, 40).map((t: any) => (
+                    <tr key={t.id}>
+                      <td>{t.title || '—'}</td>
+                      <td className="muted">{t.kind || t.type}</td>
+                      <td className="muted">{t.balance_type || 'cash'}</td>
+                      <td className="num" style={{ color: t.type === 'credit' ? '#16a34a' : '#e5484d' }}>{t.type === 'credit' ? '+' : '-'}{money(t.amount || 0)}</td>
+                      <td className="num">{money(t.balance || 0)}</td>
+                      <td className="muted">{shortDate(t.created)}</td>
+                    </tr>
+                  ))}
+                  {(!wallet.transactions || wallet.transactions.length === 0) && <tr><td colSpan={6} className="muted">No transactions</td></tr>}
                 </tbody>
               </table>
             </div>

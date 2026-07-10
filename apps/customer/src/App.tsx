@@ -4,7 +4,9 @@ import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser, captureLocationOnOpen } from './api'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings } from './api'
+import { ensureNotifPermission, fireLocalNotification } from './notify'
+import { runTopBackHandler } from './backStack'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
@@ -25,11 +27,15 @@ import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
 import Rate from './screens/Rate'
 import Bookings from './screens/Bookings'
+import History from './screens/History'
+import BookingDetail from './screens/BookingDetail'
 import Wallet from './screens/Wallet'
 import Profile from './screens/Profile'
 import Support from './screens/Support'
 import Addresses from './screens/Addresses'
 import CancelPolicy from './screens/CancelPolicy'
+import PersonalInfo from './screens/PersonalInfo'
+import Terms from './screens/Terms'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
@@ -48,6 +54,36 @@ export default function App() {
   // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
   // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
   useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+
+  // App-wide push alert: notify the customer when a booking is auto-cancelled (no expert accepted),
+  // even if they've left the Track screen. Polls every 30s; the first pass seeds silently so old
+  // cancellations don't re-alert. (Fully-killed-app push would need FCM/Firebase.)
+  useEffect(() => {
+    if (!user) return
+    ensureNotifPermission()
+    const KEY = 'hh_autocancel_seen'
+    const raw = localStorage.getItem(KEY)
+    const seen = new Set<number>(raw ? JSON.parse(raw) : [])
+    let first = raw === null
+    let stopped = false
+    const tick = async () => {
+      try {
+        const bs = await fetchBookings()
+        let changed = false
+        for (const b of bs) {
+          if (b.status === 'cancelled' && b.cancelled_by === 'system' && !seen.has(b.id)) {
+            seen.add(b.id); changed = true
+            if (!first) fireLocalNotification('No expert available', `Booking ${b.ref} was cancelled — ₹${b.refund ?? b.total ?? 0} refunded to your wallet.`)
+          }
+        }
+        if (changed || first) localStorage.setItem(KEY, JSON.stringify([...seen]))
+        first = false
+      } catch { /* offline — retry next tick */ }
+    }
+    tick()
+    const iv = setInterval(() => { if (!stopped) tick() }, 30000)
+    return () => { stopped = true; clearInterval(iv) }
+  }, [user?.id])
 
   const showSplash = !minTime || !booted
 
@@ -80,11 +116,15 @@ export default function App() {
               <Route path="/cancel/:id" element={<Cancel />} />
               <Route path="/rate/:id" element={<Rate />} />
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/history" element={<History />} />
+              <Route path="/booking/:id" element={<BookingDetail />} />
               <Route path="/wallet" element={<Wallet />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/support" element={<Support />} />
               <Route path="/addresses" element={<Addresses />} />
               <Route path="/cancellation-policy" element={<CancelPolicy />} />
+              <Route path="/personal" element={<PersonalInfo />} />
+              <Route path="/terms" element={<Terms />} />
             </Route>
             <Route path="*" element={<Navigate to={user ? '/home' : '/login'} replace />} />
           </Routes>
@@ -108,6 +148,7 @@ function BackButtonHandler() {
     let remove: (() => void) | undefined
     import('@capacitor/app').then(({ App: CapApp }) => {
       CapApp.addListener('backButton', () => {
+        if (runTopBackHandler()) return // close an open overlay (chat, invoice…) instead of navigating
         const { pathname, key } = locRef.current
         if (pathname === '/home' || pathname === '/login') CapApp.exitApp()
         else if (key === 'default') nav('/home')

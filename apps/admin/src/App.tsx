@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
 import { ToastHost } from './components/UI'
+import SosAlert from './components/SosAlert'
 import Layout from './components/Layout'
 import { useStore } from './store'
 import { fetchMe, getToken } from './api'
@@ -12,6 +13,10 @@ import Workers from './screens/Workers'
 import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
+import ServiceAreas from './screens/ServiceAreas'
+import LiveOps from './screens/LiveOps'
+import Roster from './screens/Roster'
+import Shifts from './screens/Shifts'
 import Pricing from './screens/Pricing'
 import Payments from './screens/Payments'
 import Refunds from './screens/Refunds'
@@ -34,6 +39,7 @@ export default function App() {
 
   return (
     <ToastHost>
+      {admin && <SosAlert />}
       <Routes>
         <Route path="/login" element={admin ? <Navigate to="/dashboard" replace /> : <Login />} />
         <Route element={<Guard authed={!!admin} />}>
@@ -44,6 +50,10 @@ export default function App() {
           <Route path="/bookings" element={<Page><Bookings /></Page>} />
           <Route path="/cancellations" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
+          <Route path="/service-areas" element={<Page><ServiceAreas /></Page>} />
+          <Route path="/live-ops" element={<Page><LiveOps /></Page>} />
+          <Route path="/roster" element={<Page><Roster /></Page>} />
+          <Route path="/shift-plans" element={<Page><Shifts /></Page>} />
           <Route path="/pricing" element={<Page><Pricing /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
           <Route path="/refunds" element={<Page><Refunds /></Page>} />

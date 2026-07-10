@@ -88,7 +88,8 @@ export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/cust
 export const fetchCustomer = (id: number) => req<any>(`/customers/${id}`)
 export const createCustomer = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/customers', post('', body))
 export const updateCustomer = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/customers/${id}`, patch(body))
-export const adjustWallet = (id: number, amount: number, note?: string) => req<{ balance: number }>(`/customers/${id}/wallet`, post('', { amount, note }))
+export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<{ balance: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
+export const setWalletStatus = (id: number, status: 'active' | 'frozen' | 'blocked' | 'inactive') => req<{ ok: boolean; status: string }>(`/customers/${id}/wallet/status`, post('', { status }))
 
 /* workers */
 export const fetchWorkers = (q = '', status = 'all', city = 'all') => req<{ stats: any; workers: Worker[] }>(`/workers?q=${encodeURIComponent(q)}&status=${status}&city=${city}`)
@@ -130,6 +131,51 @@ export const createService = (body: Record<string, unknown>) => req<{ ok: boolea
 export const updateService = (id: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/services/${id}`, patch(body))
 export const deleteService = (id: string) => req<{ ok: boolean }>(`/services/${id}`, { method: 'DELETE' })
 
+/* service zones (area-by-area onboarding) */
+export interface Zone {
+  id: number; name: string; state: string; city: string; pincodes: string
+  status: 'planned' | 'live' | 'paused'; sla_minutes: number | null; created: string
+  pincodeList: string[]; pincodeCount: number
+}
+export const fetchZones = () => req<Zone[]>('/zones')
+
+/* live ops control tower */
+export interface LiveOpsZone {
+  id: number; name: string; state: string; city: string; status: string; pincodeCount: number
+  supply: { assigned: number; active: number; online: number; onShift: number }
+  demand: { open: number; active: number; total: number }
+  health: 'off' | 'idle' | 'critical' | 'short' | 'healthy'
+}
+export interface LiveOps {
+  zones: LiveOpsZone[]; unzoned: { open: number; active: number }
+  totals: { openJobs: number; activeJobs: number; onlineWorkers: number; activeWorkers: number; zonesLive: number; zonesTotal: number }
+}
+export const fetchLiveOps = () => req<LiveOps>('/live-ops')
+
+/* shifts / roster (WFM) */
+export interface Shift { id: number; worker_id: number; worker_name: string; zone_id: number | null; weekday: number; start: string; end: string; on_now: boolean }
+export const fetchShifts = () => req<Shift[]>('/shifts')
+export const createShift = (body: Record<string, unknown>) => req<{ ok: boolean; added: number }>('/shifts', post('', body))
+export const deleteShift = (id: number) => req<{ ok: boolean }>(`/shifts/${id}`, { method: 'DELETE' })
+
+/* shift PLANS (min-guarantee) + attendance */
+export interface ShiftDef { id: number; code: string; name: string; start: string; end: string; graceMin: number; penalty: number; minGWeekday: number; minGWeekend: number; active: boolean }
+export interface AttendanceRow { workerId: number; workerName: string; shift: string; checkIn: string; checkOut: string; onTime: boolean | null; lateMinutes: number; penalty: number; minG: number; site?: string; geoBreaches?: number }
+export const fetchShiftDefs = () => req<ShiftDef[]>('/shift-defs')
+export const updateShiftDef = (id: number, body: Partial<ShiftDef>) => req<{ ok: boolean }>(`/shift-defs/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+export const fetchAttendance = (day?: string) => req<{ day: string; rows: AttendanceRow[] }>(`/attendance${day ? `?day=${day}` : ''}`)
+
+/* apartments (geofence sites) */
+export interface Site { id: number; name: string; address: string; lat: number; lng: number; radius: number; active: boolean; assigned: number }
+export const fetchSites = () => req<Site[]>('/sites')
+export const createSite = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/sites', post('', body))
+export const updateSite = (id: number, body: Partial<Site>) => req<{ ok: boolean }>(`/sites/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+export const deleteSite = (id: number) => req<{ ok: boolean }>(`/sites/${id}`, { method: 'DELETE' })
+export const assignWorkerSite = (workerId: number, siteId: number | null) => req<{ ok: boolean }>(`/workers/${workerId}/site`, post('', { siteId }))
+export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
+export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
+export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })
+
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')
 export const fetchRefunds = () => req<any[]>('/refunds')
@@ -156,6 +202,9 @@ export const fetchAdmins = () => req<Admin[]>('/admins')
 export const createAdminUser = (body: Record<string, unknown>) => req<Admin>('/admins', post('', body))
 export const updateAdminUser = (id: number, body: Record<string, unknown>) => req<Admin>(`/admins/${id}`, patch(body))
 export const deleteAdminUser = (id: number) => req<{ ok: boolean }>(`/admins/${id}`, { method: 'DELETE' })
+
+export const runShaktiSettlement = (month?: string) =>
+  req<{ ok: boolean; month: string; qualified: number; error?: string }>('/shakti/settle', post('/shakti/settle', { month }))
 
 /* socket */
 let socket: Socket | null = null

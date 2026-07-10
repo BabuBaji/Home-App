@@ -80,8 +80,14 @@ export const verifyPayment = (p: { razorpay_order_id: string; razorpay_payment_i
 export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
 
 /* wallet */
-export const fetchWallet = () => req<{ balance: number; cashback: number; transactions: Transaction[] }>('/api/wallet')
+export const fetchWallet = () => req<{ balance: number; cash: number; promo: number; points: number; total: number; status: string; cashback: number; transactions: Transaction[] }>('/api/wallet')
 export const addMoney = (amount: number) => req<{ balance: number }>('/api/wallet/add', { method: 'POST', body: JSON.stringify({ amount }) })
+// Credit the wallet after a verified gateway payment (server checks the signature before crediting).
+export const walletTopup = (paymentId: string, amount: number) =>
+  req<{ ok: boolean; balance: number | null; duplicate?: boolean }>('/api/payment/wallet/topup', { method: 'POST', body: JSON.stringify({ paymentId, amount }) })
+// Apply a friend's referral code (once); the friend earns when you complete your first booking.
+export const applyReferral = (code: string) =>
+  req<{ ok: boolean; referrer: string; reward: number }>('/api/referral/apply', { method: 'POST', body: JSON.stringify({ code }) })
 
 /* support */
 export const fetchTickets = () => req<Ticket[]>('/api/tickets')
@@ -100,7 +106,8 @@ export async function captureLocationOnOpen(): Promise<void> {
     const pos = await getCurrentPosition()
     lastPos = { ...pos, ts: Date.now() }
     try { localStorage.setItem('hh_geo', JSON.stringify(lastPos)) } catch { /* ignore */ }
-    // Store on the user's profile (best-effort) so worker/admin see the live location.
+    // Store on the user's profile (best-effort) so worker/admin see the live location. The backend
+    // reverse-geocodes raw "lat,lng" into a human-readable address before saving (see auth service).
     if (token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
   } catch { /* permission denied / no fix — keep any previous fix */ }
 }
@@ -137,6 +144,12 @@ export interface CancellationPolicy {
 export const fetchCancellationPolicy = () => req<CancellationPolicy>('/api/policy/cancellation')
 export const cancelBookingApi = (id: number, reason: string) => req<Booking>(`/api/bookings/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) })
 export const reviewBooking = (id: number, rating: number, review: string, photo?: string) => req<Booking>(`/api/bookings/${id}/review`, { method: 'POST', body: JSON.stringify({ rating, review, photo }) })
+// Support chat — send the conversation so far; get the assistant's reply (or a fallback flag → use the offline bot).
+export const sendSupportChat = (messages: { role: 'bot' | 'user'; text: string }[]) =>
+  req<{ reply: string | null; fallback?: boolean }>('/api/support/chat', {
+    method: 'POST',
+    body: JSON.stringify({ messages: messages.map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text })) }),
+  })
 
 /* socket */
 let socket: Socket | null = null

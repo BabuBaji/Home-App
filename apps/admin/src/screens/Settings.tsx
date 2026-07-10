@@ -134,7 +134,7 @@ export default function SettingsScreen() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px' }}>
           <ToggleRow label="Allow New Customer Registration" on={s.allow_registration !== 'false'} onClick={() => toggle('allow_registration')} disabled={!editable} />
           <ToggleRow label="Service Availability by Default" on={s.service_available_default !== 'false'} onClick={() => toggle('service_available_default')} disabled={!editable} />
-          <ToggleRow label="Auto Approve New Workers" on={s.auto_assign === 'true'} onClick={() => toggle('auto_assign')} disabled={!editable} />
+          <ToggleRow label="Auto-assign jobs to on-shift experts" on={s.auto_assign === 'true'} onClick={() => toggle('auto_assign')} disabled={!editable} />
           <ToggleRow label="Maintenance Mode" on={s.maintenance_mode === 'true'} onClick={() => toggle('maintenance_mode')} disabled={!editable} />
           <ToggleRow label="Enable Promo Codes" on={s.enable_promo !== 'false'} onClick={() => toggle('enable_promo')} disabled={!editable} />
           <ToggleRow label="Enable Review & Ratings" on={s.enable_reviews !== 'false'} onClick={() => toggle('enable_reviews')} disabled={!editable} />

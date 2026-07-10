@@ -18,6 +18,13 @@ import com.homehelp.pro.network.AvailabilityBody
 import com.homehelp.pro.network.BankBody
 import com.homehelp.pro.network.BootstrapResponse
 import com.homehelp.pro.network.BreakupItem
+import com.homehelp.pro.network.ClaimBody
+import com.homehelp.pro.network.InsuranceDto
+import com.homehelp.pro.network.MerchOrderBody
+import com.homehelp.pro.network.MerchProduct
+import com.homehelp.pro.network.ReferralDto
+import com.homehelp.pro.network.RewardsDto
+import com.homehelp.pro.network.ShaktiBonusDto
 import com.homehelp.pro.network.DeductionEntry
 import com.homehelp.pro.network.EndBody
 import com.homehelp.pro.network.LedgerEntry
@@ -91,13 +98,20 @@ data class Job(
     val completedAt: String? = null,
 )
 
+// Nullable String fields are defensive: this is deserialized from JSON by Gson, which bypasses
+// Kotlin's constructor and will inject null for any key the backend omits — a non-null String
+// field would then NPE-crash the Bookings UI. Keep these nullable and render with `?: ""`.
 data class Booking(
-    val service: String,
-    val customerName: String,
-    val address: String,
-    val timeInfo: String,
-    val amount: Int,
-    val status: String,
+    val service: String? = null,
+    val customerName: String? = null,
+    val address: String? = null,
+    val timeInfo: String? = null,
+    val amount: Int = 0,
+    val status: String? = null,
+    // Booking reference (e.g. "#HH12345") — matches the wallet ledger's Job Earnings label,
+    // so the Earnings calendar can resolve each ledger entry to its real service name.
+    // Kept LAST so existing positional Booking(...) constructions stay valid.
+    val ref: String? = null,
 )
 
 data class EarningEntry(val date: String, val amount: Int, val paid: Boolean = true)
@@ -160,6 +174,8 @@ class AppViewModel : ViewModel() {
     var todayEarnings by mutableIntStateOf(0)
         private set
     var todayJobs by mutableIntStateOf(0)
+        private set
+    var todayCompleted by mutableIntStateOf(0)
         private set
     var walletBalance by mutableIntStateOf(0)
         private set
@@ -293,6 +309,7 @@ class AppViewModel : ViewModel() {
             bankRemarks = w.bankRemarks
             shiftStart = w.shiftStart
             shiftEnd = w.shiftEnd
+            if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
             if (w.availableDays.isNotEmpty()) {
                 availableDays.clear(); availableDays.putAll(w.availableDays)
             }
@@ -314,6 +331,11 @@ class AppViewModel : ViewModel() {
         }
         b.walletSummary?.let { applyWalletSummary(it) }
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
+        schedule.clear(); schedule.addAll(b.schedule)
+        b.attendance?.let { attendance = it }
+        b.shift?.let { shifts.clear(); shifts.addAll(it.shifts); selectedShiftId = it.selectedId }
+        leaves.clear(); leaves.addAll(b.leaves)
+        tickets.clear(); tickets.addAll(b.tickets)
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
         if (b.walletTxns.isNotEmpty()) { walletTxns.clear(); walletTxns.addAll(b.walletTxns) }
         if (b.documents.isNotEmpty()) {
@@ -380,6 +402,14 @@ class AppViewModel : ViewModel() {
             val b = api.bootstrap()
             applyBootstrap(b)
         }
+    }
+
+    /** Re-pull the backend snapshot (bookings, wallet, earnings, active job) without a re-login.
+     *  Called whenever the app returns to the foreground so a job the worker completed — or that
+     *  was completed/assigned server-side — shows up right away instead of after a full relaunch. */
+    fun refresh() {
+        if (!isLoggedIn) return
+        sync { applyBootstrap(api.bootstrap()) }
     }
 
     /** Clear the session and return to the login screen. */
@@ -461,14 +491,23 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    // Wall-clock stamp when the worker accepted the current job. Drives the in-app "start within
+    // 15 min" countdown. The backend independently enforces the same window (+₹15 on-time bonus /
+    // −₹15 late-start penalty), so this is purely to inform the worker.
+    var jobAcceptedAtMs by mutableStateOf(0L)
+        private set
+    val startWindowMinutes = 15
+
     fun acceptJob() {
         jobStatus = JobStatus.ACCEPTED
+        jobAcceptedAtMs = System.currentTimeMillis()
         sync { api.acceptJob() }
     }
 
     fun rejectJob() {
         activeJob = null
         jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
         sync { api.rejectJob() }
     }
 
@@ -496,6 +535,7 @@ class AppViewModel : ViewModel() {
         val job = activeJob ?: return false
         if (input != job.otp) return false
         jobStatus = JobStatus.IN_PROGRESS
+        jobAcceptedAtMs = 0L                           // start window met — hide the countdown banner
         serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
         serviceEndMs = 0L
         viewModelScope.launch {
@@ -507,6 +547,19 @@ class AppViewModel : ViewModel() {
             } catch (e: Exception) { backendConnected = false }
         }
         return true
+    }
+
+    // Before-photo captured on arrival (module: Start Job → Before Photos). Held locally and
+    // attached to the completion payload; cleared when a new job starts.
+    var beforePhoto: String? = null
+        private set
+    fun setBeforePhoto(dataUrl: String) { beforePhoto = dataUrl }
+
+    // Worker's rating of the customer after a job (module: Customer Rating). Captured locally.
+    var lastCustomerRating by mutableIntStateOf(0)
+        private set
+    fun rateCustomer(stars: Int, comment: String) {
+        lastCustomerRating = stars.coerceIn(0, 5)
     }
 
     fun endService(photo: String? = null) {
@@ -525,6 +578,7 @@ class AppViewModel : ViewModel() {
             "${job.dateTime} • ${job.durationHours} hours", job.earnings, "Completed"))
         activeJob = null
         jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
         // Reconcile with the authoritative server totals (earnings stay 0 until the customer confirms).
         sync {
             val r = api.settle()
@@ -540,6 +594,7 @@ class AppViewModel : ViewModel() {
         }
         activeJob = null
         jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
         sync { api.cancel(ReasonBody(reason)) }
     }
 
@@ -549,6 +604,8 @@ class AppViewModel : ViewModel() {
         pendingAmount = s.pending
         holdBalance = s.hold
         todayEarnings = s.todayEarnings
+        todayJobs = s.todayJobs
+        todayCompleted = s.todayCompleted
         weekEarnings = s.weekEarnings
         monthEarnings = s.monthEarnings
         withdrawnTotal = s.totalWithdrawn
@@ -616,6 +673,38 @@ class AppViewModel : ViewModel() {
 
     fun loadPayslip() = sync { payslip = api.payslip() }
 
+    // ---- Refer & Earn / Insurance / Merch / Rewards / Language (additive modules) ----
+    var referral by mutableStateOf<ReferralDto?>(null)
+        private set
+    fun loadReferral() = sync { referral = api.referral() }
+
+    var insurance by mutableStateOf<InsuranceDto?>(null)
+        private set
+    fun loadInsurance() = sync { insurance = api.insurance() }
+    fun claimInsurance(reason: String, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            try { onDone(api.claimInsurance(ClaimBody(reason)).message.ifBlank { "Claim submitted." }) }
+            catch (e: Exception) { onDone("Couldn't submit. Please try again.") }
+        }
+    }
+
+    val merch = mutableStateListOf<MerchProduct>()
+    fun loadMerch() = sync { val r = api.merch(); merch.clear(); merch.addAll(r.products) }
+    fun orderMerch(id: String, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            try { onDone(api.orderMerch(MerchOrderBody(id)).message.ifBlank { "Order placed." }) }
+            catch (e: Exception) { onDone("Couldn't place the order. Please try again.") }
+        }
+    }
+
+    var rewards by mutableStateOf<RewardsDto?>(null)
+        private set
+    fun loadRewards() = sync { rewards = api.walletRewards() }
+
+    var shaktiBonus by mutableStateOf<ShaktiBonusDto?>(null)
+        private set
+    fun loadShaktiBonus() = sync { shaktiBonus = api.shaktiBonus() }
+
     var withdrawalReceipt by mutableStateOf<com.homehelp.pro.network.WithdrawalReceiptDto?>(null)
         private set
     fun loadWithdrawalReceipt(id: Int) = sync { withdrawalReceipt = api.withdrawalReceipt(id) }
@@ -634,6 +723,96 @@ class AppViewModel : ViewModel() {
 
     fun saveAvailability() = sync {
         api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))
+    }
+
+    // ---- shift plans (min-guarantee) ----
+    val shifts = mutableStateListOf<com.homehelp.pro.network.ShiftDto>()
+    var selectedShiftId by mutableStateOf<Int?>(null)
+        private set
+    /** Sign the worker up for a shift plan; the server re-derives attendance/guarantee status. */
+    fun selectShift(id: Int, onDone: () -> Unit = {}) {
+        selectedShiftId = id
+        viewModelScope.launch {
+            try { attendance = api.selectShift(com.homehelp.pro.network.SelectShiftBody(id)); backendConnected = true } catch (_: Exception) {}
+            onDone()
+        }
+    }
+
+    // ---- geofence (assigned-apartment radius) ----
+    var geofence by mutableStateOf<com.homehelp.pro.network.GeofenceStatus?>(null)
+        private set
+    // Non-null while an "you left your assigned area" alert should be shown app-wide.
+    var geofenceAlert by mutableStateOf<String?>(null)
+        private set
+    fun dismissGeofenceAlert() { geofenceAlert = null }
+    /** Report the worker's live location; raises an alert the first time they leave the radius. */
+    fun reportGeofence(lat: Double, lng: Double) {
+        viewModelScope.launch {
+            try {
+                val g = api.reportGeofence(com.homehelp.pro.network.GeofenceReportBody(lat, lng))
+                geofence = g
+                if (g.justBreached) {
+                    geofenceAlert = "You've left ${g.siteName.ifBlank { "your assigned apartment" }}. " +
+                        "You're ${g.distance} m away (allowed ${g.radius} m). Please return to your assigned area."
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // ---- attendance (check-in / check-out) ----
+    var attendance by mutableStateOf(com.homehelp.pro.network.AttendanceDto())
+        private set
+    fun checkIn(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { attendance = api.checkIn(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            onDone()
+        }
+    }
+    fun checkOut(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { attendance = api.checkOut(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            onDone()
+        }
+    }
+
+    // ---- availability state (Available | Busy | Break | Offline | Leave) ----
+    var availabilityState by mutableStateOf("Offline")
+        private set
+    fun changeAvailabilityState(state: String) {
+        availabilityState = state
+        val online = state == "Available"
+        if (online != isOnline) goOnline(online)
+        sync { runCatching { api.setStatus(com.homehelp.pro.network.StatusBody(state)) } }
+    }
+
+    // ---- leave requests ----
+    val leaves = mutableStateListOf<com.homehelp.pro.network.LeaveItem>()
+    fun submitLeave(fromDate: String, toDate: String, reason: String, onDone: (String?) -> Unit) {
+        if (fromDate.isBlank()) { onDone("Pick a date"); return }
+        viewModelScope.launch {
+            try {
+                val list = api.requestLeave(com.homehelp.pro.network.LeaveBody(fromDate, toDate.ifBlank { fromDate }, reason))
+                leaves.clear(); leaves.addAll(list); backendConnected = true; onDone(null)
+            } catch (e: Exception) { onDone("Couldn't submit. Please try again.") }
+        }
+    }
+
+    // ---- support tickets + SOS ----
+    val tickets = mutableStateListOf<com.homehelp.pro.network.TicketItem>()
+    fun submitTicket(subject: String, message: String, onDone: (String?) -> Unit) {
+        if (subject.isBlank() && message.isBlank()) { onDone("Describe your issue"); return }
+        viewModelScope.launch {
+            try {
+                val list = api.raiseTicket(com.homehelp.pro.network.TicketBody(subject.ifBlank { "Support request" }, message))
+                tickets.clear(); tickets.addAll(list); backendConnected = true; onDone(null)
+            } catch (e: Exception) { onDone("Couldn't submit. Please try again.") }
+        }
+    }
+    fun sendSos(lat: Double?, lng: Double?, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            try { val r = api.sos(com.homehelp.pro.network.SosBody(lat, lng)); onDone(r.message.ifBlank { "Help is on the way." }) }
+            catch (e: Exception) { onDone("Alert sent. If urgent, call emergency services.") }
+        }
     }
 
     fun savePreferences() = sync { api.updatePreferences(PreferencesBody(jobPreferences.toMap())) }
@@ -657,6 +836,7 @@ class AppViewModel : ViewModel() {
 
     // ---- dynamic data — empty until populated from the backend; grows as jobs complete ----
     val bookings = mutableStateListOf<Booking>()
+    val schedule = mutableStateListOf<com.homehelp.pro.network.ScheduleItem>()
     val earnings = mutableStateListOf<EarningEntry>()
     val walletTxns = mutableStateListOf<WalletTxn>()
 }

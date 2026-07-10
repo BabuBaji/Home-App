@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Funnel, Download, MoreVertical, CreditCard, ArrowUpRight } from 'lucide-react'
-import { fetchPayments } from '../api'
+import { fetchPayments, runShaktiSettlement } from '../api'
 import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, money, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
 
@@ -27,6 +27,15 @@ export default function Payments() {
   const pageSize = 10
 
   const [active, setActive] = useState<Txn | null>(null)
+  const [shaktiBusy, setShaktiBusy] = useState(false)
+  const [shaktiMsg, setShaktiMsg] = useState('')
+  const runShakti = () => {
+    setShaktiBusy(true); setShaktiMsg('')
+    runShaktiSettlement()
+      .then((r) => setShaktiMsg(r.ok ? `✓ Settled ${r.month} — ${r.qualified} worker(s) credited` : `Failed: ${r.error || 'error'}`))
+      .catch((e: Error) => setShaktiMsg('Failed: ' + e.message))
+      .finally(() => setShaktiBusy(false))
+  }
 
   const load = () => { setErr(''); fetchPayments().then(setD).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [])
@@ -76,6 +85,17 @@ export default function Payments() {
         <StatCard icon={<CreditCard size={22} />} tint="#f04438" label="Transactions" value={(d.transactions || []).length.toLocaleString('en-IN')} sub="recent" />
         <StatCard icon={<CreditCard size={22} />} tint="#2e90fa" label="Refunds Issued" value={money(sum.refunded)} sub="all time" />
       </div>
+
+      <Card title="Payroll">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 600, color: 'var(--ink)' }}>Sitara Bonus settlement</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>Credit each qualifying worker's monthly tier bonus (working days + Sundays for Gold) to their wallet. Idempotent — safe to run more than once; auto-runs at month start.</div>
+            {shaktiMsg && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 600, color: shaktiMsg.startsWith('✓') ? '#16a34a' : '#f04438' }}>{shaktiMsg}</div>}
+          </div>
+          <button className="btn" disabled={shaktiBusy} onClick={runShakti}>{shaktiBusy ? 'Running…' : 'Run settlement'}</button>
+        </div>
+      </Card>
 
       <div className="cols">
         <Card title="Transactions">

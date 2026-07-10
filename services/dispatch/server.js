@@ -83,7 +83,16 @@ async function matchingBookings(w) {
     const dist = w.last ? distanceKm(w.last.lat, w.last.lng, b.cust_lat, b.cust_lng) : null
     cands.push({ b, dist })
   }
-  cands.sort((a, c) => { const ad = a.dist ?? Infinity, cd = c.dist ?? Infinity; return ad !== cd ? ad - cd : a.b.id - c.b.id })
+  // Zone-first: a worker's own-zone jobs rank ahead of out-of-zone ones; then nearest by GPS.
+  // (Soft preference — out-of-zone jobs are still offered if no in-zone work, to avoid starvation.)
+  const wz = w.zone_id ?? null
+  cands.sort((a, c) => {
+    const az = wz != null && a.b.zone_id === wz ? 0 : 1
+    const cz = wz != null && c.b.zone_id === wz ? 0 : 1
+    if (az !== cz) return az - cz
+    const ad = a.dist ?? Infinity, cd = c.dist ?? Infinity
+    return ad !== cd ? ad - cd : a.b.id - c.b.id
+  })
   return cands.map((x) => x.b)
 }
 
@@ -125,7 +134,7 @@ app.post('/api/worker/jobs/accept', auth, async (req, res) => {
   if (!offeredId) return res.status(409).json({ ok: false, error: 'Job no longer available' })
   const claim = await internalPost(BOOKING_URL, `/api/internal/bookings/${offeredId}/assign`, { worker_id: req.worker.id, pro_name: req.worker.name, pro_rating: req.worker.rating })
   if (!claim.ok) return res.status(409).json({ ok: false, error: 'Job already taken by another expert' })
-  publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id })
+  publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id, ref: claim.booking?.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.accept', entityType: 'booking', entityId: offeredId, ref: claim.booking?.ref, detail: `${req.worker.name} accepted the job` })
   res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: await jobFromBooking(claim.booking) })
 })
@@ -161,6 +170,8 @@ app.post('/api/worker/jobs/verify-otp', auth, async (req, res) => {
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
   if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
   await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'in_progress' })
+  // Domain event: the wallet service uses this to decide the on-time-start incentive vs late penalty.
+  publishEvent(REDIS_URL, 'job.start', { bookingId: b.id, workerId: req.worker.id, ref: b.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)' })
   res.json({ ok: true, jobStatus: 'IN_PROGRESS', activeJob: await jobFromBooking({ ...b, status: 'in_progress' }) })
 })

@@ -68,10 +68,11 @@ export default function Profile() {
         {/* account */}
         <h3 className="section-title">Account</h3>
         <div className="acc-list">
+          <div className="acc-item" onClick={() => nav('/notifications')}><span className="ai">🔔</span><span className="at">Notifications</span><span className="chev">›</span></div>
           <div className="acc-item" onClick={() => nav('/support')}><span className="ai">🎧</span><span className="at">Help & Support</span><span className="chev">›</span></div>
           <div className="acc-item" onClick={() => nav('/cancellation-policy')}><span className="ai">↩️</span><span className="at">Cancellation & Refund Policy</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => toast('Personal info')}><span className="ai">👤</span><span className="at">Personal Information</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => toast('Opening T&C')}><span className="ai">📄</span><span className="at">Terms & Conditions</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/personal')}><span className="ai">👤</span><span className="at">Personal Information</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/terms')}><span className="ai">📄</span><span className="at">Terms & Conditions</span><span className="chev">›</span></div>
           <div className="acc-item danger" onClick={logout}><span className="ai">⏻</span><span className="at">Logout</span><span className="chev">›</span></div>
         </div>
 
