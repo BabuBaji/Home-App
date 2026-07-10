@@ -7,6 +7,8 @@
 //   • the CONFIG service — the old global `settings` bus. /internal/settings serves the
 //     unmasked values that shared/config.js getSetting() reads.
 // The BFF aggregation endpoints (dashboard/analytics/customers/…) are added in Phase 2i.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, requireRole, publishEvent, tryGet, internalPost, internalPatch } from '@homehelp/shared'
@@ -466,4 +468,4 @@ app.post('/internal/audit', internalOnly, async (req, res) => {
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[admin] service on http://localhost:${PORT}`)))
-  .catch((e) => { console.error('[admin] failed to start:', e.message); process.exit(1) })
+  .catch((e) => { console.error('[admin] failed to start:', e.message); process.exit(1) });

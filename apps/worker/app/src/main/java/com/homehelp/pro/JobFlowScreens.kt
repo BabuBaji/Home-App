@@ -265,7 +265,7 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header("Job Details", onBack = { nav.popBackStack() }, trailing = {
-            Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
+            Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Color.White,
                 modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
         })
         Column(
@@ -372,7 +372,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header("On The Way", onBack = { nav.popBackStack() }, trailing = {
-            Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
+            Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Color.White,
                 modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
         })
         Column(

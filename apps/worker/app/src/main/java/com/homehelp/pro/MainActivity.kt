@@ -160,10 +160,12 @@ fun AppRoot() {
         LocalWalletBalance provides vm.walletBalance,
         LocalWorkerInitials provides headerInitials,
     ) {
-    // Footer (bottom navigation) removed — navigation is via the ☰ drawer, the Home
-    // Quick-Actions grid, and the header wallet/profile chips.
+    // Premium floating bottom navigation (Home · Bookings · online-toggle FAB · Wallet ·
+    // Profile), shown only on the five top-level tab routes. The ☰ drawer, Home
+    // Quick-Actions grid and header chips remain fully available.
     Scaffold(
         containerColor = ScreenBg,
+        bottomBar = { if (route in TAB_ROUTES) FloatingBottomNav(nav, route, vm) },
     ) { padding ->
         NavHost(
             navController = nav,

@@ -1,0 +1,156 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Zone Planning & Operations — premium enterprise module styles.
+   Scoped under .zo- classes so nothing leaks into the rest of the admin app.
+   Exact brand spec: indigo #4F46E5 → #6366F1 → violet #7C3AED.
+   ───────────────────────────────────────────────────────────────────────────── */
+.zo {
+  --zi: #4F46E5; --zi2: #6366F1; --zv: #7C3AED; --zvd: #5B21B6; --zid: #312E81;
+  --zg: linear-gradient(120deg, #4F46E5 0%, #6366F1 52%, #7C3AED 100%);
+  --zg-hero: linear-gradient(125deg, #312E81 0%, #4F46E5 55%, #7C3AED 100%);
+  --zok: #22C55E; --zwarn: #F59E0B; --zerr: #EF4444;
+  --zline: #E5E7EB; --zink: #111827; --zmut: #6B7280;
+}
+
+/* ── header / control bar ── */
+.zo-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.zo-top h2 { font-size: 21px; font-weight: 800; letter-spacing: -.02em; color: var(--zink); margin: 0; }
+.zo-top p { margin: 2px 0 0; color: var(--zmut); font-size: 13px; }
+.zo-seg { display: inline-flex; background: #fff; border: 1px solid var(--zline); border-radius: 12px; padding: 4px; gap: 3px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+.zo-seg button { border: none; background: transparent; padding: 8px 15px; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--zmut); cursor: pointer; transition: .15s; }
+.zo-seg button.on { background: var(--zg); color: #fff; box-shadow: 0 6px 14px rgba(79,70,229,.32); }
+.zo-btn { display: inline-flex; align-items: center; gap: 8px; border: none; background: var(--zg); color: #fff; padding: 11px 18px; border-radius: 12px; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 10px 22px rgba(79,70,229,.32); transition: .15s; }
+.zo-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(79,70,229,.4); }
+.zo-btn.ghost { background: #fff; color: var(--zi); border: 1.5px solid #E7E5FB; box-shadow: none; }
+.zo-btn.ghost:hover { background: #F5F3FF; transform: none; }
+.zo-btn.line { background: #fff; color: var(--zink); border: 1px solid var(--zline); box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+.zo-btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
+
+/* ── KPI cards ── */
+.zo-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 1400px) { .zo-kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px) { .zo-kpis { grid-template-columns: repeat(2, 1fr); } }
+.zo-kpi { position: relative; background: #fff; border: 1px solid var(--zline); border-radius: 20px; padding: 16px 16px 12px; box-shadow: 0 2px 6px rgba(16,24,40,.05); overflow: hidden; transition: transform .18s, box-shadow .18s; animation: zo-rise .5s cubic-bezier(.2,.7,.3,1) both; }
+.zo-kpi:hover { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(79,70,229,.14); }
+.zo-kpi::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--zg); opacity: .9; }
+.zo-kpi-h { display: flex; align-items: center; justify-content: space-between; }
+.zo-kpi-ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; box-shadow: 0 8px 16px rgba(79,70,229,.28); }
+.zo-kpi-label { color: var(--zmut); font-size: 12px; font-weight: 600; margin-top: 12px; }
+.zo-kpi-val { font-size: 26px; font-weight: 800; letter-spacing: -.03em; color: var(--zink); line-height: 1.1; margin-top: 2px; }
+.zo-kpi-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.zo-trend { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 800; padding: 3px 8px; border-radius: 50px; }
+.zo-trend.up { color: #15803D; background: #DCFCE7; }
+.zo-trend.down { color: #B91C1C; background: #FEE2E2; }
+.zo-trend.flat { color: var(--zmut); background: #F1F5F9; }
+.zo-spark { width: 78px; height: 30px; }
+
+/* ── generic panels / glass ── */
+.zo-grid { display: grid; gap: 16px; }
+.zo-panel { background: #fff; border: 1px solid var(--zline); border-radius: 20px; box-shadow: 0 2px 8px rgba(16,24,40,.05); padding: 18px; }
+.zo-panel-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.zo-panel-h h3 { margin: 0; font-size: 15px; font-weight: 800; color: var(--zink); letter-spacing: -.01em; }
+.zo-panel-h .sub { color: var(--zmut); font-size: 12px; }
+.zo-hero { position: relative; border-radius: 22px; padding: 22px; color: #fff; background: var(--zg-hero); overflow: hidden; box-shadow: 0 20px 44px rgba(79,70,229,.32); }
+.zo-hero::after { content: ''; position: absolute; top: -60px; right: -40px; width: 200px; height: 200px; border-radius: 50%; background: rgba(255,255,255,.10); }
+.zo-hero::before { content: ''; position: absolute; bottom: -70px; left: -30px; width: 180px; height: 180px; border-radius: 50%; background: rgba(124,58,237,.35); }
+.zo-hero * { position: relative; z-index: 1; }
+
+/* ── AI recommendations ── */
+.zo-recs { display: flex; flex-direction: column; gap: 10px; }
+.zo-rec { display: flex; gap: 12px; padding: 12px; border-radius: 14px; border: 1px solid var(--zline); background: #fff; align-items: flex-start; transition: .15s; }
+.zo-rec:hover { border-color: #DDD6FE; background: #FBFAFF; }
+.zo-rec-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+.zo-rec.warn .zo-rec-ic { background: #FEF3C7; color: #B45309; }
+.zo-rec.good .zo-rec-ic { background: #DCFCE7; color: #15803D; }
+.zo-rec.info .zo-rec-ic { background: #EDE9FE; color: var(--zv); }
+.zo-rec b { font-size: 13.5px; color: var(--zink); }
+.zo-rec p { margin: 2px 0 0; font-size: 12px; color: var(--zmut); line-height: 1.45; }
+
+/* ── zones table / cards ── */
+.zo-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.zo-table th { text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--zmut); padding: 10px 12px; border-bottom: 1px solid var(--zline); }
+.zo-table td { padding: 13px 12px; border-bottom: 1px solid var(--zline); font-size: 13.5px; color: var(--zink); }
+.zo-table tr:last-child td { border-bottom: none; }
+.zo-table tbody tr { cursor: pointer; transition: background .12s; }
+.zo-table tbody tr:hover { background: #FBFAFF; }
+.zo-zname { font-weight: 800; color: var(--zink); }
+.zo-zcode { font-size: 11px; color: var(--zmut); font-weight: 700; }
+.zo-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 50px; font-size: 11.5px; font-weight: 800; }
+.zo-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.zo-chip.active { color: #15803D; background: #DCFCE7; }
+.zo-chip.pending { color: #B45309; background: #FEF3C7; }
+.zo-chip.planning { color: var(--zi); background: #E7E5FB; }
+.zo-chip.inactive { color: #64748B; background: #F1F5F9; }
+.zo-bar { height: 7px; border-radius: 50px; background: #EEF0F4; overflow: hidden; min-width: 90px; }
+.zo-bar > span { display: block; height: 100%; border-radius: 50px; background: var(--zg); }
+
+/* ── wizard / stepper ── */
+.zo-wiz { display: grid; grid-template-columns: 258px 1fr; gap: 18px; align-items: start; }
+@media (max-width: 1050px) { .zo-wiz { grid-template-columns: 1fr; } }
+.zo-steps { background: #fff; border: 1px solid var(--zline); border-radius: 20px; padding: 12px; position: sticky; top: 84px; box-shadow: 0 2px 8px rgba(16,24,40,.05); }
+.zo-step { display: flex; gap: 11px; align-items: center; padding: 9px 10px; border-radius: 12px; cursor: pointer; transition: .13s; }
+.zo-step:hover { background: #F5F3FF; }
+.zo-step.on { background: var(--zg); box-shadow: 0 8px 18px rgba(79,70,229,.3); }
+.zo-step.on .zo-step-t, .zo-step.on .zo-step-n { color: #fff; }
+.zo-step-n { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 12px; font-weight: 800; flex: none; background: #F1F0FB; color: var(--zi); }
+.zo-step.on .zo-step-n { background: rgba(255,255,255,.22); }
+.zo-step.done .zo-step-n { background: #DCFCE7; color: #15803D; }
+.zo-step-t { font-size: 13px; font-weight: 700; color: var(--zink); }
+.zo-step-s { font-size: 10.5px; color: var(--zmut); }
+.zo-step.on .zo-step-s { color: rgba(255,255,255,.85); }
+.zo-wrap { min-height: 420px; }
+.zo-wiz-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--zline); }
+
+/* ── forms ── */
+.zo-fgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.zo-fgrid.three { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 720px) { .zo-fgrid, .zo-fgrid.three { grid-template-columns: 1fr; } }
+.zo-f { display: flex; flex-direction: column; gap: 6px; }
+.zo-f > span { font-size: 12px; font-weight: 700; color: var(--zink); }
+.zo-f input, .zo-f select { width: 100%; border: 1px solid var(--zline); background: #F9FAFB; border-radius: 11px; padding: 11px 12px; font-size: 13.5px; color: var(--zink); font-family: inherit; transition: .15s; }
+.zo-f input:focus, .zo-f select:focus { outline: none; border-color: var(--zi); background: #fff; box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+
+/* ── service / list rows ── */
+.zo-srv { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--zline); border-radius: 14px; transition: .15s; }
+.zo-srv.on { border-color: #DDD6FE; background: #FBFAFF; }
+.zo-srv-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: #EDE9FE; color: var(--zv); flex: none; font-size: 18px; }
+.zo-toggle { width: 42px; height: 24px; border-radius: 50px; background: #E5E7EB; position: relative; cursor: pointer; transition: .18s; flex: none; border: none; }
+.zo-toggle.on { background: var(--zg); }
+.zo-toggle span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: .18s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.zo-toggle.on span { left: 21px; }
+.zo-mini { width: 72px; border: 1px solid var(--zline); background: #F9FAFB; border-radius: 9px; padding: 7px 8px; font-size: 12.5px; text-align: right; font-family: inherit; }
+.zo-mini:focus { outline: none; border-color: var(--zi); background: #fff; }
+
+/* ── checklist ── */
+.zo-check { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid var(--zline); border-radius: 14px; background: #fff; }
+.zo-check.done { border-color: #BBF7D0; background: #F0FDF4; }
+.zo-check-b { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; flex: none; background: #F1F5F9; color: #94A3B8; }
+.zo-check.done .zo-check-b { background: var(--zok); color: #fff; }
+.zo-check b { font-size: 13.5px; color: var(--zink); }
+
+/* ── metric mini tiles ── */
+.zo-mtiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 900px) { .zo-mtiles { grid-template-columns: repeat(2, 1fr); } }
+.zo-mtile { border: 1px solid var(--zline); border-radius: 14px; padding: 13px; background: #fff; }
+.zo-mtile .l { font-size: 11.5px; color: var(--zmut); font-weight: 600; }
+.zo-mtile .v { font-size: 21px; font-weight: 800; color: var(--zink); letter-spacing: -.02em; margin-top: 3px; }
+.zo-mtile .s { font-size: 11px; color: var(--zmut); margin-top: 2px; }
+
+/* ── heat grid (demand) ── */
+.zo-heat { display: grid; grid-template-columns: 42px repeat(12, 1fr); gap: 4px; }
+.zo-heat .hl { font-size: 10px; color: var(--zmut); display: grid; place-items: center; }
+.zo-cell { aspect-ratio: 1.4; border-radius: 5px; }
+
+/* ── shift timeline ── */
+.zo-tl { display: flex; flex-direction: column; gap: 8px; }
+.zo-tl-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 12px; }
+.zo-tl-bar { height: 34px; border-radius: 9px; background: var(--zg); display: flex; align-items: center; padding: 0 12px; color: #fff; font-weight: 700; font-size: 12px; box-shadow: 0 6px 14px rgba(79,70,229,.25); }
+
+.zo-empty { text-align: center; padding: 40px 20px; color: var(--zmut); }
+.zo-empty .e { font-size: 40px; }
+@keyframes zo-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ── skeleton loaders (shimmer) ── */
+.zo-sk { position: relative; overflow: hidden; background: #EEF0F4; border-radius: 8px; display: block; }
+.zo-sk::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent); animation: zo-shimmer 1.3s infinite; }
+@keyframes zo-shimmer { 100% { transform: translateX(100%); } }
+.zo-sk-row { display: grid; grid-template-columns: 1.5fr 1fr .8fr 1.1fr 1fr .8fr; gap: 14px; padding: 15px 12px; border-bottom: 1px solid var(--zline); align-items: center; }

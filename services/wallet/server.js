@@ -5,6 +5,8 @@
 // booking.cancelled (travel/visit compensation) and payout.completed (mark a withdrawal paid),
 // and updates the worker's balance snapshot in the worker service via /internal. Serves the
 // worker wallet screens and the admin wallet actions.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents,
@@ -367,4 +369,4 @@ init()
     // Sweep for jobs never started within the window (applies the late-start penalty).
     setInterval(() => sweepLateStarts().catch((e) => console.error('[wallet] late-start sweep:', e.message)), 30000)
   })
-  .catch((e) => { console.error('[wallet] failed to start:', e.message); process.exit(1) })
+  .catch((e) => { console.error('[wallet] failed to start:', e.message); process.exit(1) });

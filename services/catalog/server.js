@@ -4,6 +4,8 @@
 // Serves the customer catalogue + quote + coupons + home content, and admin service CRUD.
 // Admin auth + config are delegated to the admin service; per-service booking counts come from
 // the booking service; catalogue changes are broadcast as `services:update` via the realtime bus.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting,
@@ -401,4 +403,4 @@ app.patch('/api/services/:id', adminAuth, requireRole('manager'), async (req, re
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)))
-  .catch((e) => { console.error('[catalog] failed to start:', e.message); process.exit(1) })
+  .catch((e) => { console.error('[catalog] failed to start:', e.message); process.exit(1) });

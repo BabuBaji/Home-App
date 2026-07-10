@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,8 +42,11 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.FreeBreakfast
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Schedule
@@ -81,6 +85,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -113,29 +119,40 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
             .background(ScreenBg)
             .verticalScroll(rememberScrollState()),
     ) {
-        // ---- Gradient brand header (rounded bottom, floating logo tile) ----
-        Column(
+        // ---- Premium layered gradient hero (rounded bottom, glow orbs, glass logo tile) ----
+        Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp))
-                .background(BrandGradient)
-                .padding(horizontal = Space.xxl)
-                .padding(top = 68.dp, bottom = 44.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .clip(RoundedCornerShape(bottomStart = 34.dp, bottomEnd = 34.dp))
+                .background(HeroGradient),
         ) {
-            Box(
-                Modifier.size(72.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(20.dp)),
-                contentAlignment = Alignment.Center,
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 46.dp, y = (-40).dp).size(160.dp)
+                .background(Color.White.copy(alpha = 0.09f), RoundedCornerShape(Radius.pill)))
+            Box(Modifier.align(Alignment.BottomStart).offset(x = (-40).dp, y = 40.dp).size(140.dp)
+                .background(Violet.copy(alpha = 0.30f), RoundedCornerShape(Radius.pill)))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Space.xxl)
+                    .padding(top = 72.dp, bottom = 46.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(38.dp))
+                Box(
+                    Modifier.size(76.dp)
+                        .shadow(18.dp, RoundedCornerShape(22.dp), spotColor = Color.Black.copy(alpha = 0.3f))
+                        .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(22.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                }
+                Spacer(Modifier.height(18.dp))
+                Row {
+                    Text("HomeHelp", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.4).sp)
+                    Text(" Pro", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.80f), letterSpacing = (-0.4).sp)
+                }
+                Spacer(Modifier.height(7.dp))
+                Text("Your daily workforce companion", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
             }
-            Spacer(Modifier.height(18.dp))
-            Row {
-                Text("HomeHelp", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text(" Pro", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.82f))
-            }
-            Spacer(Modifier.height(6.dp))
-            Text("Your daily workforce companion", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
         }
 
         Column(Modifier.fillMaxWidth().padding(Space.xxl)) {
@@ -243,6 +260,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
 
     // Pull the wallet ledger so the Home "Last 7 Days" chart + balance chip have live data.
     LaunchedEffect(Unit) { vm.refreshWallet() }
+    // Pull the Sitara Bonus (working-days / rating reward) so the Home rewards card is live.
+    LaunchedEffect(Unit) { vm.loadShaktiBonus() }
 
     // Ask for notification permission (Android 13+) so background job alerts can show.
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -283,67 +302,99 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             .take(2).joinToString("").uppercase().ifBlank { "P" }
     }
 
+    val todayDate = remember { java.text.SimpleDateFormat("EEE, d MMM", java.util.Locale.ENGLISH).format(java.util.Date()) }
+
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // ---- Premium gradient hero: menu + greeting + notifications + avatar profile,
-        // then a translucent "glass" summary strip (today's earnings, online status, wallet). ----
-        Column(
+        // ─── Premium layered gradient hero (dark-indigo → indigo → violet) with a soft
+        //     glow, a date pill, and a frosted-glass earnings + online-toggle panel. ───
+        Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(bottomStart = Radius.sheet, bottomEnd = Radius.sheet))
-                .background(BrandGradient)
-                .padding(horizontal = Space.l)
-                .padding(top = 14.dp, bottom = Space.xl),
+                .clip(RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp))
+                .background(HeroGradient),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Filled.Menu, contentDescription = "Menu", tint = Color.White,
-                    modifier = Modifier.size(26.dp).clickable { openDrawer() },
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(greeting, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
-                    Text(firstName, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.2).sp)
-                }
-                Box {
-                    Icon(
-                        Icons.Filled.Notifications, contentDescription = "Notifications", tint = Color.White,
-                        modifier = Modifier.size(24.dp).clickable { nav.navigate(Routes.P_NOTIFICATIONS) },
-                    )
-                    if (vm.unreadNotifications > 0) {
-                        Box(Modifier.align(Alignment.TopEnd).size(9.dp).background(Coral, RoundedCornerShape(50)))
+            // decorative glow orbs (depth)
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 40.dp, y = (-30.dp)).size(150.dp)
+                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(50)))
+            Box(Modifier.align(Alignment.CenterStart).offset(x = (-50).dp, y = 20.dp).size(120.dp)
+                .background(Violet.copy(alpha = 0.25f), RoundedCornerShape(50)))
+
+            Column(Modifier.padding(horizontal = Space.l).padding(top = 16.dp, bottom = Space.xl)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(42.dp).clip(RoundedCornerShape(Radius.pill))
+                            .background(Color.White.copy(alpha = 0.14f)).clickable { openDrawer() },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(23.dp)) }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text("$greeting 👋", fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                        Text(firstName, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.2).sp)
                     }
+                    Box(
+                        Modifier.size(42.dp).clip(RoundedCornerShape(Radius.pill))
+                            .background(Color.White.copy(alpha = 0.14f)).clickable { nav.navigate(Routes.P_NOTIFICATIONS) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = Color.White, modifier = Modifier.size(22.dp))
+                        if (vm.unreadNotifications > 0) {
+                            Box(Modifier.align(Alignment.TopEnd).padding(9.dp).size(8.dp).background(Coral, RoundedCornerShape(50)))
+                        }
+                    }
+                    Spacer(Modifier.width(Space.s))
+                    ProfileChip(homeInitials, onDark = true) { nav.navigateApp(Routes.PROFILE) }
                 }
-                Spacer(Modifier.width(Space.m))
-                ProfileChip(homeInitials, onDark = true) { nav.navigateApp(Routes.PROFILE) }
-            }
-            Spacer(Modifier.height(Space.l))
-            Row(
-                Modifier.fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(Radius.card))
-                    .padding(Space.l),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Today's Earnings", fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
-                    Spacer(Modifier.height(2.dp))
-                    Text("₹${vm.todayEarnings}", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.5).sp)
-                    Spacer(Modifier.height(6.dp))
+
+                Spacer(Modifier.height(Space.l))
+
+                // Frosted-glass earnings + status panel
+                GlassPanel(Modifier.fillMaxWidth(), radius = Radius.card, alpha = 0.15f) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).background(if (vm.isOnline) GreenSuccess else Color.White.copy(alpha = 0.55f), RoundedCornerShape(50)))
-                        Spacer(Modifier.width(6.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Today's Earnings", fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+                                Spacer(Modifier.width(Space.s))
+                                Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White.copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 2.dp)) {
+                                    Text(todayDate, fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                            Spacer(Modifier.height(3.dp))
+                            Text("₹${vm.todayEarnings}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = (-0.6).sp)
+                            Spacer(Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (vm.isOnline) PulseDot(GreenSuccess, 7.dp)
+                                else Box(Modifier.size(8.dp).background(Color.White.copy(alpha = 0.55f), RoundedCornerShape(50)))
+                                Spacer(Modifier.width(if (vm.isOnline) 0.dp else 6.dp))
+                                Text(
+                                    if (vm.isOnline) "Online · ${vm.todayJobs} ${if (vm.todayJobs == 1) "job" else "jobs"} today" else "Offline · go online to earn",
+                                    fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f),
+                                )
+                            }
+                        }
+                        WalletChip(vm.walletBalance, onDark = true) { nav.navigateApp(Routes.WALLET) }
+                    }
+                    Spacer(Modifier.height(Space.m))
+                    // Prominent online toggle pill inside the hero
+                    val on = vm.isOnline
+                    Box(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.pill))
+                            .background(if (on) GreenSuccess else Color.White)
+                            .clickable { vm.goOnline(!on) }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
-                            if (vm.isOnline) "Online · ${vm.todayJobs} ${if (vm.todayJobs == 1) "job" else "jobs"} today" else "Offline · go online to earn",
-                            fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f),
+                            if (on) "● You're Online — tap to go offline" else "▶  Go Online to start earning",
+                            color = if (on) Color.White else Purple, fontWeight = FontWeight.Bold, fontSize = 14.sp,
                         )
                     }
                 }
-                WalletChip(vm.walletBalance, onDark = true) { nav.navigateApp(Routes.WALLET) }
             }
         }
 
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
             // Active job — keep the in-progress service reachable from Home so the worker
             // can jump back to the timer / OTP / end-service screen after navigating away.
@@ -387,26 +438,10 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            // ---- Today's snapshot: the three numbers that matter, as tinted stat tiles ----
             val ctxHome = LocalContext.current
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.CurrencyRupee, "₹${vm.todayEarnings}", "Earnings", GreenSuccess, GreenLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Schedule, "${vm.todayJobs}", "Jobs Today", Purple, Primary50)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.CheckCircle, "${vm.todayCompleted}", "Completed", GreenSuccess, GreenLight)
-            }
 
-            // ---- Primary status actions (Go Online · Take Break · Schedule) — before the grid ----
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                QuickAction(Modifier.weight(1f), if (vm.isOnline) "⏸️" else "▶️", if (vm.isOnline) "Go Offline" else "Go Online") { vm.goOnline(!vm.isOnline) }
-                QuickAction(Modifier.weight(1f), "☕", "Take Break") { vm.goOnline(false); toast(ctxHome, "You're on a break — go online when ready") }
-                QuickAction(Modifier.weight(1f), "📅", "Schedule") { nav.navigate(Routes.SCHEDULE) }
-            }
-
-            // ---- Quick actions grid — one-tap access to key modules ----
-            SectionTitle("Quick Actions")
-            HomeQuickGrid(nav)
-
-            // ---- Advanced: last-7-days earnings mini bar chart (from the wallet ledger) ----
+            // Real last-7-days earnings series (from the wallet ledger) — powers the
+            // featured sparkline AND the bar chart below. No fabricated figures.
             val last7 = remember(vm.walletHistory.toList()) {
                 val credited = vm.walletHistory.filter { it.isCredit }
                     .groupBy { it.date }.mapValues { (_, v) -> v.sumOf { it.amount } }
@@ -417,9 +452,156 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     Triple(dfDay.format(c.time), credited[dfIso.format(c.time)] ?: 0, off == 0)
                 }
             }
+            val amounts = last7.map { it.second }
+            val todayAmt = amounts.lastOrNull() ?: 0
+            val priorAmts = amounts.dropLast(1)
+            val avgPrior = if (priorAmts.isNotEmpty()) priorAmts.average() else 0.0
+            val trendUp = todayAmt >= avgPrior
+            val trendPct = if (avgPrior > 0) kotlin.math.abs(((todayAmt - avgPrior) / avgPrior) * 100).toInt() else 0
+            val reached = vm.goalProgress >= 1f
+
+            // ─── Featured KPI: today's earnings + sparkline + animated goal ring ───
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Today's Earnings", color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(3.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("₹${vm.todayEarnings}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp)
+                            if (avgPrior > 0) { Spacer(Modifier.width(Space.s)); TrendChip("$trendPct%", trendUp) }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Row {
+                            Text("Goal ₹${vm.dailyGoal}", color = TextGray, fontSize = 12.sp)
+                            Text(
+                                "  ·  Edit", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable { showGoalDialog = true },
+                            )
+                        }
+                        Spacer(Modifier.height(Space.m))
+                        Sparkline(
+                            amounts.map { it.toFloat() },
+                            Modifier.fillMaxWidth().height(46.dp),
+                            lineColor = GreenSuccess, fillColor = GreenSuccess.copy(alpha = 0.20f),
+                        )
+                    }
+                    Spacer(Modifier.width(Space.l))
+                    CircularGoalRing(
+                        vm.goalProgress, ringSize = 96.dp,
+                        brush = if (reached) Brush.linearGradient(listOf(GreenSuccess, Color(0xFF16A34A))) else BrandGradient,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("${(vm.goalProgress * 100).toInt()}%", color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                            Text(if (reached) "🎉" else "Goal", color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
+            // ─── 3 compact KPI cards (Jobs · Completed · Rating) ───
+            val completionPct = if (vm.todayJobs > 0) vm.todayCompleted * 100 / vm.todayJobs else 0
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                PremiumStatCard(
+                    Modifier.weight(1f), Icons.Filled.Schedule, "Jobs Today", "${vm.todayJobs}",
+                    Purple, Primary50, caption = "${vm.todayCompleted} done",
+                )
+                PremiumStatCard(
+                    Modifier.weight(1f), Icons.Filled.CheckCircle, "Completed", "${vm.todayCompleted}",
+                    GreenSuccess, GreenLight, caption = if (vm.todayJobs > 0) "$completionPct% rate" else "—",
+                )
+                PremiumStatCard(
+                    Modifier.weight(1f), Icons.Filled.Star, "Rating",
+                    if (vm.workerRating > 0) "${vm.workerRating}" else "—",
+                    Gold, GoldLight, caption = "${vm.jobsCompleted} jobs",
+                )
+            }
+
+            // ─── Live online-session card (only while online) ───
+            if (vm.isOnline) {
+                Card {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PulseDot(GreenSuccess, 9.dp)
+                        Spacer(Modifier.width(Space.s))
+                        Column(Modifier.weight(1f)) {
+                            Text("You're Online", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
+                            Text("Receiving job requests nearby", fontSize = 12.sp, color = TextGray)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Online today", fontSize = 11.sp, color = TextGray)
+                            Text(fmtOnline(vm.onlineTodayMs(nowMs)), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = GreenSuccess)
+                        }
+                    }
+                }
+            }
+
+            // ─── Quick Actions — premium rounded-icon grid ───
+            SectionTitle("Quick Actions")
+            HomeQuickGrid(nav, ctxHome, vm)
+
+            // ─── Today's Jobs — premium booking timeline ───
+            val upcoming = vm.bookings.filter { it.status == "Upcoming" }
+            SectionTitle("Today's Jobs")
+            if (upcoming.isEmpty()) {
+                Card(modifier = Modifier.clickable { nav.navigateApp(Routes.BOOKINGS) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Primary50), contentAlignment = Alignment.Center) {
+                            Text("🗓️", fontSize = 22.sp)
+                        }
+                        Spacer(Modifier.width(Space.m))
+                        Column(Modifier.weight(1f)) {
+                            Text("No jobs scheduled yet", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                            Text("New bookings will appear here — stay online", color = TextGray, fontSize = 12.5.sp)
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+                    }
+                }
+            } else {
+                Column {
+                    upcoming.take(4).forEachIndexed { i, b ->
+                        JobTimelineItem(b, isLast = i == upcoming.take(4).lastIndex) { nav.navigate(Routes.SCHEDULE) }
+                    }
+                    if (upcoming.size > 4) {
+                        Text(
+                            "View all ${upcoming.size} bookings",
+                            color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 34.dp, top = 4.dp).clickable { nav.navigateApp(Routes.BOOKINGS) },
+                        )
+                    }
+                }
+            }
+
+            // ─── Last 7 days earnings chart ───
             SevenDayEarningsCard(last7)
 
-            // ---- Attendance status (check in to start your day) ----
+            // ─── Sitara Bonus — real working-days / Sundays / rating reward ladder ───
+            SectionTitle("Sitara Bonus")
+            SitaraBonusCard(vm.shaktiBonus) { nav.navigateApp(Routes.SHAKTI) }
+
+            // ─── Performance — premium analytics ───
+            SectionTitle("Performance")
+            Card {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    PerformanceMetric(
+                        Modifier.weight(1f), "Rating", if (vm.workerRating > 0) "${vm.workerRating}" else "—",
+                        Gold, meter = if (vm.workerRating > 0) (vm.workerRating / 5.0).toFloat() else null, icon = Icons.Filled.Star,
+                    )
+                    PerformanceMetric(
+                        Modifier.weight(1f), "Completion", if (vm.todayJobs > 0) "$completionPct%" else "—",
+                        GreenSuccess, meter = if (vm.todayJobs > 0) completionPct / 100f else null, icon = Icons.Filled.CheckCircle,
+                    )
+                }
+                Spacer(Modifier.height(Space.m))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    PerformanceMetric(
+                        Modifier.weight(1f), "Jobs Done", "${vm.jobsCompleted}", Purple, icon = Icons.Filled.EmojiEvents,
+                    )
+                    PerformanceMetric(
+                        Modifier.weight(1f), "This Month", "₹${vm.monthEarnings}", Violet, icon = Icons.Filled.CurrencyRupee,
+                    )
+                }
+            }
+
+            // ─── Attendance + Wallet quick rows (existing flows preserved) ───
             val attnOn = vm.attendance.checkedIn && !vm.attendance.checkedOut
             StatusListRow(
                 icon = Icons.Filled.Schedule,
@@ -432,22 +614,6 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 valueColor = Purple,
                 onClick = { nav.navigate(Routes.ATTENDANCE) },
             )
-
-            // ---- Next job (What should I do next?) ----
-            val nextJob = vm.bookings.firstOrNull { it.status == "Upcoming" }
-            StatusListRow(
-                icon = Icons.Filled.CalendarMonth,
-                iconTint = if (nextJob != null) Purple else TextMuted,
-                iconBg = if (nextJob != null) Primary50 else FieldFill,
-                title = nextJob?.service ?: "No upcoming jobs",
-                subtitle = if (nextJob != null) (nextJob.timeInfo ?: "Scheduled") else "You're all caught up",
-                subtitleColor = TextGray,
-                value = if (nextJob != null) "View" else "",
-                valueColor = Purple,
-                onClick = if (nextJob != null) ({ nav.navigate(Routes.SCHEDULE) }) else null,
-            )
-
-            // ---- Wallet quick view (How much have I earned?) ----
             StatusListRow(
                 icon = Icons.Filled.AccountBalanceWallet,
                 iconTint = Purple,
@@ -459,78 +625,6 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 valueColor = TextDark,
                 onClick = { nav.navigateApp(Routes.WALLET) },
             )
-
-            // Online hero — the primary action, with a genuine live "online today" timer.
-            val online = vm.isOnline
-            Surface(
-                shape = RoundedCornerShape(Radius.card),
-                color = if (online) GreenLight else Color.White,
-                border = BorderStroke(1.dp, if (online) GreenSuccess.copy(alpha = 0.35f) else Divider),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(Space.l)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(9.dp).background(if (online) GreenSuccess else TextGray, RoundedCornerShape(Radius.pill)))
-                                Spacer(Modifier.width(Space.s))
-                                Text(tr(if (online) "You're Online" else "You're Offline"), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
-                            }
-                            Spacer(Modifier.height(Space.xs))
-                            Text(
-                                if (online) "Receiving job requests nearby" else "Go online to start receiving jobs",
-                                fontSize = 13.sp, color = TextGray,
-                            )
-                        }
-                        Switch(
-                            checked = online,
-                            onCheckedChange = { vm.goOnline(it) },
-                            colors = SwitchDefaults.colors(checkedTrackColor = GreenSuccess, checkedThumbColor = Color.White),
-                        )
-                    }
-                    if (online) {
-                        Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.m))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column {
-                                Text(tr("Online today"), fontSize = 12.sp, color = TextGray)
-                                Text(fmtOnline(vm.onlineTodayMs(nowMs)), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDark)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(tr("Jobs today"), fontSize = 12.sp, color = TextGray)
-                                Text("${vm.todayJobs}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDark)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Today's earnings summary — signature money banner + a connected goal-progress
-            // breakdown (goal is worker-set and persisted).
-            val reached = vm.goalProgress >= 1f
-            ElevatedGroup {
-                MoneyBanner("Today's Earnings", vm.todayEarnings)
-                Column(Modifier.padding(Space.l)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Daily goal · ₹${vm.dailyGoal}", fontSize = 13.sp, color = TextGray)
-                        Text(
-                            "Edit goal",
-                            fontSize = 13.sp, color = Purple, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { showGoalDialog = true }.padding(Space.xs),
-                        )
-                    }
-                    Spacer(Modifier.height(Space.m))
-                    ProgressBar(vm.goalProgress, fill = if (reached) GreenSuccess else Purple, height = 10)
-                    Spacer(Modifier.height(Space.s))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("₹${vm.todayEarnings} of ₹${vm.dailyGoal} goal", fontSize = 12.sp, color = TextGray)
-                        Text(
-                            if (reached) "Goal reached 🎉" else "${(vm.goalProgress * 100).toInt()}%",
-                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                            color = if (reached) GreenSuccess else Purple,
-                        )
-                    }
-                }
-            }
 
             if (vm.isOnline && vm.activeJob == null) {
                 val ctx = LocalContext.current
@@ -617,36 +711,71 @@ private fun QuickAction(modifier: Modifier, emoji: String, label: String, onClic
     }
 }
 
-// ---- Home "Quick Actions" launcher grid (advanced feature) --------------------------------
-private data class QuickItem(val icon: ImageVector, val label: String, val route: String, val tint: Color, val bg: Color)
+// ---- Home "Quick Actions" launcher grid — premium rounded-icon tiles ----------------------
+private data class QuickItem(
+    val icon: ImageVector, val label: String,
+    val accent: Color, val accentBg: Color, val onTap: () -> Unit,
+)
 
 @Composable
-private fun HomeQuickGrid(nav: NavHostController) {
+private fun HomeQuickGrid(nav: NavHostController, ctx: android.content.Context, vm: AppViewModel) {
     val items = listOf(
-        QuickItem(Icons.Filled.CalendarMonth, "Bookings", Routes.BOOKINGS, Purple, PurpleLight),
-        QuickItem(Icons.Filled.Redeem, "Refer & Earn", Routes.REFER, Coral, CoralLight),
-        QuickItem(Icons.Filled.EmojiEvents, "Rewards", Routes.REWARDS, Gold, GoldLight),
-        QuickItem(Icons.Filled.Schedule, "Attendance", Routes.ATTENDANCE, GreenSuccess, GreenLight),
+        QuickItem(if (vm.isOnline) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (vm.isOnline) "Go Offline" else "Go Online", GreenSuccess, GreenLight) { vm.goOnline(!vm.isOnline) },
+        QuickItem(Icons.Filled.FreeBreakfast, "Take Break", Amber, GoldLight) { vm.goOnline(false); toast(ctx, "You're on a break — go online when ready") },
+        QuickItem(Icons.Filled.Schedule, "Attendance", Purple, Primary50) { nav.navigate(Routes.ATTENDANCE) },
+        QuickItem(Icons.Filled.CalendarMonth, "Schedule", Color(0xFF3B82F6), Color(0xFFE7F0FE)) { nav.navigate(Routes.SCHEDULE) },
+        QuickItem(Icons.Filled.Description, "Bookings", Violet, Color(0xFFF1EAFE)) { nav.navigateApp(Routes.BOOKINGS) },
+        QuickItem(Icons.Filled.AccountBalanceWallet, "Wallet", Purple, PurpleLight) { nav.navigateApp(Routes.WALLET) },
+        QuickItem(Icons.Filled.EmojiEvents, "Rewards", Gold, GoldLight) { nav.navigateApp(Routes.REWARDS) },
+        QuickItem(Icons.Filled.Redeem, "Refer & Earn", Coral, CoralLight) { nav.navigate(Routes.REFER) },
     )
     Column(verticalArrangement = Arrangement.spacedBy(Space.l)) {
         items.chunked(4).forEach { rowItems ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                rowItems.forEach { qi -> QuickTile(Modifier.weight(1f), qi) { nav.navigateApp(qi.route) } }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                rowItems.forEach { qi ->
+                    PremiumActionTile(Modifier.weight(1f), qi.icon, qi.label, qi.accent, qi.accentBg, qi.onTap)
+                }
                 repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
 
+/** One premium node in the "Today's Jobs" booking timeline: a gradient rail dot + connector
+ *  and a floating job card (service / customer / time / amount). */
 @Composable
-private fun QuickTile(modifier: Modifier, item: QuickItem, onClick: () -> Unit) {
-    Column(modifier.bounceClick(onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(54.dp).background(item.bg, RoundedCornerShape(Radius.card)),
-            contentAlignment = Alignment.Center,
-        ) { Icon(item.icon, contentDescription = item.label, tint = item.tint, modifier = Modifier.size(24.dp)) }
-        Spacer(Modifier.height(6.dp))
-        Text(tr(item.label), fontSize = 11.sp, color = TextDark, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2)
+private fun JobTimelineItem(b: Booking, isLast: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Column(Modifier.width(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.size(13.dp).clip(RoundedCornerShape(Radius.pill)).background(BrandGradient))
+            if (!isLast) Box(Modifier.width(2.dp).weight(1f).background(Divider))
+        }
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.weight(1f).padding(bottom = if (isLast) 0.dp else Space.m)) {
+            Card(modifier = Modifier.clickable { onClick() }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Primary50), contentAlignment = Alignment.Center) {
+                        Text("🧹", fontSize = 20.sp)
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(b.service ?: "Service", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.5.sp, maxLines = 1)
+                        Spacer(Modifier.height(1.dp))
+                        Text(b.customerName ?: "Customer", color = TextGray, fontSize = 12.sp, maxLines = 1)
+                        if (!b.timeInfo.isNullOrBlank()) {
+                            Spacer(Modifier.height(2.dp))
+                            Text("🕐 ${b.timeInfo}", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                        }
+                    }
+                    Spacer(Modifier.width(Space.s))
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (b.amount > 0) Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 15.sp)
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -659,7 +788,6 @@ private fun shortInr(n: Int): String = when {
 /** Advanced: last-7-days daily-earnings mini bar chart. `days` = (weekday, amount, isToday). */
 @Composable
 private fun SevenDayEarningsCard(days: List<Triple<String, Int, Boolean>>) {
-    val max = (days.maxOfOrNull { it.second } ?: 0).coerceAtLeast(1)
     val total = days.sumOf { it.second }
     Card {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -670,32 +798,7 @@ private fun SevenDayEarningsCard(days: List<Triple<String, Int, Boolean>>) {
             Text("₹${shortInr(total)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 18.sp)
         }
         Spacer(Modifier.height(Space.l))
-        Row(
-            Modifier.fillMaxWidth().height(120.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            days.forEach { (label, amt, today) ->
-                Column(
-                    Modifier.weight(1f).fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom,
-                ) {
-                    if (amt > 0) {
-                        Text("₹${shortInr(amt)}", fontSize = 9.sp, color = if (today) Purple else TextGray, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Spacer(Modifier.height(3.dp))
-                    }
-                    val h = if (amt <= 0) 4 else (10 + 78 * amt / max)
-                    Box(
-                        Modifier.fillMaxWidth(0.62f).height(h.dp)
-                            .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                            .then(if (today) Modifier.background(BrandGradient) else Modifier.background(if (amt > 0) Purple.copy(alpha = 0.35f) else Divider)),
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(label, fontSize = 10.sp, color = if (today) Purple else TextMuted, fontWeight = if (today) FontWeight.Bold else FontWeight.Medium)
-                }
-            }
-        }
+        AnimatedLineChart(days, lineColor = GreenSuccess, fillColor = GreenSuccess)
     }
 }
 

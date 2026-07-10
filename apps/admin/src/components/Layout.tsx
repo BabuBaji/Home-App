@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
-  UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer,
+  UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, can } from '../store'
@@ -24,6 +24,7 @@ const NAV: NavGroup[] = [
     { to: '/refunds', label: 'Refunds', Icon: RotateCcw, chev: true },
   ] },
   { section: 'Operations', items: [
+    { to: '/zones', label: 'Zone Planning', Icon: Boxes, min: 'admin' },
     { to: '/live-ops', label: 'Live Ops', Icon: Radio, min: 'admin' },
     { to: '/service-areas', label: 'Service Areas', Icon: MapPin, min: 'admin' },
     { to: '/roster', label: 'Shifts / Roster', Icon: CalendarClock, min: 'admin' },
@@ -49,7 +50,7 @@ const NAV: NavGroup[] = [
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', payments: 'Payments', refunds: 'Refunds',
-  'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
+  zones: 'Zone Planning', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', roles: 'Roles & Permissions',
 }
 
