@@ -3,10 +3,12 @@ import {
   Globe, Building2, CheckCircle2, Layers, HardHat, UserCheck, Gauge, Boxes,
   TrendingUp, IndianRupee, MapPin, Plus, ChevronLeft, ChevronRight, Check, Brain, Wand2, Zap,
   Package, Users, CalendarClock, ClipboardCheck, ShieldCheck, Trash2, Sparkles, AlertTriangle,
-  Truck, Rocket, ArrowLeft,
+  Truck, Rocket, ArrowLeft, Radio, Activity, Clock3,
 } from 'lucide-react'
-import { MiniMap, useToast } from '../components/UI'
+import { MiniMap, SumBars, useToast } from '../components/UI'
+import { BarChart, Donut } from '../components/Charts'
 import { createSite, updateSite, deleteSite } from '../api'
+import { ZoneMap } from '../zones/ZoneMap'
 import {
   useZones, computeMetrics, readiness, isReady, recommendations,
   type Zone, type ZoneStatus, type Pincode, type Apartment,
@@ -66,14 +68,34 @@ function Kpi({ icon, label, value, trend, up, seed, sval }: {
 export default function ZoneOps() {
   const { zones, upsert, create } = useZones()
   const [openId, setOpenId] = useState<string | null>(null)
+  const [view, setView] = useState<'overview' | 'map' | 'tower'>('overview')
   const open = zones.find((z) => z.id === openId) || null
 
   if (open) return <ZoneSetup zone={open} onBack={() => setOpenId(null)} upsert={upsert} />
-  return <ZoneDashboard zones={zones} onOpen={setOpenId} onNew={() => { const z = create(); setOpenId(z.id) }} />
+  return (
+    <div className="zo">
+      <div className="zo-top">
+        <div>
+          <h2>Zone Planning & Operations</h2>
+          <p>Design, forecast and activate an operational zone before onboarding workers · Control Tower</p>
+        </div>
+        <div className="spacer" style={{ flex: 1 }} />
+        <div className="zo-seg">
+          <button className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>Dashboard</button>
+          <button className={view === 'map' ? 'on' : ''} onClick={() => setView('map')}>Map</button>
+          <button className={view === 'tower' ? 'on' : ''} onClick={() => setView('tower')}>Control Tower</button>
+        </div>
+        <button className="zo-btn" onClick={() => { const z = create(); setOpenId(z.id) }}><Plus size={17} /> New Zone</button>
+      </div>
+      {view === 'overview' && <OverviewBody zones={zones} onOpen={setOpenId} />}
+      {view === 'map' && <ZoneMap zones={zones} />}
+      {view === 'tower' && <ControlTower zones={zones} />}
+    </div>
+  )
 }
 
 /* ═══════════════════════════════════ DASHBOARD ═══════════════════════════════════ */
-function ZoneDashboard({ zones, onOpen, onNew }: { zones: Zone[]; onOpen: (id: string) => void; onNew: () => void }) {
+function OverviewBody({ zones, onOpen }: { zones: Zone[]; onOpen: (id: string) => void }) {
   const agg = useMemo(() => {
     const cities = new Set(zones.map((z) => z.city).filter(Boolean)).size
     let apartments = 0, workersReq = 0, assigned = 0, capacity = 0, orders = 0, revenue = 0
@@ -94,16 +116,7 @@ function ZoneDashboard({ zones, onOpen, onNew }: { zones: Zone[]; onOpen: (id: s
   const recs = useMemo(() => zones.flatMap((z) => recommendations(z).slice(0, 2).map((r) => ({ ...r, zone: z.name }))).slice(0, 6), [zones])
 
   return (
-    <div className="zo">
-      <div className="zo-top">
-        <div>
-          <h2>Zone Planning & Operations</h2>
-          <p>Design, forecast and activate an operational zone before onboarding workers · Control Tower</p>
-        </div>
-        <div className="spacer" style={{ flex: 1 }} />
-        <button className="zo-btn" onClick={onNew}><Plus size={17} /> New Zone</button>
-      </div>
-
+    <>
       {/* KPI grid */}
       <div className="zo-kpis" style={{ marginBottom: 16 }}>
         <Kpi seed={0} icon={<Globe size={20} />} label="Total Cities" value={agg.cities} sval={agg.cities} trend="+1" up />
@@ -170,7 +183,7 @@ function ZoneDashboard({ zones, onOpen, onNew }: { zones: Zone[]; onOpen: (id: s
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -715,6 +728,94 @@ function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provi
   }
 
   return null
+}
+
+/* ═══════════════════════════════════ CONTROL TOWER (Screen 14) ═══════════════════════════════════ */
+function ControlTower({ zones }: { zones: Zone[] }) {
+  const live = useMemo(() => {
+    const active = zones.filter((z) => z.status === 'active')
+    const pool = active.length ? active : zones
+    let orders = 0, workers = 0, capacity = 0, revenue = 0, aovSum = 0, n = 0
+    pool.forEach((z) => {
+      const m = computeMetrics(z)
+      orders += m.dailyOrders; capacity += m.dailyCapacity; revenue += m.dailyOrders * m.avgOrderValue
+      workers += z.shifts.reduce((a, s) => a + s.workers, 0); aovSum += m.avgOrderValue; n += 1
+    })
+    const util = capacity ? Math.round((orders / capacity) * 100) : 0
+    const aov = n ? Math.round(aovSum / n) : 0
+    const online = Math.round(workers * 0.72), onBreak = Math.round(workers * 0.12), offline = Math.max(0, workers - online - onBreak)
+    const peak = [0.2, 0.35, 0.75, 0.95, 0.7, 0.4, 0.3, 0.35, 0.55, 0.85, 1, 0.6]
+    const hourly = peak.map((p, i) => ({ h: `${6 + i * 2}h`, orders: Math.round(orders * p / 3) }))
+    const byZone = pool.map((z, i) => ({ label: z.name || 'Zone', value: computeMetrics(z).dailyOrders, color: ['#4F46E5', '#7C3AED', '#0EA5E9', '#22C55E', '#F59E0B'][i % 5] }))
+    return { orders, workers, online, onBreak, offline, util, aov, revenue, hourly, byZone, activeN: active.length }
+  }, [zones])
+
+  const feed = useMemo(() => {
+    const pool = zones.filter((z) => z.status === 'active').length ? zones.filter((z) => z.status === 'active') : zones
+    const items: { t: string; txt: string }[] = []
+    pool.forEach((z) => {
+      const on = z.services.filter((x) => x.on)
+      z.apartments.slice(0, 3).forEach((a, i) => {
+        const s = on[i % Math.max(1, on.length)]
+        items.push({ t: `${(i + 1) * 3}m ago`, txt: `New order · ${s?.name || 'Service'} at ${a.name || 'Apartment'} · ${z.name}` })
+      })
+    })
+    return items.slice(0, 8)
+  }, [zones])
+
+  return (
+    <>
+      <div className="zo-hero" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+          <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+            <Radio size={20} /><b style={{ fontSize: 16 }}>Operations Control Tower</b>
+            <span className="zo-chip" style={{ background: 'rgba(255,255,255,.2)', color: '#fff' }}><i style={{ background: '#22C55E' }} />live</span>
+          </div>
+          <span style={{ fontSize: 12, opacity: .9 }}>{live.activeN} active zone{live.activeN === 1 ? '' : 's'} · forecast-driven snapshot</span>
+        </div>
+      </div>
+      <div className="zo-kpis" style={{ marginBottom: 16 }}>
+        <Kpi seed={0} icon={<TrendingUp size={20} />} label="Live Orders (today)" value={live.orders} sval={live.orders} trend="+18%" up />
+        <Kpi seed={1} icon={<UserCheck size={20} />} label="Workers Online" value={live.online} sval={live.online || 1} trend={`of ${live.workers}`} up />
+        <Kpi seed={2} icon={<Gauge size={20} />} label="Utilization" value={live.util + '%'} sval={live.util} trend={live.util > 85 ? 'high' : 'ok'} up={live.util <= 85} />
+        <Kpi seed={3} icon={<IndianRupee size={20} />} label="Revenue (today)" value={compact(live.revenue)} sval={live.revenue} trend="+12%" up />
+        <Kpi seed={4} icon={<ShieldCheck size={20} />} label="On-time SLA" value="94%" sval={94} trend="6% breach" up />
+        <Kpi seed={5} icon={<Clock3 size={20} />} label="Avg Order Value" value={'₹' + live.aov} sval={live.aov} trend="stable" />
+      </div>
+      <div className="zo-grid" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
+        <div className="zo-panel">
+          <div className="zo-panel-h"><h3>Hourly Orders</h3><span className="sub">forecast demand across the day</span></div>
+          <BarChart data={live.hourly} valueKey="orders" labelKey="h" height={200} />
+        </div>
+        <div className="zo-panel">
+          <div className="zo-panel-h"><h3>Orders by Zone</h3></div>
+          <Donut data={live.byZone} size={190} />
+        </div>
+      </div>
+      <div className="zo-grid" style={{ gridTemplateColumns: '1fr 1.6fr', marginTop: 16 }}>
+        <div className="zo-panel">
+          <div className="zo-panel-h"><h3>Worker Availability</h3></div>
+          <SumBars rows={[
+            { label: 'Online', value: live.online, pct: live.online, color: '#22C55E' },
+            { label: 'On break', value: live.onBreak, pct: live.onBreak, color: '#F59E0B' },
+            { label: 'Offline', value: live.offline, pct: live.offline, color: '#94A3B8' },
+          ]} />
+        </div>
+        <div className="zo-panel">
+          <div className="zo-panel-h"><h3 style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Activity size={16} style={{ color: 'var(--zv)' }} /> Live Feed</h3></div>
+          <div className="zo-recs">
+            {feed.map((f, i) => (
+              <div key={i} className="zo-rec info" style={{ padding: 10 }}>
+                <span className="zo-rec-ic"><Sparkles size={15} /></span>
+                <div><b style={{ fontSize: 13 }}>{f.txt}</b><p>{f.t}</p></div>
+              </div>
+            ))}
+            {feed.length === 0 && <div className="zo-empty"><div className="e">📡</div><p>No live activity — activate a zone to see the feed.</p></div>}
+          </div>
+        </div>
+      </div>
+    </>
+  )
 }
 
 const SERVICE_EMOJI: Record<string, string> = {
