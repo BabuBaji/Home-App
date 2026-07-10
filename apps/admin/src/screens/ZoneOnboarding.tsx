@@ -6,7 +6,7 @@ import {
   Plus, ChevronLeft, ChevronRight, Check, Search, Trash2, ArrowLeft, CheckCircle2, Upload,
 } from 'lucide-react'
 import { useToast } from '../components/UI'
-import { fetchZones, createZone, updateZone, fetchWorkers, opList } from '../api'
+import { fetchZones, createZone, updateZone, fetchWorkers, fetchServices, opList } from '../api'
 import ZoneDashboard from './ZoneDashboard'
 import ZoneAdminDashboard from './ZoneAdminDashboard'
 import '../zones/zones.css'
@@ -15,17 +15,7 @@ import '../zones/zones.css'
 import type { Apt, Person, ZoneConfig, BZone } from '../zones/types'
 
 /* ───────── constants ───────── */
-const SERVICES = [
-  { key: 'sweep', name: 'Sweeping & Mopping', price: 129, skill: 'Basic', dur: 30 },
-  { key: 'bath', name: 'Bathroom Cleaning', price: 299, skill: 'Standard', dur: 45 },
-  { key: 'kitchen', name: 'Kitchen Cleaning', price: 249, skill: 'Standard', dur: 60 },
-  { key: 'dust', name: 'Dusting', price: 129, skill: 'Basic', dur: 30 },
-  { key: 'laundry', name: 'Laundry', price: 199, skill: 'Basic', dur: 45 },
-  { key: 'fan', name: 'Fan Cleaning', price: 149, skill: 'Basic', dur: 25 },
-  { key: 'window', name: 'Window Cleaning', price: 249, skill: 'Standard', dur: 40 },
-  { key: 'sofa', name: 'Sofa Cleaning', price: 699, skill: 'Standard', dur: 60 },
-  { key: 'deep', name: 'Deep Cleaning', price: 1499, skill: 'Expert', dur: 180 },
-]
+type Svc = { id: string; name: string; price: number; category?: string }
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const APT_SUGGEST = ['Rainbow Vistas', 'Brigade Metropolis', 'Kalpataru Residency', 'My Home Bhooja', 'Mantri Celestia', 'Aparna Sarovar', 'Prestige High Fields']
 const uid = () => Math.random().toString(36).slice(2, 9)
@@ -34,8 +24,8 @@ function defaultConfig(): ZoneConfig {
   return {
     coverage: { mode: 'radius', radiusKm: 5, lat: 17.4419, lng: 78.3915, pincodes: [] },
     apartments: [],
-    services: ['sweep', 'bath', 'kitchen', 'dust'],
-    pricing: Object.fromEntries(SERVICES.map((s) => [s.key, s.price])),
+    services: [],
+    pricing: {},
     pricingExtras: { gst: 18, convenienceFee: 19, minOrder: 149, discount: 0 },
     capacity: { maxOrders: 120, workersRequired: 25, minOnline: 8, maxEtaMin: 20, maxTravelKm: 5 },
     workingHours: { is247: false, days: Object.fromEntries(DAYS.map((d) => [d, { open: '08:00', close: '21:00', closed: false }])) },
@@ -135,7 +125,18 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
   const [cities, setCities] = useState<{ name: string; state: string }[]>([])
+  const [services, setServices] = useState<Svc[]>([])
   useEffect(() => { opList<{ name: string; state: string }>('cities').then(setCities).catch(() => {}) }, [])
+  useEffect(() => {
+    fetchServices().then((list) => {
+      const svc: Svc[] = (list as unknown as Svc[]).map((s) => ({ id: s.id, name: s.name, price: s.price, category: s.category }))
+      setServices(svc)
+      // New zone with nothing chosen yet → enable the first few real services + seed their prices.
+      setCfg((c) => (!zone && (!c.services || c.services.length === 0))
+        ? { ...c, services: svc.slice(0, 4).map((s) => s.id), pricing: Object.fromEntries(svc.map((s) => [s.id, s.price])) }
+        : { ...c, pricing: { ...Object.fromEntries(svc.map((s) => [s.id, s.price])), ...(c.pricing || {}) } })
+    }).catch(() => {})
+  }, [zone])
 
   const patch = (u: Partial<ZoneConfig>) => setCfg((c) => ({ ...c, ...u }))
   const body = (goLive = false) => ({
@@ -206,7 +207,7 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
               <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}><cur.Icon size={18} style={{ color: 'var(--zv)' }} /> {cur.title}</h3>
               <span className="sub">Step {step + 1} / {STEPS.length}</span>
             </div>
-            <WizStep step={cur.key} {...{ name, setName, code, setCode, city, setCity, state, setState, status, setStatus, cfg, patch, checklist, ready, toast, cities }} />
+            <WizStep step={cur.key} {...{ name, setName, code, setCode, city, setCity, state, setState, status, setStatus, cfg, patch, checklist, ready, toast, cities, services }} />
           </div>
           <div className="zo-wiz-foot">
             <button className="zo-btn line" disabled={step === 0 || saving} onClick={() => setStep((s) => Math.max(0, s - 1))}><ChevronLeft size={16} /> Back</button>
@@ -232,6 +233,7 @@ type StepProps = {
   checklist: { label: string; ok: boolean }[]; ready: boolean
   toast: (s: string, k?: 'ok' | 'err') => void
   cities: { name: string; state: string }[]
+  services: Svc[]
 }
 
 function WizStep(p: StepProps) {
@@ -326,11 +328,12 @@ function WizStep(p: StepProps) {
     const toggle = (k: string) => { const n = new Set(on); n.has(k) ? n.delete(k) : n.add(k); patch({ services: [...n] }) }
     return (
       <div className="zo-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 10 }}>
-        {SERVICES.map((s) => (
-          <div key={s.key} className={'zo-checkrow' + (on.has(s.key) ? ' on' : '')} onClick={() => toggle(s.key)}>
-            <span className="zo-cb">{on.has(s.key) && <Check size={13} />}</span>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, fontWeight: 700 }}>{s.name}</div><div style={{ fontSize: 11, color: 'var(--zmut)' }}>{s.dur}min · {s.skill}</div></div>
-            <b style={{ fontSize: 13, color: 'var(--zi)' }}>₹{cfg.pricing?.[s.key] ?? s.price}</b>
+        {p.services.length === 0 && <p className="sub">Loading services from catalogue…</p>}
+        {p.services.map((s) => (
+          <div key={s.id} className={'zo-checkrow' + (on.has(s.id) ? ' on' : '')} onClick={() => toggle(s.id)}>
+            <span className="zo-cb">{on.has(s.id) && <Check size={13} />}</span>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, fontWeight: 700 }}>{s.name}</div>{s.category && <div style={{ fontSize: 11, color: 'var(--zmut)' }}>{s.category}</div>}</div>
+            <b style={{ fontSize: 13, color: 'var(--zi)' }}>₹{cfg.pricing?.[s.id] ?? s.price}</b>
           </div>
         ))}
       </div>
@@ -354,16 +357,16 @@ function WizStep(p: StepProps) {
   if (step === 'pricing') {
     const ex = cfg.pricingExtras!
     const setPrice = (k: string, v: number) => patch({ pricing: { ...(cfg.pricing || {}), [k]: v } })
-    const enabled = SERVICES.filter((s) => (cfg.services || []).includes(s.key))
+    const enabled = p.services.filter((s) => (cfg.services || []).includes(s.id))
     return (
       <div>
         <p style={{ fontSize: 12, color: 'var(--zmut)', marginTop: -4, marginBottom: 12 }}>Leave a price to use the default. Override per zone as needed.</p>
         <div style={{ overflowX: 'auto', marginBottom: 16 }}>
           <table className="zo-table"><thead><tr><th>Service</th><th>Default</th><th>Zone Price</th></tr></thead>
             <tbody>{enabled.map((s) => (
-              <tr key={s.key} style={{ cursor: 'default' }}>
+              <tr key={s.id} style={{ cursor: 'default' }}>
                 <td><b>{s.name}</b></td><td style={{ color: 'var(--zmut)' }}>₹{s.price}</td>
-                <td><input className="zo-mini" value={cfg.pricing?.[s.key] ?? s.price} onChange={(e) => setPrice(s.key, +e.target.value)} /></td>
+                <td><input className="zo-mini" value={cfg.pricing?.[s.id] ?? s.price} onChange={(e) => setPrice(s.id, +e.target.value)} /></td>
               </tr>
             ))}</tbody>
           </table>

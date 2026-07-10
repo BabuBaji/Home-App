@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Card, Badge, SumBars } from '../components/UI'
 import { LineChart, BarChart, Donut } from '../components/Charts'
+import { allZonesMetrics } from '../api'
 import '../zones/zones.css'
 
 import type { BZone } from '../zones/types'
@@ -55,7 +56,14 @@ function Kpi({ icon, tint, label, value, sub, delta, up, seed, sval }: { icon: R
 }
 
 export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zones: BZone[]; onCreate: () => void; onOpenZone: (z: BZone) => void }) {
-  const per = useMemo(() => zones.map((z) => ({ z, m: zm(z) })), [zones])
+  // Real per-zone figures (bookings/revenue/apartments) from the backend; kept alongside the
+  // modelled worker-status / trend visuals which have no live per-zone source yet.
+  const [real, setReal] = useState<Record<number, Record<string, number>>>({})
+  useEffect(() => { allZonesMetrics().then((rows) => setReal(Object.fromEntries(rows.map((r) => [Number(r.id), r as Record<string, number>])))).catch(() => {}) }, [])
+  const per = useMemo(() => zones.map((z) => {
+    const m = zm(z); const r = real[z.id]
+    return { z, m: r ? { ...m, orders: r.orders ?? m.orders, revenue: r.revenue ?? m.revenue } : m }
+  }), [zones, real])
   const agg = useMemo(() => {
     const a = { orders: 0, revenue: 0, online: 0, total: 0, busy: 0, offline: 0 }
     per.forEach(({ m }) => { a.orders += m.orders; a.revenue += m.revenue; a.online += m.online; a.total += m.total; a.busy += m.busy; a.offline += m.offline })

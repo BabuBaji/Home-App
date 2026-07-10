@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
@@ -6,6 +6,7 @@ import {
   Star, ArrowLeft, Pencil, Download, CalendarDays, Bell, Zap, Plus, UserPlus,
 } from 'lucide-react'
 import { Card, StatCard, Badge } from '../components/UI'
+import { zoneMetrics } from '../api'
 import '../zones/zones.css'
 
 import type { BZone } from '../zones/types'
@@ -54,6 +55,16 @@ export default function ZoneDashboard({ zone, onBack, onEdit }: { zone: BZone; o
   const m = useMemo(() => metrics(zone), [zone])
   const h = useMemo(() => health(zone), [zone])
   const live = zone.status === 'live'
+  // Prefer REAL figures from the backend metrics endpoint (bookings, apartments, workers);
+  // ETA / rating / top-services split remain modelled (no live source for those yet).
+  const [real, setReal] = useState<Record<string, number> | null>(null)
+  useEffect(() => { zoneMetrics(zone.id).then(setReal).catch(() => {}) }, [zone.id])
+  const rn = (k: string, fb: number) => (real && real[k] != null ? real[k] : fb)
+  const d = {
+    online: rn('online', m.online), busy: rn('busy', m.busy), offline: rn('offline', m.offline), total: rn('workers', m.total),
+    orders: rn('orders', m.orders), pending: rn('pending', m.pending), cancelled: rn('cancelled', m.cancelled),
+    completed: rn('completed', m.completed), revenue: rn('revenue', m.revenue),
+  }
   const recent = (zone.config.apartments || []).slice(0, 5).map((a, i) => ({
     id: '#BK' + (78912 - i), svc: m.topServices[i % Math.max(1, m.topServices.length)]?.name || 'Cleaning',
     apt: a.name, time: ['09:32', '09:20', '09:05', '08:50', '08:45'][i] + ' AM',
@@ -75,19 +86,19 @@ export default function ZoneDashboard({ zone, onBack, onEdit }: { zone: BZone; o
 
       {/* KPI row 1 */}
       <div className="zo-kpis" style={{ marginBottom: 14 }}>
-        <StatCard icon={<Users size={20} />} tint="#22C55E" label="Workers Online" value={m.online} sub={`of ${m.total}`} delta="15%" />
-        <StatCard icon={<Briefcase size={20} />} tint="#F59E0B" label="Workers Busy" value={m.busy} sub={`of ${m.total}`} delta="8%" />
-        <StatCard icon={<UserX size={20} />} tint="#94A3B8" label="Workers Offline" value={m.offline} sub={`of ${m.total}`} delta="5%" down />
-        <StatCard icon={<ShoppingBag size={20} />} tint="#4F46E5" label="Orders Today" value={m.orders} delta="18%" />
-        <StatCard icon={<Clock size={20} />} tint="#F59E0B" label="Pending Orders" value={m.pending} delta="2%" down />
-        <StatCard icon={<XCircle size={20} />} tint="#EF4444" label="Cancelled Orders" value={m.cancelled} delta="1%" down />
+        <StatCard icon={<Users size={20} />} tint="#22C55E" label="Workers Online" value={d.online} sub={`of ${d.total}`} delta="15%" />
+        <StatCard icon={<Briefcase size={20} />} tint="#F59E0B" label="Workers Busy" value={d.busy} sub={`of ${d.total}`} delta="8%" />
+        <StatCard icon={<UserX size={20} />} tint="#94A3B8" label="Workers Offline" value={d.offline} sub={`of ${d.total}`} delta="5%" down />
+        <StatCard icon={<ShoppingBag size={20} />} tint="#4F46E5" label="Orders Today" value={d.orders} delta="18%" />
+        <StatCard icon={<Clock size={20} />} tint="#F59E0B" label="Pending Orders" value={d.pending} delta="2%" down />
+        <StatCard icon={<XCircle size={20} />} tint="#EF4444" label="Cancelled Orders" value={d.cancelled} delta="1%" down />
       </div>
 
       {/* KPI row 2 + Top Services */}
       <div className="zo-grid" style={{ gridTemplateColumns: 'repeat(4,1fr) 1.3fr', gap: 14, marginBottom: 16 }}>
         <StatCard icon={<Clock3 size={20} />} tint="#4F46E5" label="Average ETA" value={`${m.eta} mins`} sub="Good" />
-        <StatCard icon={<IndianRupee size={20} />} tint="#22C55E" label="Revenue Today" value={money(m.revenue)} delta="16%" />
-        <StatCard icon={<CheckCircle2 size={20} />} tint="#22C55E" label="Completed Orders" value={m.completed} delta="19%" />
+        <StatCard icon={<IndianRupee size={20} />} tint="#22C55E" label="Revenue Today" value={money(d.revenue)} delta="16%" />
+        <StatCard icon={<CheckCircle2 size={20} />} tint="#22C55E" label="Completed Orders" value={d.completed} delta="19%" />
         <StatCard icon={<Star size={20} />} tint="#F59E0B" label="Customer Rating" value={m.rating} sub="Based on 128 ratings" />
         <Card title="Top Services Today">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
