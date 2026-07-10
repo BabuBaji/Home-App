@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { Card, Badge, SumBars } from '../components/UI'
 import { LineChart, BarChart, Donut } from '../components/Charts'
-import { allZonesMetrics } from '../api'
+import { allZonesMetrics, opsOverview } from '../api'
 import '../zones/zones.css'
 
 import type { BZone } from '../zones/types'
@@ -60,30 +60,38 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
   // modelled worker-status / trend visuals which have no live per-zone source yet.
   const [real, setReal] = useState<Record<number, Record<string, number>>>({})
   useEffect(() => { allZonesMetrics().then((rows) => setReal(Object.fromEntries(rows.map((r) => [Number(r.id), r as Record<string, number>])))).catch(() => {}) }, [])
+  const [ops, setOps] = useState<Record<string, any>>({})
+  useEffect(() => { opsOverview().then(setOps).catch(() => {}) }, [])
   const per = useMemo(() => zones.map((z) => {
     const m = zm(z); const r = real[z.id]
     return { z, m: r ? { ...m, orders: r.orders ?? m.orders, revenue: r.revenue ?? m.revenue } : m }
   }), [zones, real])
+  // Aggregates: bookings/revenue/pending/cancelled from real per-zone rows; worker status +
+  // rating from the real ops-overview (worker + booking services).
   const agg = useMemo(() => {
-    const a = { orders: 0, revenue: 0, online: 0, total: 0, busy: 0, offline: 0 }
-    per.forEach(({ m }) => { a.orders += m.orders; a.revenue += m.revenue; a.online += m.online; a.total += m.total; a.busy += m.busy; a.offline += m.offline })
-    return { ...a, pending: Math.round(a.orders * 0.06), cancelled: Math.round(a.orders * 0.02), onBreak: Math.round(a.total * 0.03), rating: 4.6 }
-  }, [per])
+    let orders = 0, revenue = 0, pending = 0, cancelled = 0
+    const rows = Object.values(real)
+    rows.forEach((r) => { orders += r.orders || 0; revenue += r.revenue || 0; pending += r.pending || 0; cancelled += r.cancelled || 0 })
+    if (!rows.length) per.forEach(({ m }) => { orders += m.orders; revenue += m.revenue })
+    const ws = ops.workerStatus || {}
+    return { orders, revenue, pending, cancelled, online: ws.online || 0, busy: ws.busy || 0, offline: ws.offline || 0, total: ws.total || 0, onBreak: ws.onBreak || 0, rating: ops.rating || 0 }
+  }, [per, real, ops])
 
-  const topServices = useMemo(() => {
-    const counts: Record<string, number> = {}
-    per.forEach(({ z, m }) => { const w = (z.config.services || []).map((_, i) => (z.config.services!.length - i)); const ws = w.reduce((x, y) => x + y, 0) || 1;(z.config.services || []).forEach((k, i) => { counts[k] = (counts[k] || 0) + Math.round(m.completed * w[i] / ws) }) })
-    const palette = ['#4F46E5', '#22C55E', '#F59E0B', '#0EA5E9', '#EC4899', '#94A3B8']
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v], i) => ({ label: SVC[k] || k, value: v, color: palette[i % palette.length] }))
-  }, [per])
-
+  const palette = ['#4F46E5', '#22C55E', '#F59E0B', '#0EA5E9', '#EC4899', '#94A3B8']
+  const topServices = (ops.topServices?.length
+    ? ops.topServices.slice(0, 6).map((t: any, i: number) => ({ label: t.name, value: t.count, color: palette[i % palette.length] }))
+    : [])
+  const wsd = ops.workerStatus || {}
   const workerDonut = [
-    { label: 'Online', value: agg.online, color: '#22C55E' }, { label: 'Busy', value: agg.busy, color: '#F59E0B' },
-    { label: 'Offline', value: agg.offline, color: '#94A3B8' }, { label: 'On Break', value: agg.onBreak, color: '#7C3AED' },
+    { label: 'Online', value: wsd.online || 0, color: '#22C55E' }, { label: 'Busy', value: wsd.busy || 0, color: '#F59E0B' },
+    { label: 'Offline', value: wsd.offline || 0, color: '#94A3B8' }, { label: 'On Break', value: wsd.onBreak || 0, color: '#7C3AED' },
   ]
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const trend = days.map((day, i) => { const f = [0.55, 0.62, 0.7, 0.85, 1, 0.78, 0.6][i]; return { day, bookings: Math.round(agg.orders * f / 3), revenue: Math.round(agg.revenue * f / 3 / 200) } })
-  const revBars = Array.from({ length: 12 }, (_, i) => ({ d: `${i * 3 + 1} May`, rev: Math.round(agg.revenue / 20 * (0.5 + Math.abs(Math.sin(i)) )) }))
+  const trend = (ops.trend?.length
+    ? ops.trend.map((t: any) => ({ day: t.day, bookings: t.bookings, revenue: Math.round((t.revenue || 0) / 200) }))
+    : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => ({ day, bookings: 0, revenue: 0 })))
+  const revBars = (ops.revenueDaily?.length
+    ? ops.revenueDaily.map((r: any) => ({ d: r.d, rev: r.rev }))
+    : Array.from({ length: 7 }, (_, i) => ({ d: `Day ${i + 1}`, rev: 0 })))
   const recent = per.flatMap(({ z, m }) => (z.config.services || []).slice(0, 1).map((k) => ({ id: '#BK' + (78912 - z.id), svc: SVC[k] || k, zone: z.name, status: ['Assigned', 'In Progress', 'Completed', 'Pending'][z.id % 4], time: '09:' + (10 + z.id) + ' AM' }))).slice(0, 5)
 
   return (
@@ -106,7 +114,7 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
         <Kpi seed={2} tint="#0EA5E9" icon={<Users size={19} />} label="Workers Online" value={agg.online} sub={`/ ${agg.total}`} delta="11%" up sval={agg.online} />
         <Kpi seed={3} tint="#F59E0B" icon={<Clock size={19} />} label="Pending Orders" value={agg.pending} delta="8%" up={false} sval={agg.pending} />
         <Kpi seed={4} tint="#EF4444" icon={<XCircle size={19} />} label="Cancelled Orders" value={agg.cancelled} delta="5%" up={false} sval={agg.cancelled} />
-        <Kpi seed={5} tint="#F5B301" icon={<Star size={19} />} label="Customer Rating" value={agg.rating} delta="2%" up sval={46} />
+        <Kpi seed={5} tint="#F5B301" icon={<Star size={19} />} label="Customer Rating" value={agg.rating > 0 ? agg.rating : '—'} delta="2%" up sval={46} />
       </div>
 
       {/* trend + bookings by zone + map */}

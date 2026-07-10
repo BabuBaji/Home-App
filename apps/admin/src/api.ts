@@ -178,8 +178,9 @@ export const opList = <T = Record<string, unknown>>(path: string, zoneId?: numbe
 export const opCreate = (path: string, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}`, post('', body))
 export const opUpdate = (path: string, id: number, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}/${id}`, patch(body))
 export const opDelete = (path: string, id: number) => req<{ ok: boolean }>(`/${path}/${id}`, { method: 'DELETE' })
-export const zoneMetrics = (id: number) => req<Record<string, number>>(`/zones/${id}/metrics`)
-export const allZonesMetrics = () => req<Record<string, number | string>[]>('/zones-metrics')
+export const zoneMetrics = (id: number) => req<Record<string, any>>(`/zones/${id}/metrics`)
+export const allZonesMetrics = () => req<Record<string, any>[]>('/zones-metrics')
+export const opsOverview = () => req<Record<string, any>>('/ops-overview')
 
 export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
 export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))

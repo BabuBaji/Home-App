@@ -57,14 +57,17 @@ export default function ZoneDashboard({ zone, onBack, onEdit }: { zone: BZone; o
   const live = zone.status === 'live'
   // Prefer REAL figures from the backend metrics endpoint (bookings, apartments, workers);
   // ETA / rating / top-services split remain modelled (no live source for those yet).
-  const [real, setReal] = useState<Record<string, number> | null>(null)
+  const [real, setReal] = useState<Record<string, any> | null>(null)
   useEffect(() => { zoneMetrics(zone.id).then(setReal).catch(() => {}) }, [zone.id])
-  const rn = (k: string, fb: number) => (real && real[k] != null ? real[k] : fb)
+  const rn = (k: string, fb: number) => (real && real[k] != null ? (real[k] as number) : fb)
   const d = {
     online: rn('online', m.online), busy: rn('busy', m.busy), offline: rn('offline', m.offline), total: rn('workers', m.total),
     orders: rn('orders', m.orders), pending: rn('pending', m.pending), cancelled: rn('cancelled', m.cancelled),
     completed: rn('completed', m.completed), revenue: rn('revenue', m.revenue),
   }
+  const topSvc: { name: string; count: number }[] = (real?.topServices?.length ? real.topServices : m.topServices)
+  const ratingVal: number | string = real ? (real.rating > 0 ? real.rating : '—') : m.rating
+  const etaVal = zone.config.capacity?.maxEtaMin ?? m.eta
   const recent = (zone.config.apartments || []).slice(0, 5).map((a, i) => ({
     id: '#BK' + (78912 - i), svc: m.topServices[i % Math.max(1, m.topServices.length)]?.name || 'Cleaning',
     apt: a.name, time: ['09:32', '09:20', '09:05', '08:50', '08:45'][i] + ' AM',
@@ -96,19 +99,19 @@ export default function ZoneDashboard({ zone, onBack, onEdit }: { zone: BZone; o
 
       {/* KPI row 2 + Top Services */}
       <div className="zo-grid" style={{ gridTemplateColumns: 'repeat(4,1fr) 1.3fr', gap: 14, marginBottom: 16 }}>
-        <StatCard icon={<Clock3 size={20} />} tint="#4F46E5" label="Average ETA" value={`${m.eta} mins`} sub="Good" />
+        <StatCard icon={<Clock3 size={20} />} tint="#4F46E5" label="Target ETA" value={`${etaVal} mins`} sub="SLA" />
         <StatCard icon={<IndianRupee size={20} />} tint="#22C55E" label="Revenue Today" value={money(d.revenue)} delta="16%" />
         <StatCard icon={<CheckCircle2 size={20} />} tint="#22C55E" label="Completed Orders" value={d.completed} delta="19%" />
-        <StatCard icon={<Star size={20} />} tint="#F59E0B" label="Customer Rating" value={m.rating} sub="Based on 128 ratings" />
+        <StatCard icon={<Star size={20} />} tint="#F59E0B" label="Customer Rating" value={ratingVal} sub={ratingVal === '—' ? 'No ratings yet' : 'from real bookings'} />
         <Card title="Top Services Today">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            {m.topServices.map((s, i) => (
+            {topSvc.map((s, i) => (
               <div key={s.name} className="row" style={{ justifyContent: 'space-between', fontSize: 13 }}>
                 <span style={{ color: 'var(--zink)' }}><b style={{ color: 'var(--zmut)' }}>{i + 1}.</b> {s.name}</span>
                 <b>{s.count}</b>
               </div>
             ))}
-            {m.topServices.length === 0 && <span className="muted" style={{ fontSize: 13 }}>No services enabled yet.</span>}
+            {topSvc.length === 0 && <span className="muted" style={{ fontSize: 13 }}>No services booked yet.</span>}
           </div>
         </Card>
       </div>
