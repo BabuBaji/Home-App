@@ -406,6 +406,20 @@ app.get('/api/internal/service-booking-counts', internalOnly, async (_q, res) =>
   for (const r of rows) { let items = []; try { items = JSON.parse(r.items) } catch {} for (const it of items) out[it.id] = (out[it.id] || 0) + 1 }
   res.json(out)
 })
+// Real per-zone booking aggregates (today + lifetime) for the admin zone dashboards.
+app.get('/api/internal/zone-metrics', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(zone_id,0) AS zone_id,
+       COUNT(*) FILTER (WHERE created::date = CURRENT_DATE)::int AS orders,
+       COALESCE(SUM(total) FILTER (WHERE status='completed' AND created::date = CURRENT_DATE),0)::int AS revenue,
+       COUNT(*) FILTER (WHERE status='completed' AND created::date = CURRENT_DATE)::int AS completed,
+       COUNT(*) FILTER (WHERE status='cancelled' AND created::date = CURRENT_DATE)::int AS cancelled,
+       COUNT(*) FILTER (WHERE status = ANY($1) AND created::date = CURRENT_DATE)::int AS pending,
+       COUNT(*)::int AS orders_total,
+       COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue_total
+     FROM bookings GROUP BY COALESCE(zone_id,0)`, [ACTIVE_STATES])
+  res.json(rows)
+})
 app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json(await getBooking(Number(req.params.id))))
 // Dispatch: the open job pool (unclaimed confirmed bookings).
 app.get('/api/internal/pool', internalOnly, async (_q, res) => {

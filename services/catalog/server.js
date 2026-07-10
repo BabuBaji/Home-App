@@ -505,11 +505,33 @@ app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
   const total = workers.length
   const online = workers.filter((w) => w.available && (w.status === 'active')).length
   const busy = workers.filter((w) => w.offered_booking).length
+  // Real booking figures from the booking service (today + lifetime), tagged by zone_id.
+  const bstats = await tryGet(BOOKING_URL, '/api/internal/zone-metrics', [])
+  const b = (Array.isArray(bstats) ? bstats : []).find((x) => Number(x.zone_id) === zoneId) || {}
   res.json({
     zoneId, apartments: apts.rows[0].n, units: apts.rows[0].units, occupied: apts.rows[0].occupied,
     inventoryItems: inv.rows[0].n, lowStock: inv.rows[0].low,
     workers: total, online, busy, offline: Math.max(0, total - online - busy),
+    orders: b.orders || 0, revenue: b.revenue || 0, completed: b.completed || 0,
+    cancelled: b.cancelled || 0, pending: b.pending || 0, ordersTotal: b.orders_total || 0, revenueTotal: b.revenue_total || 0,
   })
+})
+// All-zones real metrics for the admin dashboard (apartments + real bookings per zone).
+app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
+  const zones = (await pool.query('SELECT id, name, code, city, status FROM zones ORDER BY id')).rows
+  const bstats = await tryGet(BOOKING_URL, '/api/internal/zone-metrics', [])
+  const bmap = Object.fromEntries((Array.isArray(bstats) ? bstats : []).map((x) => [Number(x.zone_id), x]))
+  const out = []
+  for (const z of zones) {
+    const apt = (await pool.query('SELECT COUNT(*)::int n, COALESCE(SUM(units),0)::int units FROM apartments WHERE zone_id=$1', [z.id])).rows[0]
+    const b = bmap[z.id] || {}
+    out.push({
+      id: z.id, name: z.name, code: z.code, city: z.city, status: z.status, apartments: apt.n, units: apt.units,
+      orders: b.orders || 0, revenue: b.revenue || 0, completed: b.completed || 0, cancelled: b.cancelled || 0,
+      pending: b.pending || 0, ordersTotal: b.orders_total || 0, revenueTotal: b.revenue_total || 0,
+    })
+  }
+  res.json(out)
 })
 
 init()
