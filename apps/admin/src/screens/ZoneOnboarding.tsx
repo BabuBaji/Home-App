@@ -6,7 +6,7 @@ import {
   Plus, ChevronLeft, ChevronRight, Check, Search, Trash2, ArrowLeft, CheckCircle2, Upload,
 } from 'lucide-react'
 import { useToast } from '../components/UI'
-import { fetchZones, createZone, updateZone, fetchWorkers } from '../api'
+import { fetchZones, createZone, updateZone, fetchWorkers, opList } from '../api'
 import ZoneDashboard from './ZoneDashboard'
 import ZoneAdminDashboard from './ZoneAdminDashboard'
 import '../zones/zones.css'
@@ -26,8 +26,6 @@ const SERVICES = [
   { key: 'sofa', name: 'Sofa Cleaning', price: 699, skill: 'Standard', dur: 60 },
   { key: 'deep', name: 'Deep Cleaning', price: 1499, skill: 'Expert', dur: 180 },
 ]
-const CITIES = ['Hyderabad', 'Bengaluru', 'Mumbai', 'Delhi', 'Chennai', 'Pune']
-const STATES = ['Telangana', 'Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const APT_SUGGEST = ['Rainbow Vistas', 'Brigade Metropolis', 'Kalpataru Residency', 'My Home Bhooja', 'Mantri Celestia', 'Aparna Sarovar', 'Prestige High Fields']
 const uid = () => Math.random().toString(36).slice(2, 9)
@@ -136,6 +134,8 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
+  const [cities, setCities] = useState<{ name: string; state: string }[]>([])
+  useEffect(() => { opList<{ name: string; state: string }>('cities').then(setCities).catch(() => {}) }, [])
 
   const patch = (u: Partial<ZoneConfig>) => setCfg((c) => ({ ...c, ...u }))
   const body = (goLive = false) => ({
@@ -206,7 +206,7 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
               <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}><cur.Icon size={18} style={{ color: 'var(--zv)' }} /> {cur.title}</h3>
               <span className="sub">Step {step + 1} / {STEPS.length}</span>
             </div>
-            <WizStep step={cur.key} {...{ name, setName, code, setCode, city, setCity, state, setState, status, setStatus, cfg, patch, checklist, ready, toast }} />
+            <WizStep step={cur.key} {...{ name, setName, code, setCode, city, setCity, state, setState, status, setStatus, cfg, patch, checklist, ready, toast, cities }} />
           </div>
           <div className="zo-wiz-foot">
             <button className="zo-btn line" disabled={step === 0 || saving} onClick={() => setStep((s) => Math.max(0, s - 1))}><ChevronLeft size={16} /> Back</button>
@@ -231,6 +231,7 @@ type StepProps = {
   cfg: ZoneConfig; patch: (u: Partial<ZoneConfig>) => void
   checklist: { label: string; ok: boolean }[]; ready: boolean
   toast: (s: string, k?: 'ok' | 'err') => void
+  cities: { name: string; state: string }[]
 }
 
 function WizStep(p: StepProps) {
@@ -240,8 +241,8 @@ function WizStep(p: StepProps) {
     <div className="zo-fgrid">
       <F label="Zone Name *"><input value={p.name} onChange={(e) => p.setName(e.target.value)} placeholder="e.g. Madhapur" /></F>
       <F label="Zone Code *"><input value={p.code} onChange={(e) => p.setCode(e.target.value.toUpperCase())} placeholder="MDP001" /></F>
-      <F label="City"><select value={p.city} onChange={(e) => p.setCity(e.target.value)}><option value="">Select city</option>{CITIES.map((c) => <option key={c}>{c}</option>)}</select></F>
-      <F label="State"><select value={p.state} onChange={(e) => p.setState(e.target.value)}><option value="">Select state</option>{STATES.map((s) => <option key={s}>{s}</option>)}</select></F>
+      <F label="City"><select value={p.city} onChange={(e) => { const c = p.cities.find((x) => x.name === e.target.value); p.setCity(e.target.value); if (c) p.setState(c.state) }}><option value="">Select city</option>{p.cities.map((c) => <option key={c.name}>{c.name}</option>)}</select></F>
+      <F label="State"><input value={p.state} readOnly placeholder="Auto-filled from city" /></F>
       <F label="Status"><select value={p.status} onChange={(e) => p.setStatus(e.target.value)}><option>Active</option><option>Inactive</option></select></F>
       <label className="zo-f" style={{ gridColumn: '1 / -1' }}><span>Description</span>
         <input value={cfg.description || ''} onChange={(e) => patch({ description: e.target.value })} placeholder="Short description of this zone" />
