@@ -3,7 +3,7 @@ import {
   Globe, Building2, CheckCircle2, Layers, HardHat, UserCheck, Gauge, Boxes,
   TrendingUp, IndianRupee, MapPin, Plus, ChevronLeft, ChevronRight, Check, Brain, Wand2, Zap,
   Package, Users, CalendarClock, ClipboardCheck, ShieldCheck, Trash2, Sparkles, AlertTriangle,
-  Truck, Rocket, ArrowLeft, Radio, Activity, Clock3,
+  Truck, Rocket, ArrowLeft, Radio, Activity, Clock3, Upload, Download,
 } from 'lucide-react'
 import { MiniMap, SumBars, useToast } from '../components/UI'
 import { BarChart, Donut } from '../components/Charts'
@@ -418,7 +418,14 @@ function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provi
         <div className="zo-panel-h" style={{ marginTop: -6 }}>
           <span className="sub">Population, structures and demand score per pincode</span>
           <div className="row" style={{ gap: 8 }}>
-            <button className="zo-btn ghost" onClick={() => toast('CSV import — connect a bulk upload endpoint', 'ok')}><Package size={15} /> Import CSV</button>
+            <CsvImport label="Import CSV" template={PIN_TEMPLATE} onRows={(rows) => {
+              const add = rows.map((r) => ({
+                id: uid(), code: r.code || r.pincode || '', population: +r.population || 0, apartments: +r.apartments || 0,
+                houses: +r.houses || 0, commercial: +r.commercial || 0, schools: +r.schools || 0, hospitals: +r.hospitals || 0,
+              })).filter((p) => p.code)
+              if (!add.length) { toast('No valid rows found in CSV', 'err'); return }
+              patch({ pincodes: [...z.pincodes, ...add] }); toast(`Imported ${add.length} pincodes`, 'ok')
+            }} />
             <button className="zo-btn" onClick={addPin}><Plus size={15} /> Add Pincode</button>
           </div>
         </div>
@@ -467,6 +474,15 @@ function StepPanel({ step, z, m, patch, checks, ready, toast, onProvision, provi
             <MTileInline l="Apartments" v={z.apartments.length} /><MTileInline l="Occupied" v={m.occupied.toLocaleString('en-IN')} /><MTileInline l="Exp. Customers" v={m.expectedCustomers.toLocaleString('en-IN')} /><MTileInline l="Synced → Worker App" v={`${synced}/${z.apartments.length}`} />
           </div>
           <div className="row" style={{ gap: 8 }}>
+            <CsvImport label="Import CSV" template={APT_TEMPLATE} onRows={(rows) => {
+              const add = rows.map((r) => ({
+                id: uid(), name: r.name || r.apartment || '', builder: r.builder || '', pincode: r.pincode || z.pincodes[0]?.code || '',
+                clusterId: z.clusters[0]?.id || null, lat: +r.lat || z.lat, lng: +r.lng || z.lng,
+                towers: +r.towers || 1, flats: +r.flats || 100, occupied: +r.occupied || 60, parking: true, lift: true, aov: +r.aov || 340,
+              })).filter((a) => a.name)
+              if (!add.length) { toast('No valid rows found in CSV', 'err'); return }
+              patch({ apartments: [...z.apartments, ...add] }); toast(`Imported ${add.length} apartments`, 'ok')
+            }} />
             <button className="zo-btn ghost" disabled={provisioning || !z.apartments.length} onClick={onProvision}>{provisioning ? 'Syncing…' : <><Truck size={15} /> Sync to worker app</>}</button>
             <button className="zo-btn" onClick={add}><Plus size={15} /> Add Apartment</button>
           </div>
@@ -845,7 +861,7 @@ function OnboardingPanel({ z }: { z: Zone }) {
         </div>
       </div>
 
-      {loading ? <div className="zo-empty"><div className="spinner" /><p style={{ marginTop: 10 }}>Loading workers…</p></div>
+      {loading ? <SkelTable rows={5} />
         : workers.length === 0 ? <Empty emoji="🧑‍🔧" text={`No workers found${z.city ? ` in ${z.city}` : ''}. Create workers in Workers (Pros), then assign them here.`} />
           : (
             <div style={{ overflowX: 'auto' }}>
@@ -983,4 +999,62 @@ function MTileInline({ l, v }: { l: string; v: ReactNode }) {
 }
 function Empty({ emoji, text }: { emoji: string; text: string }) {
   return <div className="zo-empty"><div className="e">{emoji}</div><p>{text}</p></div>
+}
+
+/* ── CSV bulk import + skeleton helpers ── */
+const PIN_TEMPLATE = 'code,population,apartments,houses,commercial,schools,hospitals\n500032,42000,18,240,30,4,2\n500084,51000,24,280,38,5,3'
+const APT_TEMPLATE = 'name,builder,pincode,lat,lng,towers,flats,occupied,aov\nMy Home Vihanga,My Home,500032,17.4419,78.3915,4,320,210,340\nAparna Sarovar,Aparna,500084,17.4460,78.3950,3,210,140,380'
+
+function parseCsv(text: string): Record<string, string>[] {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim().length)
+  if (lines.length < 2) return []
+  const split = (l: string) => {
+    const out: string[] = []; let cur = ''; let q = false
+    for (let i = 0; i < l.length; i++) {
+      const c = l[i]
+      if (q) { if (c === '"') { if (l[i + 1] === '"') { cur += '"'; i++ } else q = false } else cur += c }
+      else if (c === '"') q = true
+      else if (c === ',') { out.push(cur); cur = '' }
+      else cur += c
+    }
+    out.push(cur); return out
+  }
+  const headers = split(lines[0]).map((h) => h.trim().toLowerCase())
+  return lines.slice(1).map((l) => {
+    const cells = split(l); const o: Record<string, string> = {}
+    headers.forEach((h, i) => { o[h] = (cells[i] ?? '').trim() })
+    return o
+  })
+}
+
+function CsvImport({ label = 'Import CSV', template, onRows }: { label?: string; template?: string; onRows: (rows: Record<string, string>[]) => void }) {
+  const inputId = useMemo(() => 'zo-csv-' + Math.random().toString(36).slice(2, 8), [])
+  return (
+    <>
+      <input id={inputId} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={async (e) => {
+        const f = e.target.files?.[0]; if (!f) return
+        try { onRows(parseCsv(await f.text())) } finally { e.target.value = '' }
+      }} />
+      <label htmlFor={inputId} className="zo-btn ghost" style={{ cursor: 'pointer' }}><Upload size={15} /> {label}</label>
+      {template && (
+        <a className="zo-btn line" style={{ textDecoration: 'none' }} download="template.csv"
+          href={`data:text/csv;charset=utf-8,${encodeURIComponent(template)}`}><Download size={15} /> Template</a>
+      )}
+    </>
+  )
+}
+
+function Skel({ w = '100%', h = 14, r = 8 }: { w?: number | string; h?: number; r?: number }) {
+  return <span className="zo-sk" style={{ width: w, height: h, borderRadius: r }} />
+}
+function SkelTable({ rows = 5 }: { rows?: number }) {
+  return (
+    <div style={{ border: '1px solid var(--zline)', borderRadius: 14, overflow: 'hidden' }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="zo-sk-row">
+          <Skel w={140} /><Skel w={100} /><Skel w={64} h={20} r={50} /><Skel w={130} h={30} /><Skel w={110} h={30} /><Skel w={90} h={32} r={10} />
+        </div>
+      ))}
+    </div>
+  )
 }

@@ -148,3 +148,9 @@
 .zo-empty { text-align: center; padding: 40px 20px; color: var(--zmut); }
 .zo-empty .e { font-size: 40px; }
 @keyframes zo-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ── skeleton loaders (shimmer) ── */
+.zo-sk { position: relative; overflow: hidden; background: #EEF0F4; border-radius: 8px; display: block; }
+.zo-sk::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent); animation: zo-shimmer 1.3s infinite; }
+@keyframes zo-shimmer { 100% { transform: translateX(100%); } }
+.zo-sk-row { display: grid; grid-template-columns: 1.5fr 1fr .8fr 1.1fr 1fr .8fr; gap: 14px; padding: 15px 12px; border-bottom: 1px solid var(--zline); align-items: center; }
