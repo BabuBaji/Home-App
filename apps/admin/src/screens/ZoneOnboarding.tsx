@@ -482,11 +482,29 @@ function TeamStep({ cfg, patch }: { cfg: ZoneConfig; patch: (u: Partial<ZoneConf
 }
 
 /* ───────── coverage map (leaflet radius) ───────── */
+// Geocode an Indian pincode → centroid, via OSM Nominatim (no API key). Cached so
+// re-renders / re-visits don't re-hit the API. Structured postalcode lookup first,
+// free-form query as a fallback for pincodes Nominatim doesn't index structurally.
+const pinCache = new Map<string, { lat: number; lng: number } | null>()
+async function geocodePincode(pin: string): Promise<{ lat: number; lng: number } | null> {
+  if (pinCache.has(pin)) return pinCache.get(pin)!
+  const pick = (j: unknown) => (Array.isArray(j) && j[0] ? { lat: +(j[0] as { lat: string }).lat, lng: +(j[0] as { lon: string }).lon } : null)
+  try {
+    let j = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&postalcode=${encodeURIComponent(pin)}`)).json()
+    let res = pick(j)
+    if (!res) { j = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(pin + ', India')}`)).json(); res = pick(j) }
+    pinCache.set(pin, res); return res
+  } catch { return null }
+}
+
 function CoverageMap({ cov, onChange }: { cov: NonNullable<ZoneConfig['coverage']>; onChange: (c: NonNullable<ZoneConfig['coverage']>) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const circleRef = useRef<L.Circle | null>(null)
   const markerRef = useRef<L.Marker | null>(null)
+  const pinLayerRef = useRef<L.LayerGroup | null>(null)
+  const covRef = useRef(cov); covRef.current = cov
+  const onChangeRef = useRef(onChange); onChangeRef.current = onChange
   useEffect(() => {
     if (!ref.current || mapRef.current) return
     const map = L.map(ref.current, { attributionControl: false }).setView([cov.lat, cov.lng], 12)
@@ -496,16 +514,52 @@ function CoverageMap({ cov, onChange }: { cov: NonNullable<ZoneConfig['coverage'
     marker.on('move', (e) => { const ll = (e as unknown as { latlng: L.LatLng }).latlng; circle.setLatLng(ll) })
     marker.on('dragend', () => { const ll = marker.getLatLng(); onChangeRef.current({ ...covRef.current, lat: +ll.lat.toFixed(5), lng: +ll.lng.toFixed(5) }) })
     mapRef.current = map; markerRef.current = marker; circleRef.current = circle
+    pinLayerRef.current = L.layerGroup().addTo(map)
     setTimeout(() => map.invalidateSize(), 200)
     return () => { map.remove(); mapRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const covRef = useRef(cov); covRef.current = cov
-  const onChangeRef = useRef(onChange); onChangeRef.current = onChange
+  // Radius mode: keep the draggable marker + circle in sync with lat/lng/radius.
   useEffect(() => {
+    if (cov.mode === 'pincodes') return
     circleRef.current?.setRadius(cov.radiusKm * 1000)
     circleRef.current?.setLatLng([cov.lat, cov.lng]); markerRef.current?.setLatLng([cov.lat, cov.lng])
-  }, [cov.radiusKm, cov.lat, cov.lng])
+  }, [cov.radiusKm, cov.lat, cov.lng, cov.mode])
+  // Pincodes mode: geocode each entered pincode and plot it; radius mode: show the drag marker.
+  useEffect(() => {
+    const map = mapRef.current, marker = markerRef.current, circle = circleRef.current, pinLayer = pinLayerRef.current
+    if (!map || !marker || !circle || !pinLayer) return
+    if (cov.mode !== 'pincodes') {
+      pinLayer.clearLayers()
+      if (!map.hasLayer(marker)) marker.addTo(map)
+      if (!map.hasLayer(circle)) circle.addTo(map)
+      return
+    }
+    if (map.hasLayer(marker)) map.removeLayer(marker)
+    if (map.hasLayer(circle)) map.removeLayer(circle)
+    let cancelled = false
+    ;(async () => {
+      pinLayer.clearLayers()
+      if (!cov.pincodes.length) return
+      const found: [number, number][] = []
+      for (const p of cov.pincodes) {
+        const g = await geocodePincode(p)
+        if (cancelled) return
+        if (!g) continue
+        found.push([g.lat, g.lng])
+        L.circle([g.lat, g.lng], { radius: 2000, color: '#4F46E5', weight: 1.5, fillColor: '#4F46E5', fillOpacity: 0.12 }).addTo(pinLayer)
+        L.marker([g.lat, g.lng]).bindTooltip(p, { direction: 'top' }).addTo(pinLayer)
+      }
+      if (cancelled || !found.length) return
+      map.fitBounds(L.latLngBounds(found).pad(0.4), { maxZoom: 14 })
+      // Reflect the covered pincodes' centroid into the stored zone centre (guarded to avoid loops).
+      const clat = found.reduce((a, f) => a + f[0], 0) / found.length
+      const clng = found.reduce((a, f) => a + f[1], 0) / found.length
+      if (Math.abs(clat - covRef.current.lat) > 1e-4 || Math.abs(clng - covRef.current.lng) > 1e-4)
+        onChangeRef.current({ ...covRef.current, lat: +clat.toFixed(5), lng: +clng.toFixed(5) })
+    })()
+    return () => { cancelled = true }
+  }, [cov.mode, cov.pincodes.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
   return <div ref={ref} style={{ height: 360, width: '100%', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--zline)', background: '#eef0f4' }} />
 }
 
