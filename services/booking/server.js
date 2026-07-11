@@ -212,7 +212,7 @@ app.post('/api/bookings', auth, async (req, res) => {
   const body = req.body || {}
   // Authoritative pricing from the catalog service.
   let priced
-  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode: body.pincode }) }
+  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode: body.pincode, customerId: req.user.id }) }
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
@@ -253,6 +253,14 @@ app.post('/api/bookings', auth, async (req, res) => {
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
       body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
   const booking = rowTo(ins.rows[0])
+
+  // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
+  // usage-write failure must never fail the booking.
+  if ((priced.appliedCampaignIds?.length) || priced.coupon) {
+    internalPost(CATALOG_URL, '/api/internal/campaign-usage', {
+      customerId: req.user.id, bookingId: booking.id, campaignIds: priced.appliedCampaignIds || [], couponCode: priced.coupon || null,
+    }).catch(() => {})
+  }
 
   // Events: dispatch starts matching; notification logs; payment records the collected money.
   publishEvent(REDIS_URL, 'booking.created', { booking, serviceNames: priced.items.map((i) => i.name) })
@@ -405,6 +413,19 @@ app.get('/api/internal/service-booking-counts', internalOnly, async (_q, res) =>
   const out = {}
   for (const r of rows) { let items = []; try { items = JSON.parse(r.items) } catch {} for (const it of items) out[it.id] = (out[it.id] || 0) + 1 }
   res.json(out)
+})
+// Per-customer order signals for the pricing engine's customer-eligibility campaigns
+// (first_order / second_order / winback / vip).
+app.get('/api/internal/customer-stats', internalOnly, async (req, res) => {
+  const uid = Number(req.query.user_id)
+  if (!Number.isFinite(uid)) return res.json({ completedOrders: 0, totalOrders: 0, lastCompletedAt: null })
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) FILTER (WHERE status='completed')::int completed,
+            COUNT(*)::int total,
+            MAX(completed_at) FILTER (WHERE status='completed') AS last_completed
+       FROM bookings WHERE user_id=$1`, [uid])
+  const r = rows[0] || {}
+  res.json({ completedOrders: r.completed || 0, totalOrders: r.total || 0, lastCompletedAt: r.last_completed || null })
 })
 // Real per-zone booking aggregates (today + lifetime) for the admin zone dashboards.
 app.get('/api/internal/zone-metrics', internalOnly, async (_q, res) => {

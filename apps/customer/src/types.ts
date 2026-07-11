@@ -46,6 +46,20 @@ export interface CartItem {
   durationId: string
   durationLabel: string
   price: number
+  listPrice?: number       // pre-discount price (strikethrough) when a campaign applies
+  zoneDiscount?: number    // discount % applied to this item
+}
+
+// A zone/customer/coupon campaign surfaced to the customer as an Offers-carousel card.
+export interface Offer {
+  id: number
+  type: 'zone' | 'customer' | 'coupon'
+  title: string
+  subtitle: string
+  badge: string
+  code: string | null
+  serviceId: string | null
+  category: string | null
 }
 
 export interface User {
@@ -79,7 +93,7 @@ export interface Address {
 }
 
 export interface Coupon { code: string; type: string; value: number; min: number; max?: number; label: string }
-export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number }
+export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number; savings?: number; appliedCampaignIds?: (number | string)[] }
 
 export type BookingTypeId = 'instant' | 'schedule'
 export type BookingStatus =

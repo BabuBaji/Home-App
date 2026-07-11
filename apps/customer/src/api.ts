@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
-import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
+import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification, Offer } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the apps
 // can be repointed at a new tunnel/host WITHOUT rebuilding the APK. Falls back to the
@@ -50,6 +50,7 @@ const pinQ = (pincode?: string) => (pincode ? `?pincode=${encodeURIComponent(pin
 export const fetchServices = (pincode?: string) => req<{ categories: string[]; services: Service[] }>(`/api/services${pinQ(pincode)}`)
 export const fetchService = (id: string, pincode?: string) => req<ServiceDetail>(`/api/services/${id}${pinQ(pincode)}`)
 export const fetchHome = () => req<HomeContent>('/api/home')
+export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ(pincode)}`)
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
 
 /* favourites */

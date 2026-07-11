@@ -5,8 +5,8 @@ import { Share } from '@capacitor/share'
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { ServiceThumb } from '../serviceArt'
-import { fetchServices, fetchBookings, fetchHome, fetchMe, fetchFavourites, addFavouriteApi, removeFavouriteApi } from '../api'
-import type { Service, Booking, HomeContent, Address } from '../types'
+import { fetchServices, fetchBookings, fetchHome, fetchMe, fetchFavourites, addFavouriteApi, removeFavouriteApi, fetchOffers } from '../api'
+import type { Service, Booking, HomeContent, Address, Offer } from '../types'
 
 const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 // Where friends get the app — edit to your Play Store / website link.
@@ -26,6 +26,7 @@ export default function Home() {
   const [home, setHome] = useState<HomeContent | null>(null)
   const [addr, setAddr] = useState<Address | null>(null)
   const [favs, setFavs] = useState<string[]>([])
+  const [offers, setOffers] = useState<Offer[]>([])
 
   useEffect(() => {
     fetchBookings().then((bs) => setActive(bs.find((b) => ACTIVE.includes(b.status)) || null)).catch(() => {})
@@ -33,9 +34,10 @@ export default function Home() {
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
     fetchFavourites().then(setFavs).catch(() => {})
   }, [])
-  // Re-fetch the catalogue whenever the pincode resolves, so prices reflect that zone's offers.
+  // Re-fetch the catalogue + zone offers whenever the pincode resolves, so both reflect the zone.
   useEffect(() => {
     fetchServices(pincode || undefined).then((c) => { setServices(c.services); setCats(c.categories) }).catch(() => {})
+    fetchOffers(pincode || undefined).then(setOffers).catch(() => {})
   }, [pincode])
 
   const addressLine = addr?.line || user?.location || user?.city || 'Set your location'
@@ -110,6 +112,23 @@ export default function Home() {
               <div className="ac-d">{active.items.map((i) => i.name).join(', ')}</div>
             </div>
             <span className="ac-go">Track ›</span>
+          </div>
+        )}
+
+        {/* zone offers carousel */}
+        {offers.length > 0 && (
+          <div className="sn-offers">
+            {offers.map((o) => (
+              <button key={o.id} className={`sn-offer ${o.type}`}
+                onClick={() => { if (o.serviceId) nav(`/service/${o.serviceId}`) }}>
+                <span className="sn-offer-badge">{o.badge}</span>
+                <div className="sn-offer-body">
+                  <div className="sn-offer-t">{o.title}</div>
+                  {o.subtitle && <div className="sn-offer-s">{o.subtitle}</div>}
+                  {o.code && <span className="sn-offer-code">Code · {o.code}</span>}
+                </div>
+              </button>
+            ))}
           </div>
         )}
 

@@ -204,6 +204,23 @@ export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones',
 export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
 export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })
 
+/* campaigns (Dynamic Pricing Engine): Zone / Customer / Coupon offers */
+export interface CampaignRule { segment: string; max_usage: number; winback_days: number; vip_min_orders: number }
+export interface CampaignCoupon { coupon_code: string; auto_apply: boolean; expiry: string | null; usage_limit: number; used_count: number }
+export interface Campaign {
+  campaign_id: number; campaign_name: string; campaign_type: 'zone' | 'customer' | 'coupon'
+  discount_type: 'flat' | 'percent'; discount_value: number; max_discount: number; min_subtotal: number
+  service_id: string; category: string; duration_id: string; priority: number; stackable: boolean
+  starts: string | null; ends: string | null; status: 'active' | 'paused'
+  banner_title: string; banner_subtitle: string
+  zoneIds: number[]; rule: CampaignRule | null; coupon: CampaignCoupon | null; usedCount: number
+}
+export const fetchCampaigns = () => req<Campaign[]>('/campaigns')
+export const createCampaign = (body: Record<string, unknown>) => req<{ ok: boolean; campaign_id: number }>('/campaigns', post('', body))
+export const updateCampaign = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/campaigns/${id}`, patch(body))
+export const deleteCampaign = (id: number) => req<{ ok: boolean }>(`/campaigns/${id}`, { method: 'DELETE' })
+export const campaignUsage = (id: number) => req<{ total: number; customers: number; recent: { customer_id: number; booking_id: number; created: string }[] }>(`/campaigns/${id}/usage`)
+
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')
 export const fetchRefunds = () => req<any[]>('/refunds')

@@ -61,6 +61,7 @@ async function init() {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_rewarded BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS dob DATE`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_users_refcode ON users(referral_code)`,
     `UPDATE users SET referral_code='HH'||upper(substr(md5(random()::text||id::text),1,6)) WHERE referral_code IS NULL`,
   ])
@@ -74,7 +75,7 @@ const publicUser = (u) => u && ({
   id: u.id, phone: u.phone, name: u.name, email: u.email, provider: u.provider,
   avatar: u.avatar, country: u.country, city: u.city, location: u.location,
   wallet: u.wallet, rating: u.rating, status: u.status, created: u.created,
-  referralCode: u.referral_code, referredBy: u.referred_by,
+  referralCode: u.referral_code, referredBy: u.referred_by, dob: u.dob || null,
   promoBalance: u.promo_balance || 0, rewardPoints: u.reward_points || 0, walletStatus: u.wallet_status || 'active',
 })
 

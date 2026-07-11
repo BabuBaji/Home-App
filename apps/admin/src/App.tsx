@@ -13,6 +13,7 @@ import Workers from './screens/Workers'
 import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
+import Campaigns from './screens/Campaigns'
 import ServiceAreas from './screens/ServiceAreas'
 import ZoneOnboarding from './screens/ZoneOnboarding'
 import Stores from './screens/Stores'
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/bookings" element={<Page><Bookings /></Page>} />
           <Route path="/cancellations" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
+          <Route path="/campaigns" element={<Page><Campaigns /></Page>} />
           <Route path="/service-areas" element={<Page><ServiceAreas /></Page>} />
           <Route path="/zones" element={<Page><ZoneOnboarding /></Page>} />
           <Route path="/zones/cities" element={<Page><CitiesPage /></Page>} />
