@@ -12,7 +12,7 @@ export default function Book() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
-  const { bookingType } = useStore()
+  const { bookingType, pincode } = useStore()
   const instant = bookingType !== 'schedule'
 
   const [s, setS] = useState<ServiceDetail | null>(null)
@@ -27,15 +27,15 @@ export default function Book() {
   const [placing, setPlacing] = useState(false)
 
   useEffect(() => {
-    fetchService(id!).then((d) => { setS(d); setDur(d.durations[0]) }).catch(() => toast('Could not load service'))
+    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations[0]) }).catch(() => toast('Could not load service'))
     fetchHome().then((h) => setEta(h.instantEta)).catch(() => {})
-  }, [id])
+  }, [id, pincode])
 
   // recompute the bill whenever duration or coupon changes
   useEffect(() => {
     if (!dur) return
-    fetchQuote([{ id: id!, durationId: dur.id }], coupon || undefined).then(setQuote).catch(() => {})
-  }, [dur, coupon, id])
+    fetchQuote([{ id: id!, durationId: dur.id }], coupon || undefined, pincode || undefined).then(setQuote).catch(() => {})
+  }, [dur, coupon, id, pincode])
 
   // time slots for the chosen date (past slots on "today" are disabled)
   const slots = useMemo(() => SLOT_HOURS.map((h) => ({ h, label: slotLabel(h), disabled: isSlotDisabled(selDate, h) })), [selDate])
@@ -69,7 +69,7 @@ export default function Book() {
       const b = await createBookingApi({
         items: [{ id: s!.id, durationId: dur!.id }],
         type: instant ? 'instant' : 'schedule',
-        payment: method, coupon: coupon || undefined,
+        payment: method, coupon: coupon || undefined, pincode: pincode || undefined,
         paymentId: txnId, // Razorpay payment id (verified server-side before the booking is accepted)
         ...(instant ? {} : { date: fmtDate(selDate), time: slot !== null ? slotLabel(slot) : '' }),
       })

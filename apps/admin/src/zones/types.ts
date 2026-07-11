@@ -9,8 +9,18 @@ export interface ZoneConfig {
   apartments?: Apt[]
   services?: string[]
   pricing?: Record<string, number>
-  pricingExtras?: { gst: number; convenienceFee: number; minOrder: number; discount: number }
-  capacity?: { maxOrders: number; workersRequired: number; minOnline: number; maxEtaMin: number; maxTravelKm: number }
+  discounts?: Record<string, number>          // per-service discount % (0/undefined = none)
+  customServices?: { id: string; name: string; price: number }[]
+  addons?: { id: string; name: string; price: number; discount?: number }[]
+  pricingExtras?: { gst: number; convenienceFee: number; minOrder: number; discount: number; includeGst?: boolean; useDefault?: boolean }
+  capacity?: {
+    maxOrders: number; workersRequired: number; minOnline: number; maxEtaMin: number; maxTravelKm: number
+    // Capacity settings
+    maxConcurrentPerWorker?: number; bufferWorkers?: number; utilizationTarget?: number
+    // SLA / service level
+    jobStartWindowMin?: number; jobCompletionSlaMin?: number; graceTimeMin?: number; cancellationThreshold?: number
+  }
+  zoneType?: 'Residential' | 'Commercial' | 'Industrial'
   workingHours?: { is247: boolean; days: Record<string, { open: string; close: string; closed: boolean }> }
   holidays?: { date: string; name: string }[]
   team?: { manager?: Person; teamLeaders: Person[]; workers: Person[] }

@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css'
 import {
   Info, Map as MapIcon, Building2, Sparkles, Gauge, IndianRupee, Clock3, Users, Rocket,
   Plus, ChevronLeft, ChevronRight, Check, Search, Trash2, ArrowLeft, CheckCircle2, Upload,
+  Store, Factory, MapPin, Maximize2, Layers, Hash, GripVertical,
 } from 'lucide-react'
 import { useToast } from '../components/UI'
 import { fetchZones, createZone, updateZone, fetchWorkers, fetchServices, opList } from '../api'
@@ -26,12 +27,17 @@ function defaultConfig(): ZoneConfig {
     apartments: [],
     services: [],
     pricing: {},
-    pricingExtras: { gst: 18, convenienceFee: 19, minOrder: 149, discount: 0 },
-    capacity: { maxOrders: 120, workersRequired: 25, minOnline: 8, maxEtaMin: 20, maxTravelKm: 5 },
+    pricingExtras: { gst: 18, convenienceFee: 19, minOrder: 149, discount: 0, includeGst: true, useDefault: false },
+    capacity: {
+      maxOrders: 120, workersRequired: 25, minOnline: 8, maxEtaMin: 20, maxTravelKm: 5,
+      maxConcurrentPerWorker: 2, bufferWorkers: 3, utilizationTarget: 80,
+      jobStartWindowMin: 30, jobCompletionSlaMin: 60, graceTimeMin: 10, cancellationThreshold: 15,
+    },
     workingHours: { is247: false, days: Object.fromEntries(DAYS.map((d) => [d, { open: '08:00', close: '21:00', closed: false }])) },
     holidays: [],
     team: { teamLeaders: [], workers: [] },
     goLive: { enableBookings: true, instant: true, scheduled: true, autoAssign: true },
+    zoneType: 'Residential',
   }
 }
 
@@ -192,15 +198,15 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
         <button className="zo-btn line" onClick={onCancel}><ArrowLeft size={16} /> Zones</button>
         <div><h2>{name || 'New Zone'} {zone && <span className="zo-chip active" style={{ marginLeft: 6 }}><i />editing</span>}</h2><p>Zone Creation Wizard · step {step + 1} of {STEPS.length}</p></div>
       </div>
-      <div className="zo-wiz">
-        <div className="zo-steps">
-          {STEPS.map((s, i) => (
-            <div key={s.key} className={'zo-step' + (i === step ? ' on' : '') + (i < step ? ' done' : '')} onClick={() => setStep(i)}>
-              <span className="zo-step-n">{i < step ? <Check size={14} /> : i + 1}</span>
-              <div><div className="zo-step-t">{s.title}</div></div>
-            </div>
-          ))}
-        </div>
+      <div className="zo-hsteps">
+        {STEPS.map((s, i) => (
+          <button key={s.key} className={'zo-hstep' + (i === step ? ' on' : '') + (i < step ? ' done' : '')} onClick={() => setStep(i)}>
+            <span className="n">{i < step ? <Check size={13} /> : i + 1}</span>
+            <span className="t">{s.title}</span>
+          </button>
+        ))}
+      </div>
+      <div className="zo-wiz2">
         <div>
           <div className="zo-panel zo-wrap">
             <div className="zo-panel-h">
@@ -217,13 +223,73 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
               : <button className="zo-btn" disabled={saving || !ready} onClick={goLive}><Rocket size={16} /> Go Live</button>}
           </div>
         </div>
+        <ZoneSummary name={name} code={code} city={city} state={state} status={status} cfg={cfg} step={step} saving={saving} ready={ready} onNext={next} onGoLive={goLive} />
       </div>
     </div>
   )
 }
 
+/* ───────── zone summary rail ───────── */
+function ZoneSummary({ name, code, city, state, status, cfg, step, saving, ready, onNext, onGoLive }: {
+  name: string; code: string; city: string; state: string; status: string
+  cfg: ZoneConfig; step: number; saving: boolean; ready: boolean; onNext: () => void; onGoLive: () => void
+}) {
+  const cov = cfg.coverage
+  // Serviceable area: πr² for a radius zone, ~4 km² per pincode otherwise. Reach is an estimate
+  // from area density (~620 households/km²) plus mapped apartment units.
+  const areaKm2 = cov?.mode === 'pincodes' ? cov.pincodes.length * 4 : cov ? Math.PI * cov.radiusKm * cov.radiusKm : 0
+  const units = (cfg.apartments || []).reduce((a, x) => a + (x.units || 0), 0)
+  const reach = Math.round(areaKm2 * 620) + units * 2
+  const apts = cfg.apartments?.length || 0
+  const svc = cfg.services?.length || 0
+  const nextStep = STEPS[step + 1]
+  const inactive = status === 'Inactive'
+  const rows = [
+    { Icon: Building2, l: 'Zone Name', v: name || '—' },
+    { Icon: Hash, l: 'Zone Code', v: code || '—' },
+    { Icon: MapPin, l: 'City', v: [city, state].filter(Boolean).join(', ') || '—' },
+    { Icon: Maximize2, l: 'Area Size', v: areaKm2 ? `${areaKm2.toFixed(1)} km²` : '—' },
+    { Icon: Users, l: 'Estimated Reach', v: reach ? `${reach.toLocaleString('en-IN')} Customers` : '—' },
+    { Icon: Layers, l: 'Apartments / Localities', v: `${apts} Added` },
+    { Icon: Sparkles, l: 'Services', v: `${svc} Selected` },
+  ]
+  return (
+    <aside className="zo-sum">
+      <h3>Zone Summary</h3>
+      {rows.map((r) => (
+        <div key={r.l} className="zo-sum-row">
+          <span className="zo-sum-ic"><r.Icon size={16} /></span>
+          <div><div className="l">{r.l}</div><div className="v">{r.v}</div></div>
+        </div>
+      ))}
+      <div className="zo-sum-row">
+        <span className="zo-sum-ic" style={{ background: inactive ? '#F1F5F9' : '#DCFCE7', color: inactive ? '#64748B' : '#15803D' }}><CheckCircle2 size={16} /></span>
+        <div><div className="l">Status</div><div style={{ marginTop: 3 }}><span className={'zo-chip ' + (inactive ? 'inactive' : 'active')}><i />{status}</span></div></div>
+      </div>
+      <div className="zo-next">
+        {nextStep ? (
+          <>
+            <div className="k">Next Step</div>
+            <div className="d">Define the <b>{nextStep.title.toLowerCase()}</b> for this zone.</div>
+            <button className="zo-btn" style={{ width: '100%', justifyContent: 'center' }} disabled={saving} onClick={onNext}>Continue <ChevronRight size={15} /></button>
+          </>
+        ) : (
+          <>
+            <div className="k">Ready to launch</div>
+            <div className="d">{ready ? 'All checks complete — you can go live.' : 'Complete the checklist to go live.'}</div>
+            <button className="zo-btn" style={{ width: '100%', justifyContent: 'center' }} disabled={saving || !ready} onClick={onGoLive}><Rocket size={15} /> Go Live</button>
+          </>
+        )}
+      </div>
+    </aside>
+  )
+}
+
 /* ───────── step panels ───────── */
 const F = ({ label, children }: { label: string; children: ReactNode }) => <label className="zo-f"><span>{label}</span>{children}</label>
+const FH = ({ label, children, hint, req }: { label: string; children: ReactNode; hint?: string; req?: boolean }) => (
+  <label className="zo-f"><span>{label}{req && <b className="req"> *</b>}</span>{children}{hint && <small className="zo-hint">{hint}</small>}</label>
+)
 type StepProps = {
   step: string
   name: string; setName: (v: string) => void; code: string; setCode: (v: string) => void
@@ -276,9 +342,7 @@ function WizStep(p: StepProps) {
               <p style={{ fontSize: 12, color: 'var(--zmut)', marginTop: 10 }}>Drag the marker or edit lat/lng. The circle shows the serviceable radius.</p>
             </>
           ) : (
-            <F label="Pincodes (comma separated)">
-              <input value={cov.pincodes.join(', ')} onChange={(e) => patch({ coverage: { ...cov, pincodes: e.target.value.split(/[\s,]+/).map((x) => x.trim()).filter((x) => /^\d{6}$/.test(x)) } })} placeholder="500081, 500084, 500032" />
-            </F>
+            <PincodeField cov={cov} patch={patch} />
           )}
         </div>
       </div>
@@ -343,43 +407,93 @@ function WizStep(p: StepProps) {
   if (step === 'capacity') {
     const c = cfg.capacity!
     const set = (u: Partial<typeof c>) => patch({ capacity: { ...c, ...u } })
+    const zt = cfg.zoneType || 'Residential'
+    const opt = (n: number, unit: string) => <option key={n} value={n}>{n} {unit}</option>
+    const ZONE_TYPES = [
+      { key: 'Residential' as const, Icon: Building2, sub: 'Apartments, Flats, Societies' },
+      { key: 'Commercial' as const, Icon: Store, sub: 'Offices, Shops, Complexes' },
+      { key: 'Industrial' as const, Icon: Factory, sub: 'Factories, Warehouses, etc.' },
+    ]
     return (
-      <div className="zo-fgrid three">
-        <F label="Maximum Orders / Day"><input type="number" value={c.maxOrders} onChange={(e) => set({ maxOrders: +e.target.value })} /></F>
-        <F label="Workers Required"><input type="number" value={c.workersRequired} onChange={(e) => set({ workersRequired: +e.target.value })} /></F>
-        <F label="Minimum Online Workers"><input type="number" value={c.minOnline} onChange={(e) => set({ minOnline: +e.target.value })} /></F>
-        <F label="Maximum ETA (mins)"><input type="number" value={c.maxEtaMin} onChange={(e) => set({ maxEtaMin: +e.target.value })} /></F>
-        <F label="Maximum Travel Distance (km)"><input type="number" value={c.maxTravelKm} onChange={(e) => set({ maxTravelKm: +e.target.value })} /></F>
+      <div className="zo-cap">
+        {/* ── Capacity Settings ── */}
+        <div className="zo-sech"><h4>Capacity Settings</h4></div>
+        <div className="zo-fgrid three">
+          <FH label="Maximum Orders Per Day" req hint="Maximum number of orders that can be accepted per day">
+            <input type="number" value={c.maxOrders} onChange={(e) => set({ maxOrders: +e.target.value })} />
+          </FH>
+          <FH label="Workers Required" req hint="Recommended number of workers for this zone">
+            <input type="number" value={c.workersRequired} onChange={(e) => set({ workersRequired: +e.target.value })} />
+          </FH>
+          <FH label="Minimum Online Workers" req hint="Minimum workers should be online to accept instant orders">
+            <input type="number" value={c.minOnline} onChange={(e) => set({ minOnline: +e.target.value })} />
+          </FH>
+          <FH label="Maximum Concurrent Orders Per Worker" hint="Max orders a worker can handle at a time">
+            <input type="number" value={c.maxConcurrentPerWorker ?? 2} onChange={(e) => set({ maxConcurrentPerWorker: +e.target.value })} />
+          </FH>
+          <FH label="Buffer Workers (Optional)" hint="Extra workers kept as buffer for demand spikes">
+            <input type="number" value={c.bufferWorkers ?? 0} onChange={(e) => set({ bufferWorkers: +e.target.value })} />
+          </FH>
+          <FH label="Utilization Target" hint="Target daily utilization for this zone">
+            <select value={c.utilizationTarget ?? 80} onChange={(e) => set({ utilizationTarget: +e.target.value })}>
+              {[60, 65, 70, 75, 80, 85, 90, 95].map((n) => <option key={n} value={n}>{n}%</option>)}
+            </select>
+          </FH>
+        </div>
+
+        {/* ── SLA / Service Level ── */}
+        <div className="zo-sech" style={{ marginTop: 22 }}><h4>SLA / Service Level</h4></div>
+        <div className="zo-fgrid three">
+          <FH label="Maximum ETA for Customer" req hint="Maximum promised arrival time">
+            <select value={c.maxEtaMin} onChange={(e) => set({ maxEtaMin: +e.target.value })}>
+              {[10, 15, 20, 30, 45, 60].map((n) => opt(n, 'mins'))}
+            </select>
+          </FH>
+          <FH label="Maximum Travel Distance" req hint="Maximum distance worker can travel">
+            <select value={c.maxTravelKm} onChange={(e) => set({ maxTravelKm: +e.target.value })}>
+              {[2, 3, 5, 7, 10, 15].map((n) => opt(n, 'KM'))}
+            </select>
+          </FH>
+          <FH label="Job Start Window" req hint="Time window to start the job after arrival">
+            <select value={c.jobStartWindowMin ?? 30} onChange={(e) => set({ jobStartWindowMin: +e.target.value })}>
+              {[15, 20, 30, 45, 60].map((n) => opt(n, 'mins'))}
+            </select>
+          </FH>
+          <FH label="Job Completion SLA" req hint="Average time to complete standard service">
+            <select value={c.jobCompletionSlaMin ?? 60} onChange={(e) => set({ jobCompletionSlaMin: +e.target.value })}>
+              {[30, 45, 60, 90, 120, 180].map((n) => opt(n, 'mins'))}
+            </select>
+          </FH>
+          <FH label="Grace Time for Delay" hint="Additional time before marking delay">
+            <select value={c.graceTimeMin ?? 10} onChange={(e) => set({ graceTimeMin: +e.target.value })}>
+              {[5, 10, 15, 20, 30].map((n) => opt(n, 'mins'))}
+            </select>
+          </FH>
+          <FH label="Cancellation Threshold" hint="If daily cancellations exceed this threshold">
+            <select value={c.cancellationThreshold ?? 15} onChange={(e) => set({ cancellationThreshold: +e.target.value })}>
+              {[5, 10, 15, 20, 25, 30].map((n) => <option key={n} value={n}>{n}%</option>)}
+            </select>
+          </FH>
+        </div>
+
+        <div className="zo-note"><Info size={15} /><span>These limits help maintain quality of service and ensure timely delivery to customers.</span></div>
+
+        {/* ── Zone Type ── */}
+        <div className="zo-sech" style={{ marginTop: 22 }}><h4>Zone Type <span className="opt">(Optional)</span></h4></div>
+        <div className="zo-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {ZONE_TYPES.map(({ key, Icon, sub }) => (
+            <div key={key} className={'zo-ztype' + (zt === key ? ' on' : '')} onClick={() => patch({ zoneType: key })}>
+              <span className="radio">{zt === key && <span className="dot" />}</span>
+              <span className="ic"><Icon size={20} /></span>
+              <div><b>{key}</b><div className="s">{sub}</div></div>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
 
-  if (step === 'pricing') {
-    const ex = cfg.pricingExtras!
-    const setPrice = (k: string, v: number) => patch({ pricing: { ...(cfg.pricing || {}), [k]: v } })
-    const enabled = p.services.filter((s) => (cfg.services || []).includes(s.id))
-    return (
-      <div>
-        <p style={{ fontSize: 12, color: 'var(--zmut)', marginTop: -4, marginBottom: 12 }}>Leave a price to use the default. Override per zone as needed.</p>
-        <div style={{ overflowX: 'auto', marginBottom: 16 }}>
-          <table className="zo-table"><thead><tr><th>Service</th><th>Default</th><th>Zone Price</th></tr></thead>
-            <tbody>{enabled.map((s) => (
-              <tr key={s.id} style={{ cursor: 'default' }}>
-                <td><b>{s.name}</b></td><td style={{ color: 'var(--zmut)' }}>₹{s.price}</td>
-                <td><input className="zo-mini" value={cfg.pricing?.[s.id] ?? s.price} onChange={(e) => setPrice(s.id, +e.target.value)} /></td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-        <div className="zo-fgrid three">
-          <F label="Discount (%)"><input type="number" value={ex.discount} onChange={(e) => patch({ pricingExtras: { ...ex, discount: +e.target.value } })} /></F>
-          <F label="GST (%)"><input type="number" value={ex.gst} onChange={(e) => patch({ pricingExtras: { ...ex, gst: +e.target.value } })} /></F>
-          <F label="Convenience Fee (₹)"><input type="number" value={ex.convenienceFee} onChange={(e) => patch({ pricingExtras: { ...ex, convenienceFee: +e.target.value } })} /></F>
-          <F label="Minimum Order (₹)"><input type="number" value={ex.minOrder} onChange={(e) => patch({ pricingExtras: { ...ex, minOrder: +e.target.value } })} /></F>
-        </div>
-      </div>
-    )
-  }
+  if (step === 'pricing') return <PricingStep cfg={cfg} patch={patch} services={p.services} />
 
   if (step === 'hours') {
     const wh = cfg.workingHours!
@@ -481,6 +595,140 @@ function TeamStep({ cfg, patch }: { cfg: ZoneConfig; patch: (u: Partial<ZoneConf
   )
 }
 
+/* ───────── pricing step (service + add-on pricing) ───────── */
+const DISCOUNTS = [0, 5, 10, 15, 20, 25, 30, 40, 50]
+const DiscountSelect = ({ v, onChange }: { v: number; onChange: (n: number) => void }) => (
+  <select className={'zo-disc' + (v > 0 ? ' on' : '')} value={v} onChange={(e) => onChange(+e.target.value)}>
+    {DISCOUNTS.map((n) => <option key={n} value={n}>{n === 0 ? 'No Discount' : `${n}% Off`}</option>)}
+  </select>
+)
+// Services carry no duration in the catalogue, so show a category-based "Avg." estimate.
+const DUR_RULES: [RegExp, string][] = [
+  [/laundry|wash/i, '48 hrs'], [/paint/i, '3 hrs'],
+  [/deep|sofa|carpet|mattress|kitchen|fridge/i, '60 mins'],
+  [/bathroom|toilet|window|balcony/i, '45 mins'],
+  [/fan|light|switch|electr/i, '30 mins'], [/plumb|tap|leak/i, '40 mins'],
+]
+const estDuration = (name: string, cat?: string) => {
+  const t = `${name} ${cat || ''}`
+  for (const [re, d] of DUR_RULES) if (re.test(t)) return d
+  return '45 mins'
+}
+
+function PricingStep({ cfg, patch, services }: { cfg: ZoneConfig; patch: (u: Partial<ZoneConfig>) => void; services: Svc[] }) {
+  const [tab, setTab] = useState<'service' | 'addon'>('service')
+  const ex = cfg.pricingExtras!
+  const useDefault = !!ex.useDefault
+  const discounts = cfg.discounts || {}
+  const custom = cfg.customServices || []
+  const addons = cfg.addons || []
+  const setExtra = (u: Partial<typeof ex>) => patch({ pricingExtras: { ...ex, ...u } })
+  const setPrice = (k: string, v: number) => patch({ pricing: { ...(cfg.pricing || {}), [k]: v } })
+  const setDiscount = (k: string, v: number) => patch({ discounts: { ...discounts, [k]: v } })
+  const enabled = services.filter((s) => (cfg.services || []).includes(s.id))
+  const rows: Svc[] = [...enabled, ...custom]
+  const isCustom = (id: string) => id.startsWith('custom-')
+
+  const addCustom = () => patch({ customServices: [...custom, { id: 'custom-' + uid(), name: 'New Service', price: 199 }] })
+  const editCustom = (id: string, u: Partial<{ name: string; price: number }>) => patch({ customServices: custom.map((c) => c.id === id ? { ...c, ...u } : c) })
+  const delCustom = (id: string) => patch({ customServices: custom.filter((c) => c.id !== id) })
+  const addAddon = () => patch({ addons: [...addons, { id: 'ad-' + uid(), name: 'New Add-on', price: 99, discount: 0 }] })
+  const editAddon = (id: string, u: Partial<{ name: string; price: number; discount: number }>) => patch({ addons: addons.map((a) => a.id === id ? { ...a, ...u } : a) })
+  const delAddon = (id: string) => patch({ addons: addons.filter((a) => a.id !== id) })
+
+  return (
+    <div className="zo-price">
+      <p style={{ fontSize: 12.5, color: 'var(--zmut)', margin: '-4px 0 14px' }}>Set service prices for this zone. You can override default prices.</p>
+      <div className="zo-pricebar">
+        <div className="zo-seg">
+          <button className={tab === 'service' ? 'on' : ''} onClick={() => setTab('service')}>Service Pricing</button>
+          <button className={tab === 'addon' ? 'on' : ''} onClick={() => setTab('addon')}>Add-on Pricing</button>
+        </div>
+        {tab === 'service' && (
+          <div className="zo-usedef">
+            <button type="button" className={'zo-toggle' + (useDefault ? ' on' : '')} onClick={() => setExtra({ useDefault: !useDefault })}><span /></button>
+            <span>Use Default Prices</span>
+          </div>
+        )}
+      </div>
+
+      {tab === 'service' ? (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="zo-table zo-ptable">
+              <thead><tr><th style={{ width: 44 }}>#</th><th>Service</th><th>Duration (Avg.)</th><th>Base Price (₹)</th><th>Your Price (₹)</th><th>Discount / Offer</th></tr></thead>
+              <tbody>
+                {rows.map((s, i) => {
+                  const cust = isCustom(s.id)
+                  return (
+                    <tr key={s.id} style={{ cursor: 'default' }}>
+                      <td className="zo-grip"><GripVertical size={14} /><span>{i + 1}</span></td>
+                      <td>{cust
+                        ? <div className="row" style={{ gap: 6, alignItems: 'center' }}><input className="zo-mini" style={{ width: 150, textAlign: 'left' }} value={s.name} onChange={(e) => editCustom(s.id, { name: e.target.value })} /><button className="zo-iconbtn" onClick={() => delCustom(s.id)}><Trash2 size={13} /></button></div>
+                        : <b>{s.name}</b>}</td>
+                      <td style={{ color: 'var(--zmut)' }}>{estDuration(s.name, s.category)}</td>
+                      <td style={{ color: 'var(--zmut)' }}>{cust ? <input className="zo-mini" value={s.price} onChange={(e) => editCustom(s.id, { price: +e.target.value })} /> : s.price}</td>
+                      <td><input className="zo-mini" disabled={useDefault} value={useDefault ? s.price : (cfg.pricing?.[s.id] ?? s.price)} onChange={(e) => setPrice(s.id, +e.target.value)} /></td>
+                      <td><DiscountSelect v={discounts[s.id] || 0} onChange={(n) => setDiscount(s.id, n)} /></td>
+                    </tr>
+                  )
+                })}
+                {rows.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--zmut)', padding: 20 }}>No services selected. Go back to the Services step to add some.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <button className="zo-btn ghost" style={{ marginTop: 12 }} onClick={addCustom}><Plus size={15} /> Add Custom Service</button>
+          <div className="zo-note" style={{ marginTop: 16 }}><Info size={15} /><span>Prices are applicable for this zone only. Customers will see prices based on their location (zone).</span></div>
+        </>
+      ) : (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="zo-table zo-ptable">
+              <thead><tr><th>Add-on</th><th>Price (₹)</th><th>Discount / Offer</th><th style={{ width: 44 }}></th></tr></thead>
+              <tbody>
+                {addons.map((a) => (
+                  <tr key={a.id} style={{ cursor: 'default' }}>
+                    <td><input className="zo-mini" style={{ width: 220, textAlign: 'left' }} value={a.name} onChange={(e) => editAddon(a.id, { name: e.target.value })} /></td>
+                    <td><input className="zo-mini" value={a.price} onChange={(e) => editAddon(a.id, { price: +e.target.value })} /></td>
+                    <td><DiscountSelect v={a.discount || 0} onChange={(n) => editAddon(a.id, { discount: n })} /></td>
+                    <td><button className="zo-iconbtn" onClick={() => delAddon(a.id)}><Trash2 size={13} /></button></td>
+                  </tr>
+                ))}
+                {addons.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--zmut)', padding: 20 }}>No add-ons yet. Add extras like “Deep clean”, “Extra room”, etc.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <button className="zo-btn ghost" style={{ marginTop: 12 }} onClick={addAddon}><Plus size={15} /> Add Add-on</button>
+        </>
+      )}
+
+      {/* Payment & Charges */}
+      <div className="zo-paycard">
+        <div className="zo-sech"><h4>Payment &amp; Charges</h4></div>
+        <div className="zo-fgrid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', alignItems: 'start' }}>
+          <FH label="Convenience Fee (Customer)" hint="Charged to the customer per order">
+            <select value={ex.convenienceFee} onChange={(e) => setExtra({ convenienceFee: +e.target.value })}>
+              {[0, 10, 19, 25, 49].map((n) => <option key={n} value={n}>{n === 0 ? 'Free' : `₹${n}`}</option>)}
+            </select>
+          </FH>
+          <FH label="Minimum Order Amount" hint="Smallest cart value allowed">
+            <input type="number" value={ex.minOrder} onChange={(e) => setExtra({ minOrder: +e.target.value })} />
+          </FH>
+          <FH label="GST" hint="Tax applied on services">
+            <select value={ex.gst} onChange={(e) => setExtra({ gst: +e.target.value })}>
+              {[0, 5, 12, 18, 28].map((n) => <option key={n} value={n}>{n}%</option>)}
+            </select>
+          </FH>
+          <label className="zo-gstchk" onClick={() => setExtra({ includeGst: !(ex.includeGst !== false) })}>
+            <span className="zo-cb">{ex.includeGst !== false && <Check size={13} />}</span>
+            <span>Include GST in price shown to customer</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ───────── coverage map (leaflet radius) ───────── */
 // Geocode an Indian pincode → centroid, via OSM Nominatim (no API key). Cached so
 // re-renders / re-visits don't re-hit the API. Structured postalcode lookup first,
@@ -561,6 +809,28 @@ function CoverageMap({ cov, onChange }: { cov: NonNullable<ZoneConfig['coverage'
     return () => { cancelled = true }
   }, [cov.mode, cov.pincodes.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
   return <div ref={ref} style={{ height: 360, width: '100%', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--zline)', background: '#eef0f4' }} />
+}
+
+/* ───────── pincode field (raw text kept locally so partial typing isn't filtered away) ───────── */
+function PincodeField({ cov, patch }: { cov: NonNullable<ZoneConfig['coverage']>; patch: (u: Partial<ZoneConfig>) => void }) {
+  // The stored `cov.pincodes` only keeps valid 6-digit codes. If we bound the input directly
+  // to that, every partial keystroke ("5", "50"…) would be filtered out and the field would
+  // snap back to empty — making it impossible to type. So hold the raw text locally and derive
+  // the validated list on each change.
+  const [text, setText] = useState(cov.pincodes.join(', '))
+  return (
+    <F label="Pincodes (comma separated)">
+      <input
+        value={text}
+        onChange={(e) => {
+          const raw = e.target.value
+          setText(raw)
+          patch({ coverage: { ...cov, pincodes: raw.split(/[\s,]+/).map((x) => x.trim()).filter((x) => /^\d{6}$/.test(x)) } })
+        }}
+        placeholder="500081, 500084, 500032"
+      />
+    </F>
+  )
 }
 
 /* ───────── small helpers ───────── */

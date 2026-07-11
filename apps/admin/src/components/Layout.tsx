@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes,
-  Building2, Layers, Package, Map as MapIcon,
+  Building2, Layers, Package, Map as MapIcon, Store,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, can } from '../store'
@@ -30,6 +30,7 @@ const NAV: NavGroup[] = [
     { to: '/zones/cities', label: 'Cities', Icon: Building2, min: 'admin' },
     { to: '/zones/clusters', label: 'Clusters', Icon: Layers, min: 'admin' },
     { to: '/zones/apartments', label: 'Apartments', Icon: Boxes, min: 'admin' },
+    { to: '/zones/stores', label: 'Stores', Icon: Store, min: 'admin' },
     { to: '/zones/pricing', label: 'Pricing', Icon: Tag, min: 'admin' },
     { to: '/zones/coverage', label: 'Service Coverage', Icon: MapIcon, min: 'admin' },
     { to: '/zones/inventory', label: 'Inventory', Icon: Package, min: 'admin' },

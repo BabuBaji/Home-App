@@ -2,7 +2,9 @@ export interface Service {
   id: string
   name: string
   icon: string
-  price: number
+  price: number            // zone "from" price the customer pays (after any zone offer)
+  listPrice?: number       // pre-discount price (for strikethrough) when a zone offer applies
+  zoneDiscount?: number    // zone offer % (0/undefined = none)
   category: string
   available: boolean
   image?: string | null

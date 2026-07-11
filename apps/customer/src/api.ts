@@ -46,8 +46,9 @@ export const verifyOtp = (phone: string, otp: string) => req<{ token: string; us
 export const googleAuth = (p: { credential?: string; demo?: boolean }) => req<{ token: string; user: User }>('/api/auth/google', { method: 'POST', body: JSON.stringify(p) })
 
 /* catalogue */
-export const fetchServices = () => req<{ categories: string[]; services: Service[] }>('/api/services')
-export const fetchService = (id: string) => req<ServiceDetail>(`/api/services/${id}`)
+const pinQ = (pincode?: string) => (pincode ? `?pincode=${encodeURIComponent(pincode)}` : '')
+export const fetchServices = (pincode?: string) => req<{ categories: string[]; services: Service[] }>(`/api/services${pinQ(pincode)}`)
+export const fetchService = (id: string, pincode?: string) => req<ServiceDetail>(`/api/services/${id}${pinQ(pincode)}`)
 export const fetchHome = () => req<HomeContent>('/api/home')
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
 
@@ -59,7 +60,7 @@ export const removeFavouriteApi = (id: string) => req<string[]>(`/api/favourites
 /* coupons & quote */
 export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
 export const validateCoupon = (code: string, subtotal: number) => req<{ code: string; discount: number; label: string }>('/api/coupons/validate', { method: 'POST', body: JSON.stringify({ code, subtotal }) })
-export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon }) })
+export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode }) })
 
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')

@@ -178,6 +178,24 @@ export const opList = <T = Record<string, unknown>>(path: string, zoneId?: numbe
 export const opCreate = (path: string, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}`, post('', body))
 export const opUpdate = (path: string, id: number, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}/${id}`, patch(body))
 export const opDelete = (path: string, id: number) => req<{ ok: boolean }>(`/${path}/${id}`, { method: 'DELETE' })
+/* stores (dark-stores) with coverage/overlap guard */
+export interface Store { id: number; zone_id: number | null; name: string; manager: string; address: string; pincode: string; lat: number | null; lng: number | null; radius_km: number; status: string }
+export interface StoreNear { id: number; name: string; manager: string; lat: number; lng: number; radiusKm: number; status: string; distanceKm: number; overlapAreaKm2?: number }
+export interface StoreCheck { nearby: StoreNear[]; coveredBy: StoreNear[]; overlaps: StoreNear[]; covered: boolean; overlapping: boolean; canOverride: boolean }
+export interface StoreConflict extends StoreCheck { error: string }
+export const fetchStores = (zoneId?: number) => opList<Store>('stores', zoneId)
+export const checkStore = (lat: number, lng: number, radiusKm: number, excludeId?: number) =>
+  req<StoreCheck>(`/stores/check?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}${excludeId ? `&exclude_id=${excludeId}` : ''}`)
+export const updateStore = (id: number, body: Record<string, unknown>) => req<Store>(`/stores/${id}`, patch(body))
+export const deleteStore = (id: number) => req<{ ok: boolean }>(`/stores/${id}`, { method: 'DELETE' })
+// Returns the conflict body on 409 (covered/overlap) instead of throwing, so the UI can offer a super-admin override.
+export async function createStore(body: Record<string, unknown>): Promise<{ ok: true; store: Store } | { ok: false; conflict: StoreConflict }> {
+  const res = await fetch(API_BASE + '/api/admin/stores', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) })
+  if (res.status === 409) return { ok: false, conflict: await res.json() }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as { error?: string }).error || `Request failed (${res.status})`) }
+  return { ok: true, store: await res.json() }
+}
+
 export const zoneMetrics = (id: number) => req<Record<string, any>>(`/zones/${id}/metrics`)
 export const allZonesMetrics = () => req<Record<string, any>[]>('/zones-metrics')
 export const opsOverview = () => req<Record<string, any>>('/ops-overview')

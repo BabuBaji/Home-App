@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CartItem, User } from './types'
-import { clearToken, setToken, saveUser, loadUser, clearUser } from './api'
+import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe } from './api'
 
 interface Store {
   user: User | null
@@ -22,6 +22,7 @@ interface Store {
   coupon: string; setCoupon: (c: string) => void
   addressLine: string; setAddressLine: (a: string) => void
   note: string; setNote: (n: string) => void
+  pincode: string; setPincode: (p: string) => void   // current service-area pincode → zone pricing/offers
 
   subtotal: number
 }
@@ -38,6 +39,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [coupon, setCoupon] = useState('')
   const [addressLine, setAddressLine] = useState('')
   const [note, setNote] = useState('')
+  const [pincode, setPincode] = useState('')
+
+  // Populate the current pincode from the customer's default address once signed in, so every
+  // pricing screen can resolve the right zone's prices/offers without re-fetching addresses.
+  useEffect(() => {
+    if (!user) { setPincode(''); return }
+    fetchMe().then(({ addresses }) => {
+      const a = addresses.find((x) => x.is_default) || addresses[0]
+      if (a?.pincode) setPincode(a.pincode)
+    }).catch(() => {})
+  }, [user])
 
   const signIn = useCallback((t: string, u: User) => { setToken(t); saveUser(u); setUserState(u) }, [])
   const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]) }, [])
@@ -56,6 +68,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cart, addToCart, removeFromCart, inCart, clearCart,
       bookingType, setBookingType, date, setDate, time, setTime,
       payment, setPayment, coupon, setCoupon, addressLine, setAddressLine, note, setNote,
+      pincode, setPincode,
       subtotal,
     }}>
       {children}

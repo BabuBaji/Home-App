@@ -8,14 +8,14 @@ import type { Quote, Coupon } from '../types'
 export default function Summary() {
   const nav = useNavigate()
   const toast = useToast()
-  const { cart, bookingType, date, time, addressLine, coupon, setCoupon } = useStore()
+  const { cart, bookingType, date, time, addressLine, coupon, setCoupon, pincode } = useStore()
   const [quote, setQuote] = useState<Quote | null>(null)
   const [code, setCode] = useState(coupon)
   const [coupons, setCoupons] = useState<Coupon[]>([])
   const [showCoupons, setShowCoupons] = useState(false)
 
   function refresh(c: string) {
-    fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), c || undefined)
+    fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), c || undefined, pincode || undefined)
       .then((q) => { setQuote(q); if (c && !q.coupon) toast('Coupon not applicable'); })
       .catch((e) => toast((e as Error).message))
   }

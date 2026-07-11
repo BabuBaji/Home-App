@@ -212,7 +212,7 @@ app.post('/api/bookings', auth, async (req, res) => {
   const body = req.body || {}
   // Authoritative pricing from the catalog service.
   let priced
-  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon }) }
+  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode: body.pincode }) }
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 

@@ -68,6 +68,14 @@ async function init() {
       id SERIAL PRIMARY KEY, zone_id INTEGER NOT NULL, service_id TEXT NOT NULL,
       price INTEGER NOT NULL DEFAULT 0, discount INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true
     )`,
+    // Stores (dark-stores) inside a zone: a service point with a lat/lng centre + service radius.
+    // Overlap/coverage between stores is guarded at create time (only super-admin may override).
+    `CREATE TABLE IF NOT EXISTS stores (
+      id SERIAL PRIMARY KEY, zone_id INTEGER, name TEXT NOT NULL, manager TEXT DEFAULT '',
+      address TEXT DEFAULT '', pincode TEXT DEFAULT '', lat DOUBLE PRECISION, lng DOUBLE PRECISION,
+      radius_km DOUBLE PRECISION NOT NULL DEFAULT 3, status TEXT NOT NULL DEFAULT 'active',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
   ])
   const up = `INSERT INTO services (id,name,icon,price,category,available,sort)
     VALUES ($1,$2,$3,$4,$5,true,$6)
@@ -99,13 +107,22 @@ async function init() {
 
 const withImage = (s) => ({ ...s, available: !!s.available, image: SERVICE_IMAGES[s.id] || null })
 
-async function allServices() {
-  const { rows } = await pool.query('SELECT id,name,icon,price,category,available FROM services ORDER BY sort, name')
-  return rows.map(withImage)
+// Overlay a zone's price/discount onto a raw catalogue service. `price` becomes the discounted
+// "from" price the customer pays; `listPrice` is the pre-discount price (for strikethrough).
+function applyZonePrice(s, zmap = {}) {
+  const zp = zmap[s.id]
+  const base = zp && zp.price > 0 ? zp.price : s.price
+  const off = zp ? Math.min(90, Math.max(0, zp.discount || 0)) : 0
+  const price = off > 0 ? Math.round(base * (1 - off / 100)) : base
+  return { ...s, price, listPrice: base, zoneDiscount: off }
 }
-async function getService(id) {
+async function allServices(zmap = {}) {
+  const { rows } = await pool.query('SELECT id,name,icon,price,category,available FROM services ORDER BY sort, name')
+  return rows.map((s) => withImage(applyZonePrice(s, zmap)))
+}
+async function getService(id, zmap = {}) {
   const { rows } = await pool.query('SELECT id,name,icon,price,category,available FROM services WHERE id=$1', [id])
-  return rows[0] ? withImage(rows[0]) : null
+  return rows[0] ? withImage(applyZonePrice(rows[0], zmap)) : null
 }
 async function broadcastServices() {
   publishRealtime(REDIS_URL, null, 'services:update', await allServices())
@@ -113,24 +130,31 @@ async function broadcastServices() {
 // service-to-service: booking counts live in the booking service.
 const bookingCounts = () => tryGet(BOOKING_URL, '/api/internal/service-booking-counts', {})
 
-// Authoritative pricing for a set of {id, durationId} items.
-async function priceItems(rawItems) {
+// Authoritative pricing for a set of {id, durationId} items. `zmap` is the zone's price/discount
+// overlay (service_id → {price, discount}); empty = use catalogue base prices.
+async function priceItems(rawItems, zmap = {}) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) return { error: 'Select at least one service' }
   const items = []
   for (const it of rawItems) {
     const s = await getService(it.id)
     if (!s || !s.available) return { error: `"${it.id}" is not available` }
-    const durs = durationsFor(s.price)
+    const zp = zmap[s.id]
+    const base = zp && zp.price > 0 ? zp.price : s.price          // zone "Your Price" overrides base
+    const off = zp ? Math.min(90, Math.max(0, zp.discount || 0)) : 0
+    const durs = durationsFor(base)
     const dur = durs.find((d) => d.id === (it.durationId || '60m')) || durs[0]
-    items.push({ id: s.id, name: s.name, icon: s.icon, category: s.category, durationId: dur.id, durationLabel: dur.label, price: dur.price })
+    const listPrice = dur.price                                    // pre-discount (struck through)
+    const price = off > 0 ? Math.round(listPrice * (1 - off / 100)) : listPrice
+    items.push({ id: s.id, name: s.name, icon: s.icon, category: s.category, durationId: dur.id, durationLabel: dur.label, price, listPrice, zoneDiscount: off })
   }
   const subtotal = Math.max(0, items.reduce((sum, x) => sum + x.price, 0))
   return { items, subtotal }
 }
-async function quote({ items, coupon }) {
-  const q = await priceItems(items)
+async function quote({ items, coupon, pincode }) {
+  const zmap = await zonePriceMap(await zoneIdForPincode(pincode))
+  const q = await priceItems(items, zmap)
   if (q.error) return { status: 409, body: q }
-  let discount = 0, code = null
+  let discount = 0, code = null                                    // coupon discount is on top of zone offers
   if (coupon) { const c = applyCoupon(coupon, q.subtotal); if (!c.error) { discount = c.discount; code = c.code } }
   return { status: 200, body: { items: q.items, coupon: code, ...priceBreakdown(q.subtotal, discount) } }
 }
@@ -140,11 +164,24 @@ app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'catalog', ok: true }))
 
 /* ---------- customer catalogue (public) ---------- */
-app.get('/api/services', async (_q, res) => res.json({ categories: CATEGORIES, services: await allServices() }))
+// `?pincode=` resolves the customer's zone so prices reflect that zone's overrides + offers.
+app.get('/api/services', async (req, res) => {
+  const zmap = await zonePriceMap(await zoneIdForPincode(req.query.pincode))
+  res.json({ categories: CATEGORIES, services: await allServices(zmap) })
+})
 app.get('/api/services/:id', async (req, res) => {
-  const s = await getService(req.params.id)
+  const zmap = await zonePriceMap(await zoneIdForPincode(req.query.pincode))
+  const s = await getService(req.params.id, zmap)
   if (!s) return res.status(404).json({ error: 'Service not found' })
-  res.json({ ...s, ...detailsFor(s.id, s.price) })
+  const off = s.zoneDiscount || 0
+  const details = detailsFor(s.id, s.listPrice)                 // durations built on the zone base price
+  const durations = details.durations.map((d) => ({
+    ...d,
+    listPrice: d.price,
+    price: off > 0 ? Math.round(d.price * (1 - off / 100)) : d.price,
+    original: off > 0 ? d.price : d.original,                   // strike the pre-discount price when an offer applies
+  }))
+  res.json({ ...s, ...details, durations, zoneDiscount: off })
 })
 
 /* ---------- pricing / coupons / home ---------- */
@@ -297,6 +334,34 @@ app.get('/api/geocode', async (req, res) => {
 // Normalize a pincode blob (comma/space separated) to a clean, de-duped list of 6-digit PINs.
 const normPins = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((s) => s.trim()).filter((s) => /^\d{6}$/.test(s)))]
 
+// Resolve which zone covers a pincode, and load that zone's price/discount overlay from zone_pricing
+// (the authority for zone pricing — kept in sync from the onboarding wizard's config on save).
+async function zoneIdForPincode(pincode) {
+  const pin = String(pincode || '').trim()
+  if (!/^\d{6}$/.test(pin)) return null
+  const { rows } = await pool.query('SELECT id, pincodes FROM zones')
+  const z = rows.find((r) => normPins(r.pincodes).includes(pin))
+  return z ? z.id : null
+}
+async function zonePriceMap(zoneId) {
+  if (!zoneId) return {}
+  const { rows } = await pool.query('SELECT service_id, price, discount, active FROM zone_pricing WHERE zone_id=$1', [zoneId])
+  const m = {}
+  for (const r of rows) if (r.active !== false) m[r.service_id] = { price: Number(r.price) || 0, discount: Number(r.discount) || 0 }
+  return m
+}
+// Mirror the wizard's config (pricing + discounts for the selected services) into zone_pricing,
+// so the customer-facing price resolution has a single authoritative table to read.
+async function syncZonePricing(zoneId, config) {
+  const services = Array.isArray(config?.services) ? config.services : []
+  const pricing = config?.pricing || {}, discounts = config?.discounts || {}
+  await pool.query('DELETE FROM zone_pricing WHERE zone_id=$1', [zoneId])
+  for (const sid of services) {
+    await pool.query('INSERT INTO zone_pricing (zone_id, service_id, price, discount, active) VALUES ($1,$2,$3,$4,true)',
+      [zoneId, sid, Math.round(Number(pricing[sid]) || 0), Math.round(Number(discounts[sid]) || 0)])
+  }
+}
+
 // Service-area gating.
 //  • If ANY zones exist → zones are the source of truth: a pincode is serviceable iff it (or its
 //    city) belongs to a LIVE zone. This is how areas launch/pause "block by block".
@@ -410,6 +475,7 @@ app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) =
     'INSERT INTO zones (name,state,city,pincodes,status,sla_minutes,code,config) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *',
     [String(b.name).trim(), String(b.state || '').trim(), String(b.city || '').trim(), normPins(b.pincodes).join(','), status,
       b.slaMinutes ? Number(b.slaMinutes) : null, b.code ? String(b.code).trim() : null, JSON.stringify(b.config || {})])
+  await syncZonePricing(rows[0].id, b.config || {})
   res.status(201).json(zoneOut(rows[0]))
 })
 app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
@@ -423,10 +489,108 @@ app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, r
     b.slaMinutes !== undefined ? (b.slaMinutes ? Number(b.slaMinutes) : null) : z.sla_minutes,
     b.code !== undefined ? (b.code ? String(b.code).trim() : null) : z.code,
     b.config !== undefined ? JSON.stringify(b.config) : JSON.stringify(z.config || {}), req.params.id])
+  await syncZonePricing(Number(req.params.id), b.config !== undefined ? b.config : (z.config || {}))
   res.json(zoneOut((await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])).rows[0]))
 })
 app.delete('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
   await pool.query('DELETE FROM zones WHERE id=$1', [req.params.id])
+  res.json({ ok: true })
+})
+
+/* ───────── Stores (dark-stores) with a coverage / overlap guard ─────────
+   A store is a service point: a lat/lng centre + a service radius. Two stores "overlap" when the
+   distance between centres < sum of radii; a point is "already covered" when it sits inside an
+   existing store's radius. Creating a covered/overlapping store is blocked unless the caller is a
+   super-admin passing `override: true`. */
+const R_EARTH_KM = 6371
+const haversineKm = (aLat, aLng, bLat, bLng) => {
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng)
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2
+  return 2 * R_EARTH_KM * Math.asin(Math.min(1, Math.sqrt(s)))
+}
+// Area (km²) of the lens where two circles (radii r,R, centres d apart) overlap.
+const overlapAreaKm2 = (d, r, R) => {
+  if (d >= r + R) return 0
+  if (d <= Math.abs(R - r)) return Math.PI * Math.min(r, R) ** 2
+  const r2 = r * r, R2 = R * R, d2 = d * d
+  const a1 = r2 * Math.acos((d2 + r2 - R2) / (2 * d * r))
+  const a2 = R2 * Math.acos((d2 + R2 - r2) / (2 * d * R))
+  const a3 = 0.5 * Math.sqrt(Math.max(0, (-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R)))
+  return a1 + a2 - a3
+}
+async function analyseStore(lat, lng, radiusKm, excludeId = null) {
+  const { rows } = await pool.query('SELECT id,name,manager,lat,lng,radius_km,status,pincode FROM stores WHERE lat IS NOT NULL AND lng IS NOT NULL')
+  const nearby = [], coveredBy = [], overlaps = []
+  for (const s of rows) {
+    if (excludeId && s.id === Number(excludeId)) continue
+    const dist = haversineKm(lat, lng, s.lat, s.lng)
+    const row = { id: s.id, name: s.name, manager: s.manager, lat: s.lat, lng: s.lng, radiusKm: s.radius_km, status: s.status, distanceKm: Math.round(dist * 100) / 100 }
+    nearby.push(row)
+    if (dist <= s.radius_km) coveredBy.push(row)                                  // centre inside their coverage
+    if (radiusKm > 0 && dist < s.radius_km + radiusKm)                            // service circles overlap
+      overlaps.push({ ...row, overlapAreaKm2: Math.round(overlapAreaKm2(dist, radiusKm, s.radius_km) * 100) / 100 })
+  }
+  nearby.sort((a, b) => a.distanceKm - b.distanceKm)
+  return { nearby, coveredBy, overlaps }
+}
+
+app.get('/api/admin/stores', adminAuth, async (req, res) => {
+  const zone = req.query.zone_id ? Number(req.query.zone_id) : null
+  const { rows } = zone != null
+    ? await pool.query('SELECT * FROM stores WHERE zone_id=$1 ORDER BY id', [zone])
+    : await pool.query('SELECT * FROM stores ORDER BY id')
+  res.json(rows)
+})
+// Coverage/overlap preview for a candidate centre — the wizard calls this before creating.
+app.get('/api/admin/stores/check', adminAuth, async (req, res) => {
+  const lat = Number(req.query.lat), lng = Number(req.query.lng), radiusKm = Number(req.query.radiusKm) || 0
+  if (!isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'lat/lng required' })
+  const a = await analyseStore(lat, lng, radiusKm, req.query.exclude_id)
+  res.json({ ...a, covered: a.coveredBy.length > 0, overlapping: a.overlaps.length > 0, canOverride: req.admin?.role === 'super' })
+})
+app.post('/api/admin/stores', adminAuth, requireRole('manager'), async (req, res) => {
+  const b = req.body || {}
+  if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Store name is required' })
+  const lat = Number(b.lat), lng = Number(b.lng), radiusKm = Number(b.radius_km) || 3
+  if (!isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'A valid location (lat/lng) is required' })
+  const a = await analyseStore(lat, lng, radiusKm)
+  const blocked = a.coveredBy.length > 0 || a.overlaps.length > 0
+  const isSuper = req.admin?.role === 'super'
+  if (blocked && !(isSuper && b.override)) {
+    return res.status(409).json({
+      error: a.coveredBy.length ? 'This location is already covered by an existing store.' : 'This store overlaps an existing store.',
+      covered: a.coveredBy.length > 0, overlapping: a.overlaps.length > 0, coveredBy: a.coveredBy, overlaps: a.overlaps, canOverride: isSuper,
+    })
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO stores (zone_id,name,manager,address,pincode,lat,lng,radius_km,status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [b.zone_id ?? null, String(b.name).trim(), String(b.manager || '').trim(), String(b.address || '').trim(),
+      String(b.pincode || '').trim(), lat, lng, radiusKm, ['active', 'paused', 'planned'].includes(b.status) ? b.status : 'active'])
+  res.status(201).json({ ...rows[0], overridden: blocked })
+})
+app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req, res) => {
+  const b = req.body || {}
+  const cur = (await pool.query('SELECT * FROM stores WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Store not found' })
+  const lat = b.lat !== undefined ? Number(b.lat) : cur.lat
+  const lng = b.lng !== undefined ? Number(b.lng) : cur.lng
+  const radiusKm = b.radius_km !== undefined ? Number(b.radius_km) : cur.radius_km
+  if (b.lat !== undefined || b.lng !== undefined || b.radius_km !== undefined) {
+    const a = await analyseStore(lat, lng, radiusKm, cur.id)
+    const blocked = a.coveredBy.length > 0 || a.overlaps.length > 0
+    if (blocked && !(req.admin?.role === 'super' && b.override))
+      return res.status(409).json({ error: 'This location overlaps an existing store.', coveredBy: a.coveredBy, overlaps: a.overlaps, canOverride: req.admin?.role === 'super' })
+  }
+  const { rows } = await pool.query(
+    `UPDATE stores SET name=$1,manager=$2,address=$3,pincode=$4,lat=$5,lng=$6,radius_km=$7,status=$8,zone_id=$9 WHERE id=$10 RETURNING *`,
+    [b.name ?? cur.name, b.manager ?? cur.manager, b.address ?? cur.address, b.pincode ?? cur.pincode,
+      lat, lng, radiusKm, b.status ?? cur.status, b.zone_id ?? cur.zone_id, cur.id])
+  res.json(rows[0])
+})
+app.delete('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req, res) => {
+  await pool.query('DELETE FROM stores WHERE id=$1', [Number(req.params.id)])
   res.json({ ok: true })
 })
 

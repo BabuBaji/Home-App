@@ -12,16 +12,16 @@ export default function ServiceDetails() {
   const loc = useLocation()
   const toast = useToast()
   const goBack = () => { if (loc.key === 'default') nav('/home'); else nav(-1) }
-  const { setBookingType } = useStore()
+  const { setBookingType, pincode } = useStore()
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [services, setServices] = useState<Service[]>([])
   const [openTerms, setOpenTerms] = useState(false)
 
   useEffect(() => {
     setOpenTerms(false)
-    fetchService(id!).then(setS).catch(() => toast('Could not load service'))
-    fetchServices().then((c) => setServices(c.services.filter((x) => x.available))).catch(() => {})
-  }, [id])
+    fetchService(id!, pincode || undefined).then(setS).catch(() => toast('Could not load service'))
+    fetchServices(pincode || undefined).then((c) => setServices(c.services.filter((x) => x.available))).catch(() => {})
+  }, [id, pincode])
 
   if (!s) return <div className="screen"><Loading /></div>
 
@@ -55,6 +55,7 @@ export default function ServiceDetails() {
           <div className="sd2-price-row">
             <span className="sd2-price">₹{s.price}</span>
             {orig && orig > s.price && <span className="sd2-orig">₹{orig}</span>}
+            {s.zoneDiscount ? <span className="sd2-off">{s.zoneDiscount}% OFF</span> : null}
           </div>
 
           {/* rating */}

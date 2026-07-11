@@ -822,6 +822,7 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 .sd2-price-row { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
 .sd2-price { font-size: 22px; font-weight: 500; color: var(--ink); }
 .sd2-orig { font-size: 16px; color: var(--muted); text-decoration: line-through; }
+.sd2-off { font-size: 12px; font-weight: 700; color: #15803d; background: #dcfce7; padding: 3px 9px; border-radius: 50px; }
 .sd2-rate-row { display: flex; align-items: center; gap: 8px; margin: 16px 0; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .sd2-star { color: #f5a623; font-size: 16px; }
 .sd2-rate-val { font-weight: 500; color: var(--ink); font-size: 15px; }
@@ -1597,6 +1598,8 @@ body { line-height: 1.45; }
 
 /* "Soon" tag back on a light card */
 .sn-soon { top: 8px; right: 8px; background: rgba(20,20,30,.62); color: #fff; }
+/* zone-offer badge (top-left corner of the thumb) */
+.sn-off-badge { position: absolute; top: 8px; left: 8px; z-index: 2; background: linear-gradient(120deg,#7c3aed,#5b51e8); color: #fff; font-size: 10.5px; font-weight: 800; letter-spacing: .2px; padding: 3px 8px; border-radius: 50px; box-shadow: 0 4px 10px rgba(91,81,232,.35); }
 .sn-tile.off .sn-thumb { filter: grayscale(.4); }
 
 /* section heading — solid dark + extra bold, exactly like Snabbit's "One Expert…" */

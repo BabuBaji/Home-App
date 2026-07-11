@@ -17,7 +17,7 @@ const CAT_ICON: Record<string, typeof LayoutGrid> = { All: LayoutGrid, Cleaning:
 export default function Home() {
   const nav = useNavigate()
   const toast = useToast()
-  const { user, setBookingType } = useStore()
+  const { user, setBookingType, pincode } = useStore()
   const [services, setServices] = useState<Service[]>([])
   const [cats, setCats] = useState<string[]>([])
   const [cat, setCat] = useState('All')
@@ -28,12 +28,15 @@ export default function Home() {
   const [favs, setFavs] = useState<string[]>([])
 
   useEffect(() => {
-    fetchServices().then((c) => { setServices(c.services); setCats(c.categories) }).catch(() => {})
     fetchBookings().then((bs) => setActive(bs.find((b) => ACTIVE.includes(b.status)) || null)).catch(() => {})
     fetchHome().then(setHome).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
     fetchFavourites().then(setFavs).catch(() => {})
   }, [])
+  // Re-fetch the catalogue whenever the pincode resolves, so prices reflect that zone's offers.
+  useEffect(() => {
+    fetchServices(pincode || undefined).then((c) => { setServices(c.services); setCats(c.categories) }).catch(() => {})
+  }, [pincode])
 
   const addressLine = addr?.line || user?.location || user?.city || 'Set your location'
   const eta = home?.instantEta ?? 5
@@ -131,6 +134,7 @@ export default function Home() {
             <button key={s.id} className={`sn-tile ${!s.available ? 'off' : ''}`} onClick={() => nav(`/service/${s.id}`)}>
               <div className="sn-thumb">
                 <ServiceThumb service={s} medallion={58} />
+                {s.zoneDiscount ? <span className="sn-off-badge">{s.zoneDiscount}% OFF</span> : null}
                 {!s.available && <span className="sn-soon">Soon</span>}
               </div>
               <span className="sn-tile-name">{s.name}</span>
