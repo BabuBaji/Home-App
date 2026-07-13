@@ -3,9 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Tag, Check, X } from 'lucide-react'
 import { Loading, useToast } from '../components/UI'
 import PaymentSheet from '../components/PaymentSheet'
-import Calendar, { startOfDay, fmtDate, sameDay, SLOT_HOURS, slotLabel, isSlotDisabled } from '../components/Calendar'
+import Calendar, { startOfDay, fmtDate, sameDay, slotLabel, isSlotDisabled, allowedHours } from '../components/Calendar'
+import type { ZoneHours } from '../components/Calendar'
 import { useStore } from '../store'
-import { fetchService, fetchHome, fetchQuote, validateCoupon, createBookingApi } from '../api'
+import { fetchService, fetchHome, fetchQuote, validateCoupon, createBookingApi, fetchZoneHours } from '../api'
 import type { ServiceDetail, Duration, Quote } from '../types'
 
 export default function Book() {
@@ -31,22 +32,33 @@ export default function Book() {
     fetchHome().then((h) => setEta(h.instantEta)).catch(() => {})
   }, [id, pincode])
 
-  // recompute the bill whenever duration or coupon changes
+  // recompute the bill whenever duration / coupon / chosen slot changes (slot drives peak-hour pricing)
   useEffect(() => {
     if (!dur) return
-    fetchQuote([{ id: id!, durationId: dur.id }], coupon || undefined, pincode || undefined).then(setQuote).catch(() => {})
-  }, [dur, coupon, id, pincode])
+    const now = new Date()
+    const at = instant ? `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}` : (slot !== null ? `${slot}:00` : undefined)
+    fetchQuote([{ id: id!, durationId: dur.id }], coupon || undefined, pincode || undefined, at).then(setQuote).catch(() => {})
+  }, [dur, coupon, id, pincode, slot, instant])
 
-  // time slots for the chosen date (past slots on "today" are disabled)
-  const slots = useMemo(() => SLOT_HOURS.map((h) => ({ h, label: slotLabel(h), disabled: isSlotDisabled(selDate, h) })), [selDate])
-  const isToday = sameDay(selDate, startOfDay(new Date()))
-  // when the date changes, keep a valid slot selected (first available)
+  // the serving zone's working hours drive which time slots exist for the chosen date
+  const [zh, setZh] = useState<ZoneHours | null>(null)
   useEffect(() => {
-    if (slot === null || isSlotDisabled(selDate, slot)) {
+    if (!pincode) { setZh(null); return }
+    fetchZoneHours(pincode).then(setZh).catch(() => setZh(null))
+  }, [pincode])
+
+  // time slots for the chosen date: within the zone's working hours, past slots on "today" disabled
+  const dayHours = useMemo(() => allowedHours(zh, selDate), [zh, selDate])
+  const dayClosed = !!zh && !zh.is247 && dayHours.length === 0   // zone closed on this weekday
+  const slots = useMemo(() => dayHours.map((h) => ({ h, label: slotLabel(h), disabled: isSlotDisabled(selDate, h) })), [dayHours, selDate])
+  const isToday = sameDay(selDate, startOfDay(new Date()))
+  // when the date (or hours) change, keep a valid slot selected (first available)
+  useEffect(() => {
+    if (slot === null || !dayHours.includes(slot) || isSlotDisabled(selDate, slot)) {
       const first = slots.find((x) => !x.disabled)
       setSlot(first ? first.h : null)
     }
-  }, [selDate]) // eslint-disable-line
+  }, [selDate, dayHours]) // eslint-disable-line
 
   if (!s || !dur) return <div className="screen"><Loading /></div>
 
@@ -66,11 +78,14 @@ export default function Book() {
     if (placing) return
     setPlacing(true)
     try {
+      const bnow = new Date()
+      const bookAt = instant ? `${bnow.getHours()}:${String(bnow.getMinutes()).padStart(2, '0')}` : (slot !== null ? `${slot}:00` : undefined)
       const b = await createBookingApi({
         items: [{ id: s!.id, durationId: dur!.id }],
         type: instant ? 'instant' : 'schedule',
         payment: method, coupon: coupon || undefined, pincode: pincode || undefined,
         paymentId: txnId, // Razorpay payment id (verified server-side before the booking is accepted)
+        at: bookAt, // slot time (24h) → peak-hour surcharge is applied server-side on the authoritative price
         ...(instant ? {} : { date: fmtDate(selDate), time: slot !== null ? slotLabel(slot) : '' }),
       })
       nav(`/confirmed/${b.id}`, { replace: true })
@@ -90,7 +105,9 @@ export default function Book() {
             <h3 className="incl-head">Pick a date</h3>
             <Calendar value={selDate} onChange={setSelDate} />
             <h3 className="incl-head" style={{ marginTop: 18 }}>Pick a time{isToday ? ' · today' : ''}</h3>
-            {slots.every((x) => x.disabled) ? (
+            {dayClosed ? (
+              <div className="note-box">Closed on {selDate.toLocaleDateString('en-IN', { weekday: 'long' })} in your area — pick another date above.</div>
+            ) : slots.every((x) => x.disabled) ? (
               <div className="note-box">No more slots today — pick another date above.</div>
             ) : (
               <div className="slot-grid">
@@ -138,6 +155,11 @@ export default function Book() {
           <div className="bill">
             <div className="bill-row"><span>Item total</span><span>₹{quote.subtotal}</span></div>
             {quote.discount > 0 && <div className="bill-row disc"><span><Check size={14} /> Coupon discount</span><span>−₹{quote.discount}</span></div>}
+            {(quote.peakSurcharge || 0) > 0 && <div className="bill-row"><span>Peak-hour surcharge{quote.peakPct ? ` (+${quote.peakPct}%)` : ''}</span><span>+₹{quote.peakSurcharge}</span></div>}
+            {(quote.fee || 0) > 0 && <div className="bill-row"><span>Convenience fee</span><span>+₹{quote.fee}</span></div>}
+            {(quote.tax || 0) > 0 && (quote.gstIncluded
+              ? <div className="bill-row"><span>Incl. GST{quote.gstPct ? ` (${quote.gstPct}%)` : ''}</span><span>₹{quote.tax}</span></div>
+              : <div className="bill-row"><span>GST{quote.gstPct ? ` (${quote.gstPct}%)` : ''}</span><span>+₹{quote.tax}</span></div>)}
             <div className="bill-row total"><span>To pay</span><span>₹{quote.total}</span></div>
           </div>
         )}

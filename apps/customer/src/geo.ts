@@ -84,7 +84,26 @@ export async function getCurrentPosition(): Promise<{ lat: number; lng: number }
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org'
 
+export interface RevGeo { label: string; name: string; sub: string; area: string; city: string; pincode: string | null }
+// Full reverse-geocode via our backend (Google when the key is set) — returns the split fields the
+// map picker needs (area / city / pincode) plus the nearest building/POI name for the apartment field.
+export async function reverseGeocodeFull(lat: number, lng: number): Promise<RevGeo | null> {
+  try {
+    const r = await fetch(`${API_BASE}/api/reverse-geocode?lat=${lat}&lng=${lng}`, { headers: { Accept: 'application/json' } })
+    if (r.ok) {
+      const j = await r.json()
+      if (j) return { label: j.label || '', name: j.name || '', sub: j.sub || '', area: j.area || '', city: j.city || '', pincode: j.pincode || null }
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
 export async function reverseGeocode(lat: number, lng: number): Promise<{ label: string; sub: string; raw: any }> {
+  // Prefer our backend (Google when the key is set → accurate Indian pincodes); fall back to OSM.
+  try {
+    const r = await fetch(`${API_BASE}/api/reverse-geocode?lat=${lat}&lng=${lng}`, { headers: { Accept: 'application/json' } })
+    if (r.ok) { const j = await r.json(); if (j && j.label) return { label: j.label, sub: j.sub || '', raw: j } }
+  } catch { /* fall through to OSM */ }
   const res = await fetch(`${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`, {
     headers: { Accept: 'application/json' },
   })

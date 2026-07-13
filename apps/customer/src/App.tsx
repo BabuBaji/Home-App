@@ -12,6 +12,8 @@ import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
 import CountrySelect from './screens/CountrySelect'
 import LocationSelect from './screens/LocationSelect'
+import AddressDetails from './screens/AddressDetails'
+import SearchLocation from './screens/SearchLocation'
 import Home from './screens/Home'
 import ServiceDetails from './screens/ServiceDetails'
 import Book from './screens/Book'
@@ -99,6 +101,8 @@ export default function App() {
               <Route path="/onboarding/name" element={<NameSelect />} />
               <Route path="/onboarding/country" element={<CountrySelect />} />
               <Route path="/onboarding/location" element={<LocationSelect />} />
+              <Route path="/address-details" element={<AddressDetails />} />
+              <Route path="/locations" element={<SearchLocation />} />
             </Route>
             <Route element={<AppGuard user={user} />}>
               <Route path="/home" element={<Home />} />

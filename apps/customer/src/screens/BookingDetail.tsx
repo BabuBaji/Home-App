@@ -6,7 +6,7 @@ import { Share } from '@capacitor/share'
 import { Header, Loading, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { pushBackHandler } from '../backStack'
-import { fetchBooking } from '../api'
+import { fetchBooking, fetchInvoiceInfo, type InvoiceInfo } from '../api'
 import type { Booking } from '../types'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -23,6 +23,24 @@ const COMPANY = {
 // Stable transaction reference derived from the booking (no gateway id is persisted).
 const txnRef = (b: Booking) => `TXN-${new Date(b.created).toISOString().slice(0, 10).replace(/-/g, '')}-${String(b.id).padStart(6, '0')}`
 const dt = (s?: string | null) => (s ? new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
+// Indian-system number to words for the invoice's "amount in words" (crore / lakh / thousand).
+function amountInWords(num: number): string {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+  const two = (n: number): string => n < 20 ? ones[n] : (tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : ''))
+  const three = (n: number): string => { const h = Math.floor(n / 100), r = n % 100; return (h ? ones[h] + ' Hundred' + (r ? ' ' : '') : '') + (r ? two(r) : '') }
+  let n = Math.floor(Math.abs(num))
+  if (n === 0) return 'Zero'
+  const cr = Math.floor(n / 10000000); n %= 10000000
+  const la = Math.floor(n / 100000); n %= 100000
+  const th = Math.floor(n / 1000); n %= 1000
+  let out = ''
+  if (cr) out += two(cr) + ' Crore '
+  if (la) out += two(la) + ' Lakh '
+  if (th) out += two(th) + ' Thousand '
+  if (n) out += three(n)
+  return out.trim()
+}
 function actualDuration(b: Booking): string | null {
   if (!b.started_at || !b.completed_at) return null
   const mins = Math.max(0, Math.round((new Date(b.completed_at).getTime() - new Date(b.started_at).getTime()) / 60000))
@@ -39,7 +57,9 @@ export default function BookingDetail() {
   const [err, setErr] = useState(false)
   const [showInvoice, setShowInvoice] = useState(false)
 
+  const [inv, setInv] = useState<InvoiceInfo | null>(null)
   useEffect(() => { fetchBooking(Number(id)).then(setB).catch(() => setErr(true)) }, [id])
+  useEffect(() => { fetchInvoiceInfo().then(setInv).catch(() => {}) }, [])
   // Android hardware back closes the invoice preview instead of navigating away.
   useEffect(() => { if (showInvoice) return pushBackHandler(() => setShowInvoice(false)) }, [showInvoice])
   if (err) return <div className="screen"><Header title="Booking Details" /><div className="state"><div className="ico">⚠️</div><h3>Could not load booking</h3></div></div>
@@ -57,7 +77,17 @@ export default function BookingDetail() {
     const stampText = cancelled ? 'CANCELLED' : paid ? 'PAID' : 'PENDING'
     const genAt = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     const txn = txnRef(b!)
-    const rows = b!.items.map((i) => `<tr><td>${esc(i.name)}${i.durationLabel ? ` <span class="dim">· ${esc(i.durationLabel)}</span>` : ''}</td><td class="r">${money(i.price)}</td></tr>`).join('')
+    const seller = inv || { name: COMPANY.name, gstin: COMPANY.gstin, address: COMPANY.addr, state: 'Telangana', sac: '9987', prefix: 'INV', gstInclusive: false }
+    // Sequential invoice number: <prefix>/<financial year>/<padded booking id> (bookings are consecutive).
+    const fyD = new Date(b!.created); const fyY = fyD.getMonth() >= 3 ? fyD.getFullYear() : fyD.getFullYear() - 1
+    const invNo = `${seller.prefix}/${fyY}-${String((fyY + 1) % 100).padStart(2, '0')}/${String(b!.id).padStart(5, '0')}`
+    // Taxable value reconciles exactly (total − GST − fee); split GST into CGST + SGST (intra-state supply).
+    const taxable = Math.max(0, b!.total - b!.tax - b!.fee)
+    const gRate = taxable > 0 ? Math.round((b!.tax / taxable) * 100) : 0
+    const half = gRate / 2
+    const cgst = Math.round(b!.tax / 2), sgst = b!.tax - cgst
+    const inWords = amountInWords(b!.total)
+    const rows = b!.items.map((i) => `<tr><td>${esc(i.name)}${i.durationLabel ? ` <span class="dim">· ${esc(i.durationLabel)}</span>` : ''}</td><td class="dim">${esc(seller.sac)}</td><td class="r">${money(i.price)}</td></tr>`).join('')
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;color:#1c1830;background:#eceaf2;padding:14px;-webkit-font-smoothing:antialiased}
@@ -88,13 +118,14 @@ td{padding:11px 0;font-size:13px;border-bottom:1px solid #f2f0f8}
 .foot .hr{height:3px;background:linear-gradient(90deg,#6d5cf5,#4840c4);border-radius:3px;margin-bottom:12px}
 </style></head><body><div class="sheet">
 <div class="top"><div><div class="brand">🏠 Home<span>Help</span></div><div class="tagline">One expert who can do it all</div>
-<div class="co">${COMPANY.name} · GSTIN: ${COMPANY.gstin}</div><div class="co">${COMPANY.addr}</div></div>
-<div class="it"><h1>TAX INVOICE</h1><div class="no">${esc(b!.ref)}</div></div></div>
+<div class="co">${esc(seller.name)} · GSTIN: ${esc(seller.gstin)}</div><div class="co">${esc(seller.address)}</div></div>
+<div class="it"><h1>TAX INVOICE</h1><div class="no">${esc(invNo)}</div><div class="no" style="opacity:.7">Ref ${esc(b!.ref)}</div></div></div>
 <div class="meta">
 <div><div class="k">Invoice Date</div><div class="v">${genAt}</div></div>
 <div><div class="k">Transaction ID</div><div class="v">${txn}</div></div>
 <div><div class="k">Booked On</div><div class="v">${dt(b!.created)}</div></div>
 <div><div class="k">Type</div><div class="v">${b!.type === 'instant' ? 'Instant' : 'Scheduled'}</div></div>
+<div><div class="k">Place of Supply</div><div class="v">${esc(seller.state || '—')}</div></div>
 <div><div class="k">Schedule</div><div class="v">${esc(scheduled)}</div></div>
 <div><div class="k">Expert</div><div class="v">${esc(b!.pro_name || 'Not assigned')}${b!.pro_rating ? ` ⭐ ${b!.pro_rating}` : ''}</div></div>
 <div><div class="k">Service Address</div><div class="v">${esc(b!.address || '—')}</div></div>
@@ -103,14 +134,19 @@ ${b!.completed_at ? `<div><div class="k">Completed</div><div class="v">${dt(b!.c
 ${dur ? `<div><div class="k">Duration Worked</div><div class="v">${esc(dur)}</div></div>` : ''}
 </div>
 <div class="body"><div class="stamp"><b>${stampText}</b><small>HomeHelp<br>${esc(genAt.split(',')[0])}</small></div>
-<table><thead><tr><th>Service</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+<table><thead><tr><th>Service</th><th>SAC</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="totals">
 <div class="row"><span>Item total</span><span>${money(b!.subtotal)}</span></div>
-<div class="row"><span>Platform fee</span><span>${money(b!.fee)}</span></div>
-<div class="row"><span>Taxes (GST)</span><span>${money(b!.tax)}</span></div>
 ${b!.discount ? `<div class="row"><span>Discount${b!.coupon ? ` (${esc(b!.coupon)})` : ''}</span><span>-${money(b!.discount)}</span></div>` : ''}
+<div class="row"><span>Taxable value</span><span>${money(taxable)}</span></div>
+<div class="row"><span>CGST @ ${half}%</span><span>${money(cgst)}</span></div>
+<div class="row"><span>SGST @ ${half}%</span><span>${money(sgst)}</span></div>
+<div class="row"><span>Platform fee</span><span>${money(b!.fee)}</span></div>
 <div class="row grand"><span>Total ${paid ? 'Paid' : 'Payable'}</span><span>${money(b!.total)}</span></div>
-</div></div>
+${seller.gstInclusive ? `<div style="font-size:10px;color:#9a97ad;text-align:right;margin-top:4px">GST is included in the item price shown above.</div>` : ''}
+</div>
+<div style="clear:both;font-size:11.5px;color:#4a4660;padding:4px 0 8px;line-height:1.5"><b>Amount in words:</b> Rupees ${esc(inWords)} Only</div>
+</div>
 <div class="pay">Payment: <b>${esc((b!.payment || '').toUpperCase())}</b>
 <span class="badge ${paid ? 'ok' : cancelled ? 'no' : 'pend'}">${esc(b!.payment_status.toUpperCase())}</span>
 <span style="color:#8a86a0">Txn: ${txn}</span>

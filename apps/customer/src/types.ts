@@ -84,16 +84,20 @@ export interface Address {
   label: string
   line: string
   house?: string
+  floor?: string
   apartment?: string
   street?: string
   landmark?: string
   city?: string
   pincode?: string
+  receiver_phone?: string
+  lat?: number
+  lng?: number
   is_default: number
 }
 
 export interface Coupon { code: string; type: string; value: number; min: number; max?: number; label: string }
-export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number; savings?: number; appliedCampaignIds?: (number | string)[] }
+export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number; savings?: number; appliedCampaignIds?: (number | string)[]; peakSurcharge?: number; peakPct?: number; isPeak?: boolean; gstPct?: number; gstIncluded?: boolean }
 
 export type BookingTypeId = 'instant' | 'schedule'
 export type BookingStatus =

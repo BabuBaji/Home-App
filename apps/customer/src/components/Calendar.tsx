@@ -63,3 +63,42 @@ export function isSlotDisabled(date: Date, h: number) {
   const now = new Date()
   return sameDay(date, startOfDay(now)) && h <= now.getHours()
 }
+
+/** A zone's working-hours config (from GET /api/zone-hours). null/is247 → all-day availability. */
+export interface ZoneHours {
+  is247: boolean
+  days: Record<string, { open: string; close: string; closed: boolean; brStart?: string; brEnd?: string }> | null
+  specialHours: { id?: string; label?: string; date?: string; open: string; close: string }[]
+}
+const _minOf = (t?: string) => { const m = /(\d{1,2}):(\d{2})/.exec(t || ''); return m ? +m[1] * 60 + +m[2] : null }
+const _DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']   // getDay() 0=Sun … 6=Sat
+const _ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+/**
+ * Bookable hour-slots for a date, derived from the zone's working hours.
+ * - no hours / not configured → the default 08:00–19:00 grid (backward compatible)
+ * - 24×7 → every hour
+ * - a special-hours entry for that exact date overrides the weekday schedule
+ * - a closed day → [] (caller shows a "closed" message)
+ * The daily break window is removed from the returned hours.
+ */
+export function allowedHours(zh: ZoneHours | null, date: Date): number[] {
+  if (zh && zh.is247) return Array.from({ length: 24 }, (_, i) => i)
+  if (!zh || !zh.days) return SLOT_HOURS   // no zone / no hours configured → default grid
+  const sp = (zh.specialHours || []).find((s) => s.date && s.date === _ymd(date))
+  let openMin: number, closeMin: number, brS: number | null = null, brE: number | null = null
+  if (sp) { openMin = _minOf(sp.open) ?? 0; closeMin = _minOf(sp.close) ?? 1440 }
+  else {
+    const day = zh.days ? zh.days[_DOW[date.getDay()]] : null
+    if (!day || day.closed) return []
+    openMin = _minOf(day.open) ?? 0; closeMin = _minOf(day.close) ?? 1440
+    brS = _minOf(day.brStart); brE = _minOf(day.brEnd)
+  }
+  const out: number[] = []
+  for (let h = 0; h < 24; h++) {
+    const m = h * 60
+    if (m < openMin || m >= closeMin) continue
+    if (brS != null && brE != null && m >= brS && m < brE) continue
+    out.push(h)
+  }
+  return out
+}

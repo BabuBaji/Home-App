@@ -55,7 +55,6 @@ export default function ServiceDetails() {
           <div className="sd2-price-row">
             <span className="sd2-price">₹{s.price}</span>
             {orig && orig > s.price && <span className="sd2-orig">₹{orig}</span>}
-            {s.zoneDiscount ? <span className="sd2-off">{s.zoneDiscount}% OFF</span> : null}
           </div>
 
           {/* rating */}

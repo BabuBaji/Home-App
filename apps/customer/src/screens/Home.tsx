@@ -75,7 +75,7 @@ export default function Home() {
     <div className="screen has-nav">
       {/* fixed top bar — OUTSIDE the scroll area so content never bleeds above it */}
       <div className="sn-top">
-        <button className="sn-loc" onClick={() => nav('/onboarding/location')}>
+        <button className="sn-loc" onClick={() => nav('/locations')}>
           <div className="sn-loc-h">home <ChevronDown size={15} /></div>
           <div className="sn-loc-a"><MapPin size={12} /> {addressLine}</div>
         </button>
@@ -153,7 +153,6 @@ export default function Home() {
             <button key={s.id} className={`sn-tile ${!s.available ? 'off' : ''}`} onClick={() => nav(`/service/${s.id}`)}>
               <div className="sn-thumb">
                 <ServiceThumb service={s} medallion={58} />
-                {s.zoneDiscount ? <span className="sn-off-badge">{s.zoneDiscount}% OFF</span> : null}
                 {!s.available && <span className="sn-soon">Soon</span>}
               </div>
               <span className="sn-tile-name">{s.name}</span>

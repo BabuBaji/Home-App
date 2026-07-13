@@ -50,7 +50,14 @@ const pinQ = (pincode?: string) => (pincode ? `?pincode=${encodeURIComponent(pin
 export const fetchServices = (pincode?: string) => req<{ categories: string[]; services: Service[] }>(`/api/services${pinQ(pincode)}`)
 export const fetchService = (id: string, pincode?: string) => req<ServiceDetail>(`/api/services/${id}${pinQ(pincode)}`)
 export const fetchHome = () => req<HomeContent>('/api/home')
+export interface InvoiceInfo { name: string; gstin: string; address: string; state: string; sac: string; prefix: string; gstInclusive: boolean }
+export const fetchInvoiceInfo = () => req<InvoiceInfo>('/api/invoice-info')
 export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ(pincode)}`)
+import type { ZoneHours } from './components/Calendar'
+// Working hours for the zone serving a pincode — the Schedule screen builds its slot grid from this.
+export const fetchZoneHours = (pincode: string) => req<ZoneHours>(`/api/zone-hours?pincode=${encodeURIComponent(pincode)}`)
+// Google Maps JS key for the interactive map location picker.
+export const fetchMapsKey = () => req<{ key: string }>('/api/maps-key')
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
 
 /* favourites */
@@ -61,13 +68,14 @@ export const removeFavouriteApi = (id: string) => req<string[]>(`/api/favourites
 /* coupons & quote */
 export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
 export const validateCoupon = (code: string, subtotal: number) => req<{ code: string; discount: number; label: string }>('/api/coupons/validate', { method: 'POST', body: JSON.stringify({ code, subtotal }) })
-export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode }) })
+export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string, at?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode, at }) })
 
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
 export const updateMe = (patch: Partial<User>) => req<{ user: User }>('/api/me', { method: 'PATCH', body: JSON.stringify(patch) })
 export const fetchAddresses = () => req<Address[]>('/api/addresses')
 export const addAddressApi = (a: Partial<Address>) => req<Address>('/api/addresses', { method: 'POST', body: JSON.stringify(a) })
+export const updateAddressApi = (id: number, a: Partial<Address>) => req<Address>(`/api/addresses/${id}`, { method: 'PATCH', body: JSON.stringify(a) })
 export const setDefaultAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}/default`, { method: 'PATCH' })
 export const deleteAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}`, { method: 'DELETE' })
 
