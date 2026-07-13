@@ -65,10 +65,13 @@ async function init() {
     `CREATE TABLE IF NOT EXISTS shift_defs (
       id SERIAL PRIMARY KEY, code TEXT UNIQUE, name TEXT NOT NULL,
       start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
-      grace_min INTEGER NOT NULL DEFAULT 10, penalty INTEGER NOT NULL DEFAULT 50,
+      grace_min INTEGER NOT NULL DEFAULT 15, penalty INTEGER NOT NULL DEFAULT 50,
       min_g_weekday INTEGER NOT NULL DEFAULT 850, min_g_weekend INTEGER NOT NULL DEFAULT 950,
       active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0
     )`,
+    // Business rule: check-in later than 15 min after shift start ⇒ ₹50 penalty. Normalize any
+    // rows still on the old 10-min default to 15 (leaves admin-customized values untouched).
+    `UPDATE shift_defs SET grace_min = 15 WHERE grace_min = 10`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS shift_def_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS shift_def_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_minutes INTEGER`,

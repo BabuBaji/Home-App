@@ -240,7 +240,7 @@ data class ShiftDto(
     val start: String = "",
     val end: String = "",
     val hours: Int = 8,
-    val graceMin: Int = 10,
+    val graceMin: Int = 15,
     val penalty: Int = 50,
     val minGuarantee: Int = 0,
 )
