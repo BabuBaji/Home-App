@@ -6,12 +6,15 @@
 // the booking service; catalogue changes are broadcast as `services:update` via the realtime bus.
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+import path from 'path'
+import { fileURLToPath } from 'url'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting, parseToken,
+  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting, parseToken, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
 import {
-  CATEGORIES, SERVICES_SEED, SERVICE_IMAGES, detailsFor, durationsFor,
+  CATEGORIES, SERVICES_SEED, SERVICE_IMAGES, descFor, durationMinFor, SERVICE_DURATION, detailsFor, durationsFor,
   REFERRAL, TRUST_BADGES, COUPONS, applyCoupon, priceBreakdown,
 } from './catalog-data.js'
 import {
@@ -123,14 +126,26 @@ async function init() {
       UNIQUE (customer_id, campaign_id, booking_id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_ccu_cust_camp ON customer_campaign_usage (customer_id, campaign_id)`,
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS duration_min INTEGER`,
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS gst_pct INTEGER`,   // GST rate per service (SAC-based); default 18%
   ])
+  // Seed inserts any missing services and keeps display order in sync, but does NOT overwrite
+  // name/price/icon/category on conflict — those are admin-managed and must survive restarts.
   const up = `INSERT INTO services (id,name,icon,price,category,available,sort)
     VALUES ($1,$2,$3,$4,$5,true,$6)
-    ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, icon=EXCLUDED.icon, price=EXCLUDED.price, category=EXCLUDED.category, sort=EXCLUDED.sort`
+    ON CONFLICT (id) DO UPDATE SET sort=EXCLUDED.sort`
   for (let i = 0; i < SERVICES_SEED.length; i++) {
     const [id, name, icon, price, category] = SERVICES_SEED[i]
     await pool.query(up, [id, name, icon, price, category, i])
   }
+  // Backfill real per-service durations once (idempotent — only rows not yet set; admin edits kept).
+  for (const [id, min] of Object.entries(SERVICE_DURATION)) await pool.query('UPDATE services SET duration_min=$1 WHERE id=$2 AND duration_min IS NULL', [min, id])
+  await pool.query('UPDATE services SET duration_min=60 WHERE duration_min IS NULL')
+  await pool.query('UPDATE services SET gst_pct=18 WHERE gst_pct IS NULL')   // default GST 18% for untagged services
+  // Durations are standardized to the 5 presets (60/90/120/150/180) — snap any stray value to the nearest.
+  await pool.query(`UPDATE services SET duration_min = CASE
+    WHEN duration_min < 75 THEN 60 WHEN duration_min < 105 THEN 90
+    WHEN duration_min < 135 THEN 120 WHEN duration_min < 165 THEN 150 ELSE 180 END`)
   // Seed one launch zone so instant bookings get a zone_id and push auto-assign can fire on a
   // fresh DB. Only when NO zones exist — once an admin creates any zone, zones are the source of
   // truth (see serviceability logic below) and we must not re-inject this one.
@@ -192,7 +207,7 @@ async function seedCampaigns() {
   console.log('[catalog] seeded campaigns (coupons + first-order + zone launch)')
 }
 
-const withImage = (s) => ({ ...s, available: !!s.available, image: SERVICE_IMAGES[s.id] || null })
+const withImage = (s) => ({ ...s, available: !!s.available, image: SERVICE_IMAGES[s.id] || null, desc: descFor(s.id), durationMin: s.duration_min ?? durationMinFor(s.id), gstPct: s.gst_pct ?? 18 })
 
 // Overlay a zone's price/discount onto a raw catalogue service. `price` becomes the discounted
 // "from" price the customer pays; `listPrice` is the pre-discount price (for strikethrough).
@@ -204,11 +219,11 @@ function applyZonePrice(s, zmap = {}) {
   return { ...s, price, listPrice: base, zoneDiscount: off }
 }
 async function allServices(zmap = {}) {
-  const { rows } = await pool.query('SELECT id,name,icon,price,category,available FROM services ORDER BY sort, name')
+  const { rows } = await pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services ORDER BY sort, name')
   return rows.map((s) => withImage(applyZonePrice(s, zmap)))
 }
 async function getService(id, zmap = {}) {
-  const { rows } = await pool.query('SELECT id,name,icon,price,category,available FROM services WHERE id=$1', [id])
+  const { rows } = await pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services WHERE id=$1', [id])
   return rows[0] ? withImage(applyZonePrice(rows[0], zmap)) : null
 }
 async function broadcastServices() {
@@ -224,7 +239,7 @@ const bookingCounts = () => tryGet(BOOKING_URL, '/api/internal/service-booking-c
    existing configured discounts keep working alongside admin-created campaigns. */
 
 const rawServiceRow = async (id) =>
-  (await pool.query('SELECT id,name,icon,price,category,available FROM services WHERE id=$1', [id])).rows[0] || null
+  (await pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services WHERE id=$1', [id])).rows[0] || null
 const zoneBase = (s, zmap) => (zmap[s.id] && zmap[s.id].price > 0 ? zmap[s.id].price : s.price)
 
 // The customer id from a (possibly absent) Bearer token — no network hop.
@@ -272,7 +287,7 @@ async function catalogueFor(zoneId, customerId) {
   const zmap = await zonePriceMap(zoneId)
   const [campaigns, ctx, { rows }] = await Promise.all([
     campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId),
-    pool.query('SELECT id,name,icon,price,category,available FROM services ORDER BY sort, name'),
+    pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services ORDER BY sort, name'),
   ])
   return rows.map((s) => {
     const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: '60m', listPrice: zoneBase(s, zmap) }], campaigns, ctx, applyCoupons: false })
@@ -315,13 +330,41 @@ async function priceCart({ items: rawItems, coupon, zoneId, customerId, applyCou
   const items = r.items.map((it) => ({ id: it.serviceId, name: it.name, icon: it.icon, category: it.category, durationId: it.durationId, durationLabel: it.durationLabel, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount }))
   return { items, subtotal: r.subtotal, discount: r.discount, total: r.total, coupon: r.coupon, savings: r.savings, appliedCampaignIds: r.appliedCampaignIds }
 }
-async function quote({ items, coupon, pincode, customerId = null }) {
+async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const zoneId = await zoneIdForPincode(pincode)
   const q = await priceCart({ items, coupon, zoneId, customerId, applyCoupons: true })
   if (q.error) return { status: 409, body: q }
+  const cfg = await zoneConfigJson(zoneId)
+  // Peak-hour surcharge: a % uplift on the subtotal when the requested slot (`at`, HH:MM/ISO) is in a peak window.
+  const pk = cfg && cfg.peakHours
+  const peak = pk && pk.enabled && Array.isArray(pk.windows) && pk.windows.length ? pk : null
+  const onPeak = isPeakAt(peak, at)
+  const peakPct = onPeak ? (Number(peak.upliftPct) || 0) : 0
+  const peakSurcharge = onPeak ? Math.round(q.subtotal * peakPct / 100) : 0
+  // Convenience fee stays zone-level; GST rate is per-service; inclusive/exclusive display is platform-wide.
+  const ex = (cfg && cfg.pricingExtras) || {}
+  const fee = Math.round(Number(ex.convenienceFee) || 0)
+  const gstIncluded = (await getSetting(ADMIN_URL, 'gst_inclusive', 'true')) === 'true'
+  // Per-item GST at each service's own rate; coupon discount + peak surcharge allocated by price share (GST on the net value).
+  const gmap = {}
+  const ids = q.items.map((it) => it.id)
+  if (ids.length) { const { rows } = await pool.query('SELECT id, COALESCE(gst_pct,18) AS g FROM services WHERE id = ANY($1)', [ids]); for (const r of rows) gmap[r.id] = Number(r.g) }
+  const gross = q.subtotal || 0
+  let taxF = 0
+  for (const it of q.items) {
+    const share = gross > 0 ? (it.price / gross) : (1 / (q.items.length || 1))
+    const net = Math.max(0, it.price - q.discount * share + peakSurcharge * share)
+    const g = gmap[it.id] ?? 18
+    taxF += gstIncluded ? (net - net / (1 + g / 100)) : (net * g / 100)
+  }
+  const tax = Math.round(taxF)
+  const serviceAmount = Math.max(0, q.subtotal - q.discount + peakSurcharge)
+  const total = gstIncluded ? (serviceAmount + fee) : (serviceAmount + tax + fee)
+  const gstBase = gstIncluded ? (serviceAmount - tax) : serviceAmount
+  const gstPct = gstBase > 0 ? Math.round((tax / gstBase) * 100) : 0   // blended rate for display
   return {
     status: 200,
-    body: { items: q.items, coupon: q.coupon, ...priceBreakdown(q.subtotal, q.discount), savings: q.savings, appliedCampaignIds: q.appliedCampaignIds },
+    body: { items: q.items, coupon: q.coupon, subtotal: q.subtotal, discount: q.discount, peakPct, peakSurcharge, isPeak: onPeak, fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds },
   }
 }
 
@@ -344,6 +387,9 @@ async function validateCouponDb(code, subtotal) {
 
 const app = express()
 app.use(express.json())
+// Serve the service images (bundled from services/catalog/public/services). Reached via the
+// gateway because the path starts with /api/services, which routes here.
+app.use('/api/services-media', express.static(path.join(__dirname, 'public/services'), { maxAge: '7d' }))
 app.get('/health', (_q, res) => res.json({ service: 'catalog', ok: true }))
 
 /* ---------- customer catalogue (public) ---------- */
@@ -384,6 +430,16 @@ app.post('/api/coupons/validate', async (req, res) => {
   res.json(r)
 })
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
+// Seller details for the customer tax invoice (from admin settings). Public — GSTIN is on every invoice anyway.
+app.get('/api/invoice-info', async (_q, res) => res.json({
+  name: await getSetting(ADMIN_URL, 'company_name', 'HomeHelp Services Pvt. Ltd.'),
+  gstin: await getSetting(ADMIN_URL, 'company_gstin', ''),
+  address: await getSetting(ADMIN_URL, 'company_address', ''),
+  state: await getSetting(ADMIN_URL, 'company_state', ''),
+  sac: await getSetting(ADMIN_URL, 'service_sac', '9987'),
+  prefix: await getSetting(ADMIN_URL, 'invoice_prefix', 'INV'),
+  gstInclusive: (await getSetting(ADMIN_URL, 'gst_inclusive', 'false')) === 'true',
+}))
 app.get('/api/referral', (_q, res) => res.json(REFERRAL))
 
 // Customer Offers carousel: campaigns with a banner, scoped to the caller's zone + eligibility.
@@ -539,6 +595,75 @@ app.get('/api/geocode', async (req, res) => {
   } catch (e) { console.error('[catalog] geocode:', e.message); res.status(502).json({ error: 'Geocode failed' }) }
 })
 
+// Reverse geocoding: lat/lng -> area, city, pincode. Google (building-accurate, India-biased) when
+// the key is set, else OpenStreetMap/Nominatim. Central path for the app's "use current location"
+// and the auth service's GPS profile-location resolver, so pincodes are accurate everywhere.
+app.get('/api/reverse-geocode', async (req, res) => {
+  const lat = Number(req.query.lat), lng = Number(req.query.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'lat & lng required' })
+  const key = await googleUsable()
+  try {
+    if (key) {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${key}&region=in&language=en`
+      const j = await (await fetch(url)).json()
+      if (j.status === 'OK' && j.results?.length) {
+        // Google returns results most-specific (street) → least (country). Scan ACROSS all of them for
+        // each field so the city comes from the proper "locality" result (e.g. Hyderabad), not a
+        // mandal/district that happens to sit on the most-specific result.
+        const across = (type) => { for (const r of j.results) { const c = (r.address_components || []).find((x) => x.types.includes(type)); if (c) return c.long_name } return '' }
+        const area = across('sublocality_level_1') || across('sublocality') || across('neighborhood')
+        // City: Google's `locality` is sometimes a mandal/neighbourhood (e.g. "Madha"). The formatted
+        // address renders the real city as the segment just before "<State> <PIN>" — use that first.
+        const fparts = (j.results[0].formatted_address || '').split(',').map((s) => s.trim()).filter(Boolean)
+        const pinSeg = fparts.findIndex((p) => /\b\d{6}\b/.test(p))
+        const cityFromFmt = pinSeg > 0 ? fparts[pinSeg - 1] : ''
+        const city = cityFromFmt || across('locality') || across('postal_town') || across('administrative_area_level_2') || across('administrative_area_level_1')
+        const pincode = pinFromComponents(j.results[0].address_components) || across('postal_code')
+        // area + city, de-duped (avoid "Borabanda, Borabanda" when they resolve to the same name)
+        let label = [area, city].filter((v, i, arr) => v && arr.indexOf(v) === i).join(', ') || (j.results[0].formatted_address || '').split(',').slice(0, 2).join(', ').trim()
+        if (label && pincode) label = `${label} - ${pincode}`
+        // Nearest named place → the building/apartment name to pre-fill (what GPS reverse-geocode
+        // can't give). Only accept an actual building/complex — a residential place TYPE, or a name
+        // that reads like a residence — so we never pre-fill the field with a random nearby shop.
+        let name = ''
+        try {
+          const nb = await (await fetch(`https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&rankby=distance&key=${key}`)).json()
+          if (nb.status === 'OK' && nb.results?.length) {
+            const RESID = /residenc|apartment|towers?|heights|enclave|\bvilla|\bhomes?\b|residences|manor|society|flats?|\bblock|\bphase|nagar|colony|estate|court|\bhills?\b|\bpark\b|\bplaza\b/i
+            const isBldg = (r) => (r.types || []).some((t) => ['premise', 'subpremise', 'lodging', 'apartment_complex', 'real_estate_agency'].includes(t))
+            const chosen = nb.results.find((r) => isBldg(r) && RESID.test(String(r.name || ''))) || nb.results.find(isBldg) || nb.results.find((r) => RESID.test(String(r.name || '')))
+            if (chosen && !/^\d+[\w/\s-]*$/.test(String(chosen.name || '').trim())) name = chosen.name || ''
+          }
+        } catch { /* name is optional */ }
+        return res.json({ provider: 'google', label, name, area, city, pincode, sub: j.results[0].formatted_address || '' })
+      }
+      console.warn('[catalog] google reverse:', j.status, j.error_message || '')
+      markGoogleDenied(j.status, j.error_message)
+    }
+    const r = await fetch(`${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
+      { headers: { 'User-Agent': 'HomeHelp/1.0 (reverse)', Accept: 'application/json' } })
+    const j = await r.json()
+    const a = j.address || {}
+    const area = (a.suburb || a.neighbourhood || a.village || a.town || a.city_district || a.locality || '')
+    const city = a.city || a.town || a.state_district || a.state || ''
+    const pincode = a.postcode || null
+    let label = [area, city].filter(Boolean).join(', ') || (j.display_name ? j.display_name.split(',').slice(0, 2).join(', ').trim() : '')
+    if (label && pincode) label = `${label} - ${pincode}`
+    res.json({ provider: 'nominatim', label, area, city, pincode, sub: j.display_name || '' })
+  } catch (e) { console.error('[catalog] reverse:', e.message); res.status(502).json({ error: 'Reverse geocode failed' }) }
+})
+
+// Public: the Maps JS key the customer app loads to render the interactive map picker. Prefers a
+// dedicated client key (maps_client_key) if set — Maps-JS keys are inherently client-exposed, so
+// restrict that one by app/referrer in Google Cloud. Falls back to the server geocoding key.
+app.get('/api/maps-key', async (_q, res) => {
+  const [clientKey, serverKey] = await Promise.all([
+    getSetting(ADMIN_URL, 'maps_client_key', '').catch(() => ''),
+    gkey(),
+  ])
+  res.json({ key: clientKey || serverKey || '' })
+})
+
 // Normalize a pincode blob (comma/space separated) to a clean, de-duped list of 6-digit PINs.
 const normPins = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((s) => s.trim()).filter((s) => /^\d{6}$/.test(s)))]
 
@@ -558,6 +683,23 @@ async function zonePriceMap(zoneId) {
   for (const r of rows) if (r.active !== false) m[r.service_id] = { price: Number(r.price) || 0, discount: Number(r.discount) || 0 }
   return m
 }
+// The zone's config JSON (peakHours + pricingExtras drive charges). Null when no zone.
+async function zoneConfigJson(zoneId) {
+  if (!zoneId) return null
+  const { rows } = await pool.query('SELECT config FROM zones WHERE id=$1', [zoneId])
+  let c = rows[0] && rows[0].config; if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  return c || null
+}
+// The zone's working-hours config for a pincode (null when no zone / not configured → all-day).
+async function zoneWorkingHours(pincode) {
+  const cfg = await zoneConfigJson(await zoneIdForPincode(pincode))
+  return cfg && cfg.workingHours ? cfg.workingHours : null
+}
+const _minOfDay = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null }
+function isPeakAt(peak, at) {
+  const mm = _minOfDay(at); if (mm == null || !peak) return false
+  return peak.windows.some((w) => { const s = _minOfDay(w.start), e = _minOfDay(w.end); return s != null && e != null && mm >= s && mm < e })
+}
 // Mirror the wizard's config (pricing + discounts for the selected services) into zone_pricing,
 // so the customer-facing price resolution has a single authoritative table to read.
 async function syncZonePricing(zoneId, config) {
@@ -565,8 +707,11 @@ async function syncZonePricing(zoneId, config) {
   const pricing = config?.pricing || {}, discounts = config?.discounts || {}
   await pool.query('DELETE FROM zone_pricing WHERE zone_id=$1', [zoneId])
   for (const sid of services) {
+    const price = Math.round(Number(pricing[sid]) || 0)
+    const discount = Math.round(Number(discounts[sid]) || 0)
+    if (price <= 0 && discount <= 0) continue   // no override & no discount → service follows the live catalogue price
     await pool.query('INSERT INTO zone_pricing (zone_id, service_id, price, discount, active) VALUES ($1,$2,$3,$4,true)',
-      [zoneId, sid, Math.round(Number(pricing[sid]) || 0), Math.round(Number(discounts[sid]) || 0)])
+      [zoneId, sid, price, discount])
   }
 }
 
@@ -603,6 +748,16 @@ app.get('/api/zones', async (_q, res) => {
   res.json(rows)
 })
 
+// Public: working-hours config for the zone serving a pincode. The customer app builds its bookable
+// time-slot grid from this; the booking service validates chosen times against it. When there's no
+// zone or it isn't configured, we return is247 (all-day) so the default slot grid is used.
+app.get('/api/zone-hours', async (req, res) => {
+  const wh = await zoneWorkingHours(String(req.query.pincode || '').trim())
+  // No zone / no hours configured → days:null signals "use the default slot grid" (NOT 24×7).
+  if (!wh) return res.json({ is247: false, days: null, specialHours: [] })
+  res.json({ is247: !!wh.is247, days: wh.days || null, specialHours: wh.specialHours || [] })
+})
+
 // Internal: which zone covers a pincode — booking stamps booking.zone_id from this on create.
 app.get('/api/internal/zone-for', internalOnly, async (req, res) => {
   const pincode = String(req.query.pincode || '').trim()
@@ -610,6 +765,14 @@ app.get('/api/internal/zone-for', internalOnly, async (req, res) => {
   const { rows } = await pool.query('SELECT id, name, status, pincodes FROM zones')
   const z = rows.find((r) => normPins(r.pincodes).includes(pincode))
   res.json(z ? { zoneId: z.id, zoneName: z.name, live: z.status === 'live' } : { zoneId: null })
+})
+// Internal: a zone's capacity/SLA config (by zoneId or pincode) — booking & dispatch read this to
+// enforce Max Orders/Day, Max Travel Distance, etc. Returns { zoneId, capacity } (capacity null if unset).
+app.get('/api/internal/zone-capacity', internalOnly, async (req, res) => {
+  let zoneId = req.query.zoneId ? Number(req.query.zoneId) : null
+  if (!zoneId && req.query.pincode) zoneId = await zoneIdForPincode(String(req.query.pincode))
+  const cfg = await zoneConfigJson(zoneId)
+  res.json({ zoneId: zoneId || null, capacity: (cfg && cfg.capacity) || null })
 })
 // Internal: full zone list (for the admin live-ops aggregation).
 app.get('/api/internal/zones', internalOnly, async (_q, res) => {
@@ -657,8 +820,8 @@ app.post('/api/admin/services', adminAuth, requireRole('manager'), async (req, r
   const exists = await pool.query('SELECT 1 FROM services WHERE id=$1', [id])
   if (exists.rowCount) return res.status(409).json({ error: 'Service already exists' })
   const { rows } = await pool.query('SELECT COALESCE(MAX(sort),0)+1 AS s FROM services')
-  await pool.query('INSERT INTO services (id,name,icon,price,category,available,sort) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [id, b.name, b.icon || '🧰', Math.max(0, Number(b.price) || 99), b.category || 'Cleaning', b.available === false ? false : true, rows[0].s])
+  await pool.query('INSERT INTO services (id,name,icon,price,category,available,sort,duration_min,gst_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [id, b.name, b.icon || '🧰', Math.max(0, Number(b.price) || 99), b.category || 'Cleaning', b.available === false ? false : true, rows[0].s, Math.max(5, Number(b.duration_min) || durationMinFor(id)), b.gst_pct != null ? Math.max(0, Number(b.gst_pct)) : 18])
   await broadcastServices()
   res.status(201).json({ ok: true, id })
 })
@@ -667,9 +830,9 @@ app.patch('/api/admin/services/:id', adminAuth, requireRole('manager'), async (r
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Not found' })
   const s = cur.rows[0]
-  await pool.query('UPDATE services SET name=$1, icon=$2, price=$3, category=$4, available=$5 WHERE id=$6', [
+  await pool.query('UPDATE services SET name=$1, icon=$2, price=$3, category=$4, available=$5, duration_min=COALESCE($6,duration_min), gst_pct=COALESCE($7,gst_pct) WHERE id=$8', [
     b.name ?? s.name, b.icon ?? s.icon, b.price ?? s.price, b.category ?? s.category,
-    b.available === undefined ? s.available : !!b.available, req.params.id,
+    b.available === undefined ? s.available : !!b.available, b.duration_min ?? null, b.gst_pct ?? null, req.params.id,
   ])
   await broadcastServices()
   res.json({ ok: true })
@@ -1017,6 +1180,9 @@ app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
   }
   res.json(out)
 })
+
+// Bust the settings cache the instant an admin saves settings (otherwise it lags up to the 15s TTL).
+subscribeEvents(REDIS_URL, 'catalog', (type) => { if (type === 'settings.updated') invalidateSettings() })
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)))

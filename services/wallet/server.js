@@ -9,7 +9,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents,
+  makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
   makeAdminAuth, getSettingInt,
 } from '@homehelp/shared'
 
@@ -310,6 +310,7 @@ app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, asyn
 
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
+  if (type === 'settings.updated') return invalidateSettings()
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
   else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })

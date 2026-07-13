@@ -46,6 +46,11 @@ const DEFAULT_SETTINGS = {
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
   auto_assign: 'true', maintenance_mode: 'false', dispatch_timeout_min: '5',
+  gst_inclusive: 'false',   // GST is added on top of the shown price (exclusive) — the market norm; toggle in Settings
+  // Seller details printed on the customer tax invoice (edit to your registered company).
+  company_name: 'HomeHelp Services Pvt. Ltd.', company_gstin: '36AABCH1234M1Z7',
+  company_address: '3rd Floor, Cyber Heights, HITEC City, Hyderabad, Telangana 500081',
+  company_state: 'Telangana', service_sac: '9987', invoice_prefix: 'INV',
   razorpay_key_id: '', razorpay_key_secret: '', google_maps_key: '', msg91_key: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
