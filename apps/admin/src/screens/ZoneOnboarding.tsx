@@ -175,9 +175,12 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
   }, [zone])
 
   const patch = (u: Partial<ZoneConfig>) => setCfg((c) => ({ ...c, ...u }))
+  // Status on save: "Go Live" publishes; editing an ALREADY-published zone must NOT demote it back to
+  // draft — the Active/Inactive toggle controls live vs paused. Only a never-published draft stays 'planned'.
+  const wasPublished = zone?.status === 'live' || zone?.status === 'paused'
   const body = (goLive = false) => ({
     name: name.trim(), code: code.trim(), city, state,
-    status: goLive ? 'live' : (status === 'Inactive' ? 'paused' : 'planned'),
+    status: goLive ? 'live' : wasPublished ? (status === 'Inactive' ? 'paused' : 'live') : 'planned',
     pincodes: (cfg.coverage?.pincodes || []).join(','),
     slaMinutes: cfg.capacity?.maxEtaMin || null, config: { ...cfg, pricing: {} },  // base always from catalogue; only per-zone discounts are stored
   })
@@ -237,12 +240,19 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
         <div><h2>{name || 'New Zone'} {zone && <span className="zo-chip active" style={{ marginLeft: 6 }}><i />editing</span>}</h2><p>Zone Creation Wizard · step {step + 1} of {STEPS.length}</p></div>
       </div>
       <div className="zo-hsteps">
-        {STEPS.map((s, i) => (
-          <button key={s.key} className={'zo-hstep' + (i === step ? ' on' : '') + (i < step ? ' done' : '')} onClick={() => goToStep(i)}>
-            <span className="n">{i < step ? <Check size={13} /> : i + 1}</span>
-            <span className="t">{s.title}</span>
-          </button>
-        ))}
+        {STEPS.map((s, i) => {
+          const done = i < step, current = i === step
+          return (
+            <button key={s.key} className={'zo-hstep' + (current ? ' current' : '') + (done ? ' done' : '')} onClick={() => goToStep(i)}>
+              <span className="zo-hstep-top">
+                <span className={'zo-hstep-bar' + (i === 0 ? ' hide' : '') + (i <= step ? ' fill' : '')} />
+                <span className="n">{done ? <Check size={14} /> : i + 1}</span>
+                <span className={'zo-hstep-bar' + (i === STEPS.length - 1 ? ' hide' : '') + (i < step ? ' fill' : '')} />
+              </span>
+              <span className="t">{s.title}</span>
+            </button>
+          )
+        })}
       </div>
       <div className="zo-wiz2">
         <div>

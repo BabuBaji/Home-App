@@ -100,16 +100,20 @@
 .zo-wrap { min-height: 420px; }
 
 /* ── horizontal stepper (top) ── */
-.zo-hsteps { display: flex; gap: 6px; background: #fff; border: 1px solid var(--zline); border-radius: 16px; padding: 10px; margin-bottom: 18px; overflow-x: auto; box-shadow: 0 2px 8px rgba(16,24,40,.05); scrollbar-width: thin; }
-.zo-hstep { display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; border-radius: 11px; border: none; background: transparent; cursor: pointer; white-space: nowrap; transition: .13s; flex: none; }
-.zo-hstep:hover { background: #F5F3FF; }
-.zo-hstep.on { background: var(--zg); box-shadow: 0 8px 18px rgba(79,70,229,.3); }
-.zo-hstep .n { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: #F1F0FB; color: var(--zi); flex: none; }
-.zo-hstep.on .n { background: rgba(255,255,255,.22); color: #fff; }
-.zo-hstep.done .n { background: #DCFCE7; color: #15803D; }
-.zo-hstep .t { font-size: 12.5px; font-weight: 700; color: var(--zink); }
-.zo-hstep.on .t { color: #fff; }
-.zo-hstep.done .t { color: var(--zmut); }
+/* fit-to-screen progress stepper: 9 evenly-spaced nodes, connector fills in the theme colour */
+.zo-hsteps { display: flex; background: #fff; border: 1px solid var(--zline); border-radius: 16px; padding: 12px 8px 10px; margin-bottom: 18px; box-shadow: 0 2px 8px rgba(16,24,40,.05); }
+.zo-hstep { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 0; border: none; background: transparent; cursor: pointer; }
+.zo-hstep-top { display: flex; align-items: center; width: 100%; }
+.zo-hstep-bar { flex: 1; height: 3px; background: #E7E5F0; border-radius: 2px; transition: background .25s; }
+.zo-hstep-bar.fill { background: var(--zg); }        /* completed segment → theme colour */
+.zo-hstep-bar.hide { visibility: hidden; }
+.zo-hstep .n { width: 27px; height: 27px; border-radius: 50%; margin: 0 5px; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: #F1F0FB; color: var(--zi); flex: none; transition: .2s; }
+.zo-hstep.done .n { background: var(--zg); color: #fff; }                        /* completed → theme fill + check */
+.zo-hstep.current .n { background: var(--zg); color: #fff; box-shadow: 0 4px 12px rgba(79,70,229,.4); transform: scale(1.06); }
+.zo-hstep .t { font-size: 10.5px; font-weight: 700; color: var(--zmut); text-align: center; line-height: 1.22; text-wrap: balance; }
+.zo-hstep.done .t, .zo-hstep.current .t { color: var(--zink); }
+.zo-hstep:hover .n { filter: brightness(.97); }
+@media (max-width: 900px) { .zo-hstep .t { font-size: 9.5px; } .zo-hstep .n { width: 24px; height: 24px; } }
 
 /* ── wizard body + summary rail ── */
 .zo-wiz2 { display: grid; grid-template-columns: 1fr 300px; gap: 18px; align-items: start; }
