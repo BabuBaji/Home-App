@@ -96,6 +96,11 @@ export default function SettingsScreen() {
           <Field label="Platform Tagline"><input disabled={!editable} value={s.platform_tagline || ''} onChange={(e) => set('platform_tagline', e.target.value)} placeholder="We make home services simple" /></Field>
           <Field label="Support Email"><input disabled={!editable} value={s.support_email || ''} onChange={(e) => set('support_email', e.target.value)} /></Field>
           <Field label="Support Phone"><input disabled={!editable} value={s.support_phone || ''} onChange={(e) => set('support_phone', e.target.value)} /></Field>
+          <Field label="Company Legal Name (tax invoice)"><input disabled={!editable} value={s.company_name || ''} onChange={(e) => set('company_name', e.target.value)} placeholder="HomeHelp Services Pvt. Ltd." /></Field>
+          <Field label="Company GSTIN"><input disabled={!editable} value={s.company_gstin || ''} onChange={(e) => set('company_gstin', e.target.value)} placeholder="36AABCH1234M1Z7" /></Field>
+          <Field label="Registered Address (invoice)"><input disabled={!editable} value={s.company_address || ''} onChange={(e) => set('company_address', e.target.value)} placeholder="Street, City, State, PIN" /></Field>
+          <Field label="State — Place of Supply"><input disabled={!editable} value={s.company_state || ''} onChange={(e) => set('company_state', e.target.value)} placeholder="Telangana" /></Field>
+          <Field label="Service SAC Code"><input disabled={!editable} value={s.service_sac || ''} onChange={(e) => set('service_sac', e.target.value)} placeholder="9987" /></Field>
         </div>
 
         {/* Default Currency & Time */}
@@ -138,6 +143,7 @@ export default function SettingsScreen() {
           <ToggleRow label="Maintenance Mode" on={s.maintenance_mode === 'true'} onClick={() => toggle('maintenance_mode')} disabled={!editable} />
           <ToggleRow label="Enable Promo Codes" on={s.enable_promo !== 'false'} onClick={() => toggle('enable_promo')} disabled={!editable} />
           <ToggleRow label="Enable Review & Ratings" on={s.enable_reviews !== 'false'} onClick={() => toggle('enable_reviews')} disabled={!editable} />
+          <ToggleRow label="Show GST-inclusive prices to customers" on={s.gst_inclusive !== 'false'} onClick={() => toggle('gst_inclusive')} disabled={!editable} />
         </div>
 
         {/* Session & Security */}

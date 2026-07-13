@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers } from '../api'
 import type { AdminBooking } from '../types'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
+import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
 import { useStore, can } from '../store'
 
 const ONGOING = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
@@ -31,6 +31,7 @@ const paymentTone = (p: string): string => {
 export default function Bookings() {
   const { admin } = useStore()
   const toast = useToast()
+  const confirm = useConfirm()
   const [rows, setRows] = useState<AdminBooking[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -123,7 +124,7 @@ export default function Bookings() {
 
   const assignWorker = () => { if (!assignTo) { toast('Select a worker', 'err'); return } doUpdate({ pro_name: assignTo }, 'Worker assigned') }
   const applyStatus = () => { if (!changeStatus) { toast('Select a status', 'err'); return } doUpdate({ status: changeStatus }, 'Status updated') }
-  const cancelBooking = () => { if (!window.confirm('Cancel this booking?')) return; doUpdate({ status: 'cancelled' }, 'Booking cancelled') }
+  const cancelBooking = async () => { if (!(await confirm({ title: 'Cancel this booking?', message: 'The customer will be notified and refunded per policy.', confirmLabel: 'Cancel booking', cancelLabel: 'Keep', danger: true }))) return; doUpdate({ status: 'cancelled' }, 'Booking cancelled') }
 
   return (
     <div className="grid" style={{ gap: 16 }}>

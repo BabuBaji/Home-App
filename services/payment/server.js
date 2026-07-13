@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import {
-  makePool, migrate, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents,
+  makePool, migrate, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents, invalidateSettings,
   publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
 
@@ -236,6 +236,7 @@ app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => {
 
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'payment', async (type, data) => {
+  if (type === 'settings.updated') return invalidateSettings()
   if (type === 'payment.succeeded') await recordPayment(data)
   else if (type === 'booking.completed' && data.booking?.worker_id) {
     const b = data.booking

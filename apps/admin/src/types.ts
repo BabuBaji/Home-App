@@ -26,7 +26,7 @@ export interface Customer {
 export interface Worker {
   id: number; name: string; phone?: string; email?: string; city?: string; zone_id?: number | null
   services: string[]; avatar?: string | null; status: string; verified: boolean
-  rating: number; jobs: number; earnings: number; joined: string
+  rating: number; jobs: number; earnings: number; joined: string; designation?: string
 }
 
 export interface AdminBooking {
@@ -37,7 +37,7 @@ export interface AdminBooking {
 
 export interface AdminService {
   id: string; name: string; icon: string; price: number; category: string
-  available: boolean; sort: number; bookings: number
+  available: boolean; sort: number; bookings: number; durationMin?: number; gstPct?: number
 }
 
 export interface Complaint {

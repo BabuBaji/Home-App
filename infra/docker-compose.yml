@@ -10,9 +10,10 @@
 # Build context is the REPO ROOT (..) so each image can bundle services/shared.
 services:
   # ============================ infrastructure ============================
+    # host port remapped 6379->6380 to avoid clashing with another local Redis; services still use redis:6379 internally
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    ports: ["6380:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -23,14 +24,14 @@ services:
   catalog-db:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: catalog }
-    ports: ["5432:5432"]
+    ports: ["5442:5432"]  # host port remapped 5432->5442 to avoid clashing with another local Postgres
     volumes: ["catalog-pgdata:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d catalog"], interval: 5s, timeout: 3s, retries: 10 }
 
   auth-db:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: "${POSTGRES_USER}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: auth }
-    ports: ["5433:5432"]
+    ports: ["5443:5432"]   # host 5433 is taken by another project (dograh-postgres); internal DNS auth-db:5432 unchanged
     volumes: ["auth-pgdata:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d auth"], interval: 5s, timeout: 3s, retries: 10 }
 
@@ -91,6 +92,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@auth-db:5432/auth
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      CATALOG_URL: http://catalog:4001
       DEV_OTP: ${DEV_OTP}
     ports: ["4002:4002"]
     depends_on:
@@ -106,6 +108,7 @@ services:
       INTERNAL_KEY: ${INTERNAL_KEY}
       ADMIN_URL: http://admin:4010
       BOOKING_URL: http://booking:4006
+      WORKER_URL: http://worker:4004
     ports: ["4001:4001"]
     depends_on:
       catalog-db: { condition: service_healthy }
@@ -139,6 +142,7 @@ services:
       INTERNAL_KEY: ${INTERNAL_KEY}
       WORKER_URL: http://worker:4004
       BOOKING_URL: http://booking:4006
+      CATALOG_URL: http://catalog:4001
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
     ports: ["4007:4007"]

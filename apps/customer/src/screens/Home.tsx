@@ -5,8 +5,10 @@ import { Share } from '@capacitor/share'
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { ServiceThumb } from '../serviceArt'
-import { fetchServices, fetchBookings, fetchHome, fetchMe, fetchFavourites, addFavouriteApi, removeFavouriteApi } from '../api'
-import type { Service, Booking, HomeContent, Address } from '../types'
+import { isZoneOpenNow, todayHoursLabel } from '../components/Calendar'
+import ComingSoon from './ComingSoon'
+import { fetchServices, fetchBookings, fetchHome, fetchMe, fetchFavourites, addFavouriteApi, removeFavouriteApi, fetchOffers } from '../api'
+import type { Service, Booking, HomeContent, Address, Offer } from '../types'
 
 const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 // Where friends get the app — edit to your Play Store / website link.
@@ -17,7 +19,7 @@ const CAT_ICON: Record<string, typeof LayoutGrid> = { All: LayoutGrid, Cleaning:
 export default function Home() {
   const nav = useNavigate()
   const toast = useToast()
-  const { user, setBookingType } = useStore()
+  const { user, setBookingType, pincode, serviceable, zoneHours } = useStore()
   const [services, setServices] = useState<Service[]>([])
   const [cats, setCats] = useState<string[]>([])
   const [cat, setCat] = useState('All')
@@ -26,17 +28,24 @@ export default function Home() {
   const [home, setHome] = useState<HomeContent | null>(null)
   const [addr, setAddr] = useState<Address | null>(null)
   const [favs, setFavs] = useState<string[]>([])
+  const [offers, setOffers] = useState<Offer[]>([])
 
   useEffect(() => {
-    fetchServices().then((c) => { setServices(c.services); setCats(c.categories) }).catch(() => {})
     fetchBookings().then((bs) => setActive(bs.find((b) => ACTIVE.includes(b.status)) || null)).catch(() => {})
     fetchHome().then(setHome).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
     fetchFavourites().then(setFavs).catch(() => {})
   }, [])
+  // Re-fetch the catalogue + zone offers whenever the pincode resolves, so both reflect the zone.
+  useEffect(() => {
+    fetchServices(pincode || undefined).then((c) => { setServices(c.services); setCats(c.categories) }).catch(() => {})
+    fetchOffers(pincode || undefined).then(setOffers).catch(() => {})
+  }, [pincode])
 
   const addressLine = addr?.line || user?.location || user?.city || 'Set your location'
   const eta = home?.instantEta ?? 5
+  const openNow = isZoneOpenNow(zoneHours)          // zone open at this moment?
+  const hoursLabel = todayHoursLabel(zoneHours)     // "6:00 AM – 9:00 PM"
 
   const filtered = useMemo(() => services.filter((s) =>
     (cat === 'All' || (cat === '♥ Saved' ? favs.includes(s.id) : s.category === cat))
@@ -53,7 +62,19 @@ export default function Home() {
     }
   }
 
+  // Block booking when the current location isn't in a live service zone.
+  function guardServiceable(): boolean {
+    if (serviceable === false) { toast("We're not in your area yet — coming soon! 🚧"); return false }
+    return true
+  }
   function startBooking(mode: 'instant' | 'schedule') {
+    if (!guardServiceable()) return
+    // Instant needs the zone open right now; after hours, steer them to Schedule.
+    if (mode === 'instant' && !isZoneOpenNow(zoneHours)) {
+      const lbl = todayHoursLabel(zoneHours)
+      toast(`We're closed right now${lbl ? ` · Hours ${lbl}` : ''}. Please schedule for later. 🌙`)
+      return
+    }
     setBookingType(mode)
     const first = services.find((s) => s.available) || services[0]
     if (first) nav(`/service/${first.id}`)
@@ -70,7 +91,7 @@ export default function Home() {
     <div className="screen has-nav">
       {/* fixed top bar — OUTSIDE the scroll area so content never bleeds above it */}
       <div className="sn-top">
-        <button className="sn-loc" onClick={() => nav('/onboarding/location')}>
+        <button className="sn-loc" onClick={() => nav('/locations')}>
           <div className="sn-loc-h">home <ChevronDown size={15} /></div>
           <div className="sn-loc-a"><MapPin size={12} /> {addressLine}</div>
         </button>
@@ -82,6 +103,7 @@ export default function Home() {
       </div>
 
       <div className="content sn-home">
+        {serviceable === false ? <ComingSoon /> : (<>
         {/* hero: schedule + instant */}
         <div className="sn-hero">
           <button className="sn-hero-card schedule" onClick={() => startBooking('schedule')}>
@@ -89,10 +111,10 @@ export default function Home() {
             <div className="sn-hc-title">Schedule <span className="chev">›</span></div>
             <div className="sn-hc-sub">Pick your time</div>
           </button>
-          <button className="sn-hero-card instant" onClick={() => startBooking('instant')}>
-            <span className="sn-eta"><Zap size={13} /> {eta} mins</span>
+          <button className={`sn-hero-card instant ${openNow ? '' : 'closed'}`} onClick={() => startBooking('instant')}>
+            <span className="sn-eta">{openNow ? <><Zap size={13} /> {eta} mins</> : 'Closed'}</span>
             <div className="sn-hc-title">Instant <span className="chev">›</span></div>
-            <div className="sn-hc-sub">Get now</div>
+            <div className="sn-hc-sub">{openNow ? 'Get now' : (hoursLabel ? `Opens ${hoursLabel.split(' – ')[0]}` : 'Closed now')}</div>
             <img className="sn-expert" alt="" loading="lazy" decoding="async" src="/expert.jpg"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
           </button>
@@ -107,6 +129,23 @@ export default function Home() {
               <div className="ac-d">{active.items.map((i) => i.name).join(', ')}</div>
             </div>
             <span className="ac-go">Track ›</span>
+          </div>
+        )}
+
+        {/* zone offers carousel */}
+        {offers.length > 0 && (
+          <div className="sn-offers">
+            {offers.map((o) => (
+              <button key={o.id} className={`sn-offer ${o.type}`}
+                onClick={() => { if (o.serviceId) nav(`/service/${o.serviceId}`) }}>
+                <span className="sn-offer-badge">{o.badge}</span>
+                <div className="sn-offer-body">
+                  <div className="sn-offer-t">{o.title}</div>
+                  {o.subtitle && <div className="sn-offer-s">{o.subtitle}</div>}
+                  {o.code && <span className="sn-offer-code">Code · {o.code}</span>}
+                </div>
+              </button>
+            ))}
           </div>
         )}
 
@@ -128,7 +167,7 @@ export default function Home() {
         {/* service photo grid */}
         <div className="sn-grid">
           {filtered.map((s) => (
-            <button key={s.id} className={`sn-tile ${!s.available ? 'off' : ''}`} onClick={() => nav(`/service/${s.id}`)}>
+            <button key={s.id} className={`sn-tile ${!s.available ? 'off' : ''}`} onClick={() => { if (guardServiceable()) nav(`/service/${s.id}`) }}>
               <div className="sn-thumb">
                 <ServiceThumb service={s} medallion={58} />
                 {!s.available && <span className="sn-soon">Soon</span>}
@@ -196,6 +235,7 @@ export default function Home() {
             <circle cx="88" cy="26" r="1.6" fill="#c9c2f7" />
           </svg>
         </div>
+        </>)}
       </div>
       <BottomNav />
     </div>

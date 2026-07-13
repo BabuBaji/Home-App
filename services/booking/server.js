@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly,
-  internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents,
+  internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
 import { quoteCancellation, scheduledStartMs } from './cancellation.js'
 
@@ -136,10 +136,48 @@ async function anyActiveWorker(serviceNames) {
   return r ? !!r.available : true // default true if worker service is unavailable
 }
 
-// Fixed hourly slots — must match the customer app's Calendar (08:00 AM … 07:00 PM).
+// Default hourly slots (08:00 AM … 07:00 PM) — used when a pincode has no zone / no working-hours
+// config. When the zone defines working hours, the bookable grid is derived from them instead.
 const SLOT_HOURS = Array.from({ length: 12 }, (_, i) => 8 + i)
 const slotLabel = (h) => `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:00 ${h >= 12 ? 'PM' : 'AM'}`
 const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+
+// ── zone working-hours enforcement ──
+const _minOf = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null }
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']   // JS getDay() 0=Sun … 6=Sat
+// Resolve a date's effective open window from a zone's working-hours config.
+// A special-hours entry for that exact date overrides the weekday schedule.
+function dayWindow(hours, dateStr) {
+  if (!hours || hours.is247 || !hours.days) return { open247: true, closed: false }   // no config → unrestricted
+  const sp = (hours.specialHours || []).find((s) => s.date && s.date === dateStr)
+  if (sp) return { closed: false, openMin: _minOf(sp.open) ?? 0, closeMin: _minOf(sp.close) ?? 1440, brStart: null, brEnd: null }
+  // Parse the weekday — accept ISO ("2026-07-13") and the app's display format ("13 Jul 2026").
+  let d = new Date(dateStr + 'T00:00:00')
+  if (isNaN(d.getTime())) d = new Date(dateStr)
+  const day = hours.days && hours.days[DOW[d.getDay()]]
+  if (!day || day.closed) return { closed: true }
+  return { closed: false, openMin: _minOf(day.open) ?? 0, closeMin: _minOf(day.close) ?? 1440, brStart: _minOf(day.brStart), brEnd: _minOf(day.brEnd) }
+}
+// Is a time-of-day (minutes) inside the day's open window and not on the break?
+function withinWindow(win, tMin) {
+  if (!win || win.open247) return true
+  if (win.closed || tMin == null) return win.closed ? false : true
+  if (tMin < win.openMin || tMin >= win.closeMin) return false
+  if (win.brStart != null && win.brEnd != null && tMin >= win.brStart && tMin < win.brEnd) return false
+  return true
+}
+// Bookable hour-slots for a date given a zone's working hours.
+//  • explicit 24×7 → every hour   • no zone / no hours configured → the default grid
+//  • configured weekday → open→close minus break   • closed weekday → []
+function slotHoursFor(hours, dateStr) {
+  if (hours && hours.is247) return Array.from({ length: 24 }, (_, i) => i)
+  if (!hours || !hours.days) return SLOT_HOURS
+  const win = dayWindow(hours, dateStr)
+  if (win.closed) return []
+  const out = []
+  for (let h = 0; h < 24; h++) if (withinWindow(win, h * 60)) out.push(h)
+  return out
+}
 
 // Capacity check for a scheduled slot: pincode served + at least one qualified worker not already
 // booked at that date/slot. Workers being online *now* doesn't matter for a future slot.
@@ -204,17 +242,44 @@ app.get('/api/slots', auth, async (req, res) => {
   const workerCount = wa.count ?? 0
   const rows = date ? (await pool.query(`SELECT time, count(*)::int n FROM bookings WHERE date=$1 AND status = ANY($2) GROUP BY time`, [date, ACTIVE_STATES])).rows : []
   const booked = Object.fromEntries(rows.map((r) => [r.time, r.n]))
-  const slots = SLOT_HOURS.map((h) => { const time = slotLabel(h); const m = booked[time] || 0; return { hour: h, time, booked: m, available: !!srv.serviceable && workerCount > m } })
-  res.json({ serviceable: !!srv.serviceable, workerCount, slots })
+  // Bookable hours come from the serving zone's working hours (falls back to the default grid).
+  const hours = pincode ? await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(pincode)}`, null) : null
+  const hourList = slotHoursFor(hours, date || '')
+  const slots = hourList.map((h) => { const time = slotLabel(h); const m = booked[time] || 0; return { hour: h, time, booked: m, available: !!srv.serviceable && workerCount > m } })
+  const closed = !!hours && !hours.is247 && hourList.length === 0
+  res.json({ serviceable: !!srv.serviceable, workerCount, slots, closed })
 })
 
 app.post('/api/bookings', auth, async (req, res) => {
   const body = req.body || {}
   // Authoritative pricing from the catalog service.
   let priced
-  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon }) }
+  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode: body.pincode, customerId: req.user.id, at: body.at }) }
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
+
+  // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
+  // before any wallet debit). Uses the chosen date for scheduled bookings, else today for instant.
+  if (body.pincode) {
+    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
+    if (hours && !hours.is247) {
+      const dateStr = body.date || nowIso().slice(0, 10)
+      const win = dayWindow(hours, dateStr)
+      if (win.closed) return res.status(422).json({ error: 'This area is closed on the selected day. Please pick another date.' })
+      const tMin = _minOf(body.at)   // 24h "HH:MM" — scheduled slot or the instant-now time
+      if (tMin != null && !withinWindow(win, tMin)) return res.status(422).json({ error: 'That time is outside working hours for this area. Please choose a slot within working hours.' })
+    }
+  }
+
+  // Daily capacity gate: reject once the zone hits its configured Max Orders/Day (excludes cancellations).
+  if (body.pincode) {
+    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
+    const maxOrders = Number(zc?.capacity?.maxOrders) || 0
+    if (zc?.zoneId && maxOrders > 0) {
+      const { rows } = await pool.query(`SELECT count(*)::int n FROM bookings WHERE zone_id=$1 AND created::date = CURRENT_DATE AND status <> 'cancelled'`, [zc.zoneId])
+      if (rows[0].n >= maxOrders) return res.status(422).json({ error: 'This area has reached its maximum bookings for today. Please try again tomorrow.' })
+    }
+  }
 
   // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
   if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
@@ -240,7 +305,8 @@ app.post('/api/bookings', auth, async (req, res) => {
   }
 
   // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops).
-  const pincode = String(body.pincode || '').trim()
+  // Prefer an explicit pincode; else pull a 6-digit PIN out of the address text.
+  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
   let zoneId = null
   if (pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null); zoneId = zr?.zoneId ?? null }
 
@@ -253,6 +319,14 @@ app.post('/api/bookings', auth, async (req, res) => {
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
       body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
   const booking = rowTo(ins.rows[0])
+
+  // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
+  // usage-write failure must never fail the booking.
+  if ((priced.appliedCampaignIds?.length) || priced.coupon) {
+    internalPost(CATALOG_URL, '/api/internal/campaign-usage', {
+      customerId: req.user.id, bookingId: booking.id, campaignIds: priced.appliedCampaignIds || [], couponCode: priced.coupon || null,
+    }).catch(() => {})
+  }
 
   // Events: dispatch starts matching; notification logs; payment records the collected money.
   publishEvent(REDIS_URL, 'booking.created', { booking, serviceNames: priced.items.map((i) => i.name) })
@@ -406,6 +480,64 @@ app.get('/api/internal/service-booking-counts', internalOnly, async (_q, res) =>
   for (const r of rows) { let items = []; try { items = JSON.parse(r.items) } catch {} for (const it of items) out[it.id] = (out[it.id] || 0) + 1 }
   res.json(out)
 })
+// Per-customer order signals for the pricing engine's customer-eligibility campaigns
+// (first_order / second_order / winback / vip).
+app.get('/api/internal/customer-stats', internalOnly, async (req, res) => {
+  const uid = Number(req.query.user_id)
+  if (!Number.isFinite(uid)) return res.json({ completedOrders: 0, totalOrders: 0, lastCompletedAt: null })
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) FILTER (WHERE status='completed')::int completed,
+            COUNT(*)::int total,
+            MAX(completed_at) FILTER (WHERE status='completed') AS last_completed
+       FROM bookings WHERE user_id=$1`, [uid])
+  const r = rows[0] || {}
+  res.json({ completedOrders: r.completed || 0, totalOrders: r.total || 0, lastCompletedAt: r.last_completed || null })
+})
+// Real per-zone booking aggregates (today + lifetime) for the admin zone dashboards.
+app.get('/api/internal/zone-metrics', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(zone_id,0) AS zone_id,
+       COUNT(*) FILTER (WHERE created::date = CURRENT_DATE)::int AS orders,
+       COALESCE(SUM(total) FILTER (WHERE status='completed' AND created::date = CURRENT_DATE),0)::int AS revenue,
+       COUNT(*) FILTER (WHERE status='completed' AND created::date = CURRENT_DATE)::int AS completed,
+       COUNT(*) FILTER (WHERE status='cancelled' AND created::date = CURRENT_DATE)::int AS cancelled,
+       COUNT(*) FILTER (WHERE status = ANY($1) AND created::date = CURRENT_DATE)::int AS pending,
+       COUNT(*)::int AS orders_total,
+       COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue_total,
+       COALESCE(ROUND(AVG(rating) FILTER (WHERE rating IS NOT NULL), 1), 0)::float AS rating
+     FROM bookings GROUP BY COALESCE(zone_id,0)`, [ACTIVE_STATES])
+  res.json(rows)
+})
+// Real operational chart data (7-day trend, 14-day revenue, top services, avg rating).
+// Optional ?zone_id= scopes everything to one zone; otherwise global across zones.
+app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
+  const zoneId = req.query.zone_id != null && req.query.zone_id !== '' ? Number(req.query.zone_id) : null
+  const zw = zoneId != null ? ' AND zone_id=$1' : ''
+  const params = zoneId != null ? [zoneId] : []
+  const trend = (await pool.query(
+    `SELECT to_char(created::date, 'Dy') AS day, created::date AS d, COUNT(*)::int AS bookings,
+       COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue
+     FROM bookings WHERE created >= CURRENT_DATE - INTERVAL '6 days'${zw}
+     GROUP BY created::date ORDER BY created::date`, params)).rows
+  const revenueDaily = (await pool.query(
+    `SELECT to_char(created::date, 'DD Mon') AS d, COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS rev
+     FROM bookings WHERE created >= CURRENT_DATE - INTERVAL '13 days'${zw}
+     GROUP BY created::date ORDER BY created::date`, params)).rows
+  const rating = (await pool.query(`SELECT COALESCE(ROUND(AVG(rating), 1), 0)::float AS r FROM bookings WHERE rating IS NOT NULL${zw}`, params)).rows[0].r
+  const items = (await pool.query(`SELECT items FROM bookings WHERE 1=1${zw}`, params)).rows
+  const counts = {}
+  for (const row of items) { let arr = []; try { arr = JSON.parse(row.items) } catch { /* ignore */ } for (const it of arr) counts[it.id] = (counts[it.id] || 0) + 1 }
+  const topServices = Object.entries(counts).map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count)
+  // Real recent-bookings feed (latest 6).
+  const recentRows = (await pool.query(
+    `SELECT ref, type, items, status, zone_id, to_char(created, 'HH12:MI AM') AS time
+     FROM bookings WHERE 1=1${zw} ORDER BY created DESC LIMIT 6`, params)).rows
+  const recent = recentRows.map((r) => {
+    let svc = r.type; try { const arr = JSON.parse(r.items); if (arr[0] && arr[0].name) svc = arr[0].name } catch { /* ignore */ }
+    return { ref: r.ref, service: svc, status: r.status, time: r.time, zoneId: r.zone_id }
+  })
+  res.json({ trend, revenueDaily, rating, topServices, recent })
+})
 app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json(await getBooking(Number(req.params.id))))
 // Dispatch: the open job pool (unclaimed confirmed bookings).
 app.get('/api/internal/pool', internalOnly, async (_q, res) => {
@@ -476,6 +608,7 @@ app.post('/api/internal/bookings/:id/work-photo', internalOnly, async (req, res)
 
 /* ================= event consumers ================= */
 subscribeEvents(REDIS_URL, 'booking', async (type, data) => {
+  if (type === 'settings.updated') return invalidateSettings()
   if (type === 'payment.succeeded' && data.bookingId) {
     await pool.query("UPDATE bookings SET payment_status='paid' WHERE id=$1 AND payment_status<>'paid'", [data.bookingId])
     await emitBookingUpdate(data.bookingId)
@@ -491,19 +624,23 @@ const AA_ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 async function autoAssignSweep() {
   try {
     if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
-    const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND zone_id IS NOT NULL ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
+    const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
     if (!open.length) return
     const busy = new Set((await pool.query('SELECT DISTINCT worker_id FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1)', [AA_ACTIVE])).rows.map((r) => r.worker_id))
     for (const b of open) {
+      // Resolve the zone from the pincode if it wasn't stamped at create time (or the zone was created later).
+      let zoneId = b.zone_id
+      if (!zoneId && b.pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(b.pincode)}`, null); if (zr?.zoneId && zr.live) zoneId = zr.zoneId }
+      if (!zoneId) continue
       const names = (b.items || []).map((i) => i.name).join(',')
-      const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${b.zone_id}&services=${encodeURIComponent(names)}`, { workers: [] })
+      const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zoneId}&services=${encodeURIComponent(names)}`, { workers: [] })
       const cands = (feed.workers || []).filter((w) => w.available && !busy.has(w.id))
       if (!cands.length) continue
       if (b.cust_lat != null) cands.sort((a, c) => ((distanceKm(a.last?.lat, a.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity) - ((distanceKm(c.last?.lat, c.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity))
       const w = cands[0]
       const upd = await pool.query(
-        "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned' WHERE id=$4 AND worker_id IS NULL AND status='confirmed' RETURNING *",
-        [w.id, w.name || 'Expert', w.rating || 4.8, b.id])
+        "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, zone_id=$4, status='worker_assigned' WHERE id=$5 AND worker_id IS NULL AND status='confirmed' RETURNING *",
+        [w.id, w.name || 'Expert', w.rating || 4.8, zoneId, b.id])
       if (!upd.rowCount) continue
       busy.add(w.id)
       await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})

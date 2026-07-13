@@ -127,6 +127,10 @@ export const updateBooking = (id: number, body: Record<string, unknown>) => req<
 
 /* services */
 export const fetchServices = () => req<AdminService[]>('/services')
+// Platform GST mode + seller info (public catalog endpoint, not under /api/admin) — used by the
+// zone pricing wizard to preview GST amounts correctly for inclusive vs exclusive pricing.
+export interface InvoiceInfo { name: string; gstin: string; address: string; state: string; sac: string; prefix: string; gstInclusive: boolean }
+export const fetchInvoiceInfo = () => fetch(API_BASE + '/api/invoice-info', { headers: token ? { Authorization: 'Bearer ' + token } : {} }).then((r) => r.json() as Promise<InvoiceInfo>)
 export const createService = (body: Record<string, unknown>) => req<{ ok: boolean; id: string }>('/services', post('', body))
 export const updateService = (id: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/services/${id}`, patch(body))
 export const deleteService = (id: string) => req<{ ok: boolean }>(`/services/${id}`, { method: 'DELETE' })
@@ -172,9 +176,54 @@ export const createSite = (body: Record<string, unknown>) => req<{ ok: boolean; 
 export const updateSite = (id: number, body: Partial<Site>) => req<{ ok: boolean }>(`/sites/${id}`, { method: 'PUT', body: JSON.stringify(body) })
 export const deleteSite = (id: number) => req<{ ok: boolean }>(`/sites/${id}`, { method: 'DELETE' })
 export const assignWorkerSite = (workerId: number, siteId: number | null) => req<{ ok: boolean }>(`/workers/${workerId}/site`, post('', { siteId }))
+
+/* zone-operations entities (real catalog tables): cities/clusters/apartments/inventory/zone-pricing */
+export const opList = <T = Record<string, unknown>>(path: string, zoneId?: number) => req<T[]>(`/${path}${zoneId != null ? `?zone_id=${zoneId}` : ''}`)
+export const opCreate = (path: string, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}`, post('', body))
+export const opUpdate = (path: string, id: number, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}/${id}`, patch(body))
+export const opDelete = (path: string, id: number) => req<{ ok: boolean }>(`/${path}/${id}`, { method: 'DELETE' })
+/* stores (dark-stores) with coverage/overlap guard */
+export interface Store { id: number; zone_id: number | null; name: string; manager: string; address: string; pincode: string; lat: number | null; lng: number | null; radius_km: number; status: string }
+export interface StoreNear { id: number; name: string; manager: string; lat: number; lng: number; radiusKm: number; status: string; distanceKm: number; overlapAreaKm2?: number }
+export interface StoreCheck { nearby: StoreNear[]; coveredBy: StoreNear[]; overlaps: StoreNear[]; covered: boolean; overlapping: boolean; canOverride: boolean }
+export interface StoreConflict extends StoreCheck { error: string }
+export const fetchStores = (zoneId?: number) => opList<Store>('stores', zoneId)
+export const checkStore = (lat: number, lng: number, radiusKm: number, excludeId?: number) =>
+  req<StoreCheck>(`/stores/check?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}${excludeId ? `&exclude_id=${excludeId}` : ''}`)
+export const updateStore = (id: number, body: Record<string, unknown>) => req<Store>(`/stores/${id}`, patch(body))
+export const deleteStore = (id: number) => req<{ ok: boolean }>(`/stores/${id}`, { method: 'DELETE' })
+// Returns the conflict body on 409 (covered/overlap) instead of throwing, so the UI can offer a super-admin override.
+export async function createStore(body: Record<string, unknown>): Promise<{ ok: true; store: Store } | { ok: false; conflict: StoreConflict }> {
+  const res = await fetch(API_BASE + '/api/admin/stores', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) })
+  if (res.status === 409) return { ok: false, conflict: await res.json() }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as { error?: string }).error || `Request failed (${res.status})`) }
+  return { ok: true, store: await res.json() }
+}
+
+export const zoneMetrics = (id: number) => req<Record<string, any>>(`/zones/${id}/metrics`)
+export const allZonesMetrics = () => req<Record<string, any>[]>('/zones-metrics')
+export const opsOverview = () => req<Record<string, any>>('/ops-overview')
+
 export const createZone = (body: Record<string, unknown>) => req<Zone>('/zones', post('', body))
 export const updateZone = (id: number, body: Record<string, unknown>) => req<Zone>(`/zones/${id}`, patch(body))
 export const deleteZone = (id: number) => req<{ ok: boolean }>(`/zones/${id}`, { method: 'DELETE' })
+
+/* campaigns (Dynamic Pricing Engine): Zone / Customer / Coupon offers */
+export interface CampaignRule { segment: string; max_usage: number; winback_days: number; vip_min_orders: number }
+export interface CampaignCoupon { coupon_code: string; auto_apply: boolean; expiry: string | null; usage_limit: number; used_count: number }
+export interface Campaign {
+  campaign_id: number; campaign_name: string; campaign_type: 'zone' | 'customer' | 'coupon'
+  discount_type: 'flat' | 'percent'; discount_value: number; max_discount: number; min_subtotal: number
+  service_id: string; category: string; duration_id: string; priority: number; stackable: boolean
+  starts: string | null; ends: string | null; status: 'active' | 'paused'
+  banner_title: string; banner_subtitle: string
+  zoneIds: number[]; rule: CampaignRule | null; coupon: CampaignCoupon | null; usedCount: number
+}
+export const fetchCampaigns = () => req<Campaign[]>('/campaigns')
+export const createCampaign = (body: Record<string, unknown>) => req<{ ok: boolean; campaign_id: number }>('/campaigns', post('', body))
+export const updateCampaign = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/campaigns/${id}`, patch(body))
+export const deleteCampaign = (id: number) => req<{ ok: boolean }>(`/campaigns/${id}`, { method: 'DELETE' })
+export const campaignUsage = (id: number) => req<{ total: number; customers: number; recent: { customer_id: number; booking_id: number; created: string }[] }>(`/campaigns/${id}/usage`)
 
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')

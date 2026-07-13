@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime,
+  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
 } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4004)
@@ -43,6 +43,7 @@ async function init() {
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS bank_status TEXT DEFAULT 'Pending'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS designation TEXT`,   // Zone Manager / Team Leader / Worker — drives zone Assign-Team role lookups
     // Shifts (WFM roster): a worker is "on shift" in a zone during weekly time windows.
     // weekday 0=Sun..6=Sat; start_min/end_min = minutes from midnight (IST).
     `CREATE TABLE IF NOT EXISTS shifts (
@@ -178,6 +179,11 @@ async function init() {
       await pool.query('INSERT INTO worker_sites (name,address,lat,lng,radius) VALUES ($1,$2,$3,$4,$5)', [name, addr, lat, lng, r])
     console.log('[worker] seeded 3 sample apartments (geofence sites)')
   }
+  // Role designations (Zone Manager / Team Leader / Worker) — backfilled once (idempotent: fills
+  // only untagged rows, so admin edits are never overwritten). Drives the zone Assign-Team lookups.
+  await pool.query(`UPDATE workers SET designation='Zone Manager' WHERE designation IS NULL AND name IN ('Rakesh Kumar','Imran Shaikh')`)
+  await pool.query(`UPDATE workers SET designation='Team Leader' WHERE designation IS NULL AND name IN ('Neha Gupta','Kavita Joshi','Sunita Devi')`)
+  await pool.query(`UPDATE workers SET designation='Worker' WHERE designation IS NULL`)
   console.log('[worker] Postgres ready (workers, worker_documents)')
 }
 
@@ -751,8 +757,8 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const b = req.body || {}
   if (!b.name) return res.status(400).json({ error: 'Name required' })
   const { rows } = await pool.query(
-    `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING *`,
-    [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null])
+    `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id,designation) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *`,
+    [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker'])
   res.status(201).json(rowToWorker(rows[0]))
 })
 app.get('/api/admin/workers/:id', adminAuth, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
@@ -873,16 +879,30 @@ app.get('/internal/on-shift', internalOnly, async (req, res) => {
 
 async function patchWorker(id, b, res) {
   const w = await getWorker(id); if (!w) { res.status(404); return { error: 'Not found' } }
-  await pool.query('UPDATE workers SET name=$1, phone=$2, email=$3, city=$4, services=$5::jsonb, status=$6, verified=$7, bank_status=COALESCE($8,bank_status), zone_id=$9 WHERE id=$10', [
+  await pool.query('UPDATE workers SET name=$1, phone=$2, email=$3, city=$4, services=$5::jsonb, status=$6, verified=$7, bank_status=COALESCE($8,bank_status), zone_id=$9, designation=COALESCE($10,designation) WHERE id=$11', [
     b.name ?? w.name, b.phone ?? w.phone, b.email ?? w.email, b.city ?? w.city,
     JSON.stringify(b.services ?? w.services), b.status ?? w.status,
     b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
-    b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), id])
+    b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), b.designation ?? null, id])
   return rowToWorker(await getWorker(id))
 }
 
 /* ---------- internal (service-to-service) ---------- */
 app.get('/internal/workers', internalOnly, async (req, res) => res.json({ stats: await workerStats(), workers: await listWorkers(req.query) }))
+// Real worker-status breakdown (online / busy / offline) for the admin zone dashboards.
+app.get('/internal/worker-status', internalOnly, async (req, res) => {
+  const zoneId = req.query.zone_id != null && req.query.zone_id !== '' ? Number(req.query.zone_id) : null
+  const where = zoneId != null ? 'WHERE zone_id=$1' : ''
+  const params = zoneId != null ? [zoneId] : []
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE available AND status='active' AND offered_booking IS NULL)::int AS online,
+       COUNT(*) FILTER (WHERE offered_booking IS NOT NULL)::int AS busy,
+       COUNT(*) FILTER (WHERE NOT available AND status='active')::int AS offline
+     FROM workers ${where}`, params)
+  const r = rows[0]
+  res.json({ total: r.total, online: r.online, busy: r.busy, offline: r.offline, onBreak: 0 })
+})
 app.get('/internal/workers/active-for', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
   const rows = (await pool.query("SELECT services, available FROM workers WHERE status='active'")).rows
@@ -911,7 +931,7 @@ app.post('/api/admin/workers/:id/bank/approve', adminAuth, async (req, res) => {
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 
 /* ---------- events ---------- */
-subscribeEvents(REDIS_URL, 'worker', async (_type, _data) => { /* reserved for future reactions */ })
+subscribeEvents(REDIS_URL, 'worker', (type) => { if (type === 'settings.updated') invalidateSettings() })
 
 // Auto-settle Shakti bonuses at the start of each month (pays out the PREVIOUS month).
 // Runs daily but only acts on the 1st–2nd; the wallet credit is idempotent per worker/month.

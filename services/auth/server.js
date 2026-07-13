@@ -17,6 +17,7 @@ import { makePool, migrate, nowIso, internalOnly, publishEvent } from '@homehelp
 const PORT = Number(process.env.PORT || 4002)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5433/auth'
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '')
 const DEV_OTP = process.env.DEV_OTP || '4321'
 const WELCOME_BONUS = 1240
 
@@ -50,6 +51,11 @@ async function init() {
     )`,
     `CREATE INDEX IF NOT EXISTS ix_addr_user ON addresses(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_txn_user ON transactions(user_id)`,
+    // Map-picker address details: floor, receiver phone, and the exact pinned coordinate.
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS floor TEXT`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS receiver_phone TEXT`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS lat REAL`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS lng REAL`,
     // Three-balance wallet: `wallet` is the Cash balance; add Promo + Reward Points and a status.
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_balance INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS reward_points INTEGER NOT NULL DEFAULT 0`,
@@ -61,6 +67,7 @@ async function init() {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_rewarded BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS dob DATE`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_users_refcode ON users(referral_code)`,
     `UPDATE users SET referral_code='HH'||upper(substr(md5(random()::text||id::text),1,6)) WHERE referral_code IS NULL`,
   ])
@@ -74,7 +81,7 @@ const publicUser = (u) => u && ({
   id: u.id, phone: u.phone, name: u.name, email: u.email, provider: u.provider,
   avatar: u.avatar, country: u.country, city: u.city, location: u.location,
   wallet: u.wallet, rating: u.rating, status: u.status, created: u.created,
-  referralCode: u.referral_code, referredBy: u.referred_by,
+  referralCode: u.referral_code, referredBy: u.referred_by, dob: u.dob || null,
   promoBalance: u.promo_balance || 0, rewardPoints: u.reward_points || 0, walletStatus: u.wallet_status || 'active',
 })
 
@@ -146,8 +153,9 @@ async function ensureDefaultAddressFromLocation(uid, city, location, pincode) {
   }
 }
 
-// Reverse-geocode "lat,lng" to "Area, City - PIN" via OpenStreetMap Nominatim. Cached in memory
-// (rounded key) so repeated app-opens don't hammer Nominatim's public endpoint.
+// Reverse-geocode "lat,lng" to "Area, City - PIN" via the catalog's /api/reverse-geocode (Google when
+// the key is set, else Nominatim). Centralised there so pincodes are accurate. Cached in memory
+// (rounded key) so repeated app-opens don't re-hit the geocoder.
 const geoCache = new Map()
 async function reverseGeocodeServer(location) {
   const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(location || '')
@@ -156,17 +164,10 @@ async function reverseGeocodeServer(location) {
   const key = `${lat.toFixed(3)},${lng.toFixed(3)}`
   if (geoCache.has(key)) return geoCache.get(key)
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
-      { headers: { Accept: 'application/json', 'User-Agent': 'HomeHelp/1.0 (support@homehelp.in)' } })
+    const r = await fetch(`${CATALOG_URL}/api/reverse-geocode?lat=${lat}&lng=${lng}`, { headers: { Accept: 'application/json' } })
     if (!r.ok) return null
     const j = await r.json()
-    const a = j.address || {}
-    const area = (a.suburb || a.neighbourhood || a.village || a.town || a.city_district || a.locality || '').replace(/^Ward\s+\d+\s+/i, '')
-    const city = a.city || a.town || a.state_district || a.state || ''
-    const pincode = a.postcode || pinOf(j.display_name) || null
-    let label = [area, city].filter(Boolean).join(', ') || (j.display_name ? j.display_name.split(',').slice(0, 2).join(', ').trim() : '')
-    if (label && pincode) label = `${label} - ${pincode}`
-    const out = label ? { label, pincode } : null
+    const out = j && j.label ? { label: j.label, pincode: j.pincode || pinOf(j.label) || null } : null
     if (out) geoCache.set(key, out)
     return out
   } catch { return null }
@@ -311,12 +312,33 @@ app.post('/api/referral/apply', auth, async (req, res) => {
 app.get('/api/addresses', auth, async (req, res) => res.json(await getAddresses(req.user.id)))
 app.post('/api/addresses', auth, async (req, res) => {
   const a = req.body || {}
-  const line = a.line || [a.house, a.apartment, a.street, a.landmark, a.city, a.pincode].filter(Boolean).join(', ')
+  // Human-readable one-liner: flat/floor/building first, then the map locality + pincode.
+  const line = a.line || [a.house, a.floor && `Floor ${a.floor}`, a.apartment, a.street, a.landmark, a.city, a.pincode].filter(Boolean).join(', ')
+  const receiverPhone = a.receiver_phone ?? a.receiverPhone ?? null
+  // First address (or an explicit makeDefault) becomes the default → drives the customer's zone/pricing.
+  const existing = (await pool.query('SELECT count(*)::int n FROM addresses WHERE user_id=$1', [req.user.id])).rows[0].n
+  const makeDefault = a.makeDefault === true || existing === 0
+  if (makeDefault) await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [req.user.id])
   const { rows } = await pool.query(
-    `INSERT INTO addresses (user_id,label,line,house,apartment,street,landmark,city,pincode,is_default)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false) RETURNING *`,
-    [req.user.id, a.label || 'Other', line, a.house, a.apartment, a.street, a.landmark, a.city, a.pincode])
+    `INSERT INTO addresses (user_id,label,line,house,floor,apartment,street,landmark,city,pincode,receiver_phone,lat,lng,is_default)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [req.user.id, a.label || 'Other', line, a.house || null, a.floor || null, a.apartment || null, a.street || null,
+      a.landmark || null, a.city || null, a.pincode || null, receiverPhone, a.lat ?? null, a.lng ?? null, makeDefault])
   res.status(201).json(rows[0])
+})
+app.patch('/api/addresses/:id', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const a = req.body || {}
+  const cur = (await pool.query('SELECT * FROM addresses WHERE id=$1 AND user_id=$2', [id, req.user.id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Not found' })
+  const m = { ...cur, ...a }
+  const receiverPhone = a.receiver_phone ?? a.receiverPhone ?? cur.receiver_phone
+  const line = a.line || [m.house, m.floor && `Floor ${m.floor}`, m.apartment, m.street, m.landmark, m.city, m.pincode].filter(Boolean).join(', ')
+  await pool.query(
+    `UPDATE addresses SET label=$1,line=$2,house=$3,floor=$4,apartment=$5,street=$6,landmark=$7,city=$8,pincode=$9,receiver_phone=$10,lat=$11,lng=$12 WHERE id=$13 AND user_id=$14`,
+    [m.label || 'Home', line, m.house || null, m.floor || null, m.apartment || null, m.street || null, m.landmark || null,
+      m.city || null, m.pincode || null, receiverPhone || null, a.lat ?? cur.lat, a.lng ?? cur.lng, id, req.user.id])
+  res.json((await pool.query('SELECT * FROM addresses WHERE id=$1', [id])).rows[0])
 })
 app.patch('/api/addresses/:id/default', auth, async (req, res) => {
   await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [req.user.id])
