@@ -62,7 +62,7 @@ const NAV: NavGroup[] = [
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', pricing: 'Pricing', payments: 'Payments', refunds: 'Refunds',
-  zones: 'Zone Planning', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
+  zones: 'Zone Operations', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', roles: 'Roles & Permissions',
 }
 
@@ -73,6 +73,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const nav = useNavigate()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('hha_nav_collapsed') === '1' } catch { return false } })
+  const toggleCollapsed = () => setCollapsed((c) => { const n = !c; try { localStorage.setItem('hha_nav_collapsed', n ? '1' : '0') } catch { /* ignore */ } return n })
   const [alerts, setAlerts] = useState(0)
   useEffect(() => { fetchAlerts().then((a) => setAlerts(a.count)).catch(() => {}) }, [pathname])
   const seg = pathname.split('/')[1] || 'dashboard'
@@ -80,7 +82,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const isDash = seg === 'dashboard'
 
   return (
-    <div className="shell">
+    <div className={'shell' + (collapsed ? ' collapsed' : '')}>
       <aside className={'sidebar' + (open ? ' open' : '')}>
         <div className="brand">
           <span className="brand-logo"><HomeIcon size={20} /></span>
@@ -100,7 +102,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
-        <button className="signout" onClick={() => { signOut(); nav('/login') }}><LogOut size={18} /> Sign out</button>
+        <button className="signout" onClick={() => { signOut(); nav('/login') }}><LogOut size={18} /> <span>Sign out</span></button>
       </aside>
 
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
@@ -108,6 +110,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <div className="main">
         <header className="topbar">
           <button className="iconbtn only-mobile" onClick={() => setOpen(true)}><Menu size={22} /></button>
+          <button className="iconbtn only-desktop nav-toggle" onClick={toggleCollapsed} title={collapsed ? 'Expand menu' : 'Collapse menu'}><Menu size={20} /></button>
           <div className="titlewrap">
             <h1 className="page-title">{title}</h1>
             {isDash

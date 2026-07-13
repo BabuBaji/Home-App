@@ -29,27 +29,16 @@ function zm(z: BZone) {
   const health = Math.min(99, 58 + svc.length * 4 + Math.round(total / 3))
   return { total, online, busy, offline, orders, completed, revenue, eta, svc, avg, health }
 }
-function series(v: number, seed: number) {
-  return Array.from({ length: 8 }, (_, i) => Math.max(0, v * (0.6 + (i / 7) * 0.4 + Math.sin((i + seed) * 1.3) * 0.1)))
-}
-function Spark({ data, color }: { data: number[]; color: string }) {
-  const w = 120, h = 34, max = Math.max(...data, 1), min = Math.min(...data, 0), rng = max - min || 1
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * w, h - ((v - min) / rng) * (h - 6) - 3] as const)
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
-  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: 34 }}>
-    <path d={`${d} L${w},${h} L0,${h} Z`} fill={color} opacity=".10" /><path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-}
-function Kpi({ icon, tint, label, value, sub, delta, up, seed, sval }: { icon: ReactNode; tint: string; label: string; value: ReactNode; sub?: string; delta: string; up: boolean; seed: number; sval: number }) {
+// delta/up are optional: only render a trend chip when a real change is supplied.
+function Kpi({ icon, tint, label, value, sub, delta, up }: { icon: ReactNode; tint: string; label: string; value: ReactNode; sub?: string; delta?: string; up?: boolean }) {
   return (
-    <div className="zo-kpi" style={{ animationDelay: `${seed * 40}ms` }}>
+    <div className="zo-kpi">
       <div className="zo-kpi-h">
         <div className="zo-kpi-ico" style={{ background: `${tint}18`, color: tint, boxShadow: 'none' }}>{icon}</div>
-        <span className={'zo-trend ' + (up ? 'up' : 'down')}>{up ? <TrendingUp size={11} /> : <TrendingDown size={11} />}{delta}</span>
+        {delta ? <span className={'zo-trend ' + (up ? 'up' : 'down')}>{up ? <TrendingUp size={11} /> : <TrendingDown size={11} />}{delta}</span> : null}
       </div>
       <div className="zo-kpi-label">{label}</div>
       <div className="zo-kpi-val">{value}{sub && <span style={{ fontSize: 14, color: 'var(--zmut)', fontWeight: 700 }}> {sub}</span>}</div>
-      <div style={{ marginTop: 8 }}><Spark data={series(sval, seed)} color={tint} /></div>
     </div>
   )
 }
@@ -92,35 +81,32 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
     ? ops.revenueDaily.map((r: any) => ({ d: r.d, rev: r.rev }))
     : Array.from({ length: 7 }, (_, i) => ({ d: `Day ${i + 1}`, rev: 0 })))
   const recent: { id: string; svc: string; zone: string; status: string; time: string }[] = (ops.recent || []).map((r: any) => ({ id: r.ref, svc: r.service, zone: r.zone, status: r.status, time: r.time }))
+  const hasTrend = trend.some((t: any) => (t.bookings || 0) > 0 || (t.revenue || 0) > 0)
 
   return (
     <div>
-      {/* filter bar */}
-      <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
-        <span className="citysel">All Zones</span>
-        <span className="daterange"><CalendarDays size={14} /> Today</span>
-        <span className="citysel">All Services</span>
-        <span className="citysel">All Status</span>
-        <div style={{ flex: 1 }} />
-        <button className="zo-btn line"><Download size={15} /> Export Report</button>
-        <button className="zo-btn" onClick={onCreate}><Plus size={16} /> Create New Zone</button>
-      </div>
-
       {/* KPI row */}
       <div className="zo-kpis" style={{ gridTemplateColumns: 'repeat(6,1fr)', marginBottom: 16 }}>
-        <Kpi seed={0} tint="#4F46E5" icon={<ShoppingBag size={19} />} label="Total Bookings" value={agg.orders.toLocaleString('en-IN')} delta="18%" up sval={agg.orders} />
-        <Kpi seed={1} tint="#22C55E" icon={<IndianRupee size={19} />} label="Total Revenue" value={compact(agg.revenue)} delta="16%" up sval={agg.revenue} />
-        <Kpi seed={2} tint="#0EA5E9" icon={<Users size={19} />} label="Workers Online" value={agg.online} sub={`/ ${agg.total}`} delta="11%" up sval={agg.online} />
-        <Kpi seed={3} tint="#F59E0B" icon={<Clock size={19} />} label="Pending Orders" value={agg.pending} delta="8%" up={false} sval={agg.pending} />
-        <Kpi seed={4} tint="#EF4444" icon={<XCircle size={19} />} label="Cancelled Orders" value={agg.cancelled} delta="5%" up={false} sval={agg.cancelled} />
-        <Kpi seed={5} tint="#F5B301" icon={<Star size={19} />} label="Customer Rating" value={agg.rating > 0 ? agg.rating : '—'} delta="2%" up sval={46} />
+        <Kpi tint="#4F46E5" icon={<ShoppingBag size={19} />} label="Total Bookings" value={agg.orders.toLocaleString('en-IN')} />
+        <Kpi tint="#22C55E" icon={<IndianRupee size={19} />} label="Total Revenue" value={compact(agg.revenue)} />
+        <Kpi tint="#0EA5E9" icon={<Users size={19} />} label="Workers Online" value={agg.online} sub={`/ ${agg.total}`} />
+        <Kpi tint="#F59E0B" icon={<Clock size={19} />} label="Pending Orders" value={agg.pending} />
+        <Kpi tint="#EF4444" icon={<XCircle size={19} />} label="Cancelled Orders" value={agg.cancelled} />
+        <Kpi tint="#F5B301" icon={<Star size={19} />} label="Customer Rating" value={agg.rating > 0 ? agg.rating : '—'} />
       </div>
 
       {/* trend + bookings by zone + map */}
       <div className="zo-grid" style={{ gridTemplateColumns: '1.3fr 1fr 1.3fr', gap: 16, marginBottom: 16 }}>
         <Card title="Bookings Trend" right={<Badge tone="violet">This Week</Badge>}>
-          <div className="row" style={{ gap: 16, marginBottom: 4, fontSize: 12, fontWeight: 700 }}><span className="row" style={{ gap: 6, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: '#5b51e8', display: 'inline-block' }} /> Bookings</span><span className="row" style={{ gap: 6, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: '#16a34a', display: 'inline-block' }} /> Revenue (₹)</span></div>
-          <LineChart data={trend as unknown as Record<string, number>[]} keys={['bookings', 'revenue']} height={200} />
+          {hasTrend ? (<>
+            <div className="row" style={{ gap: 16, marginBottom: 4, fontSize: 12, fontWeight: 700 }}><span className="row" style={{ gap: 6, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: '#5b51e8', display: 'inline-block' }} /> Bookings</span><span className="row" style={{ gap: 6, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: '#16a34a', display: 'inline-block' }} /> Revenue (₹)</span></div>
+            <LineChart data={trend as unknown as Record<string, number>[]} keys={['bookings', 'revenue']} height={200} />
+          </>) : (
+            <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--zmut)' }}>
+              <BarChart3 size={26} style={{ opacity: .35 }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>No bookings this week yet</span>
+            </div>
+          )}
         </Card>
         <Card title="Bookings by Zone" right={<span style={{ fontSize: 12, color: 'var(--zi)', fontWeight: 700 }}>View All</span>}>
           <table className="zo-table"><thead><tr><th>Zone</th><th>Bookings</th><th>Revenue</th><th>ETA</th></tr></thead>

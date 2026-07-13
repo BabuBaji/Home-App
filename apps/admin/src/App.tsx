@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
-import { ToastHost } from './components/UI'
+import { ToastHost, ConfirmHost } from './components/UI'
 import SosAlert from './components/SosAlert'
 import Layout from './components/Layout'
 import { useStore } from './store'
@@ -43,6 +43,7 @@ export default function App() {
 
   return (
     <ToastHost>
+     <ConfirmHost>
       {admin && <SosAlert />}
       <Routes>
         <Route path="/login" element={admin ? <Navigate to="/dashboard" replace /> : <Login />} />
@@ -82,6 +83,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to={admin ? '/dashboard' : '/login'} replace />} />
       </Routes>
+     </ConfirmHost>
     </ToastHost>
   )
 }

@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
-import { AlertTriangle, X, Search, TrendingUp, TrendingDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { type ReactNode, useEffect, useState, useRef, createContext, useContext, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { AlertTriangle, X, Search, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, ChevronDown, Check } from 'lucide-react'
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string, kind?: 'ok' | 'err') => void>(() => {})
@@ -13,6 +14,82 @@ export function ToastHost({ children }: { children: ReactNode }) {
       {children}
       {t && <div className={'toast ' + t.kind}>{t.msg}</div>}
     </ToastCtx.Provider>
+  )
+}
+
+/* ---------- Confirm (promise-based, toast-style) ---------- */
+type ConfirmOpts = { title: string; message?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }
+const ConfirmCtx = createContext<(o: ConfirmOpts) => Promise<boolean>>(async () => false)
+export const useConfirm = () => useContext(ConfirmCtx)
+export function ConfirmHost({ children }: { children: ReactNode }) {
+  const [st, setSt] = useState<{ o: ConfirmOpts; resolve: (v: boolean) => void } | null>(null)
+  const confirm = useCallback((o: ConfirmOpts) => new Promise<boolean>((resolve) => setSt({ o, resolve })), [])
+  const done = (v: boolean) => { st?.resolve(v); setSt(null) }
+  return (
+    <ConfirmCtx.Provider value={confirm}>
+      {children}
+      {st && (
+        <div onClick={() => done(false)} style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 28, background: 'rgba(15,23,42,.18)' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', border: '1px solid var(--line, #e4e7ec)', borderRadius: 14, boxShadow: '0 18px 44px rgba(16,24,40,.22)', padding: '13px 15px', display: 'flex', alignItems: 'center', gap: 13, maxWidth: 560, width: 'calc(100% - 40px)' }}>
+            <span style={{ width: 36, height: 36, borderRadius: 10, flex: 'none', display: 'grid', placeItems: 'center', background: st.o.danger ? '#FEE2E2' : '#EEF2FF', color: st.o.danger ? '#DC2626' : '#4338CA' }}><AlertTriangle size={17} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink, #101828)' }}>{st.o.title}</div>
+              {st.o.message && <div style={{ fontSize: 12, color: 'var(--muted, #667085)', marginTop: 1 }}>{st.o.message}</div>}
+            </div>
+            <button className="btn line" style={{ padding: '8px 14px' }} onClick={() => done(false)}>{st.o.cancelLabel || 'Cancel'}</button>
+            <button className="btn" style={{ padding: '8px 14px', ...(st.o.danger ? { background: '#DC2626', borderColor: '#DC2626' } : {}) }} onClick={() => done(true)}>{st.o.confirmLabel || 'Confirm'}</button>
+          </div>
+        </div>
+      )}
+    </ConfirmCtx.Provider>
+  )
+}
+
+/* ---------- Custom dropdown (portal-based, never clipped) ---------- */
+type DdOption = { value: string; label: string }
+export function Dropdown({ value, options, onChange, width, placeholder, disabled }: {
+  value: string
+  options: (DdOption | string)[]
+  onChange: (v: string) => void
+  width?: number | string
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const opts: DdOption[] = options.map((o) => typeof o === 'string' ? { value: o, label: o } : o)
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const sel = opts.find((o) => o.value === value)
+  const toggle = () => { if (disabled) return; if (open) { setOpen(false); return } const r = btnRef.current?.getBoundingClientRect(); if (r) setRect(r); setOpen(true) }
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('keydown', onKey) }
+  }, [open])
+  return (
+    <>
+      <button ref={btnRef} type="button" className="dd-trigger" disabled={disabled} onClick={toggle} style={{ width: width ?? '100%' }}>
+        <span className={sel ? '' : 'dd-ph'} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sel ? sel.label : (placeholder || 'Select…')}</span>
+        <ChevronDown size={14} style={{ flex: 'none', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+      {open && rect && createPortal(
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 300 }} />
+          <div className="dd-panel" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 301 }}>
+            {opts.map((o) => (
+              <button type="button" key={o.value} className={'dd-opt' + (o.value === value ? ' sel' : '')} onClick={() => { onChange(o.value); setOpen(false) }}>
+                <span>{o.label}</span>{o.value === value && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
   )
 }
 

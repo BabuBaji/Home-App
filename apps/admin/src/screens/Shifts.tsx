@@ -142,9 +142,11 @@ export default function Shifts() {
                   <td style={td}><input type="number" value={s.lng} onChange={(e) => patchSite(s.id, 'lng', Number(e.target.value))} style={{ ...inp, width: 92 }} /></td>
                   <td style={td}><input type="number" value={s.radius} onChange={(e) => patchSite(s.id, 'radius', Number(e.target.value))} style={{ ...inp, width: 74 }} /></td>
                   <td style={td}>{s.assigned}</td>
-                  <td style={{ ...td, display: 'flex', gap: 6 }}>
-                    <button onClick={() => saveSite(s)} style={{ ...btn, padding: '6px 10px' }}><Save size={13} /></button>
-                    <button onClick={() => delSite(s)} style={{ ...btn, padding: '6px 10px', background: '#ef4444' }}><Trash2 size={13} /></button>
+                  <td style={td}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => saveSite(s)} style={{ ...btn, padding: '6px 10px' }}><Save size={13} /></button>
+                      <button onClick={() => delSite(s)} style={{ ...btn, padding: '6px 10px', background: '#ef4444' }}><Trash2 size={13} /></button>
+                    </div>
                   </td>
                 </tr>
               ))}

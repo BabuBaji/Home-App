@@ -2,18 +2,19 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
 import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
 import type { Worker } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, shortDate } from '../components/UI'
+import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
 import { useStore, can } from '../store'
 import { CITIES } from '../cities'
 
 type Stats = { total: number; active: number; pending: number; inactive: number }
 
-type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null }
-const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null }
+type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string }
+const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker' }
 
 export default function Workers() {
   const { admin } = useStore()
   const toast = useToast()
+  const confirm = useConfirm()
   const [data, setData] = useState<{ stats: Stats; workers: Worker[] } | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -61,7 +62,7 @@ export default function Workers() {
   const addWorker = async () => {
     setBusy(true)
     try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id })
+      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation })
       toast('Worker added')
       setAddOpen(false); setDraft(EMPTY_DRAFT); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -71,7 +72,7 @@ export default function Workers() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id })
+      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation })
       toast('Worker updated')
       setEditing(null); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -82,12 +83,12 @@ export default function Workers() {
   }
 
   const doDelete = async (w: Worker) => {
-    if (!window.confirm(`Delete worker "${w.name}"? This cannot be undone.`)) return
+    if (!(await confirm({ title: `Delete worker "${w.name}"?`, message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return
     try { await deleteWorker(w.id); toast('Worker deleted'); load() } catch (e) { toast((e as Error).message, 'err') }
   }
 
   const openEdit = (w: Worker) => {
-    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null })
+    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker' })
     setEditing(w)
   }
 
@@ -131,6 +132,7 @@ export default function Workers() {
                 <th>Mobile Number</th>
                 <th>Email</th>
                 <th>City</th>
+                <th>Role</th>
                 <th>Services</th>
                 <th className="num">Jobs Completed</th>
                 <th>Rating</th>
@@ -154,6 +156,7 @@ export default function Workers() {
                     <td className="muted">{w.phone ?? '—'}</td>
                     <td className="muted">{w.email ?? '—'}</td>
                     <td>{w.city ?? '—'}</td>
+                    <td><Badge tone={w.designation === 'Zone Manager' ? 'violet' : w.designation === 'Team Leader' ? 'green' : 'gray'} dot={false}>{w.designation || 'Worker'}</Badge></td>
                     <td>
                       {svcCount === 0 ? <span className="muted">—</span> : (
                         <span className="row" style={{ gap: 5 }}>
@@ -242,7 +245,7 @@ export default function Workers() {
 const MENU_ITEM: CSSProperties = { display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }
 
 function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChange: (d: Draft) => void; services: string[]; zones: Zone[] }) {
-  const set = (k: 'name' | 'phone' | 'email' | 'city' | 'status', v: string) => onChange({ ...draft, [k]: v })
+  const set = (k: 'name' | 'phone' | 'email' | 'city' | 'status' | 'designation', v: string) => onChange({ ...draft, [k]: v })
   const toggleService = (name: string) => {
     const has = draft.services.includes(name)
     onChange({ ...draft, services: has ? draft.services.filter((s) => s !== name) : [...draft.services, name] })
@@ -257,6 +260,13 @@ function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChan
           <option value="">— Select city —</option>
           {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city} · {c.state}</option>)}
           {draft.city && !CITIES.some((c) => c.city === draft.city) && <option value={draft.city}>{draft.city}</option>}
+        </select>
+      </Field>
+      <Field label="Role / Designation">
+        <select value={draft.designation} onChange={(e) => set('designation', e.target.value)}>
+          <option value="Worker">Worker</option>
+          <option value="Team Leader">Team Leader</option>
+          <option value="Zone Manager">Zone Manager</option>
         </select>
       </Field>
       <Field label="Service Zone (home area)">

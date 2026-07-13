@@ -127,6 +127,10 @@ export const updateBooking = (id: number, body: Record<string, unknown>) => req<
 
 /* services */
 export const fetchServices = () => req<AdminService[]>('/services')
+// Platform GST mode + seller info (public catalog endpoint, not under /api/admin) — used by the
+// zone pricing wizard to preview GST amounts correctly for inclusive vs exclusive pricing.
+export interface InvoiceInfo { name: string; gstin: string; address: string; state: string; sac: string; prefix: string; gstInclusive: boolean }
+export const fetchInvoiceInfo = () => fetch(API_BASE + '/api/invoice-info', { headers: token ? { Authorization: 'Bearer ' + token } : {} }).then((r) => r.json() as Promise<InvoiceInfo>)
 export const createService = (body: Record<string, unknown>) => req<{ ok: boolean; id: string }>('/services', post('', body))
 export const updateService = (id: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/services/${id}`, patch(body))
 export const deleteService = (id: string) => req<{ ok: boolean }>(`/services/${id}`, { method: 'DELETE' })

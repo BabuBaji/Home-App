@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { LayoutGrid, CheckCircle2, PauseCircle, Tag, Funnel, Plus, Eye, Pencil, Trash2 } from 'lucide-react'
 import { fetchServices, createService, updateService, deleteService } from '../api'
 import type { AdminService } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money } from '../components/UI'
+import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money } from '../components/UI'
 
 type Tone = 'green' | 'amber' | 'red' | 'blue' | 'violet' | 'gray'
 
@@ -15,11 +15,12 @@ const CAT_TONE: Record<string, Tone> = {
 
 const ICON_TINTS = ['#eef0ff', '#e7f7ee', '#fff6e6', '#e8eefe']
 
-type Draft = { name: string; category: string; price: string; icon: string; available: boolean }
-const emptyDraft: Draft = { name: '', category: 'Home Services', price: '', icon: '🧰', available: true }
+type Draft = { name: string; category: string; price: string; icon: string; available: boolean; duration_min: string; gst_pct: string }
+const emptyDraft: Draft = { name: '', category: 'Home Services', price: '', icon: '🧰', available: true, duration_min: '60', gst_pct: '18' }
 
 export default function Services() {
   const toast = useToast()
+  const confirm = useConfirm()
   const [rows, setRows] = useState<AdminService[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -54,21 +55,21 @@ export default function Services() {
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   const openAdd = () => { setDraft(emptyDraft); setActive(null); setModal('add') }
-  const openEdit = (s: AdminService) => { setActive(s); setDraft({ name: s.name, category: s.category, price: String(s.price), icon: s.icon, available: s.available }); setModal('edit') }
+  const openEdit = (s: AdminService) => { setActive(s); setDraft({ name: s.name, category: s.category, price: String(s.price), icon: s.icon, available: s.available, duration_min: String(s.durationMin ?? 60), gst_pct: String(s.gstPct ?? 18) }); setModal('edit') }
   const openView = (s: AdminService) => { setActive(s); setModal('view') }
   const close = () => { setModal(null); setActive(null); setSaving(false) }
 
   const save = () => {
     if (!draft.name.trim()) { toast('Name is required', 'err'); return }
     setSaving(true)
-    const body = { name: draft.name.trim(), category: draft.category, price: Number(draft.price) || 0, icon: draft.icon || '🧰', available: draft.available }
+    const body = { name: draft.name.trim(), category: draft.category, price: Number(draft.price) || 0, icon: draft.icon || '🧰', available: draft.available, duration_min: Number(draft.duration_min) || 60, gst_pct: Number(draft.gst_pct) || 0 }
     const p = modal === 'edit' && active ? updateService(active.id, body) : createService(body)
     p.then(() => { toast(modal === 'edit' ? 'Service updated' : 'Service created', 'ok'); close(); load() })
       .catch((e: Error) => { toast(e.message, 'err'); setSaving(false) })
   }
 
-  const remove = (s: AdminService) => {
-    if (!window.confirm(`Delete service "${s.name}"?`)) return
+  const remove = async (s: AdminService) => {
+    if (!(await confirm({ title: `Delete service "${s.name}"?`, message: 'It will be removed from the catalogue.', confirmLabel: 'Delete', danger: true }))) return
     deleteService(s.id)
       .then(() => { toast('Service deleted', 'ok'); load() })
       .catch((e: Error) => toast(e.message, 'err'))
@@ -199,6 +200,16 @@ export default function Services() {
           </Field>
           <Field label="Base Price (₹)">
             <input type="number" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} placeholder="499" />
+          </Field>
+          <Field label="Avg. Duration">
+            <select className="select" value={draft.duration_min} onChange={(e) => setDraft({ ...draft, duration_min: e.target.value })}>
+              {[60, 90, 120, 150, 180].map((m) => { const h = Math.floor(m / 60), r = m % 60; return <option key={m} value={m}>{r ? `${h}:${String(r).padStart(2, '0')} hr` : `${h} hr`}</option> })}
+            </select>
+          </Field>
+          <Field label="GST %">
+            <select className="select" value={draft.gst_pct} onChange={(e) => setDraft({ ...draft, gst_pct: e.target.value })}>
+              {[0, 5, 12, 18, 28].map((n) => <option key={n} value={n}>{n}%</option>)}
+            </select>
           </Field>
           <Field label="Icon (emoji)">
             <input value={draft.icon} onChange={(e) => setDraft({ ...draft, icon: e.target.value })} placeholder="🧹" />

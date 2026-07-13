@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Plus, Search, MapPin, Store as StoreIcon, Trash2, AlertTriangle, CheckCircle2, ArrowLeft, ShieldAlert } from 'lucide-react'
-import { useToast } from '../components/UI'
+import { useToast, useConfirm } from '../components/UI'
 import { useStore, can } from '../store'
 import { fetchStores, checkStore, createStore, deleteStore, fetchZones, type Store, type StoreCheck, type StoreNear, type Zone } from '../api'
 import '../zones/zones.css'
@@ -24,6 +24,7 @@ async function geocodePin(pin: string): Promise<{ lat: number; lng: number } | n
 export default function Stores() {
   const { admin } = useStore()
   const toast = useToast()
+  const confirm = useConfirm()
   const isSuper = can(admin?.role, 'super')
   const [stores, setStores] = useState<Store[]>([])
   const [zones, setZones] = useState<Zone[]>([])
@@ -35,7 +36,7 @@ export default function Stores() {
   useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
   const zoneName = (id: number | null) => zones.find((z) => z.id === id)?.name || '—'
 
-  const del = (s: Store) => { if (confirm(`Delete "${s.name}"?`)) deleteStore(s.id).then(load).catch(() => toast('Delete failed', 'err')) }
+  const del = async (s: Store) => { if (!(await confirm({ title: `Delete "${s.name}"?`, message: 'This dark store will be removed.', confirmLabel: 'Delete', danger: true }))) return; deleteStore(s.id).then(load).catch(() => toast('Delete failed', 'err')) }
 
   if (adding) return <StoreBuilder isSuper={isSuper} zones={zones} onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} />
 

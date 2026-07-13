@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Trash2, Pencil, X, Tag } from 'lucide-react'
-import { useToast } from '../components/UI'
+import { useToast, useConfirm } from '../components/UI'
 import {
   fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, fetchZones, fetchServices,
   type Campaign,
@@ -58,6 +58,7 @@ export default function Campaigns() {
   const [typeFilter, setTypeFilter] = useState('')
   const [edit, setEdit] = useState<Partial<Campaign> | null>(null)
   const toast = useToast()
+  const confirm = useConfirm()
 
   const load = () => { setLoading(true); fetchCampaigns().then(setRows).catch(() => toast('Could not load campaigns', 'err')).finally(() => setLoading(false)) }
   useEffect(load, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -73,7 +74,7 @@ export default function Campaigns() {
     setRows((rs) => rs.map((r) => r.campaign_id === c.campaign_id ? { ...r, status } : r))
     updateCampaign(c.campaign_id, { status }).catch(() => toast('Save failed', 'err'))
   }
-  const del = async (id: number) => { if (!confirm('Delete this campaign?')) return; try { await deleteCampaign(id); load() } catch { toast('Delete failed', 'err') } }
+  const del = async (id: number) => { if (!(await confirm({ title: 'Delete this campaign?', confirmLabel: 'Delete', danger: true }))) return; try { await deleteCampaign(id); load() } catch { toast('Delete failed', 'err') } }
 
   async function save(c: Partial<Campaign>) {
     if (!c.campaign_name?.trim()) return toast('Name is required', 'err')
@@ -124,9 +125,11 @@ export default function Campaigns() {
                   <td style={{ fontSize: 12 }}>{c.starts || c.ends ? `${(c.starts || '').slice(0, 10) || '…'} → ${(c.ends || '').slice(0, 10) || '…'}` : 'Always'}</td>
                   <td>{c.usedCount}</td>
                   <td><button className={'zo-toggle' + (c.status === 'active' ? ' on' : '')} onClick={() => toggleStatus(c)}><span /></button></td>
-                  <td style={{ display: 'flex', gap: 6 }}>
-                    <button className="zo-btn line" style={{ padding: 7 }} onClick={() => setEdit(JSON.parse(JSON.stringify(c)))}><Pencil size={14} /></button>
-                    <button className="zo-btn line" style={{ padding: 7 }} onClick={() => del(c.campaign_id)}><Trash2 size={14} /></button>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="zo-btn line" style={{ padding: 7 }} onClick={() => setEdit(JSON.parse(JSON.stringify(c)))}><Pencil size={14} /></button>
+                      <button className="zo-btn line" style={{ padding: 7 }} onClick={() => del(c.campaign_id)}><Trash2 size={14} /></button>
+                    </div>
                   </td>
                 </tr>
               ))}</tbody>
