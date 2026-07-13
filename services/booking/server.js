@@ -151,7 +151,9 @@ function dayWindow(hours, dateStr) {
   if (!hours || hours.is247 || !hours.days) return { open247: true, closed: false }   // no config → unrestricted
   const sp = (hours.specialHours || []).find((s) => s.date && s.date === dateStr)
   if (sp) return { closed: false, openMin: _minOf(sp.open) ?? 0, closeMin: _minOf(sp.close) ?? 1440, brStart: null, brEnd: null }
-  const d = new Date(dateStr + 'T00:00:00')
+  // Parse the weekday — accept ISO ("2026-07-13") and the app's display format ("13 Jul 2026").
+  let d = new Date(dateStr + 'T00:00:00')
+  if (isNaN(d.getTime())) d = new Date(dateStr)
   const day = hours.days && hours.days[DOW[d.getDay()]]
   if (!day || day.closed) return { closed: true }
   return { closed: false, openMin: _minOf(day.open) ?? 0, closeMin: _minOf(day.close) ?? 1440, brStart: _minOf(day.brStart), brEnd: _minOf(day.brEnd) }
