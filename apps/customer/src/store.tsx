@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CartItem, User } from './types'
-import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe } from './api'
+import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours } from './api'
+import { checkServiceable } from './geo'
+import type { ZoneHours } from './components/Calendar'
 
 interface Store {
   user: User | null
@@ -23,6 +25,8 @@ interface Store {
   addressLine: string; setAddressLine: (a: string) => void
   note: string; setNote: (n: string) => void
   pincode: string; setPincode: (p: string) => void   // current service-area pincode → zone pricing/offers
+  serviceable: boolean | null                        // is the current pincode inside a live zone? (null = unknown/checking)
+  zoneHours: ZoneHours | null                         // the serving zone's working hours (for open-now / slot checks)
 
   subtotal: number
 }
@@ -40,6 +44,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [addressLine, setAddressLine] = useState('')
   const [note, setNote] = useState('')
   const [pincode, setPincode] = useState('')
+  const [serviceable, setServiceable] = useState<boolean | null>(null)
+  const [zoneHours, setZoneHours] = useState<ZoneHours | null>(null)
 
   // Populate the current pincode from the customer's default address once signed in, so every
   // pricing screen can resolve the right zone's prices/offers without re-fetching addresses.
@@ -50,6 +56,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (a?.pincode) setPincode(a.pincode)
     }).catch(() => {})
   }, [user])
+
+  // Whenever the pincode changes, check if we actually serve that zone (drives the "coming soon" gate)
+  // and load its working hours (drives the "we're closed now" gate for instant bookings).
+  useEffect(() => {
+    if (!pincode) { setServiceable(null); setZoneHours(null); return }
+    setServiceable(null)
+    checkServiceable(pincode).then((r) => setServiceable(r.serviceable)).catch(() => setServiceable(true))
+    fetchZoneHours(pincode).then(setZoneHours).catch(() => setZoneHours(null))
+  }, [pincode])
 
   const signIn = useCallback((t: string, u: User) => { setToken(t); saveUser(u); setUserState(u) }, [])
   const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]) }, [])
@@ -68,7 +83,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cart, addToCart, removeFromCart, inCart, clearCart,
       bookingType, setBookingType, date, setDate, time, setTime,
       payment, setPayment, coupon, setCoupon, addressLine, setAddressLine, note, setNote,
-      pincode, setPincode,
+      pincode, setPincode, serviceable, zoneHours,
       subtotal,
     }}>
       {children}

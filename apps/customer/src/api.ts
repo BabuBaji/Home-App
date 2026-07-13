@@ -56,6 +56,13 @@ export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ
 import type { ZoneHours } from './components/Calendar'
 // Working hours for the zone serving a pincode — the Schedule screen builds its slot grid from this.
 export const fetchZoneHours = (pincode: string) => req<ZoneHours>(`/api/zone-hours?pincode=${encodeURIComponent(pincode)}`)
+// Live service areas (for the "we are live in" coming-soon screen).
+export const fetchLiveAreas = () => req<{ name: string; state: string; city: string }[]>('/api/zones')
+// Authoritative bookable slots for a date: zone working hours + per-slot availability (capacity).
+export interface SlotInfo { hour: number; time: string; booked: number; available: boolean }
+export const fetchSlots = (date: string, pincode: string, services: string) =>
+  req<{ serviceable: boolean; workerCount: number; slots: SlotInfo[]; closed: boolean }>(
+    `/api/slots?date=${encodeURIComponent(date)}&pincode=${encodeURIComponent(pincode)}&services=${encodeURIComponent(services)}`)
 // Google Maps JS key for the interactive map location picker.
 export const fetchMapsKey = () => req<{ key: string }>('/api/maps-key')
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')

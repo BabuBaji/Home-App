@@ -281,6 +281,8 @@ button.card.off { opacity: .6; filter: grayscale(.35); cursor: not-allowed; }
 .slot:active:not(:disabled) { transform: scale(.97); }
 .slot:disabled { opacity: .4; }
 .slot.sel { background: var(--primary); color: #fff; border-color: var(--primary); }
+.slot.soldout { position: relative; color: #b0b0bc; background: #f5f5f8; border-color: #ececf0; text-decoration: line-through; opacity: 1; }
+.slot-out { position: absolute; top: -7px; right: -5px; background: #e5484d; color: #fff; font-size: 8.5px; font-weight: 800; padding: 1px 5px; border-radius: 6px; text-decoration: none; letter-spacing: .02em; }
 
 /* Friendly scheduling — brand-consistent (violet) calendar + slots, and a summary card */
 .cal { border-radius: 18px; padding: 16px; box-shadow: 0 4px 16px rgba(40,36,80,.06); border: 1px solid #f0f0f6; }
@@ -1667,6 +1669,43 @@ body { line-height: 1.45; }
 .mp-addr-sub { font-size: 12.5px; color: #888; line-height: 1.4; margin-top: 2px; }
 .mp-confirm { width: 100%; border: none; background: var(--primary); color: #fff; border-radius: 14px; padding: 15px; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(14,165,164,.3); }
 .mp-confirm:disabled { opacity: .55; }
+.mp-srv { font-size: 13px; font-weight: 700; padding: 10px 12px; border-radius: 11px; margin-bottom: 10px; }
+.mp-srv.no { background: #fff4ec; color: #c2410c; border: 1px solid #fed7aa; }
+.mp-srv.ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+
+.sn-hero-card.instant.closed { filter: grayscale(.5); opacity: .85; }
+.sn-hero-card.instant.closed .sn-eta { background: rgba(0,0,0,.28); }
+
+/* ── "not available in your area yet" / coming-soon screen ── */
+.cs-top { display: flex; align-items: center; padding: calc(10px + env(safe-area-inset-top)) 12px 6px; }
+.cs { padding: 6px 4px 28px; }
+.cs-hero { position: relative; height: 210px; border-radius: 24px; margin: 6px auto 22px; max-width: 340px; overflow: hidden;
+  background: linear-gradient(180deg, #bfe3ff 0%, #ffd9e8 55%, #ffe9d6 100%); animation: cs-in .55s ease both; }
+.cs-hero-glow { position: absolute; inset: 0; background: radial-gradient(circle at 50% 62%, rgba(255,255,255,.92), transparent 60%); animation: cs-pulse 3s ease-in-out infinite; }
+.cs-hero-emoji { position: absolute; inset: 0; display: grid; place-items: center; font-size: 92px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.15)); animation: cs-float 4s ease-in-out infinite; }
+.cs-title { font-size: 26px; font-weight: 800; color: #1a1a22; margin: 4px 12px 8px; line-height: 1.2; animation: cs-up .5s .08s ease both; }
+.cs-sub { font-size: 15px; color: #6a6a78; line-height: 1.5; margin: 0 12px 26px; animation: cs-up .5s .16s ease both; }
+.cs-live-h { font-size: 22px; font-weight: 800; color: #1a1a22; margin: 0 6px 12px; animation: cs-up .5s .24s ease both; }
+.cs-card { background: #fdf1f3; border-radius: 20px; padding: 16px 0 18px; animation: cs-up .5s .3s ease both; }
+.cs-cities { display: flex; gap: 12px; overflow-x: auto; padding: 0 14px 6px; scrollbar-width: none; scroll-snap-type: x mandatory; }
+.cs-cities::-webkit-scrollbar { display: none; }
+.cs-city { flex: 0 0 auto; width: 132px; background: #fff; border: 2px solid transparent; border-radius: 16px; padding: 12px; cursor: pointer; transition: transform .15s, border-color .15s; text-align: center; scroll-snap-align: start; }
+.cs-city:active { transform: scale(.96); }
+.cs-city.on { border-color: #f4a6be; box-shadow: 0 6px 16px rgba(244,120,150,.18); }
+.cs-city.soon { opacity: .72; }
+.cs-city-ill { height: 96px; border-radius: 12px; display: grid; place-items: center; font-size: 52px; background: linear-gradient(160deg,#eef6ff,#fbeef2); }
+.cs-city-name { font-size: 15px; font-weight: 700; color: #6b5150; margin-top: 8px; }
+.cs-areas-box { text-align: left; padding: 16px 16px 0; }
+.cs-areas-h { font-size: 16px; font-weight: 700; color: #1a1a22; margin-bottom: 12px; }
+.cs-areas { display: flex; flex-wrap: wrap; gap: 10px; }
+.cs-area { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #eee; border-radius: 11px; padding: 11px 16px; font-size: 14.5px; color: #333; }
+.cs-area svg { color: var(--primary); }
+.cs-change { margin: 24px auto 0; display: block; background: var(--primary); color: #fff; border: none; border-radius: 14px; padding: 15px 30px; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(14,165,164,.3); }
+@keyframes cs-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes cs-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes cs-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes cs-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+@media (prefers-reduced-motion: reduce) { .cs-hero, .cs-title, .cs-sub, .cs-live-h, .cs-card, .cs-hero-glow, .cs-hero-emoji { animation: none !important; } }
 
 /* ── add address details screen ── */
 .ad-screen { position: fixed; inset: 0; display: flex; flex-direction: column; background: #f4f5f8; z-index: 50; }

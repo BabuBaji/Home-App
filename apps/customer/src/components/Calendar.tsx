@@ -10,8 +10,10 @@ export function fmtDate(d: Date) {
   return `${d.getDate()} ${m[d.getMonth()]} ${d.getFullYear()}`
 }
 
-export default function Calendar({ value, onChange }: { value: Date; onChange: (d: Date) => void }) {
+export default function Calendar({ value, onChange, zh }: { value: Date; onChange: (d: Date) => void; zh?: ZoneHours | null }) {
   const today = startOfDay(new Date())
+  // a date is "closed" when the zone doesn't operate that weekday (no bookable hours)
+  const isClosedDate = (date: Date) => !!zh && !zh.is247 && !!zh.days && allowedHours(zh, date).length === 0
   const [view, setView] = useState(new Date(value.getFullYear(), value.getMonth(), 1))
   const year = view.getFullYear()
   const month = view.getMonth()
@@ -35,13 +37,15 @@ export default function Calendar({ value, onChange }: { value: Date; onChange: (
           if (d === null) return <div key={`e${i}`} />
           const date = new Date(year, month, d)
           const past = date < today
+          const closed = !past && isClosedDate(date)
           const selected = sameDay(date, value)
           const isToday = sameDay(date, today)
           return (
             <div
               key={d}
-              className={`cal-day ${selected ? 'sel' : ''} ${past ? 'past' : ''} ${isToday && !selected ? 'today' : ''}`}
-              onClick={() => { if (!past) onChange(date) }}
+              className={`cal-day ${selected ? 'sel' : ''} ${past ? 'past' : ''} ${closed ? 'closed' : ''} ${isToday && !selected ? 'today' : ''}`}
+              onClick={() => { if (!past && !closed) onChange(date) }}
+              title={closed ? 'Closed this day' : undefined}
             >
               {d}
             </div>
@@ -101,4 +105,21 @@ export function allowedHours(zh: ZoneHours | null, date: Date): number[] {
     out.push(h)
   }
   return out
+}
+
+/** Is the zone open at THIS moment? (instant bookings need this.) True when unconfigured / 24×7. */
+export function isZoneOpenNow(zh: ZoneHours | null): boolean {
+  if (!zh || zh.is247 || !zh.days) return true
+  const now = new Date()
+  return allowedHours(zh, now).includes(now.getHours())
+}
+
+/** Today's "6:00 AM – 9:00 PM" label for messaging (empty if closed today / unconfigured). */
+export function todayHoursLabel(zh: ZoneHours | null): string {
+  if (!zh || zh.is247 || !zh.days) return ''
+  const now = new Date()
+  const day = zh.days[_DOW[now.getDay()]]
+  if (!day || day.closed) return ''
+  const fmt = (t: string) => { const [h, m] = t.split(':').map(Number); const ap = h >= 12 ? 'PM' : 'AM'; return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ap}` }
+  return `${fmt(day.open)} – ${fmt(day.close)}`
 }

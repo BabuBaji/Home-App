@@ -4,7 +4,7 @@ import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../components/UI'
 import { fetchMapsKey } from '../api'
 import { loadGoogleMaps } from '../maps'
-import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, GeoError, type Place } from '../geo'
+import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
 
 const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GPS is unavailable
 
@@ -22,6 +22,7 @@ export default function LocationSelect() {
   const [loadErr, setLoadErr] = useState('')
   const [addr, setAddr] = useState<{ label: string; name: string; sub: string; pincode: string | null; lat: number; lng: number } | null>(null)
   const [resolving, setResolving] = useState(false)
+  const [checking, setChecking] = useState(false)   // serviceability check on Confirm (not while panning)
   const [q, setQ] = useState('')
   const [results, setResults] = useState<Place[]>([])
 
@@ -89,9 +90,14 @@ export default function LocationSelect() {
     catch (e) { toast(e instanceof GeoError && e.reason === 'permission' ? 'Allow location permission to use this' : 'Could not get your location') }
   }
 
-  // Confirm → go to the address-details form, carrying the pinned point + resolved locality.
-  function confirm() {
+  // Confirm → verify we serve this spot (checked ONCE here, not while panning), then continue.
+  async function confirm() {
     if (!addr) return toast('Move the map to your location')
+    setChecking(true)
+    let ok = true
+    try { ok = (await checkServiceable(addr.pincode || undefined, undefined)).serviceable } catch { ok = true }
+    setChecking(false)
+    if (!ok) return nav('/coming-soon')   // not served → show the "not available in your area yet" screen
     nav('/address-details', { state: { label: addr.label, name: addr.name, sub: addr.sub, pincode: addr.pincode, lat: addr.lat, lng: addr.lng } })
   }
 
@@ -145,7 +151,7 @@ export default function LocationSelect() {
             <div className="mp-addr-sub">{addr?.sub || (addr?.pincode ? `Pincode ${addr.pincode}` : 'Pan the map to place the pin')}</div>
           </div>
         </div>
-        <button className="mp-confirm" onClick={confirm} disabled={!addr}>Confirm location</button>
+        <button className="mp-confirm" onClick={confirm} disabled={!addr || checking}>{checking ? 'Checking…' : 'Confirm location'}</button>
       </div>
     </div>
   )
