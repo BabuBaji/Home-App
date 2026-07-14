@@ -224,16 +224,40 @@ export default function Workers() {
       {viewing && (
         <Modal title="Worker Details" onClose={() => setViewing(null)}>
           <div className="grid" style={{ gap: 12 }}>
-            <div className="cell-user"><Avatar name={viewing.name} src={viewing.avatar} size={48} /><div><strong>{viewing.name}</strong></div></div>
-            <Field label="Mobile Number"><input value={viewing.phone || '—'} readOnly /></Field>
-            <Field label="Email"><input value={viewing.email || '—'} readOnly /></Field>
-            <Field label="City"><input value={viewing.city || '—'} readOnly /></Field>
+            <div className="cell-user">
+              <Avatar name={viewing.name} src={viewing.avatar} size={48} />
+              <div><strong>{viewing.name}</strong><div className="muted" style={{ fontSize: 12 }}>{viewing.designation || 'Worker'} · ID {viewing.id}</div></div>
+            </div>
+            <div className="row" style={{ gap: 24 }}>
+              <Field label="Mobile Number"><input value={viewing.phone || '—'} readOnly /></Field>
+              <Field label="Email"><input value={viewing.email || '—'} readOnly /></Field>
+            </div>
+            <div className="row" style={{ gap: 24 }}>
+              <Field label="City"><input value={viewing.city || '—'} readOnly /></Field>
+              <Field label="Zone"><input value={zones.find((z) => z.id === viewing.zone_id)?.name || '—'} readOnly /></Field>
+            </div>
             <Field label="Services"><input value={(viewing.services || []).join(', ') || '—'} readOnly /></Field>
-            <Field label="Status"><div><Badge tone={viewing.status === 'active' ? 'green' : viewing.status === 'pending' ? 'amber' : 'red'}>{viewing.status}</Badge></div></Field>
+            <div className="row" style={{ gap: 24 }}>
+              <Field label="Status"><div><Badge tone={viewing.status === 'active' ? 'green' : viewing.status === 'pending' ? 'amber' : 'red'}>{viewing.status}</Badge></div></Field>
+              <Field label="Verified"><div><Badge tone={viewing.verified ? 'green' : 'gray'} dot={false}>{viewing.verified ? 'Verified' : 'Unverified'}</Badge></div></Field>
+              <Field label="Availability"><div><Badge tone={viewing.available ? 'green' : 'gray'} dot={false}>{viewing.available ? 'Online' : 'Offline'}</Badge></div></Field>
+            </div>
             <div className="row" style={{ gap: 24 }}>
               <Field label="Jobs Completed"><input value={String(viewing.jobs)} readOnly /></Field>
               <Field label="Rating"><input value={String(viewing.rating)} readOnly /></Field>
+              <Field label="Balance"><input value={`₹${viewing.balance ?? 0}`} readOnly /></Field>
             </div>
+            <Field label="Bank / KYC">
+              <div><Badge tone={viewing.bank_status === 'Verified' ? 'green' : viewing.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{viewing.bank_status || 'Pending'}</Badge></div>
+            </Field>
+            {viewing.profile?.bank?.bankAccount && (
+              <Field label="Bank Account">
+                <input value={`${viewing.profile.bank.bankName || 'Bank'} ••••${String(viewing.profile.bank.bankAccount).slice(-4)} · ${viewing.profile.bank.bankIfsc || ''}`} readOnly />
+              </Field>
+            )}
+            {viewing.profile?.bankVerification?.registeredName && (
+              <Field label="Registered Name (as per bank)"><input value={viewing.profile.bankVerification.registeredName} readOnly /></Field>
+            )}
             <Field label="Joined On"><input value={shortDate(viewing.joined)} readOnly /></Field>
           </div>
         </Modal>

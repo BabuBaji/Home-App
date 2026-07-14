@@ -27,6 +27,11 @@ export interface Worker {
   id: number; name: string; phone?: string; email?: string; city?: string; zone_id?: number | null
   services: string[]; avatar?: string | null; status: string; verified: boolean
   rating: number; jobs: number; earnings: number; joined: string; designation?: string
+  bank_status?: string; available?: boolean; balance?: number; withdrawn?: number
+  profile?: {
+    bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string }
+    bankVerification?: { status?: string; registeredName?: string; nameMatch?: boolean | null; reason?: string }
+  }
 }
 
 export interface AdminBooking {
