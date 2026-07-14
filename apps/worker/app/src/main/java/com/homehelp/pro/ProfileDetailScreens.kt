@@ -451,7 +451,10 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(Space.s)); Text("Reason: ${vm.bankRemarks}", fontSize = 12.sp, color = RedCancel)
             }
             // Name the bank has on record for this account (from the penny-drop check).
-            if (vm.bankRegisteredName.isNotBlank()) {
+            if (vm.bankApproved && vm.bankRegisteredName.isNotBlank()) {
+                Spacer(Modifier.height(Space.s))
+                Text("✓ Verified — ${vm.bankRegisteredName}", fontSize = 13.sp, color = GreenSuccess, fontWeight = FontWeight.SemiBold)
+            } else if (vm.bankRegisteredName.isNotBlank()) {
                 Spacer(Modifier.height(Space.s))
                 Text("Registered name (as per bank): ${vm.bankRegisteredName}", fontSize = 12.sp, color = TextDark)
             }
