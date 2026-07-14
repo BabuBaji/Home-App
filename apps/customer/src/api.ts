@@ -13,9 +13,12 @@ export async function initApiBase(): Promise<void> {
   // are handled by the Vite proxy -> localhost:8080. (The PC can't reach its own LAN IP
   // via the Docker-published port, so we must NOT switch dev to the LAN IP.)
   if (import.meta.env.DEV) return
-  // Packaged app: prefer the remote config so it can be repointed at a new LAN IP / tunnel
-  // WITHOUT rebuilding the APK. The build-time VITE_API_URL stays as the offline
-  // fallback (already in API_BASE) if the config can't be fetched.
+  // Packaged app: the LAN IP baked at build time (VITE_API_URL via build-apk.ps1) wins.
+  // We do NOT trust the remote config here because GitHub's raw CDN serves a stale copy
+  // for several minutes after a push, which would point the app at a dead IP. Rebuild
+  // (build-apk.ps1 auto-detects the current Wi-Fi IP) to repoint.
+  if (API_BASE) return
+  // Only when nothing was baked, fall back to the remote config.
   try {
     const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
     if (r.ok) {
