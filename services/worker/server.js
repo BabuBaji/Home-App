@@ -181,7 +181,28 @@ async function init() {
 
 /* ---------- helpers ---------- */
 const rowToWorker = (w) => w && ({ ...w, verified: !!w.verified, available: !!w.available })
-const workerDto = (w) => w && ({ id: w.id, name: w.name, phone: w.phone, email: w.email, city: w.city, services: w.services, avatar: w.avatar, status: w.status, verified: !!w.verified, rating: w.rating, jobs: w.jobs, available: !!w.available, bankStatus: w.bank_status, ...(w.profile || {}) })
+// Worker app's bank_status vocabulary differs from the DB's — map it so the app shows the
+// right pill and unlocks withdrawals on a verified account.
+const APP_BANK_STATUS = { Verified: 'Approved', Pending: 'Pending Verification', Rejected: 'Rejected' }
+const workerDto = (w) => {
+  if (!w) return w
+  const p = w.profile || {}
+  const bank = p.bank || {}
+  const bv = p.bankVerification || {}
+  const hasBank = !!(bank.bankAccount || bank.bankUpi)
+  return {
+    id: w.id, name: w.name, phone: w.phone, email: w.email, city: w.city, services: w.services,
+    avatar: w.avatar, status: w.status, verified: !!w.verified, rating: w.rating, jobs: w.jobs,
+    available: !!w.available,
+    ...p,
+    // Flatten bank.* to the top-level fields the worker app's WorkerDto reads, and expose the
+    // verification result (registered name / rejection reason).
+    bankHolder: bank.bankHolder || '', bankName: bank.bankName || '', bankAccount: bank.bankAccount || '',
+    bankIfsc: bank.bankIfsc || '', bankUpi: bank.bankUpi || '', chequePhoto: bank.chequePhoto || '',
+    bankRemarks: bv.reason || (bv.nameMatch === false ? `Name on account: ${bv.registeredName || 'differs'}` : ''),
+    bankStatus: hasBank ? (APP_BANK_STATUS[w.bank_status] || w.bank_status || 'Pending Verification') : 'Not Added',
+  }
+}
 const walletDto = (w) => ({ balance: w.balance, pending: w.pending, hold: w.hold, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding, earnings: w.earnings })
 const walletSummary = (w) => ({ available: w.balance, pending: w.pending, onHold: w.hold, totalEarned: w.earnings, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding })
 // Real period earnings for the wallet/earnings dashboard: the worker's 80% share of jobs
