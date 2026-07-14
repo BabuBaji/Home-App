@@ -9,7 +9,11 @@ const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app
 export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 export async function initApiBase(): Promise<void> {
-  // Prefer the remote config so the app can be repointed at a new LAN IP / tunnel
+  // In the browser dev server, keep API_BASE empty so requests go to relative /api and
+  // are handled by the Vite proxy -> localhost:8080. (The PC can't reach its own LAN IP
+  // via the Docker-published port, so we must NOT switch dev to the LAN IP.)
+  if (import.meta.env.DEV) return
+  // Packaged app: prefer the remote config so it can be repointed at a new LAN IP / tunnel
   // WITHOUT rebuilding the APK. The build-time VITE_API_URL stays as the offline
   // fallback (already in API_BASE) if the config can't be fetched.
   try {
