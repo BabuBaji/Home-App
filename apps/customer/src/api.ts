@@ -9,14 +9,14 @@ const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app
 export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 export async function initApiBase(): Promise<void> {
-  // A build-time URL (VITE_API_URL, e.g. a LAN IP for local device testing) takes priority —
-  // don't let the remote config override it.
-  if (API_BASE) return
+  // Prefer the remote config so the app can be repointed at a new LAN IP / tunnel
+  // WITHOUT rebuilding the APK. The build-time VITE_API_URL stays as the offline
+  // fallback (already in API_BASE) if the config can't be fetched.
   try {
     const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
     if (r.ok) {
       const j = await r.json()
-      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+      if (j && j.apiBase) { API_BASE = String(j.apiBase).replace(/\/$/, ''); return }
     }
   } catch { /* keep the baked fallback */ }
 }
