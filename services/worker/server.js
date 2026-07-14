@@ -467,7 +467,7 @@ app.get('/api/worker/bootstrap', auth, async (req, res) => res.json(await bootst
 
 /* ---------- profile / documents ---------- */
 app.put('/api/worker/profile', auth, async (req, res) => { const b = req.body || {}; await pool.query('UPDATE workers SET name=COALESCE($1,name), email=COALESCE($2,email), city=COALESCE($3,city), avatar=COALESCE($4,avatar) WHERE id=$5', [b.name ?? null, b.email ?? null, b.city ?? null, b.avatar ?? null, req.worker.id]); res.json(workerDto(await getWorker(req.worker.id))) })
-app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (pending verification)' }); res.json(workerDto(await getWorker(req.worker.id))) })
+app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'bank.verify.requested', { workerId: req.worker.id, bank: req.body || {}, name: req.worker.name }); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (verifying)' }); res.json(workerDto(await getWorker(req.worker.id))) })
 app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
 
 /* ---------- shift plans (min-guarantee) ---------- */
@@ -923,7 +923,23 @@ app.post('/api/admin/workers/:id/bank/approve', adminAuth, async (req, res) => {
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 
 /* ---------- events ---------- */
-subscribeEvents(REDIS_URL, 'worker', (type) => { if (type === 'settings.updated') invalidateSettings() })
+// Result of the RazorpayX bank-account validation (penny-drop) kicked off on bank save.
+async function applyBankVerification(workerId, ok, data = {}) {
+  if (!workerId) return
+  const status = ok ? 'Verified' : 'Rejected'
+  await pool.query('UPDATE workers SET bank_status=$1 WHERE id=$2', [status, workerId])
+  await mergeProfile(workerId, { bankVerification: { status, registeredName: data.registeredName || '', nameMatch: data.nameMatch ?? null, reason: data.reason || '', at: new Date().toISOString() } })
+  const detail = ok
+    ? `Bank verified${data.registeredName ? ' — ' + data.registeredName : ''}${data.nameMatch === false ? ' (name mismatch — review)' : ''}`
+    : `Bank verification failed (${data.reason || 'invalid account'})`
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Payments', action: 'kyc.bank.verify', entityType: 'worker', entityId: workerId, detail })
+}
+
+subscribeEvents(REDIS_URL, 'worker', async (type, data) => {
+  if (type === 'settings.updated') return invalidateSettings()
+  if (type === 'bank.verified') return applyBankVerification(data.workerId, true, data)
+  if (type === 'bank.verify.failed') return applyBankVerification(data.workerId, false, data)
+})
 
 // Auto-settle Shakti bonuses at the start of each month (pays out the PREVIOUS month).
 // Runs daily but only acts on the 1st–2nd; the wallet credit is idempotent per worker/month.

@@ -49,6 +49,7 @@ async function init() {
     // One payout row per withdrawal — guards against double-paying if the event is redelivered.
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_payout_withdrawal ON payouts(withdrawal_id) WHERE withdrawal_id IS NOT NULL`,
     `CREATE TABLE IF NOT EXISTS wallet_ledger (id SERIAL PRIMARY KEY, worker_id INTEGER, type TEXT, amount INTEGER, ref TEXT, created TIMESTAMPTZ DEFAULT now())`,
+    `CREATE TABLE IF NOT EXISTS bank_validations (id SERIAL PRIMARY KEY, worker_id INTEGER, validation_id TEXT, fund_account_id TEXT, status TEXT, registered_name TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS webhook_events (id SERIAL PRIMARY KEY, event_id TEXT UNIQUE, type TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_booking ON payments(booking_id) WHERE booking_id IS NOT NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_settle_booking ON settlements(booking_id)`,
@@ -163,6 +164,73 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
       [workerId, withdrawalId, amount, String(e.message || 'payout error')])
     publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: String(e.message || 'payout error') })
     console.error(`[payment] payout ${withdrawalId} failed:`, e.message)
+  }
+}
+
+/* ---------- bank account verification (RazorpayX Fund Account Validation / penny-drop) ----------
+ * When a worker saves bank details we validate the account is real and pull the bank's registered
+ * holder name to catch typos / wrong accounts before any money is ever paid out. */
+
+// Loose name match: token overlap after stripping case/punctuation. Catches an obviously wrong
+// account (totally different holder) without rejecting minor spelling / initial-order differences.
+// Returns true/false, or null when we can't tell (empty name from the bank).
+function nameMatches(entered, registered) {
+  const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter((t) => t.length > 1)
+  const A = norm(entered), B = new Set(norm(registered))
+  if (!A.length || !B.size) return null
+  const hits = A.filter((t) => B.has(t)).length
+  return hits >= 1 && hits / A.length >= 0.5
+}
+
+async function initiateBankVerification({ workerId, bank, name }) {
+  if (!workerId || !bank) return
+  const holder = bank.bankHolder || name || `Worker ${workerId}`
+  const useUpi = !(bank.bankAccount && bank.bankIfsc) && !!bank.bankUpi
+  const cfg = await payoutCfg()
+
+  // MOCK mode — no RazorpayX configured. Trust the entered details so dev/demo proceeds.
+  if (!cfg.live) {
+    publishEvent(REDIS_URL, 'bank.verified', { workerId, registeredName: holder, nameMatch: true, mock: true })
+    console.log(`[payment] bank verify ${workerId} — MOCK auto-verified`)
+    return
+  }
+  if (useUpi ? !bank.bankUpi : !(bank.bankAccount && bank.bankIfsc)) {
+    return publishEvent(REDIS_URL, 'bank.verify.failed', { workerId, reason: 'Missing bank / UPI details' })
+  }
+  try {
+    const contact = await rzpxCall(cfg, '/v1/contacts', { name: holder, type: 'employee', reference_id: `worker_${workerId}` })
+    const fa = await rzpxCall(cfg, '/v1/fund_accounts', useUpi
+      ? { contact_id: contact.id, account_type: 'vpa', vpa: { address: bank.bankUpi } }
+      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount } })
+    const val = await rzpxCall(cfg, '/v1/fund_accounts/validations', {
+      account_number: cfg.account, fund_account: { id: fa.id }, amount: 100, currency: 'INR',
+      notes: { workerId: String(workerId), holder },
+    })
+    await pool.query('INSERT INTO bank_validations (worker_id,validation_id,fund_account_id,status) VALUES ($1,$2,$3,$4)', [workerId, val.id, fa.id, val.status || 'created'])
+    // Some validations resolve synchronously; otherwise the webhook finalizes it.
+    if (val.results || val.status === 'completed') await finalizeBankValidation(val, holder)
+    else console.log(`[payment] bank verify ${workerId} — validation ${val.id} created, awaiting webhook`)
+  } catch (e) {
+    publishEvent(REDIS_URL, 'bank.verify.failed', { workerId, reason: String(e.message || 'validation error') })
+    console.error(`[payment] bank verify ${workerId} failed:`, e.message)
+  }
+}
+
+// Map a completed RazorpayX validation to Verified/Rejected + emit the event the worker service consumes.
+async function finalizeBankValidation(entity, holderHint) {
+  const fromDb = (await pool.query('SELECT worker_id FROM bank_validations WHERE validation_id=$1', [entity.id])).rows[0]
+  const workerId = Number(entity.notes?.workerId) || fromDb?.worker_id
+  if (!workerId) return
+  const holder = entity.notes?.holder || holderHint || ''
+  const accStatus = entity.results?.account_status || (entity.status === 'completed' ? 'active' : '')
+  const registered = entity.results?.registered_name || ''
+  await pool.query('UPDATE bank_validations SET status=$1, registered_name=$2 WHERE validation_id=$3', [accStatus || entity.status || 'completed', registered, entity.id])
+  if (accStatus === 'active') {
+    publishEvent(REDIS_URL, 'bank.verified', { workerId, registeredName: registered, nameMatch: nameMatches(holder, registered) })
+    console.log(`[payment] bank verify ${workerId} -> verified (${registered || 'no name'})`)
+  } else {
+    publishEvent(REDIS_URL, 'bank.verify.failed', { workerId, reason: accStatus ? `Account ${accStatus}` : 'Validation failed', registeredName: registered })
+    console.log(`[payment] bank verify ${workerId} -> rejected (${accStatus || 'failed'})`)
   }
 }
 
@@ -292,6 +360,20 @@ app.post('/api/payments/payout/webhook', async (req, res) => {
   res.json({ ok: true })
 })
 
+// RazorpayX fund-account-validation webhook (penny-drop result). HMAC-verified + deduped.
+app.post('/api/payments/bank-validation/webhook', async (req, res) => {
+  const secret = await getSetting(ADMIN_URL, 'payout_webhook_secret', '')
+  const sig = req.headers['x-razorpay-signature']
+  if (secret) { const expected = crypto.createHmac('sha256', secret).update(req.rawBody || Buffer.from('')).digest('hex'); if (sig !== expected) return res.status(400).json({ error: 'bad signature' }) }
+  const evt = req.body || {}
+  const entity = evt.payload?.fund_account?.validation?.entity || evt.payload?.validation?.entity || (evt.id && evt.status ? evt : null)
+  if (entity?.id) {
+    const dup = await pool.query('INSERT INTO webhook_events (event_id,type) VALUES ($1,$2) ON CONFLICT (event_id) DO NOTHING RETURNING id', [String(evt.id || entity.id), evt.event || 'fund_account.validation'])
+    if (dup.rowCount) await finalizeBankValidation(entity)
+  }
+  res.json({ ok: true })
+})
+
 /* ---------- admin finance ---------- */
 // Admin Payments screen expects { summary, methods, transactions } — not a raw row array.
 app.get('/api/admin/payments', adminAuth, async (_q, res) => {
@@ -358,6 +440,7 @@ app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => {
 subscribeEvents(REDIS_URL, 'payment', async (type, data) => {
   if (type === 'settings.updated') return invalidateSettings()
   if (type === 'payout.requested') return initiatePayout(data)
+  if (type === 'bank.verify.requested') return initiateBankVerification(data)
   if (type === 'payment.succeeded') await recordPayment(data)
   else if (type === 'booking.completed' && data.booking?.worker_id) {
     const b = data.booking
