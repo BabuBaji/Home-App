@@ -93,6 +93,12 @@ export interface Address {
   receiver_phone?: string
   lat?: number
   lng?: number
+  // Home profile (captured while adding the address).
+  home_size?: string        // '1BHK' | '2BHK' | '3BHK' | '4+ BHK'
+  bedrooms?: number
+  bathrooms?: number
+  fans?: number
+  acs?: number
   is_default: number
 }
 

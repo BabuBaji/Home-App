@@ -56,6 +56,12 @@ async function init() {
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS receiver_phone TEXT`,
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS lat REAL`,
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS lng REAL`,
+    // Home profile captured while adding an address: house size (BHK) + appliance/room counts.
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS home_size TEXT`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS bedrooms INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS bathrooms INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS fans INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS acs INTEGER NOT NULL DEFAULT 0`,
     // Three-balance wallet: `wallet` is the Cash balance; add Promo + Reward Points and a status.
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_balance INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS reward_points INTEGER NOT NULL DEFAULT 0`,
@@ -184,6 +190,9 @@ async function normalizeLocation(incoming, existing) {
   if (!g) return { value: existing || null, pincode: pinOf(existing) }
   return { value: g.label, pincode: g.pincode }
 }
+
+// Coerce a home-profile count to a non-negative integer (0 when absent/invalid).
+function intOr0(v) { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0 }
 
 async function getAddresses(uid) {
   const { rows } = await pool.query('SELECT * FROM addresses WHERE user_id=$1 ORDER BY is_default DESC, id', [uid])
@@ -320,10 +329,11 @@ app.post('/api/addresses', auth, async (req, res) => {
   const makeDefault = a.makeDefault === true || existing === 0
   if (makeDefault) await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [req.user.id])
   const { rows } = await pool.query(
-    `INSERT INTO addresses (user_id,label,line,house,floor,apartment,street,landmark,city,pincode,receiver_phone,lat,lng,is_default)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    `INSERT INTO addresses (user_id,label,line,house,floor,apartment,street,landmark,city,pincode,receiver_phone,lat,lng,home_size,bedrooms,bathrooms,fans,acs,is_default)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [req.user.id, a.label || 'Other', line, a.house || null, a.floor || null, a.apartment || null, a.street || null,
-      a.landmark || null, a.city || null, a.pincode || null, receiverPhone, a.lat ?? null, a.lng ?? null, makeDefault])
+      a.landmark || null, a.city || null, a.pincode || null, receiverPhone, a.lat ?? null, a.lng ?? null,
+      a.home_size || null, intOr0(a.bedrooms), intOr0(a.bathrooms), intOr0(a.fans), intOr0(a.acs), makeDefault])
   res.status(201).json(rows[0])
 })
 app.patch('/api/addresses/:id', auth, async (req, res) => {
@@ -335,9 +345,10 @@ app.patch('/api/addresses/:id', auth, async (req, res) => {
   const receiverPhone = a.receiver_phone ?? a.receiverPhone ?? cur.receiver_phone
   const line = a.line || [m.house, m.floor && `Floor ${m.floor}`, m.apartment, m.street, m.landmark, m.city, m.pincode].filter(Boolean).join(', ')
   await pool.query(
-    `UPDATE addresses SET label=$1,line=$2,house=$3,floor=$4,apartment=$5,street=$6,landmark=$7,city=$8,pincode=$9,receiver_phone=$10,lat=$11,lng=$12 WHERE id=$13 AND user_id=$14`,
+    `UPDATE addresses SET label=$1,line=$2,house=$3,floor=$4,apartment=$5,street=$6,landmark=$7,city=$8,pincode=$9,receiver_phone=$10,lat=$11,lng=$12,home_size=$13,bedrooms=$14,bathrooms=$15,fans=$16,acs=$17 WHERE id=$18 AND user_id=$19`,
     [m.label || 'Home', line, m.house || null, m.floor || null, m.apartment || null, m.street || null, m.landmark || null,
-      m.city || null, m.pincode || null, receiverPhone || null, a.lat ?? cur.lat, a.lng ?? cur.lng, id, req.user.id])
+      m.city || null, m.pincode || null, receiverPhone || null, a.lat ?? cur.lat, a.lng ?? cur.lng,
+      m.home_size || null, intOr0(m.bedrooms), intOr0(m.bathrooms), intOr0(m.fans), intOr0(m.acs), id, req.user.id])
   res.json((await pool.query('SELECT * FROM addresses WHERE id=$1', [id])).rows[0])
 })
 app.patch('/api/addresses/:id/default', auth, async (req, res) => {
