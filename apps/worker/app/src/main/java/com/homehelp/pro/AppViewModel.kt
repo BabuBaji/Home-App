@@ -755,6 +755,15 @@ class AppViewModel : ViewModel() {
         bankRegisteredName = w.bankRegisteredName
         bankNameMatch = w.bankNameMatch
         bankUpi = w.bankUpi
+        // Verification (penny-drop) runs asynchronously after this call returns, so the immediate
+        // response is "Pending Verification". Poll the snapshot a few times so the final result
+        // (Approved / Rejected) appears on the screen without the worker reopening it.
+        var tries = 0
+        while (bankStatus == "Pending Verification" && tries < 6) {
+            tries++
+            delay(1500)
+            runCatching { applyBootstrap(api.bootstrap()) }
+        }
     }
 
     fun saveAvailability() = sync {
