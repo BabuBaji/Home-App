@@ -161,6 +161,7 @@ services:
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
       WALLET_URL: http://wallet:4009
+      WORKER_URL: http://worker:4004
       FINANCE_ENC_KEY: ${FINANCE_ENC_KEY}
     ports: ["4008:4008"]
     depends_on:
