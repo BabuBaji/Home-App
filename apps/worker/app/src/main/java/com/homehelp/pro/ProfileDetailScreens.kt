@@ -21,7 +21,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
@@ -65,7 +72,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -98,16 +107,130 @@ private fun softFieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-private fun Field(label: String, value: String, onChange: (String) -> Unit) {
+private fun Field(label: String, value: String, keyboard: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
         singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(Radius.field),
         colors = softFieldColors(),
     )
+}
+
+/** A bank shown in the picker: display name, short badge code, and brand-ish badge colour. */
+private data class BankOption(val name: String, val code: String, val color: Long)
+
+private val INDIAN_BANKS = listOf(
+    BankOption("State Bank of India", "SBI", 0xFF2A4DA8),
+    BankOption("HDFC Bank", "HDFC", 0xFF004C8F),
+    BankOption("ICICI Bank", "ICICI", 0xFFAE282E),
+    BankOption("Axis Bank", "AXIS", 0xFF97144D),
+    BankOption("Kotak Mahindra Bank", "KOTAK", 0xFFE4002B),
+    BankOption("Punjab National Bank", "PNB", 0xFFA1132E),
+    BankOption("Bank of Baroda", "BOB", 0xFFEF5A28),
+    BankOption("Canara Bank", "CNRB", 0xFF00558C),
+    BankOption("Union Bank of India", "UBI", 0xFFC8102E),
+    BankOption("Bank of India", "BOI", 0xFFF37021),
+    BankOption("IndusInd Bank", "INDS", 0xFF9B1B30),
+    BankOption("YES Bank", "YES", 0xFF00518F),
+    BankOption("IDFC FIRST Bank", "IDFC", 0xFF9C1D26),
+    BankOption("IDBI Bank", "IDBI", 0xFF006A4E),
+    BankOption("Federal Bank", "FDRL", 0xFFF9A01B),
+    BankOption("Indian Bank", "INDB", 0xFF00355F),
+    BankOption("Central Bank of India", "CBI", 0xFF7A1F2B),
+    BankOption("Indian Overseas Bank", "IOB", 0xFF003D7C),
+    BankOption("UCO Bank", "UCO", 0xFF1A4E8A),
+    BankOption("Bank of Maharashtra", "BOM", 0xFFF6A21E),
+    BankOption("Punjab & Sind Bank", "PSB", 0xFF6A1B9A),
+    BankOption("RBL Bank", "RBL", 0xFFE4002B),
+    BankOption("Bandhan Bank", "BDN", 0xFFDA291C),
+    BankOption("AU Small Finance Bank", "AU", 0xFF6D2077),
+    BankOption("South Indian Bank", "SIB", 0xFFC8102E),
+    BankOption("Karnataka Bank", "KBL", 0xFFED1C24),
+    BankOption("Karur Vysya Bank", "KVB", 0xFF00518F),
+    BankOption("City Union Bank", "CUB", 0xFF003D7C),
+    BankOption("DCB Bank", "DCB", 0xFF00A0DF),
+    BankOption("Jammu & Kashmir Bank", "JKB", 0xFF6A1B9A),
+    BankOption("Tamilnad Mercantile Bank", "TMB", 0xFF00518F),
+    BankOption("CSB Bank", "CSB", 0xFF00355F),
+    BankOption("Dhanlaxmi Bank", "DLB", 0xFFED1C24),
+    BankOption("Paytm Payments Bank", "PYTM", 0xFF00BAF2),
+    BankOption("Airtel Payments Bank", "ARTL", 0xFFE4002B),
+    BankOption("India Post Payments Bank", "IPPB", 0xFFAE282E),
+    BankOption("Equitas Small Finance Bank", "EQTS", 0xFF6D2077),
+    BankOption("Ujjivan Small Finance Bank", "UJVN", 0xFF00518F),
+    BankOption("Jana Small Finance Bank", "JANA", 0xFFE4002B),
+    BankOption("Standard Chartered Bank", "SCB", 0xFF1A4E8A),
+    BankOption("HSBC Bank", "HSBC", 0xFFDB0011),
+    BankOption("Citibank", "CITI", 0xFF003B70),
+    BankOption("DBS Bank", "DBS", 0xFFE4002B),
+)
+
+/** Loose check that the selected bank name and the IFSC's bank name refer to the same bank. */
+private fun bankMatches(selected: String, ifscBank: String): Boolean {
+    fun norm(s: String) = s.lowercase().replace("bank", "").filter { it.isLetterOrDigit() || it == ' ' }.trim()
+    val a = norm(selected); val b = norm(ifscBank)
+    if (a.isBlank() || b.isBlank()) return true
+    return a.contains(b) || b.contains(a) || a.split(" ")[0] == b.split(" ")[0]
+}
+
+/** Circular badge with the bank's short code on its brand colour (no external logo assets). */
+@Composable
+private fun BankBadge(code: String, color: Long, size: Int = 34) {
+    Box(Modifier.size(size.dp).clip(CircleShape).background(Color(color)), contentAlignment = Alignment.Center) {
+        Text(code, color = Color.White, fontSize = if (code.length >= 4) 9.sp else 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Searchable bank selector — a field that opens a dialog with a search box + badge list. */
+@Composable
+private fun BankPickerField(selected: String, onSelect: (BankOption) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val chosen = INDIAN_BANKS.firstOrNull { it.name == selected }
+    Box(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
+            .clickable { open = true }.padding(Space.m),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (chosen != null) { BankBadge(chosen.code, chosen.color, 28); Spacer(Modifier.width(Space.s)) }
+            Text(selected.ifBlank { "Select your bank" }, color = if (selected.isBlank()) TextMuted else TextDark, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = TextGray)
+        }
+    }
+    if (open) {
+        Dialog(onDismissRequest = { open = false; query = "" }) {
+            Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
+                Column(Modifier.padding(Space.m).heightIn(max = 520.dp)) {
+                    Text("Select Bank", fontWeight = FontWeight.SemiBold, color = TextDark)
+                    Spacer(Modifier.height(Space.s))
+                    OutlinedTextField(
+                        value = query, onValueChange = { query = it },
+                        label = { Text("Search bank") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.field), colors = softFieldColors(),
+                    )
+                    Spacer(Modifier.height(Space.s))
+                    val filtered = INDIAN_BANKS.filter { it.name.contains(query, true) || it.code.contains(query, true) }
+                    LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                        items(filtered) { b ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onSelect(b); open = false; query = "" }.padding(vertical = Space.s),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BankBadge(b.code, b.color)
+                                Spacer(Modifier.width(Space.m))
+                                Text(b.name, color = TextDark, fontSize = 14.sp)
+                            }
+                        }
+                        if (filtered.isEmpty()) item { Text("No banks match \"$query\"", color = TextGray, modifier = Modifier.padding(Space.m)) }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** Tinted rounded icon chip used as the leading element of list/toggle/nav rows. */
@@ -327,6 +450,15 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             if (vm.bankStatus == "Rejected" && vm.bankRemarks.isNotBlank()) {
                 Spacer(Modifier.height(Space.s)); Text("Reason: ${vm.bankRemarks}", fontSize = 12.sp, color = RedCancel)
             }
+            // Name the bank has on record for this account (from the penny-drop check).
+            if (vm.bankRegisteredName.isNotBlank()) {
+                Spacer(Modifier.height(Space.s))
+                Text("Registered name (as per bank): ${vm.bankRegisteredName}", fontSize = 12.sp, color = TextDark)
+            }
+            if (vm.bankNameMatch == false) {
+                Spacer(Modifier.height(Space.xs))
+                Text("⚠ This differs from the name you entered — flagged for review.", fontSize = 12.sp, color = Amber)
+            }
             Spacer(Modifier.height(Space.s)); HairlineDivider(); Spacer(Modifier.height(Space.s))
             Text(
                 if (vm.bankApproved) "Your account is verified — you can withdraw money."
@@ -340,11 +472,25 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionLabel("Account Details")
                 Spacer(Modifier.height(Space.m))
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    Field("Account Holder Name", vm.bankHolder) { vm.bankHolder = it }
-                    Field("Bank Name", vm.bankName) { vm.bankName = it }
-                    Field("Account Number", vm.bankAccount) { vm.bankAccount = it }
-                    Field("Re-enter Account Number", reenter) { reenter = it }
-                    Field("IFSC Code", vm.bankIfsc) { vm.bankIfsc = it }
+                    // Bank — searchable dropdown with brand badges.
+                    BankPickerField(vm.bankName) { vm.bankName = it.name }
+                    // Account number: digits only — non-numeric input is stripped as it's typed.
+                    Field("Account Number", vm.bankAccount, KeyboardType.Number) { vm.bankAccount = it.filter(Char::isDigit).take(18) }
+                    Field("Confirm Account Number", reenter, KeyboardType.Number) { reenter = it.filter(Char::isDigit).take(18) }
+                    Field("IFSC Code", vm.bankIfsc) { vm.bankIfsc = it.uppercase(); vm.lookupIfsc(it) }
+                    // Confirm the IFSC is real + which bank/branch it belongs to (cross-checks the selected bank).
+                    when {
+                        vm.ifscChecking -> Text("Checking IFSC…", fontSize = 12.sp, color = TextGray)
+                        vm.ifscError.isNotBlank() -> Text("⚠ ${vm.ifscError}", fontSize = 12.sp, color = RedCancel)
+                        vm.ifscBank.isNotBlank() -> {
+                            val mism = vm.bankName.isNotBlank() && !bankMatches(vm.bankName, vm.ifscBank)
+                            Text(
+                                (if (mism) "⚠ This IFSC belongs to ${vm.ifscBank}" else "✓ ${vm.ifscBank}") +
+                                    (if (vm.bankBranch.isNotBlank()) " — ${vm.bankBranch}" else ""),
+                                fontSize = 12.sp, color = if (mism) Amber else GreenSuccess,
+                            )
+                        }
+                    }
                     Field("UPI ID (optional)", vm.bankUpi) { vm.bankUpi = it }
                     // Optional cancelled cheque / passbook photo.
                     Row(
@@ -364,11 +510,19 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             PrimaryButton("Continue") {
+                val acc = vm.bankAccount.trim()
+                val ifsc = vm.bankIfsc.trim().uppercase()
+                // Standard Indian IFSC: 4 letters + '0' + 6 alphanumerics (e.g. HDFC0001234).
+                val ifscOk = Regex("^[A-Z]{4}0[A-Z0-9]{6}$").matches(ifsc)
                 when {
-                    vm.bankHolder.isBlank() || vm.bankName.isBlank() || vm.bankAccount.isBlank() || vm.bankIfsc.isBlank() ->
-                        toast(ctx, "Please fill all required fields")
-                    vm.bankAccount.trim() != reenter.trim() -> toast(ctx, "Account numbers do not match")
-                    else -> otpStep = true
+                    vm.bankName.isBlank() -> toast(ctx, "Please select your bank")
+                    acc.isBlank() -> toast(ctx, "Enter your account number")
+                    acc.length < 9 || acc.length > 18 -> toast(ctx, "Enter a valid account number (9–18 digits)")
+                    acc != reenter.trim() -> toast(ctx, "Account numbers do not match")
+                    !ifscOk -> toast(ctx, "Enter a valid IFSC code (e.g. HDFC0001234)")
+                    vm.ifscChecking -> toast(ctx, "Verifying IFSC — please wait")
+                    vm.ifscError.isNotBlank() -> toast(ctx, "This IFSC could not be verified")
+                    else -> { vm.bankIfsc = ifsc; otpStep = true }
                 }
             }
         } else {

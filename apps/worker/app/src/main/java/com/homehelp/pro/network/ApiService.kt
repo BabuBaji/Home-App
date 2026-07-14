@@ -26,6 +26,9 @@ interface ApiService {
     @PUT("api/worker/bank")
     suspend fun updateBank(@Body body: BankBody): WorkerDto
 
+    @GET("api/worker/ifsc/{code}")
+    suspend fun ifscLookup(@Path("code") code: String): IfscDto
+
     @PUT("api/worker/availability")
     suspend fun updateAvailability(@Body body: AvailabilityBody): WorkerDto
 

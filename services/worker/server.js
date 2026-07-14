@@ -199,7 +199,9 @@ const workerDto = (w) => {
     // verification result (registered name / rejection reason).
     bankHolder: bank.bankHolder || '', bankName: bank.bankName || '', bankAccount: bank.bankAccount || '',
     bankIfsc: bank.bankIfsc || '', bankUpi: bank.bankUpi || '', chequePhoto: bank.chequePhoto || '',
-    bankRemarks: bv.reason || (bv.nameMatch === false ? `Name on account: ${bv.registeredName || 'differs'}` : ''),
+    bankRemarks: bv.reason || '',
+    bankRegisteredName: bv.registeredName || '',
+    bankNameMatch: (bv.nameMatch === undefined || bv.nameMatch === null) ? null : !!bv.nameMatch,
     bankStatus: hasBank ? (APP_BANK_STATUS[w.bank_status] || w.bank_status || 'Pending Verification') : 'Not Added',
   }
 }
@@ -485,6 +487,20 @@ app.post('/api/worker/auth/verify', async (req, res) => {
   res.json({ ok: true, token: 'worker-' + w.id, ...(await bootstrap(w.id)) })
 })
 app.get('/api/worker/bootstrap', auth, async (req, res) => res.json(await bootstrap(req.worker.id)))
+
+// IFSC lookup — resolves the bank + branch from the code (Razorpay's free public IFSC directory)
+// so the app can confirm the IFSC is real and AUTO-FILL the bank name instead of trusting free text.
+// The account-number/holder correctness is a separate step (the penny-drop on save).
+app.get('/api/worker/ifsc/:code', auth, async (req, res) => {
+  const code = String(req.params.code || '').trim().toUpperCase()
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) return res.json({ valid: false, error: 'Invalid IFSC format' })
+  try {
+    const r = await fetch('https://ifsc.razorpay.com/' + code)
+    if (!r.ok) return res.json({ valid: false, error: 'IFSC not found' })
+    const d = await r.json()
+    res.json({ valid: true, ifsc: code, bank: d.BANK || '', branch: d.BRANCH || '', city: d.CITY || d.CENTRE || '', state: d.STATE || '' })
+  } catch { res.json({ valid: false, error: 'Could not verify IFSC right now' }) }
+})
 
 /* ---------- profile / documents ---------- */
 app.put('/api/worker/profile', auth, async (req, res) => { const b = req.body || {}; await pool.query('UPDATE workers SET name=COALESCE($1,name), email=COALESCE($2,email), city=COALESCE($3,city), avatar=COALESCE($4,avatar) WHERE id=$5', [b.name ?? null, b.email ?? null, b.city ?? null, b.avatar ?? null, req.worker.id]); res.json(workerDto(await getWorker(req.worker.id))) })

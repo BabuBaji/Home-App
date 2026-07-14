@@ -240,6 +240,21 @@ class AppViewModel : ViewModel() {
         private set
     var bankRemarks by mutableStateOf("")
         private set
+    // The account-holder name the bank has on record (from the penny-drop check) + whether it
+    // matches what the worker typed. null = not checked yet / couldn't determine.
+    var bankRegisteredName by mutableStateOf("")
+        private set
+    var bankNameMatch by mutableStateOf<Boolean?>(null)
+        private set
+    // Bank + branch resolved from the IFSC (auto-fills bank name; confirms the IFSC is a real code).
+    var bankBranch by mutableStateOf("")
+        private set
+    var ifscBank by mutableStateOf("")          // bank the IFSC actually belongs to (for cross-check)
+        private set
+    var ifscError by mutableStateOf("")
+        private set
+    var ifscChecking by mutableStateOf(false)
+        private set
     val bankApproved: Boolean get() = bankStatus == "Approved"
 
     // Selectable options only — nothing is pre-selected for the worker. The backend
@@ -307,6 +322,8 @@ class AppViewModel : ViewModel() {
             bankUpi = w.bankUpi
             bankStatus = w.bankStatus
             bankRemarks = w.bankRemarks
+            bankRegisteredName = w.bankRegisteredName
+            bankNameMatch = w.bankNameMatch
             shiftStart = w.shiftStart
             shiftEnd = w.shiftEnd
             if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
@@ -714,10 +731,29 @@ class AppViewModel : ViewModel() {
     // ---- profile persistence (called from the Save buttons) ----
     fun saveProfile() = sync { api.updateProfile(ProfileBody(workerName, workerPhone, workerEmail, workerCity)) }
 
+    /** Resolve bank + branch from the IFSC (auto-fills the bank name and confirms the code is real).
+     *  Only the penny-drop on save can prove the ACCOUNT NUMBER itself — this just validates the IFSC. */
+    fun lookupIfsc(code: String) {
+        val c = code.trim().uppercase()
+        if (!Regex("^[A-Z]{4}0[A-Z0-9]{6}$").matches(c)) { bankBranch = ""; ifscError = ""; return }
+        viewModelScope.launch {
+            ifscChecking = true; ifscError = ""
+            try {
+                val r = api.ifscLookup(c)
+                if (r.valid) { ifscBank = r.bank; bankBranch = listOf(r.branch, r.city).filter { it.isNotBlank() }.joinToString(", "); ifscError = "" }
+                else { bankBranch = ""; ifscBank = ""; ifscError = r.error.ifBlank { "IFSC not found" } }
+            } catch (e: Exception) { bankBranch = ""; ifscBank = ""; ifscError = "Could not verify IFSC" }
+            finally { ifscChecking = false }
+        }
+    }
+
     fun saveBank(chequePhoto: String = "") = sync {
-        val w = api.updateBank(BankBody(bankHolder, bankName, bankAccount, bankIfsc, bankUpi, chequePhoto))
+        val holder = bankHolder.ifBlank { workerName }
+        val w = api.updateBank(BankBody(holder, bankName, bankAccount, bankIfsc, bankUpi, chequePhoto))
         bankStatus = w.bankStatus
         bankRemarks = w.bankRemarks
+        bankRegisteredName = w.bankRegisteredName
+        bankNameMatch = w.bankNameMatch
         bankUpi = w.bankUpi
     }
 
