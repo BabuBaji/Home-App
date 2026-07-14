@@ -101,6 +101,16 @@ async function rzpxCall(cfg, path, body) {
   return json
 }
 
+// RazorpayX GET (Basic auth) — used to poll an async validation for its result.
+async function rzpxGet(cfg, path) {
+  const resp = await fetch('https://api.razorpay.com' + path, {
+    headers: { Authorization: 'Basic ' + Buffer.from(`${cfg.keyId}:${cfg.keySecret}`).toString('base64') },
+  })
+  const json = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(json?.error?.description || `RazorpayX GET ${path} failed (${resp.status})`)
+  return json
+}
+
 // RazorpayX payout statuses -> our ledger outcome. 'processed' = money delivered.
 const PAYOUT_DONE = new Set(['processed'])
 const PAYOUT_FAILED = new Set(['reversed', 'failed', 'rejected', 'cancelled'])
@@ -207,9 +217,15 @@ async function initiateBankVerification({ workerId, bank, name }) {
       notes: { workerId: String(workerId), holder },
     })
     await pool.query('INSERT INTO bank_validations (worker_id,validation_id,fund_account_id,status) VALUES ($1,$2,$3,$4)', [workerId, val.id, fa.id, val.status || 'created'])
-    // Some validations resolve synchronously; otherwise the webhook finalizes it.
-    if (val.results || val.status === 'completed') await finalizeBankValidation(val, holder)
-    else console.log(`[payment] bank verify ${workerId} — validation ${val.id} created, awaiting webhook`)
+    // The penny-drop is ASYNC — the create response usually has no result yet (status "created").
+    // Poll a few times for the outcome; the fund_account.validation webhook is the backstop.
+    let res = val
+    for (let i = 0; i < 5 && !res.results?.account_status; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      res = await rzpxGet(cfg, `/v1/fund_accounts/validations/${val.id}`).catch(() => res)
+    }
+    if (res.results?.account_status) await finalizeBankValidation(res, holder)
+    else console.log(`[payment] bank verify ${workerId} — validation ${val.id} still '${res.status}', awaiting webhook`)
   } catch (e) {
     publishEvent(REDIS_URL, 'bank.verify.failed', { workerId, reason: String(e.message || 'validation error') })
     console.error(`[payment] bank verify ${workerId} failed:`, e.message)
