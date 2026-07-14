@@ -429,6 +429,12 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     var otpStep by remember { mutableStateOf(false) }
     var otp by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf(false) }
+    // Local form state — kept separate from the ViewModel so a background refresh (ON_RESUME ->
+    // applyBootstrap) can't wipe what the worker is typing mid-entry.
+    var fName by remember { mutableStateOf(vm.bankName) }
+    var fAccount by remember { mutableStateOf(vm.bankAccount) }
+    var fIfsc by remember { mutableStateOf(vm.bankIfsc) }
+    var fUpi by remember { mutableStateOf(vm.bankUpi) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) { chequeName = pickedFileName(ctx, uri); toast(ctx, "Attached: $chequeName") }
     }
@@ -488,7 +494,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             PrimaryButton("Verify & Submit") {
                 if (otp.length < 4) toast(ctx, "Enter the 4-digit OTP")
                 else {
-                    vm.saveBank(chequeName)
+                    vm.saveBank(fName, fAccount, fIfsc, fUpi, chequeName)
                     toast(ctx, "Bank submitted — verifying…")
                     otpStep = false; otp = ""; reenter = ""; editing = false
                 }
@@ -500,7 +506,10 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                     Text("Saved Account", fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
                     Text(
                         "Edit", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                        modifier = Modifier.clickable { editing = true; reenter = "" },
+                        modifier = Modifier.clickable {
+                            fName = vm.bankName; fAccount = vm.bankAccount; fIfsc = vm.bankIfsc; fUpi = vm.bankUpi
+                            reenter = ""; editing = true
+                        },
                     )
                 }
                 Spacer(Modifier.height(Space.m))
@@ -522,17 +531,17 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(Space.m))
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     // Bank — searchable dropdown with brand badges.
-                    BankPickerField(vm.bankName) { vm.bankName = it.name }
+                    BankPickerField(fName) { fName = it.name }
                     // Account number: digits only — non-numeric input is stripped as it's typed.
-                    Field("Account Number", vm.bankAccount, KeyboardType.Number) { vm.bankAccount = it.filter(Char::isDigit).take(18) }
+                    Field("Account Number", fAccount, KeyboardType.Number) { fAccount = it.filter(Char::isDigit).take(18) }
                     Field("Confirm Account Number", reenter, KeyboardType.Number) { reenter = it.filter(Char::isDigit).take(18) }
-                    Field("IFSC Code", vm.bankIfsc) { vm.bankIfsc = it.uppercase(); vm.lookupIfsc(it) }
+                    Field("IFSC Code", fIfsc) { fIfsc = it.uppercase(); vm.lookupIfsc(it) }
                     // Confirm the IFSC is real + which bank/branch it belongs to (cross-checks the selected bank).
                     when {
                         vm.ifscChecking -> Text("Checking IFSC…", fontSize = 12.sp, color = TextGray)
                         vm.ifscError.isNotBlank() -> Text("⚠ ${vm.ifscError}", fontSize = 12.sp, color = RedCancel)
                         vm.ifscBank.isNotBlank() -> {
-                            val mism = vm.bankName.isNotBlank() && !bankMatches(vm.bankName, vm.ifscBank)
+                            val mism = fName.isNotBlank() && !bankMatches(fName, vm.ifscBank)
                             Text(
                                 (if (mism) "⚠ This IFSC belongs to ${vm.ifscBank}" else "✓ ${vm.ifscBank}") +
                                     (if (vm.bankBranch.isNotBlank()) " — ${vm.bankBranch}" else ""),
@@ -540,7 +549,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                             )
                         }
                     }
-                    Field("UPI ID (optional)", vm.bankUpi) { vm.bankUpi = it }
+                    Field("UPI ID (optional)", fUpi) { fUpi = it }
                     // Optional cancelled cheque / passbook photo.
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
@@ -559,19 +568,19 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             PrimaryButton("Continue") {
-                val acc = vm.bankAccount.trim()
-                val ifsc = vm.bankIfsc.trim().uppercase()
+                val acc = fAccount.trim()
+                val ifsc = fIfsc.trim().uppercase()
                 // Standard Indian IFSC: 4 letters + '0' + 6 alphanumerics (e.g. HDFC0001234).
                 val ifscOk = Regex("^[A-Z]{4}0[A-Z0-9]{6}$").matches(ifsc)
                 when {
-                    vm.bankName.isBlank() -> toast(ctx, "Please select your bank")
+                    fName.isBlank() -> toast(ctx, "Please select your bank")
                     acc.isBlank() -> toast(ctx, "Enter your account number")
                     acc.length < 9 || acc.length > 18 -> toast(ctx, "Enter a valid account number (9–18 digits)")
                     acc != reenter.trim() -> toast(ctx, "Account numbers do not match")
                     !ifscOk -> toast(ctx, "Enter a valid IFSC code (e.g. HDFC0001234)")
                     vm.ifscChecking -> toast(ctx, "Verifying IFSC — please wait")
                     vm.ifscError.isNotBlank() -> toast(ctx, "This IFSC could not be verified")
-                    else -> { vm.bankIfsc = ifsc; otpStep = true }
+                    else -> { fIfsc = ifsc; otpStep = true }
                 }
             }
         }

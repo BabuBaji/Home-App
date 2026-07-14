@@ -747,14 +747,16 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun saveBank(chequePhoto: String = "") = sync {
-        val holder = bankHolder.ifBlank { workerName }
-        val w = api.updateBank(BankBody(holder, bankName, bankAccount, bankIfsc, bankUpi, chequePhoto))
+    fun saveBank(name: String, account: String, ifsc: String, upi: String, chequePhoto: String = "") = sync {
+        val w = api.updateBank(BankBody(workerName, name, account, ifsc, upi, chequePhoto))
+        bankName = w.bankName
+        bankAccount = w.bankAccount
+        bankIfsc = w.bankIfsc
+        bankUpi = w.bankUpi
         bankStatus = w.bankStatus
         bankRemarks = w.bankRemarks
         bankRegisteredName = w.bankRegisteredName
         bankNameMatch = w.bankNameMatch
-        bankUpi = w.bankUpi
         // Verification (penny-drop) runs asynchronously after this call returns, so the immediate
         // response is "Pending Verification". Poll the snapshot a few times so the final result
         // (Approved / Rejected) appears on the screen without the worker reopening it.
