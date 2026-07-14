@@ -279,6 +279,35 @@ app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(awai
 app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await historyLedger(req.wid)))
 app.get('/api/worker/wallet/rewards', auth, async (req, res) => res.json(await rewardsDto(req.wid)))
 app.get('/api/worker/wallet/withdrawals', auth, async (req, res) => res.json(await rowsFor('worker_withdrawals', req.wid)))
+// Receipt for one withdrawal — shape matches the worker app's WithdrawalReceiptDto.
+app.get('/api/worker/wallet/withdrawals/:id/receipt', auth, async (req, res) => {
+  const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1 AND worker_id=$2', [Number(req.params.id), req.wid])).rows[0]
+  if (!w) return res.status(404).json({ error: 'Withdrawal not found' })
+  const snap = await workerSnapshot(req.wid)
+  const bank = (snap && snap.profile && snap.profile.bank) || {}
+  const dest = bank.bankAccount
+    ? `${bank.bankName || 'Bank'} ••••${String(bank.bankAccount).slice(-4)}`
+    : (bank.bankUpi || (w.method === 'upi' ? 'Linked UPI' : 'Bank account'))
+  const f = fmtDate(w.created)
+  const paid = w.status === 'Paid'
+  const note = paid ? 'Amount transferred to your bank account.'
+    : w.status === 'Failed' ? 'Payout failed — the amount was refunded to your balance.'
+    : w.status === 'Rejected' ? 'This withdrawal was rejected — the amount is back in your balance.'
+    : 'Your withdrawal is being processed.'
+  res.json({
+    reference: w.reference || `WD${String(w.id).padStart(6, '0')}`,
+    workerName: (snap && snap.name) || '',
+    workerId: String(req.wid),
+    amount: w.amount || 0,
+    method: w.method || 'Bank',
+    destination: dest,
+    status: w.status || 'Pending',
+    date: f.date, time: f.time,
+    processedDate: paid ? f.date : '',
+    bankDetails: dest,
+    note,
+  })
+})
 app.get('/api/worker/wallet/advances', auth, async (req, res) => res.json(await rowsFor('worker_advances', req.wid)))
 app.get('/api/worker/wallet/notifications', auth, async (req, res) => {
   const rows = await rowsFor('worker_notifications', req.wid)
