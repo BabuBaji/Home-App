@@ -428,6 +428,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     var chequeName by remember { mutableStateOf("") }
     var otpStep by remember { mutableStateOf(false) }
     var otp by remember { mutableStateOf("") }
+    var editing by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) { chequeName = pickedFileName(ctx, uri); toast(ctx, "Attached: $chequeName") }
     }
@@ -470,7 +471,52 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             )
         }
 
-        if (!otpStep) {
+        val hasSavedBank = vm.bankAccount.isNotBlank()
+        if (otpStep) {
+            Card {
+                Text("OTP Confirmation", fontWeight = FontWeight.SemiBold, color = TextDark)
+                Spacer(Modifier.height(Space.xs))
+                Text("Enter the 4-digit OTP sent to your registered mobile to confirm these bank details.", fontSize = 12.sp, color = TextGray)
+                Spacer(Modifier.height(Space.m))
+                OutlinedTextField(
+                    value = otp,
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
+                    label = { Text("OTP") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(Radius.field), colors = softFieldColors(),
+                )
+            }
+            PrimaryButton("Verify & Submit") {
+                if (otp.length < 4) toast(ctx, "Enter the 4-digit OTP")
+                else {
+                    vm.saveBank(chequeName)
+                    toast(ctx, "Bank submitted — verifying…")
+                    otpStep = false; otp = ""; reenter = ""; editing = false
+                }
+            }
+        } else if (hasSavedBank && !editing) {
+            // Read-only summary of the already-saved account, with an Edit action.
+            Card {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Saved Account", fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    Text(
+                        "Edit", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                        modifier = Modifier.clickable { editing = true; reenter = "" },
+                    )
+                }
+                Spacer(Modifier.height(Space.m))
+                val bopt = INDIAN_BANKS.firstOrNull { it.name == vm.bankName }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (bopt != null) { BankBadge(bopt.code, bopt.color); Spacer(Modifier.width(Space.m)) }
+                    Column(Modifier.weight(1f)) {
+                        Text(vm.bankName.ifBlank { "Bank account" }, fontWeight = FontWeight.SemiBold, color = TextDark)
+                        Text("A/C ••••${vm.bankAccount.takeLast(4)}   •   ${vm.bankIfsc}", fontSize = 12.sp, color = TextGray)
+                    }
+                }
+                if (vm.bankUpi.isNotBlank()) {
+                    Spacer(Modifier.height(Space.s)); Text("UPI: ${vm.bankUpi}", fontSize = 12.sp, color = TextGray)
+                }
+            }
+        } else {
             Card {
                 SectionLabel("Account Details")
                 Spacer(Modifier.height(Space.m))
@@ -526,27 +572,6 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                     vm.ifscChecking -> toast(ctx, "Verifying IFSC — please wait")
                     vm.ifscError.isNotBlank() -> toast(ctx, "This IFSC could not be verified")
                     else -> { vm.bankIfsc = ifsc; otpStep = true }
-                }
-            }
-        } else {
-            Card {
-                Text("OTP Confirmation", fontWeight = FontWeight.SemiBold, color = TextDark)
-                Spacer(Modifier.height(Space.xs))
-                Text("Enter the 4-digit OTP sent to your registered mobile to confirm these bank details.", fontSize = 12.sp, color = TextGray)
-                Spacer(Modifier.height(Space.m))
-                OutlinedTextField(
-                    value = otp,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
-                    label = { Text("OTP") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(Radius.field), colors = softFieldColors(),
-                )
-            }
-            PrimaryButton("Verify & Submit") {
-                if (otp.length < 4) toast(ctx, "Enter the 4-digit OTP")
-                else {
-                    vm.saveBank(chequeName)
-                    toast(ctx, "Bank submitted — pending admin verification")
-                    otpStep = false; otp = ""; reenter = ""
                 }
             }
         }
