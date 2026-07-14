@@ -241,11 +241,21 @@ export default function Workers() {
               <Field label="Status"><div><Badge tone={viewing.status === 'active' ? 'green' : viewing.status === 'pending' ? 'amber' : 'red'}>{viewing.status}</Badge></div></Field>
               <Field label="Verified"><div><Badge tone={viewing.verified ? 'green' : 'gray'} dot={false}>{viewing.verified ? 'Verified' : 'Unverified'}</Badge></div></Field>
               <Field label="Availability"><div><Badge tone={viewing.available ? 'green' : 'gray'} dot={false}>{viewing.available ? 'Online' : 'Offline'}</Badge></div></Field>
+              <Field label="On Shift"><div><Badge tone={viewing.on_shift ? 'green' : 'gray'} dot={false}>{viewing.on_shift ? 'On shift' : 'Off'}</Badge></div></Field>
             </div>
             <div className="row" style={{ gap: 24 }}>
               <Field label="Jobs Completed"><input value={String(viewing.jobs)} readOnly /></Field>
-              <Field label="Rating"><input value={String(viewing.rating)} readOnly /></Field>
+              <Field label="Rating"><input value={viewing.rating ? String(viewing.rating) : '—'} readOnly /></Field>
+              <Field label="Last Location"><input value={viewing.last_lat != null ? `${Number(viewing.last_lat).toFixed(4)}, ${Number(viewing.last_lng).toFixed(4)}` : '—'} readOnly /></Field>
+            </div>
+            <div className="row" style={{ gap: 24 }}>
               <Field label="Balance"><input value={`₹${viewing.balance ?? 0}`} readOnly /></Field>
+              <Field label="Lifetime Earnings"><input value={`₹${viewing.earnings ?? 0}`} readOnly /></Field>
+              <Field label="On Hold"><input value={`₹${viewing.hold ?? 0}`} readOnly /></Field>
+            </div>
+            <div className="row" style={{ gap: 24 }}>
+              <Field label="Withdrawn"><input value={`₹${viewing.withdrawn ?? 0}`} readOnly /></Field>
+              <Field label="Advance Outstanding"><input value={`₹${viewing.advance_outstanding ?? 0}`} readOnly /></Field>
             </div>
             <Field label="Bank / KYC">
               <div><Badge tone={viewing.bank_status === 'Verified' ? 'green' : viewing.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{viewing.bank_status || 'Pending'}</Badge></div>
