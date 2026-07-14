@@ -101,15 +101,7 @@ async function init() {
       id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, subject TEXT, message TEXT,
       status TEXT NOT NULL DEFAULT 'Open', created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    // Always-available demo/QA worker so a clean phone login works out-of-the-box for testing
-    // (idempotent — matches on the last-10-digits of the phone, ignoring any +91/space format).
-    `INSERT INTO workers (name, phone, email, city, services, status, verified, rating)
-     SELECT 'Demo Partner', '9876543210', 'demo.partner@pros.homehelp.in', 'Hyderabad',
-            '["Utensil Wash","Mopping","Sweeping","Dusting","Bathroom Cleaning","Laundry","Kitchen Cleaning"]'::jsonb,
-            'active', true, 4.8
-     WHERE NOT EXISTS (
-       SELECT 1 FROM workers WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') LIKE '%9876543210'
-     )`,
+    // (Demo/QA worker seed disabled — real workers are managed in Admin → Workers.)
   ])
   const seeded = (await pool.query('SELECT COUNT(*)::int n FROM workers')).rows[0].n
   if (!seeded) {
