@@ -73,7 +73,12 @@ app.get('/health', (_q, res) => res.json({ service: 'payment', ok: true }))
 async function rzp() {
   const keyId = await getSetting(ADMIN_URL, 'razorpay_key_id', '')
   const keySecret = await getSetting(ADMIN_URL, 'razorpay_key_secret', '')
-  return { keyId, keySecret, live: !!(keyId && keySecret) }
+  // `payment_gateway=mock` forces demo mode (no real gateway) — used when the Razorpay keys are
+  // absent/invalid so bookings can still complete in testing. Set it to 'razorpay' (or clear it)
+  // once valid keys are in Admin ▸ Settings to go back to real (test-mode) Razorpay.
+  const mode = (await getSetting(ADMIN_URL, 'payment_gateway', '')).trim().toLowerCase()
+  const live = mode === 'mock' ? false : (mode === 'razorpay' || !!(keyId && keySecret))
+  return { keyId, keySecret, live }
 }
 
 /* ---------- RazorpayX payouts (worker withdrawals -> bank) ----------

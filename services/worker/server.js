@@ -1177,11 +1177,18 @@ app.get('/internal/workers/active-for', internalOnly, async (req, res) => {
   // workers (for future scheduled slots, where being online right now doesn't matter).
   res.json({ available: qualified.some((w) => w.available), count: qualified.length, onlineCount: qualified.filter((w) => w.available).length })
 })
+// Active workers who offer a service — for the customer "Worker Assignment" screen (list only).
+app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
+  const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
+  const rows = (await pool.query("SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng FROM workers WHERE status='active' ORDER BY jobs DESC NULLS LAST, rating DESC")).rows
+  const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
+  res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: !!w.available, lat: w.last_lat, lng: w.last_lng })))
+})
 app.get('/internal/workers/:id', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
 app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json({ services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available, status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null, last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null }) })
 app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET offered_booking=$1 WHERE id=$2', [req.body?.bookingId ?? null, Number(req.params.id)]); res.json({ ok: true }) })
 app.post('/internal/workers/:id/location', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2 WHERE id=$3', [req.body?.lat, req.body?.lng, Number(req.params.id)]); res.json({ ok: true }) })
-app.get('/internal/workers/:id/public-profile', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json(w ? { id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, phone: w.phone, avatar: w.avatar, verified: !!w.verified } : null) })
+app.get('/internal/workers/:id/public-profile', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json(w ? { id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, phone: w.phone, avatar: w.avatar, verified: !!w.verified, city: w.city, services: Array.isArray(w.services) ? w.services : [] } : null) })
 app.patch('/internal/workers/:id', internalOnly, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 // Wallet service adjusts the balance snapshot (deltas) after ledger changes.
 app.post('/internal/workers/:id/balance', internalOnly, async (req, res) => {

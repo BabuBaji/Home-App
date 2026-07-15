@@ -223,11 +223,52 @@ app.get('/api/bookings', auth, async (req, res) => {
   res.json(rows.map((r) => publicBooking(rowTo(r))))
 })
 
+// Public: real customer reviews for a service — pulled from completed/reviewed bookings that
+// included this service. Read-only; defined before /api/bookings/:id so "service-reviews" isn't
+// treated as an id. Enriches with the reviewer's name from auth (best-effort).
+app.get('/api/bookings/service-reviews', async (req, res) => {
+  const sid = String(req.query.serviceId || '').trim()
+  if (!sid) return res.json([])
+  const { rows } = await pool.query(
+    `SELECT user_id, rating, review, pro_name, created FROM bookings
+     WHERE rating IS NOT NULL AND review IS NOT NULL AND review <> '' AND items LIKE $1
+     ORDER BY id DESC LIMIT 30`, ['%"id":"' + sid + '"%'])
+  const ids = [...new Set(rows.map((r) => r.user_id))]
+  const names = {}
+  await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name }))
+  res.json(rows.map((r) => ({ name: names[r.user_id] || 'Customer', rating: r.rating, text: r.review, date: r.created, pro: r.pro_name || '' })))
+})
+
+// Public: active workers offering a service (for the customer "Worker Assignment" screen).
+// Enriched with distance from the customer's lat/lng when provided. Read-only.
+app.get('/api/bookings/service-workers', async (req, res) => {
+  const service = String(req.query.service || '').trim()
+  if (!service) return res.json([])
+  const lat = parseFloat(String(req.query.lat)), lng = parseFloat(String(req.query.lng))
+  const workers = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(service)}`, [])
+  const km = (aLat, aLng, bLat, bLng) => {
+    const R = 6371, toRad = (d) => d * Math.PI / 180
+    const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng)
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2
+    return 2 * R * Math.asin(Math.sqrt(s))
+  }
+  res.json((workers || []).map((w) => ({
+    id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, online: w.online,
+    km: (w.lat != null && !isNaN(lat) && !isNaN(lng)) ? Math.round(km(lat, lng, w.lat, w.lng) * 10) / 10 : null,
+  })))
+})
+
 app.get('/api/bookings/:id', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   const serviceAvailable = await anyActiveWorker((b.items || []).map((i) => i.name))
-  const pro = b.worker_id ? { id: b.worker_id, name: b.pro_name, rating: b.pro_rating } : null
+  let pro = b.worker_id ? { id: b.worker_id, name: b.pro_name, rating: b.pro_rating } : null
+  // Enrich the assigned worker with real public profile fields (read-only) so the tracking
+  // screens show live data (jobs done, avatar, verified, phone, skills) instead of placeholders.
+  if (pro) {
+    const wp = await tryGet(WORKER_URL, `/internal/workers/${b.worker_id}/public-profile`, null)
+    if (wp) pro = { ...pro, name: wp.name || pro.name, rating: wp.rating ?? pro.rating, servicesDone: wp.jobs ?? 0, jobs: wp.jobs ?? 0, avatar: wp.avatar || null, verified: !!wp.verified, phone: wp.phone || null, city: wp.city || null, skills: Array.isArray(wp.services) ? wp.services : [] }
+  }
   let travel = {}
   const d = distanceKm(b.worker_lat, b.worker_lng, b.cust_lat, b.cust_lng)
   if (d != null) travel = { pos: { lat: b.worker_lat, lng: b.worker_lng }, dist: +d.toFixed(1), eta: Math.max(1, Math.round(d * 2.5)) }
@@ -318,7 +359,42 @@ app.post('/api/bookings', auth, async (req, res) => {
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
       body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
-  const booking = rowTo(ins.rows[0])
+  let booking = rowTo(ins.rows[0])
+
+  // Assign an expert immediately: the customer's chosen worker, else the nearest ONLINE worker
+  // offering the service (demo auto-assign). Additive — if none is found the booking stays
+  // 'confirmed' and normal dispatch can still pick it up. Never double-assigns (worker_id IS NULL).
+  async function assignWorker(id, name, rating) {
+    const upd = await pool.query(
+      "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned' WHERE id=$4 AND worker_id IS NULL RETURNING *",
+      [id, name, rating ?? 4.7, booking.id])
+    if (upd.rows[0]) { booking = rowTo(upd.rows[0]); internalPost(WORKER_URL, `/internal/workers/${id}/offered`, { bookingId: booking.id }).catch(() => {}) }
+  }
+
+  const chosenId = Number(body.workerId)
+  if (chosenId) {
+    const wp = await tryGet(WORKER_URL, `/internal/workers/${chosenId}/public-profile`, null)
+    if (wp && wp.name) await assignWorker(chosenId, wp.name, wp.rating)
+  } else {
+    // "Any available worker" → pick the nearest online expert for this service.
+    const svc = priced.items.map((i) => i.name).join(',')
+    const cand = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(svc)}`, [])
+    if (Array.isArray(cand) && cand.length) {
+      const cl = booking.cust_lat, cn = booking.cust_lng
+      const dist = (w) => (w.lat != null && cl != null && cn != null) ? distanceKm(cl, cn, w.lat, w.lng) : null
+      const online = cand.filter((w) => w.online)
+      const list = online.length ? online : cand
+      list.sort((a, b2) => {
+        const da = dist(a), db = dist(b2)
+        if (da != null && db != null) return da - db
+        if (da != null) return -1
+        if (db != null) return 1
+        return (b2.jobs || 0) - (a.jobs || 0) // no GPS → most-experienced first
+      })
+      const pick = list[0]
+      if (pick) await assignWorker(pick.id, pick.name, pick.rating)
+    }
+  }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
   // usage-write failure must never fail the booking.

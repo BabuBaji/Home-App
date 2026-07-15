@@ -237,10 +237,16 @@ ${cancelled && (b!.refund ?? 0) > 0 ? `<span style="margin-left:auto;color:#1f9d
           <button className="btn" onClick={() => nav(`/rate/${b.id}`)}>⭐ Rate</button>
         )}
         {live && (
-          <button className="btn" onClick={() => nav(`/track/${b.id}`)}>Track</button>
+          <button className="btn" onClick={() => nav(`/job/${b.id}`)}>Track</button>
         )}
         {(b.status === 'completed' || b.status === 'cancelled') && (
-          <button className="btn ghost" onClick={() => { setBookingType('instant'); nav(`/book/${b.items[0].id}`) }}>🔁 Rebook</button>
+          <button className="btn ghost" onClick={() => nav(`/rebook/${b.id}`)}>🔁 Rebook</button>
+        )}
+        {b.status === 'completed' && (
+          <button className="btn ghost" onClick={() => nav(`/tip/${b.id}`)}>💜 Tip</button>
+        )}
+        {b.status === 'completed' && (
+          <button className="btn ghost" onClick={() => nav(`/complaint/${b.id}`)}>⚠️ Report</button>
         )}
         {b.status === 'completed' && (
           <button className="btn ghost" onClick={() => setShowInvoice(true)}>🧾 Invoice</button>

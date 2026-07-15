@@ -68,6 +68,7 @@ export default function Profile() {
         {/* account */}
         <h3 className="section-title">Account</h3>
         <div className="acc-list">
+          <div className="acc-item" onClick={() => nav('/refer')}><span className="ai">🎁</span><span className="at">Refer &amp; Earn</span><span className="chev">›</span></div>
           <div className="acc-item" onClick={() => nav('/notifications')}><span className="ai">🔔</span><span className="at">Notifications</span><span className="chev">›</span></div>
           <div className="acc-item" onClick={() => nav('/support')}><span className="ai">🎧</span><span className="at">Help & Support</span><span className="chev">›</span></div>
           <div className="acc-item" onClick={() => nav('/cancellation-policy')}><span className="ai">↩️</span><span className="at">Cancellation & Refund Policy</span><span className="chev">›</span></div>

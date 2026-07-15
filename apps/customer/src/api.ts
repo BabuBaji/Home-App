@@ -151,6 +151,13 @@ export const createBookingApi = async (payload: any) => {
   return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
 }
 export const fetchBookings = () => req<Booking[]>('/api/bookings')
+// Real customer reviews for a service (from reviewed bookings). Public/read-only.
+export const fetchServiceReviews = (serviceId: string) =>
+  req<{ name: string; rating: number; text: string; date: string; pro: string }[]>(`/api/bookings/service-reviews?serviceId=${encodeURIComponent(serviceId)}`)
+// Real workers offering a service (from the worker service), with distance from the customer.
+export const fetchServiceWorkers = (service: string, lat?: number, lng?: number) =>
+  req<{ id: number; name: string; rating: number; jobs: number; online: boolean; km: number | null }[]>(
+    `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })
