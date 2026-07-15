@@ -309,7 +309,7 @@ export default function WorkerDetail() {
       </div>
 
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px, 300px) 1fr', gap: 14, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 360px) 1fr', gap: 14, alignItems: 'stretch' }}>
         <Card>
           <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
             <Avatar name={w.name} src={w.avatar} size={72} />
@@ -329,11 +329,11 @@ export default function WorkerDetail() {
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 14 }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13 }}>
+            <div style={{ flexShrink: 0 }}>
+              <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13, whiteSpace: 'nowrap' }}>
                 <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} reviews)</span>
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'nowrap' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
             </div>
             <button className="btn" style={{ flexShrink: 0, padding: '10px 14px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
           </div>
