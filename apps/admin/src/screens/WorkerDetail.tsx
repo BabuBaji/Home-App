@@ -3,10 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
-  Clock, Wifi, BatteryMedium, CalendarClock,
+  Clock, Wifi, BatteryMedium, CalendarClock, Download,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, type Zone } from '../api'
-import type { WorkerDetail, WorkerNote } from '../types'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, fetchSettings, type Zone } from '../api'
+import type { WorkerDetail, WorkerNote, WalletState } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate } from '../components/UI'
 import { useStore } from '../store'
 
@@ -118,7 +118,7 @@ const STATUS_COLORS: Record<string, string> = { completed: '#16a34a', inProgress
 const SERVICE_PALETTE = ['#5b51e8', '#f59e0b', '#06b6d4', '#10b981', '#94a3b8', '#ec4899']
 
 /** Multi-segment SVG donut with a centred total. */
-function DonutChart({ segments, total, colorFor }: { segments: { count: number }[]; total: number; colorFor: (i: number) => string }) {
+function DonutChart({ segments, total, colorFor, centerValue, centerLabel }: { segments: { count: number }[]; total: number; colorFor: (i: number) => string; centerValue?: string; centerLabel?: string }) {
   const r = 52, cx = 68, cy = 68, C = 2 * Math.PI * r
   let acc = 0
   return (
@@ -130,8 +130,8 @@ function DonutChart({ segments, total, colorFor }: { segments: { count: number }
         acc += len
         return el
       })}
-      <text x={cx} y={cy - 1} textAnchor="middle" fontSize={24} fontWeight={700} fill="var(--ink,#101828)">{total}</text>
-      <text x={cx} y={cy + 15} textAnchor="middle" fontSize={10.5} fill="var(--muted,#98a2b3)">Total Jobs</text>
+      <text x={cx} y={cy - 1} textAnchor="middle" fontSize={centerValue ? 18 : 24} fontWeight={700} fill="var(--ink,#101828)">{centerValue ?? total}</text>
+      <text x={cx} y={cy + 15} textAnchor="middle" fontSize={10.5} fill="var(--muted,#98a2b3)">{centerLabel ?? 'Total Jobs'}</text>
     </svg>
   )
 }
@@ -183,10 +183,17 @@ export default function WorkerDetail() {
   const [notes, setNotes] = useState<WorkerNote[]>([])
   const [noteText, setNoteText] = useState('')
   const [tab, setTab] = useState<string>('overview')
+  const [wal, setWal] = useState<WalletState | null>(null)
+  const [earnTab, setEarnTab] = useState<'txns' | 'payouts'>('txns')
+  const [earnPage, setEarnPage] = useState(1)
+  const [commissionPct, setCommissionPct] = useState(20)
+  const [calcAmount, setCalcAmount] = useState(1000)
 
   const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
   useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
+  useEffect(() => { if (tab === 'earnings' && !wal && id) fetchWorkerWallet(Number(id)).then(setWal).catch(() => {}) }, [tab, wal, id])
+  useEffect(() => { fetchSettings().then((s) => setCommissionPct(Number(s.commission_percent) || 20)).catch(() => {}) }, [])
   const submitNote = async () => {
     const text = noteText.trim(); if (!text || !w) return
     try { const n = await addWorkerNote(w.id, text, admin?.name || 'Admin'); setNotes([n, ...notes]); setNoteText('') }
@@ -221,6 +228,41 @@ export default function WorkerDetail() {
   const prettyStatus = (s: string) => String(s || '—').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   const jobsPreview = jp ? jp.jobs.slice(0, 5) : []
   const viewAllJobs = () => nav(`/bookings?worker=${encodeURIComponent(w.name)}`)
+
+  // ---- Earnings & Payouts (real data from the wallet ledger) ----
+  const ws = wal?.walletSummary || w.wallet
+  const paidWd = (wal?.withdrawals || []).filter((x) => x.status === 'Paid')
+  const lastPayout = paidWd[0] || null
+  const nextThu = new Date(Date.now() + (((4 - new Date().getDay() + 7) % 7) || 7) * 86400000)
+  const fmtShort = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+  const thisYm = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+  const credits = (wal?.history || []).filter((h) => h.isCredit)
+  const catLabel = (t: string) => { const s = (t || '').toLowerCase(); if (s.includes('job') || s.includes('base')) return 'Base Earnings'; if (s.includes('incentive')) return 'Incentives'; if (s.includes('tip')) return 'Tips'; if (s.includes('guarantee')) return 'Guarantee'; if (s.includes('bonus') || s.includes('sitara') || s.includes('shakti')) return 'Bonus'; return t || 'Other' }
+  const bdMap: Record<string, number> = {}
+  for (const h of credits.filter((c) => (c.date || '').slice(0, 7) === thisYm)) { const k = catLabel(h.type); bdMap[k] = (bdMap[k] || 0) + h.amount }
+  const BD_ORDER = ['Base Earnings', 'Incentives', 'Tips', 'Guarantee', 'Bonus']
+  const BD_COLORS: Record<string, string> = { 'Base Earnings': '#5b51e8', Incentives: '#10b981', Tips: '#06b6d4', Guarantee: '#0ea5e9', Bonus: '#f59e0b', Other: '#94a3b8' }
+  const bdSegs = Object.entries(bdMap).sort((a, b) => BD_ORDER.indexOf(a[0]) - BD_ORDER.indexOf(b[0])).map(([label, amount]) => ({ label, amount }))
+  const bdTotal = bdSegs.reduce((s, x) => s + x.amount, 0)
+  const earnDayMap: Record<string, number> = {}
+  for (const h of credits) { if (!h.date) continue; earnDayMap[h.date] = (earnDayMap[h.date] || 0) + h.amount }
+  const earnTrend = Object.entries(earnDayMap).sort((a, b) => a[0].localeCompare(b[0])).slice(-30).map(([date, amount]) => ({ date, amount }))
+  const earnRows = earnTab === 'txns' ? (wal?.history || []) : (wal?.withdrawals || [])
+  const EARN_PAGE = 8
+  const earnPages = Math.max(1, Math.ceil(earnRows.length / EARN_PAGE))
+  const curEarnPage = Math.min(earnPage, earnPages)
+  const earnPageRows = earnRows.slice((curEarnPage - 1) * EARN_PAGE, curEarnPage * EARN_PAGE)
+  const calcCommission = Math.round((calcAmount * commissionPct) / 100)
+  const calcNet = Math.max(0, calcAmount - calcCommission)
+  const exportEarnCsv = () => {
+    const head = earnTab === 'txns' ? ['Date', 'Time', 'Type', 'Ref', 'Amount', 'Credit/Debit', 'Status', 'Remarks'] : ['Date', 'Amount', 'Method', 'Status', 'Reference']
+    const rows = earnTab === 'txns'
+      ? (wal?.history || []).map((h) => [h.date, h.time, h.type, h.refId, h.amount, h.isCredit ? 'Credit' : 'Debit', h.status, h.remarks])
+      : (wal?.withdrawals || []).map((x) => [x.date, x.amount, x.method, x.status, x.reference])
+    const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = `worker-${w.id}-${earnTab}.csv`; a.click(); URL.revokeObjectURL(url)
+  }
 
   const liveOpPanel = (
     <Panel title="Live Operation" action={w.liveJob && <button className="btn ghost" onClick={() => nav('/bookings')}>View Job</button>}>
@@ -414,6 +456,17 @@ export default function WorkerDetail() {
             <StatusItem icon={<MapPin size={14} />} label="Last GPS" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(2)}, ${Number(w.last_lng).toFixed(2)}` : '—'} />
             <StatusItem icon={<Clock size={14} />} label="Idle Time" value={dev.idleMins != null ? `${dev.idleMins} min` : '—'} />
           </div>
+          {tab === 'earnings' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8, paddingTop: 12 }}>
+              <Kpi label="Today's Earnings" value={rupee(ws?.todayEarnings)} tone="#7c3aed" />
+              <Kpi label="Week's Earnings" value={rupee(ws?.weekEarnings)} />
+              <Kpi label="Month's Earnings" value={rupee(ws?.monthEarnings)} />
+              <Kpi label="Total Earnings" value={rupee(ws?.totalEarned ?? w.earnings)} />
+              <Kpi label="Pending Payout" value={rupee(ws?.hold)} tone={(ws?.hold ?? 0) > 0 ? '#d97706' : undefined} />
+              <Kpi label="Last Payout" value={lastPayout ? rupee(lastPayout.amount) : '—'} sub={lastPayout?.date} />
+              <Kpi label="Next Payout" value={fmtShort(nextThu)} sub="On Thursday" />
+            </div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', gap: 8, paddingTop: 12 }}>
             <Kpi label="Today's Jobs" value={m?.todayJobs ?? 0} sub={`Completed: ${m?.completedToday ?? 0}`} />
             <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} trend={m?.trends?.weekJobs} />
@@ -424,6 +477,7 @@ export default function WorkerDetail() {
             <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} trend={m?.trends?.rating} />
             <Kpi label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
           </div>
+          )}
           </div>
         </Card>
       </div>
@@ -622,8 +676,8 @@ export default function WorkerDetail() {
         </>
       )}
 
-      {(show('earnings')) && <div style={grid3}>{earningsTrendPanel}
-        <Panel title="Earnings Summary" action={<button className="btn ghost" onClick={() => nav('/worker-wallet')}>Full Earnings</button>}>
+      {tab === 'overview' && <div style={grid3}>{earningsTrendPanel}
+        <Panel title="Earnings Summary" action={<button style={softBtn} onClick={() => setTab('earnings')}>Details <ChevronRight size={15} /></button>}>
           <Info label="Available" value={rupee(w.wallet?.available ?? w.balance)} />
           <Info label="Lifetime Earned" value={rupee(w.wallet?.totalEarned ?? w.earnings)} />
           <Info label="This Week" value={rupee(w.wallet?.weekEarnings)} />
@@ -632,6 +686,119 @@ export default function WorkerDetail() {
           <Info label="Withdrawn" value={rupee(w.wallet?.totalWithdrawn)} />
         </Panel>
       </div>}
+
+      {tab === 'earnings' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
+            <Panel title="Earnings Summary" action={<span className="muted" style={{ fontSize: 12 }}>This Month</span>}>
+              {earnTrend.length ? <TrendChart points={earnTrend} /> : <div className="muted" style={{ fontSize: 13, padding: '24px 0', textAlign: 'center' }}>No earnings recorded yet.</div>}
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Daily credited earnings.</div>
+            </Panel>
+            <Panel title="Earnings Breakdown (This Month)">
+              {bdSegs.length ? (
+                <div className="row" style={{ gap: 16, alignItems: 'center' }}>
+                  <DonutChart segments={bdSegs.map((s) => ({ count: s.amount }))} total={bdTotal} colorFor={(i) => BD_COLORS[bdSegs[i].label] || '#94a3b8'} centerValue={rupee(bdTotal)} centerLabel="This Month" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {bdSegs.map((s) => (
+                      <div key={s.label} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: 13, gap: 8 }}>
+                        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}><span style={{ width: 9, height: 9, borderRadius: 9, background: BD_COLORS[s.label] || '#94a3b8', display: 'inline-block', flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span></span>
+                        <span style={{ whiteSpace: 'nowrap' }}><strong>{rupee(s.amount)}</strong> <span className="muted">{bdTotal ? Math.round((s.amount / bdTotal) * 1000) / 10 : 0}%</span></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : <div className="muted" style={{ fontSize: 13, padding: '24px 0', textAlign: 'center' }}>{wal ? 'No earnings this month.' : 'Loading…'}</div>}
+            </Panel>
+            <Panel title="Payout Overview">
+              <Info label="Wallet Balance" value={rupee(ws?.available ?? w.balance)} />
+              <Info label="Pending Settlement" value={rupee(ws?.hold)} />
+              <Info label="Last Payout" value={lastPayout ? `${rupee(lastPayout.amount)} · ${lastPayout.date}` : '—'} />
+              <Info label="Total Payouts" value={rupee(ws?.totalWithdrawn)} />
+              <Info label="Payout Method" value="Bank Transfer" />
+              <Info label="Bank Account" value={bank?.bankAccount ? `••••${String(bank.bankAccount).slice(-4)}${bank.bankName ? ` · ${bank.bankName}` : ''}` : '—'} verified={w.bank_status === 'Verified'} />
+              <button className="btn" style={{ width: '100%', marginTop: 12, justifyContent: 'center' }} onClick={() => setTab('docs')}><Wallet size={15} /> View Payout Settings</button>
+            </Panel>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 16 }}>
+            <Card>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+                <div className="row" style={{ gap: 4 }}>
+                  {([['txns', 'Earnings Transactions'], ['payouts', 'Payout History']] as const).map(([k, label]) => (
+                    <button key={k} onClick={() => { setEarnTab(k); setEarnPage(1) }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px', fontSize: 13, fontWeight: earnTab === k ? 700 : 500, color: earnTab === k ? 'var(--violet,#5b51e8)' : 'var(--muted,#667085)', borderBottom: earnTab === k ? '2px solid var(--violet,#5b51e8)' : '2px solid transparent' }}>{label}</button>
+                  ))}
+                </div>
+                <button style={softBtn} onClick={exportEarnCsv}><Download size={15} /> Export</button>
+              </div>
+              {!wal ? <Loading /> : earnRows.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>{earnTab === 'txns' ? 'No transactions yet.' : 'No payouts yet.'}</div>
+              ) : (
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: earnTab === 'txns' ? 720 : 520 }}>
+                      <thead>
+                        <tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                          {(earnTab === 'txns' ? ['Date & Time', 'Ref / Job', 'Type', 'Amount', 'Net', 'Status', 'Remarks'] : ['Date', 'Amount', 'Method', 'Reference', 'Status']).map((h) => (
+                            <th key={h} style={{ padding: '8px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {earnTab === 'txns' ? (earnPageRows as typeof wal.history).map((h) => (
+                          <tr key={h.id} style={{ borderBottom: '1px solid var(--line,#f4f5f8)' }}>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap', color: 'var(--muted,#667085)' }}>{h.date} {h.time}</td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap', fontWeight: 600 }}>{h.refId || '—'}</td>
+                            <td style={{ padding: '10px' }}><Badge tone={h.isCredit ? 'green' : 'red'} dot={false}>{h.type}</Badge></td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{rupee(h.amount)}</td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap', fontWeight: 600, color: h.isCredit ? '#16a34a' : '#dc2626' }}>{h.isCredit ? '+' : '−'}{rupee(h.amount)}</td>
+                            <td style={{ padding: '10px' }}><Badge tone={h.isCredit ? 'green' : 'red'} dot={false}>{h.status}</Badge></td>
+                            <td style={{ padding: '10px', color: 'var(--muted,#667085)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.remarks || '—'}</td>
+                          </tr>
+                        )) : (earnPageRows as typeof wal.withdrawals).map((x) => (
+                          <tr key={x.id} style={{ borderBottom: '1px solid var(--line,#f4f5f8)' }}>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap', color: 'var(--muted,#667085)' }}>{x.date}</td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap', fontWeight: 600 }}>{rupee(x.amount)}</td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{x.method || 'Bank'}</td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap', color: 'var(--muted,#667085)' }}>{x.reference || '—'}</td>
+                            <td style={{ padding: '10px' }}><Badge tone={x.status === 'Paid' ? 'green' : x.status === 'Failed' || x.status === 'Rejected' ? 'red' : 'amber'} dot={false}>{x.status}</Badge></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 10, flexWrap: 'wrap' }}>
+                    <span className="muted" style={{ fontSize: 12.5 }}>Showing {(curEarnPage - 1) * EARN_PAGE + 1} to {Math.min(curEarnPage * EARN_PAGE, earnRows.length)} of {earnRows.length}</span>
+                    <div className="row" style={{ gap: 4 }}>
+                      <button style={{ ...softBtn, padding: '6px 10px', opacity: curEarnPage <= 1 ? 0.5 : 1 }} disabled={curEarnPage <= 1} onClick={() => setEarnPage(curEarnPage - 1)}><ChevronLeft size={15} /></button>
+                      {Array.from({ length: earnPages }, (_, i) => i + 1).map((n) => (
+                        <button key={n} onClick={() => setEarnPage(n)} style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--line,#e4e7ec)', cursor: 'pointer', fontSize: 13, fontWeight: n === curEarnPage ? 700 : 500, background: n === curEarnPage ? 'var(--violet,#5b51e8)' : 'var(--card,#fff)', color: n === curEarnPage ? '#fff' : 'var(--ink,#101828)' }}>{n}</button>
+                      ))}
+                      <button style={{ ...softBtn, padding: '6px 10px', opacity: curEarnPage >= earnPages ? 0.5 : 1 }} disabled={curEarnPage >= earnPages} onClick={() => setEarnPage(curEarnPage + 1)}><ChevronRight size={15} /></button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </Card>
+
+            <Card>
+              <strong style={{ fontSize: 15 }}>Earnings Calculator</strong>
+              <div style={{ marginTop: 14 }}>
+                <label style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Service Amount (₹)</label>
+                <input type="number" value={calcAmount} min={0} onChange={(e) => setCalcAmount(Math.max(0, Number(e.target.value) || 0))} style={{ width: '100%', marginTop: 5, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--line,#e4e7ec)', fontSize: 14 }} />
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <div className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--line,#f1f2f6)', fontSize: 13 }}><span className="muted">Service Amount</span><strong>{rupee(calcAmount)}</strong></div>
+                <div className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--line,#f1f2f6)', fontSize: 13 }}><span className="muted">Platform Commission ({commissionPct}%)</span><strong style={{ color: '#dc2626' }}>−{rupee(calcCommission)}</strong></div>
+                <div className="row" style={{ justifyContent: 'space-between', padding: '10px 0', fontSize: 15 }}><strong>You Earn</strong><strong style={{ color: '#16a34a' }}>{rupee(calcNet)}</strong></div>
+              </div>
+              <div style={{ marginTop: 10, background: 'var(--soft,#f6f7fb)', borderRadius: 10, padding: 10, fontSize: 12, display: 'flex', gap: 8 }}>
+                <ShieldAlert size={15} style={{ flexShrink: 0, color: 'var(--muted,#98a2b3)', marginTop: 1 }} />
+                <span>Worker share is {100 - commissionPct}% of the service amount. Payouts are processed on payout runs to the verified bank account.</span>
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
 
       {(show('avail')) && <div style={grid3}>{availabilityPanel}
         <Panel title="Attendance & Shift">

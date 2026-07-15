@@ -78,6 +78,20 @@ export interface JobsPerformance {
   trend: { date: string; value: number }[]
   jobs: JobRow[]
 }
+export interface WalletTxn {
+  id: number; ts: number; date: string; time: string; type: string; refId: string
+  amount: number; isCredit: boolean; status: string; method: string; remarks: string
+}
+export interface WalletWithdrawal {
+  id: number; amount: number; method: string; destination: string; status: string; remarks: string; reference: string; date: string
+}
+export interface WalletState {
+  walletSummary: WorkerWalletSummary & { totalEarned?: number; totalWithdrawn?: number }
+  earningsBreakup: { category: string; amount: number }[]
+  history: WalletTxn[]
+  withdrawals: WalletWithdrawal[]
+  advances?: unknown[]
+}
 export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
