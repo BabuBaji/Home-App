@@ -31,7 +31,7 @@ export interface Worker {
   balance?: number; withdrawn?: number; hold?: number; pending?: number; advance_outstanding?: number
   last_lat?: number | null; last_lng?: number | null; shift_def_id?: number | null; site_id?: number | null
   profile?: {
-    bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string }
+    bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string; bankAccountType?: string }
     bankVerification?: { status?: string; registeredName?: string; nameMatch?: boolean | null; reason?: string }
     personal?: { gender?: string; dob?: string; fatherName?: string; address?: string; aadhaar?: string; pan?: string; whatsapp?: string; emergencyName?: string; emergencyPhone?: string; languages?: string }
     skillLevels?: Record<string, string>
@@ -51,7 +51,12 @@ export interface WorkerMetrics {
 export interface WorkerDevice { battery?: number | null; network?: string | null; idleMins?: number | null; lastSeen?: string | null }
 export interface WorkerHealth { riskScore: number; level: string; attendanceRisk: number; burnoutRisk: number; lateProbability: number; complaintProbability: number; suggestion: string }
 export interface WorkerLiveJob { id: number; ref: string; service: string; status: string; total: number; apartment?: string; otpStatus?: string; startedAt?: string; date?: string; time?: string }
-export interface WorkerWalletSummary { available?: number; totalEarned?: number; totalWithdrawn?: number; hold?: number; weekEarnings?: number; monthEarnings?: number; todayEarnings?: number; advanceOutstanding?: number }
+export interface WorkerWalletSummary {
+  available?: number; totalEarned?: number; totalWithdrawn?: number; hold?: number
+  weekEarnings?: number; monthEarnings?: number; todayEarnings?: number; advanceOutstanding?: number
+  // Payout policy from settings — nextPayout is an estimate off the configured schedule ('' = on-demand).
+  nextPayout?: string; nextPayoutEst?: number; payoutFrequency?: string; minPayoutLimit?: number
+}
 export interface WorkerNote { id: number; note: string; author?: string; created?: string }
 export interface ActivityItem { id: number; action: string; detail?: string; ref?: string; created?: string }
 export interface TrendPoint { date: string; amount: number }
@@ -81,9 +86,15 @@ export interface JobsPerformance {
 export interface WalletTxn {
   id: number; ts: number; date: string; time: string; type: string; refId: string
   amount: number; isCredit: boolean; status: string; method: string; remarks: string
+  // Quotable id for support: the real gateway reference on payouts, else a derived ledger id.
+  reference?: string
+  // Who credited it: 'System' for platform-calculated rows, an admin's name for a manual bonus.
+  source?: string
 }
 export interface WalletWithdrawal {
   id: number; amount: number; method: string; destination: string; status: string; remarks: string; reference: string; date: string
+  // payoutId = our ledger id; reference = gateway payout id; utr = the bank's transfer number.
+  payoutId?: string; utr?: string; time?: string
 }
 export interface WalletState {
   walletSummary: WorkerWalletSummary & { totalEarned?: number; totalWithdrawn?: number }

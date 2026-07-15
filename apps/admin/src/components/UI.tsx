@@ -202,9 +202,10 @@ export function SumBars({ rows }: { rows: { label: string; value: ReactNode; pct
 }
 
 /* ---------- search input ---------- */
-export function SearchBox({ value, onChange, placeholder = 'Search…' }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+// `sm` matches the Dropdown trigger's height/radius for toolbars that mix the two.
+export function SearchBox({ value, onChange, placeholder = 'Search…', className = '' }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
   return (
-    <div className="searchbox">
+    <div className={'searchbox' + (className ? ` ${className}` : '')}>
       <Search size={17} />
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
     </div>
