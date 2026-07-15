@@ -335,7 +335,6 @@ export default function WorkerDetail() {
                   </span>
                 ))}
               </div>
-              <button className="btn" style={{ alignSelf: 'flex-start', marginTop: 8, padding: '9px 14px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
             </div>
           </div>
         </Card>
