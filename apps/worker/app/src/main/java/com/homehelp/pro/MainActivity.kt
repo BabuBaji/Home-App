@@ -133,9 +133,15 @@ fun AppRoot() {
     // Re-pull backend data every time the app comes to the foreground, so a completed job /
     // updated earnings appear immediately instead of only after a full relaunch.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    val hbCtx = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.refresh()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                vm.refresh()
+                val (batt, net) = readDeviceState(hbCtx)
+                val loc = lastKnownLoc(hbCtx)
+                vm.sendHeartbeat(batt, net, loc?.first, loc?.second)
+            }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
@@ -253,6 +259,26 @@ private fun lastKnownLoc(ctx: android.content.Context): Pair<Double, Double>? = 
         loc?.let { it.latitude to it.longitude }
     }
 } catch (_: Exception) { null }
+
+/** Read battery % and coarse network type for the admin status strip. */
+private fun readDeviceState(ctx: android.content.Context): Pair<Int?, String?> {
+    val battery = try {
+        val bm = ctx.getSystemService(android.content.Context.BATTERY_SERVICE) as android.os.BatteryManager
+        bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+    } catch (_: Exception) { null }
+    val network = try {
+        val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        when {
+            caps == null -> "Offline"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "WiFi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            else -> "Online"
+        }
+    } catch (_: Exception) { null }
+    return Pair(battery, network)
+}
 
 @Composable
 private fun BottomBar(nav: NavHostController, current: String?) {

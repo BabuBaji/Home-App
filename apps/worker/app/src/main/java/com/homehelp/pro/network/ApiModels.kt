@@ -366,6 +366,7 @@ data class ProfileBody(val name: String, val phone: String, val email: String, v
 data class UploadDocBody(val name: String, val fileName: String)
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
+data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)
 data class AvailabilityBody(val availableDays: Map<String, Boolean>, val shiftStart: String, val shiftEnd: String)
 data class PreferencesBody(val jobPreferences: Map<String, Boolean>)
 data class NotificationsBody(

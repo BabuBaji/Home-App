@@ -429,6 +429,12 @@ class AppViewModel : ViewModel() {
         sync { applyBootstrap(api.bootstrap()) }
     }
 
+    /** Report device battery %, network type and last GPS so the admin status strip shows live values. */
+    fun sendHeartbeat(battery: Int?, network: String?, lat: Double?, lng: Double?) {
+        if (!isLoggedIn) return
+        viewModelScope.launch { runCatching { api.heartbeat(com.homehelp.pro.network.HeartbeatBody(battery, network, lat, lng)) } }
+    }
+
     /** Clear the session and return to the login screen. */
     fun logout() {
         Session.clear()
