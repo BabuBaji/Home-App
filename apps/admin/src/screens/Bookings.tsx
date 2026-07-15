@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers } from '../api'
 import type { AdminBooking } from '../types'
@@ -39,9 +40,10 @@ export default function Bookings() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
+  const [params] = useSearchParams()
   const [status, setStatus] = useState('all')
   const [service, setService] = useState('all')
-  const [worker, setWorker] = useState('all')
+  const [worker, setWorker] = useState(params.get('worker') || 'all')
   const [city, setCity] = useState('all')
 
   const [modal, setModal] = useState<null | 'view' | 'more'>(null)

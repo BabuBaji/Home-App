@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
-  Clock, Wifi, BatteryMedium, CalendarClock, Eye, Download,
+  Clock, Wifi, BatteryMedium, CalendarClock,
 } from 'lucide-react'
 import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote } from '../types'
@@ -183,8 +183,6 @@ export default function WorkerDetail() {
   const [notes, setNotes] = useState<WorkerNote[]>([])
   const [noteText, setNoteText] = useState('')
   const [tab, setTab] = useState<string>('overview')
-  const [jobPage, setJobPage] = useState(1)
-  const [jobFilter, setJobFilter] = useState('all')
 
   const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
@@ -216,25 +214,13 @@ export default function WorkerDetail() {
   const softBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card,#fff)', border: '1px solid var(--line,#e4e7ec)', color: 'var(--violet,#5b51e8)', padding: '9px 15px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }
   const show = (t: string) => tab === 'overview' || tab === t
 
-  // ---- Jobs & Performance: table filtering + pagination (client-side over the real jobs list) ----
+  // ---- Jobs & Performance: Recent Jobs is a preview only; "View All" deep-links to Bookings ----
   const jp = w.jobsPerformance
   const ACTIVE_STS = ['confirmed', 'worker_assigned', 'accepted', 'on_the_way', 'on the way', 'travelling', 'arrived', 'in_progress', 'in progress', 'started']
-  const statusGroup = (s: string) => s === 'completed' ? 'completed' : s === 'cancelled' ? 'cancelled' : ACTIVE_STS.includes(String(s).toLowerCase()) ? 'in_progress' : 'other'
   const statusTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : ACTIVE_STS.includes(String(s).toLowerCase()) ? 'amber' : 'gray'
   const prettyStatus = (s: string) => String(s || '—').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  const jobsFiltered = jp ? (jobFilter === 'all' ? jp.jobs : jp.jobs.filter((j) => statusGroup(j.status) === jobFilter)) : []
-  const PAGE_SIZE = 10
-  const jobPages = Math.max(1, Math.ceil(jobsFiltered.length / PAGE_SIZE))
-  const curPage = Math.min(jobPage, jobPages)
-  const jobsPageRows = jobsFiltered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE)
-  const exportJobsCsv = () => {
-    if (!jp) return
-    const head = ['Job ID', 'Service', 'Customer', 'Date', 'Time', 'Amount', 'Status', 'Acceptance', 'On Time', 'Rating', 'Earnings']
-    const rows = jobsFiltered.map((j) => [j.ref, j.service, j.customer, j.date, j.time, j.amount, prettyStatus(j.status), j.acceptance, j.onTime, j.rating ?? '', j.earnings])
-    const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    const a = document.createElement('a'); a.href = url; a.download = `worker-${w.id}-jobs.csv`; a.click(); URL.revokeObjectURL(url)
-  }
+  const jobsPreview = jp ? jp.jobs.slice(0, 5) : []
+  const viewAllJobs = () => nav(`/bookings?worker=${encodeURIComponent(w.name)}`)
 
   const liveOpPanel = (
     <Panel title="Live Operation" action={w.liveJob && <button className="btn ghost" onClick={() => nav('/bookings')}>View Job</button>}>
@@ -594,62 +580,41 @@ export default function WorkerDetail() {
           <Card>
             <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
               <strong style={{ fontSize: 15 }}>Recent Jobs</strong>
-              <div className="row" style={{ gap: 10 }}>
-                <select value={jobFilter} onChange={(e) => { setJobFilter(e.target.value); setJobPage(1) }} style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid var(--line,#e4e7ec)', fontSize: 13, background: 'var(--card,#fff)', cursor: 'pointer' }}>
-                  <option value="all">All Status</option>
-                  <option value="completed">Completed</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-                <button style={softBtn} onClick={exportJobsCsv}><Download size={15} /> Export</button>
-              </div>
+              <button style={softBtn} onClick={viewAllJobs}>View All Bookings <ChevronRight size={15} /></button>
             </div>
-            {jobsFiltered.length === 0 ? (
-              <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No jobs to show.</div>
+            {jobsPreview.length === 0 ? (
+              <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No jobs yet.</div>
             ) : (
               <>
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 900 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 820 }}>
                     <thead>
                       <tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
-                        {['Job ID', 'Service', 'Customer', 'Date & Time', 'Amount', 'Status', 'Acceptance', 'On Time', 'Rating', 'Earnings', ''].map((h) => (
+                        {['Job ID', 'Service', 'Customer', 'Date & Time', 'Amount', 'Status', 'On Time', 'Rating', 'Earnings'].map((h) => (
                           <th key={h} style={{ padding: '8px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {jobsPageRows.map((j) => (
-                        <tr key={j.id} style={{ borderBottom: '1px solid var(--line,#f4f5f8)' }}>
+                      {jobsPreview.map((j) => (
+                        <tr key={j.id} style={{ borderBottom: '1px solid var(--line,#f4f5f8)', cursor: 'pointer' }} onClick={viewAllJobs}>
                           <td style={{ padding: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{j.ref}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{j.service}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{j.customer}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap', color: 'var(--muted,#667085)' }}>{[j.date, j.time].filter(Boolean).join(', ') || '—'}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{rupee(j.amount)}</td>
                           <td style={{ padding: '10px' }}><Badge tone={statusTone(j.status)} dot={false}>{prettyStatus(j.status)}</Badge></td>
-                          <td style={{ padding: '10px' }}>{j.acceptance === 'Accepted' ? <Badge tone="green" dot={false}>Accepted</Badge> : <span className="muted">—</span>}</td>
                           <td style={{ padding: '10px' }}>{j.onTime === 'On Time' ? <Badge tone="green" dot={false}>On Time</Badge> : j.onTime === 'Late' ? <Badge tone="red" dot={false}>Late</Badge> : <span className="muted">—</span>}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{j.rating ? <span>{j.rating} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span> : <span className="muted">—</span>}</td>
                           <td style={{ padding: '10px', whiteSpace: 'nowrap', fontWeight: 600 }}>{j.earnings ? rupee(j.earnings) : <span className="muted" style={{ fontWeight: 400 }}>₹0</span>}</td>
-                          <td style={{ padding: '10px' }}>
-                            <span className="row" style={{ gap: 8 }}>
-                              <Eye size={16} style={{ cursor: 'pointer', color: 'var(--muted,#98a2b3)' }} onClick={() => nav('/bookings')} />
-                              <ChevronRight size={16} style={{ cursor: 'pointer', color: 'var(--muted,#98a2b3)' }} onClick={() => nav('/bookings')} />
-                            </span>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 10, flexWrap: 'wrap' }}>
-                  <span className="muted" style={{ fontSize: 12.5 }}>Showing {(curPage - 1) * PAGE_SIZE + 1} to {Math.min(curPage * PAGE_SIZE, jobsFiltered.length)} of {jobsFiltered.length} jobs</span>
-                  <div className="row" style={{ gap: 4 }}>
-                    <button style={{ ...softBtn, padding: '6px 10px', opacity: curPage <= 1 ? 0.5 : 1 }} disabled={curPage <= 1} onClick={() => setJobPage(curPage - 1)}><ChevronLeft size={15} /></button>
-                    {Array.from({ length: jobPages }, (_, i) => i + 1).map((n) => (
-                      <button key={n} onClick={() => setJobPage(n)} style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--line,#e4e7ec)', cursor: 'pointer', fontSize: 13, fontWeight: n === curPage ? 700 : 500, background: n === curPage ? 'var(--violet,#5b51e8)' : 'var(--card,#fff)', color: n === curPage ? '#fff' : 'var(--ink,#101828)' }}>{n}</button>
-                    ))}
-                    <button style={{ ...softBtn, padding: '6px 10px', opacity: curPage >= jobPages ? 0.5 : 1 }} disabled={curPage >= jobPages} onClick={() => setJobPage(curPage + 1)}><ChevronRight size={15} /></button>
-                  </div>
+                  <span className="muted" style={{ fontSize: 12.5 }}>Showing the {jobsPreview.length} most recent {jobsPreview.length === 1 ? 'job' : 'jobs'}{jp && jp.summary.totalJobs > jobsPreview.length ? ` of ${jp.summary.totalJobs}` : ''}.</span>
+                  <button style={{ ...softBtn, color: 'var(--violet,#5b51e8)' }} onClick={viewAllJobs}>View all in Bookings <ChevronRight size={15} /></button>
                 </div>
               </>
             )}

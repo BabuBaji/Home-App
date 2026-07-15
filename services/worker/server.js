@@ -930,7 +930,7 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
 
   const custList = await tryGet(AUTH_URL, '/api/internal/customers', [])
   const custMap = new Map((Array.isArray(custList) ? custList : (custList.items || [])).map((c) => [c.id, c.name]))
-  const jobRows = bk.slice(0, 60).map((b) => ({
+  const jobRows = bk.slice(0, 8).map((b) => ({
     id: b.id, ref: b.ref || `BK${b.id}`, service: svcOf(b), customer: custMap.get(b.user_id) || '—',
     date: b.date || (b.created ? String(b.created).slice(0, 10) : ''), time: b.time || '', created: b.created || '',
     amount: b.total || 0, status: b.status || '',
