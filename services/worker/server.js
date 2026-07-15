@@ -790,7 +790,23 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
     [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker'])
   res.status(201).json(rowToWorker(rows[0]))
 })
-app.get('/api/admin/workers/:id', adminAuth, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
+// Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
+app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Not found' })
+  const [docs, bookings] = await Promise.all([
+    documents(id),
+    tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
+  ])
+  const recentJobs = (bookings || []).slice(0, 8).map((b) => ({
+    id: b.id, ref: b.ref || `BK${b.id}`,
+    service: b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—',
+    status: b.status || '', total: b.total || 0, date: b.date || '', time: b.time || '',
+  }))
+  const documentsOut = (docs || []).map((d) => ({ id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created }))
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs })
+})
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
 

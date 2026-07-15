@@ -36,6 +36,10 @@ export interface Worker {
   }
 }
 
+export interface WorkerDoc { id: number; name: string; fileName?: string; status?: string; created?: string }
+export interface WorkerJob { id: number; ref: string; service: string; status: string; total: number; date?: string; time?: string }
+export interface WorkerDetail extends Worker { documents?: WorkerDoc[]; recentJobs?: WorkerJob[] }
+
 export interface AdminBooking {
   id: number; ref: string; customer: string; service: string; pro: string
   date?: string; time?: string; type: string; total: number

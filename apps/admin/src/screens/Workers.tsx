@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
-import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
-import type { Worker } from '../types'
+import { fetchWorkers, fetchWorkerDetail, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
+import type { Worker, WorkerDetail } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
 import { useStore, can } from '../store'
 import { CITIES } from '../cities'
@@ -30,6 +30,9 @@ export default function Workers() {
   const [editing, setEditing] = useState<Worker | null>(null)
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
   const [viewing, setViewing] = useState<Worker | null>(null)
+  const [detail, setDetail] = useState<WorkerDetail | null>(null)
+  // Open the details modal instantly with the list data, then enrich with documents + recent jobs.
+  const openView = (w: Worker) => { setViewing(w); setDetail(null); fetchWorkerDetail(w.id).then(setDetail).catch(() => {}) }
   const [busy, setBusy] = useState(false)
   const [allServices, setAllServices] = useState<string[]>([])
   const [zones, setZones] = useState<Zone[]>([])
@@ -178,7 +181,7 @@ export default function Workers() {
                         <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={(e) => { e.stopPropagation(); setMenuId(menuId === w.id ? null : w.id) }}><MoreVertical size={16} /></button>
                         {menuId === w.id && (
                           <div className="menu" style={{ position: 'absolute', right: 0, top: 34, zIndex: 20, background: 'var(--card, #fff)', border: '1px solid var(--line, #e4e7ec)', borderRadius: 8, boxShadow: '0 8px 24px rgba(16,24,40,.12)', minWidth: 150, padding: 4 }} onClick={(e) => e.stopPropagation()}>
-                            <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); setViewing(w) }}>View</button>
+                            <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openView(w) }}>View</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openEdit(w) }}>Edit</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'active', verified: true }, 'Worker approved') }}>Approve</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'suspended' }, 'Worker suspended') }}>Suspend</button>
@@ -222,7 +225,7 @@ export default function Workers() {
       )}
 
       {viewing && (
-        <Modal title="Worker Details" onClose={() => setViewing(null)}>
+        <Modal title="Worker Details" onClose={() => { setViewing(null); setDetail(null) }}>
           <div className="grid" style={{ gap: 12 }}>
             <div className="cell-user">
               <Avatar name={viewing.name} src={viewing.avatar} size={48} />
@@ -268,6 +271,40 @@ export default function Workers() {
             {viewing.profile?.bankVerification?.registeredName && (
               <Field label="Registered Name (as per bank)"><input value={viewing.profile.bankVerification.registeredName} readOnly /></Field>
             )}
+
+            {/* KYC documents (fetched on open) */}
+            <Field label={`KYC Documents${detail?.documents ? ` (${detail.documents.length})` : ''}`}>
+              {!detail ? <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
+                : (detail.documents && detail.documents.length > 0) ? (
+                  <div className="grid" style={{ gap: 6 }}>
+                    {detail.documents.map((d) => (
+                      <div key={d.id} className="row" style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 13 }}>{d.name}{d.fileName ? ` · ${d.fileName}` : ''}</span>
+                        <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="muted" style={{ fontSize: 12 }}>No documents uploaded.</div>}
+            </Field>
+
+            {/* Recent jobs (fetched on open) */}
+            <Field label={`Recent Jobs${detail?.recentJobs ? ` (${detail.recentJobs.length})` : ''}`}>
+              {!detail ? <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
+                : (detail.recentJobs && detail.recentJobs.length > 0) ? (
+                  <div className="grid" style={{ gap: 6 }}>
+                    {detail.recentJobs.map((j) => (
+                      <div key={j.id} className="row" style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 13 }}>{j.ref} · {j.service}{j.date ? ` · ${j.date}` : ''}</span>
+                        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: 13 }}>₹{j.total}</span>
+                          <Badge tone={j.status === 'completed' ? 'green' : j.status === 'cancelled' ? 'red' : 'blue'} dot={false}>{j.status}</Badge>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="muted" style={{ fontSize: 12 }}>No recent jobs.</div>}
+            </Field>
+
             <Field label="Joined On"><input value={shortDate(viewing.joined)} readOnly /></Field>
           </div>
         </Modal>

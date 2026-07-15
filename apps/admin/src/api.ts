@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client'
 import type {
-  Admin, DashboardData, Customer, Worker, AdminBooking, AdminService,
+  Admin, DashboardData, Customer, Worker, WorkerDetail, AdminBooking, AdminService,
   Complaint, Ticket, Settings,
 } from './types'
 
@@ -93,6 +93,7 @@ export const setWalletStatus = (id: number, status: 'active' | 'frozen' | 'block
 
 /* workers */
 export const fetchWorkers = (q = '', status = 'all', city = 'all') => req<{ stats: any; workers: Worker[] }>(`/workers?q=${encodeURIComponent(q)}&status=${status}&city=${city}`)
+export const fetchWorkerDetail = (id: number) => req<WorkerDetail>(`/workers/${id}`)
 export const createWorker = (body: Record<string, unknown>) => req<Worker>('/workers', post('', body))
 export const updateWorker = (id: number, body: Record<string, unknown>) => req<Worker>(`/workers/${id}`, patch(body))
 export const deleteWorker = (id: number) => req<{ ok: boolean }>(`/workers/${id}`, { method: 'DELETE' })
