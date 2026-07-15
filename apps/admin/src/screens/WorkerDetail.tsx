@@ -318,8 +318,13 @@ export default function WorkerDetail() {
                 <strong style={{ fontSize: 18 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
               </div>
               <div style={{ marginTop: 6 }}><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {badges.map((b) => <Badge key={b} tone="violet" dot={false}>{b}</Badge>)}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 }}>
+                {badges.map((b) => (
+                  <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 9px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    {b === 'Verified' ? <BadgeCheck size={12} /> : b === 'Top Performer' ? <Star size={11} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={11} /> : <Zap size={11} />}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{b}</span>
+                  </span>
+                ))}
               </div>
             </div>
           </div>
