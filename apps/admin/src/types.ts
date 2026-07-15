@@ -44,7 +44,8 @@ export interface WorkerJob { id: number; ref: string; service: string; status: s
 export interface WorkerMetrics {
   totalJobs: number; completed: number; cancelled: number; todayJobs: number; weekJobs: number
   monthJobs: number; completedToday?: number; completedWeek?: number; completedMonth?: number
-  cancellationPct: number; completionPct: number; todayEarnings: number
+  cancellationPct: number; completionPct: number; acceptanceRate?: number
+  onTimePct?: number; onTimeSamples?: number; todayEarnings: number
   trends?: { weekJobs: number; completion: number; cancellation: number; rating: number } | null
 }
 export interface WorkerDevice { battery?: number | null; network?: string | null; idleMins?: number | null; lastSeen?: string | null }

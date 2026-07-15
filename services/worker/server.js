@@ -842,6 +842,9 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const ACTIVE = ['assigned', 'accepted', 'on_the_way', 'on the way', 'travelling', 'arrived', 'in_progress', 'in progress', 'started']
   const isToday = (ts) => ts && new Date(ts).toDateString() === now.toDateString()
   const cmpIn = (n) => completed.filter((b) => n === 0 ? isToday(b.created) : within(b.created, n)).length
+  // On-time % from real attendance check-ins (on_time flag set at check-in vs shift grace window).
+  const attRes = await pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE on_time)::int AS ontime FROM attendance WHERE worker_id=$1`, [id]).catch(() => ({ rows: [] }))
+  const attTot = attRes.rows[0]?.total || 0, attOn = attRes.rows[0]?.ontime || 0
   const metrics = {
     totalJobs: bk.length, completed: completed.length, cancelled: cancelled.length,
     todayJobs: bk.filter((b) => isToday(b.created)).length,
@@ -850,6 +853,11 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     completedToday: cmpIn(0), completedWeek: cmpIn(7), completedMonth: cmpIn(30),
     cancellationPct: bk.length ? Math.round((cancelled.length / bk.length) * 100) : 0,
     completionPct: bk.length ? Math.round((completed.length / bk.length) * 100) : 0,
+    // Acceptance rate = jobs the worker took on (not cancelled) / total assigned.
+    acceptanceRate: bk.length ? Math.round(((bk.length - cancelled.length) / bk.length) * 100) : 0,
+    // On-time attendance %; null-safe 0 when the worker has no check-ins yet.
+    onTimePct: attTot ? Math.round((attOn / attTot) * 100) : 0,
+    onTimeSamples: attTot,
     todayEarnings: wallet ? (wallet.todayEarnings || 0) : 0,
   }
   // Trend vs the most recent prior daily snapshot (▲/▼ on the KPI tiles). null until history exists.

@@ -341,7 +341,7 @@ export default function WorkerDetail() {
 
         <Card>
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 16, height: '100%' }}>
-          <div className="row" style={{ justifyContent: 'space-between', gap: '14px 12px', flexWrap: 'wrap', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '14px 12px', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
             <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? w.liveJob.status : (onDuty ? 'Available' : 'Offline')} />
             <StatusItem icon={<Briefcase size={14} />} label="Current Job" value={w.liveJob ? w.liveJob.ref : '—'} sub={w.liveJob?.service} />
             <StatusItem icon={<MapPin size={14} />} label="Zone" value={zoneName} />
@@ -351,12 +351,13 @@ export default function WorkerDetail() {
             <StatusItem icon={<MapPin size={14} />} label="Last GPS" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'} />
             <StatusItem icon={<Clock size={14} />} label="Idle Time" value={dev.idleMins != null ? `${dev.idleMins} min` : '—'} />
           </div>
-          <div className="row" style={{ gap: 10, flexWrap: 'wrap', paddingTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: 10, paddingTop: 12 }}>
             <Kpi label="Today's Jobs" value={m?.todayJobs ?? 0} sub={`Completed: ${m?.completedToday ?? 0}`} />
             <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} trend={m?.trends?.weekJobs} />
             <Kpi label="Monthly Jobs" value={m?.monthJobs ?? 0} sub={`Completed: ${m?.completedMonth ?? 0}`} />
-            <Kpi label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" trend={m?.trends?.completion} />
+            <Kpi label="Acceptance Rate" value={`${m?.acceptanceRate ?? 0}%`} tone="#16a34a" />
             <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} trend={m?.trends?.cancellation} invert />
+            <Kpi label="On Time" value={m?.onTimeSamples ? `${m?.onTimePct ?? 0}%` : '—'} tone={!m?.onTimeSamples ? undefined : (m.onTimePct ?? 0) >= 80 ? '#16a34a' : (m.onTimePct ?? 0) >= 50 ? '#d97706' : '#dc2626'} sub={m?.onTimeSamples ? `${m.onTimeSamples} check-ins` : undefined} />
             <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} trend={m?.trends?.rating} />
             <Kpi label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
           </div>
