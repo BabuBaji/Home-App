@@ -309,7 +309,7 @@ export default function WorkerDetail() {
       </div>
 
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 400px) 1fr', gap: 16, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card>
           {/* Left: avatar + rating + Worker ID · Right: name/status/badges/action */}
           <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
