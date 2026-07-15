@@ -56,10 +56,33 @@ export interface WorkerNote { id: number; note: string; author?: string; created
 export interface ActivityItem { id: number; action: string; detail?: string; ref?: string; created?: string }
 export interface TrendPoint { date: string; amount: number }
 export interface TimelineStep { action: string; detail?: string; created?: string }
+export interface JobPerfSummary {
+  totalJobs: number; completed: number; completedPct: number; cancelled: number; cancelledPct: number
+  noShow: number; noShowPct: number; onTimeArrivals: number; onTimePct: number; avgRating: number; totalEarnings: number
+}
+export interface JobSegment { key?: string; label?: string; service?: string; count: number; pct: number }
+export interface JobPerfMetrics {
+  acceptanceRate: number; acceptanceDelta: number | null; onTimeArrival: number; onTimeDelta: number | null
+  cancellationRate: number; cancellationDelta: number | null; customerRating: number; ratingDelta: number | null
+  jobsPerDay: number; jobsPerDayDelta: number | null; earningsPerDay: number; earningsPerDayDelta: number | null
+}
+export interface JobRow {
+  id: number; ref: string; service: string; customer: string; date: string; time: string; created: string
+  amount: number; status: string; acceptance: string; onTime: string; rating: number | null; earnings: number
+}
+export interface JobsPerformance {
+  summary: JobPerfSummary
+  byStatus: { total: number; segments: JobSegment[] }
+  byService: { total: number; segments: JobSegment[] }
+  metrics: JobPerfMetrics
+  trend: { date: string; value: number }[]
+  jobs: JobRow[]
+}
 export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
   activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice; health?: WorkerHealth
+  jobsPerformance?: JobsPerformance
 }
 
 export interface AdminBooking {

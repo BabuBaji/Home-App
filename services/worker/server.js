@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
+  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings, getSettingInt,
 } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4004)
@@ -867,6 +867,109 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     cancellation: metrics.cancellationPct - (prevSnap.cancellation_pct || 0),
     rating: Math.round(((w.rating || 0) - (prevSnap.rating || 0)) * 10) / 10,
   } : null
+
+  // ---- Jobs & Performance tab aggregates (all derived from real bookings) ----
+  const COMMISSION = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  const workerShare = (b) => Math.max(0, Math.round(((b.total || 0) * (100 - COMMISSION)) / 100))
+  const pctOf = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : 0)
+  const parseClock = (t) => {
+    const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+    if (!m) return null
+    let h = Number(m[1]); const ap = (m[3] || '').toUpperCase()
+    if (ap === 'PM' && h < 12) h += 12
+    if (ap === 'AM' && h === 12) h = 0
+    return { h, min: Number(m[2]) }
+  }
+  const schedMs = (b) => {
+    if (!b.date) return null
+    const d = new Date(`${b.date}T00:00:00`); if (isNaN(d.getTime())) return null
+    const c = parseClock(b.time); if (c) d.setHours(c.h, c.min, 0, 0)
+    return d.getTime()
+  }
+  const jobOnTime = (b) => {
+    if (b.status !== 'completed') return false
+    const s = schedMs(b); if (s == null || !b.started_at) return true
+    return new Date(b.started_at).getTime() <= s + 10 * 60000
+  }
+  const jobNoShow = (b) => {
+    const s = schedMs(b)
+    return !!b.worker_id && s != null && (now - s > 2 * 3600000) && !b.started_at && !b.completed_at && !['completed', 'cancelled'].includes(b.status)
+  }
+  const ratings = bk.map((b) => b.rating).filter((r) => r != null && r > 0)
+  const avgJobRating = ratings.length ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10 : (w.rating || 0)
+  const noShow = bk.filter(jobNoShow)
+  const onTimeArr = completed.filter(jobOnTime)
+  const totalEarned = completed.reduce((s, b) => s + workerShare(b), 0)
+
+  const sameMonth = (ts) => ts && new Date(ts).getMonth() === now.getMonth() && new Date(ts).getFullYear() === now.getFullYear()
+  const monthBk = bk.filter((b) => sameMonth(b.created))
+  const ACTIVE_ST = ['confirmed', 'worker_assigned', 'accepted', 'on_the_way', 'on the way', 'arrived', 'in_progress', 'in progress', 'started']
+  const mStatus = {
+    total: monthBk.length,
+    completed: monthBk.filter((b) => b.status === 'completed').length,
+    cancelled: monthBk.filter((b) => b.status === 'cancelled').length,
+    noShow: monthBk.filter(jobNoShow).length,
+    inProgress: monthBk.filter((b) => ACTIVE_ST.includes(String(b.status).toLowerCase()) && !jobNoShow(b)).length,
+  }
+  const svcCount = {}
+  for (const b of monthBk) { const s = svcOf(b); svcCount[s] = (svcCount[s] || 0) + 1 }
+  const svcSorted = Object.entries(svcCount).sort((a, b) => b[1] - a[1])
+  const topSvc = svcSorted.slice(0, 4).map(([service, count]) => ({ service, count, pct: pctOf(count, monthBk.length) }))
+  const otherCount = svcSorted.slice(4).reduce((s, [, c]) => s + c, 0)
+  if (otherCount > 0) topSvc.push({ service: 'Others', count: otherCount, pct: pctOf(otherCount, monthBk.length) })
+
+  const trendDays = []
+  for (let i = 29; i >= 0; i--) {
+    const key = new Date(now - i * dayMs).toISOString().slice(0, 10)
+    const dayComp = completed.filter((b) => String(b.completed_at || b.created || '').slice(0, 10) === key)
+    trendDays.push({ date: key, value: dayComp.length ? Math.round((dayComp.filter(jobOnTime).length / dayComp.length) * 100) : null })
+  }
+  const perfTrend = trendDays.filter((d) => d.value != null)
+  const dayOfMonth = Math.max(1, now.getDate())
+  const monthEarned = monthBk.filter((b) => b.status === 'completed').reduce((s, b) => s + workerShare(b), 0)
+
+  const custList = await tryGet(AUTH_URL, '/api/internal/customers', [])
+  const custMap = new Map((Array.isArray(custList) ? custList : (custList.items || [])).map((c) => [c.id, c.name]))
+  const jobRows = bk.slice(0, 60).map((b) => ({
+    id: b.id, ref: b.ref || `BK${b.id}`, service: svcOf(b), customer: custMap.get(b.user_id) || '—',
+    date: b.date || (b.created ? String(b.created).slice(0, 10) : ''), time: b.time || '', created: b.created || '',
+    amount: b.total || 0, status: b.status || '',
+    acceptance: b.worker_id ? 'Accepted' : '—',
+    onTime: b.status === 'completed' ? (jobOnTime(b) ? 'On Time' : 'Late') : '—',
+    rating: b.rating || null,
+    earnings: b.status === 'completed' ? workerShare(b) : 0,
+  }))
+
+  const jobsPerformance = {
+    summary: {
+      totalJobs: bk.length,
+      completed: completed.length, completedPct: pctOf(completed.length, bk.length),
+      cancelled: cancelled.length, cancelledPct: pctOf(cancelled.length, bk.length),
+      noShow: noShow.length, noShowPct: pctOf(noShow.length, bk.length),
+      onTimeArrivals: onTimeArr.length, onTimePct: pctOf(onTimeArr.length, completed.length),
+      avgRating: avgJobRating, totalEarnings: totalEarned,
+    },
+    byStatus: {
+      total: mStatus.total,
+      segments: [
+        { key: 'completed', label: 'Completed', count: mStatus.completed, pct: pctOf(mStatus.completed, mStatus.total) },
+        { key: 'inProgress', label: 'In Progress', count: mStatus.inProgress, pct: pctOf(mStatus.inProgress, mStatus.total) },
+        { key: 'noShow', label: 'No Show', count: mStatus.noShow, pct: pctOf(mStatus.noShow, mStatus.total) },
+        { key: 'cancelled', label: 'Cancelled', count: mStatus.cancelled, pct: pctOf(mStatus.cancelled, mStatus.total) },
+      ],
+    },
+    byService: { total: monthBk.length, segments: topSvc },
+    metrics: {
+      acceptanceRate: metrics.acceptanceRate, acceptanceDelta: null,
+      onTimeArrival: pctOf(onTimeArr.length, completed.length), onTimeDelta: null,
+      cancellationRate: metrics.cancellationPct, cancellationDelta: prevSnap ? metrics.cancellationPct - (prevSnap.cancellation_pct || 0) : null,
+      customerRating: avgJobRating, ratingDelta: prevSnap ? Math.round((avgJobRating - (prevSnap.rating || 0)) * 10) / 10 : null,
+      jobsPerDay: Math.round((monthBk.length / dayOfMonth) * 10) / 10, jobsPerDayDelta: null,
+      earningsPerDay: Math.round(monthEarned / dayOfMonth), earningsPerDayDelta: null,
+    },
+    trend: perfTrend,
+    jobs: jobRows,
+  }
   // Device telemetry the worker app reports via /api/worker/heartbeat.
   const dev = (w.profile && w.profile.device) || {}
   const idleMins = dev.at ? Math.max(0, Math.round((now - new Date(dev.at)) / 60000)) : null
@@ -911,7 +1014,7 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     : 'Rating dipping — coaching / a check-in is recommended.'
   const health = { riskScore, level, attendanceRisk, burnoutRisk, lateProbability, complaintProbability, suggestion }
 
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health })
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })

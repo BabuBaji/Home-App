@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
+  ChevronLeft, ChevronRight, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
-  Clock, Wifi, BatteryMedium, CalendarClock,
+  Clock, Wifi, BatteryMedium, CalendarClock, Eye, Download,
 } from 'lucide-react'
 import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote } from '../types'
@@ -114,6 +114,61 @@ function RiskRow({ label, value, pct }: { label: string; value: number; pct?: bo
   )
 }
 
+const STATUS_COLORS: Record<string, string> = { completed: '#16a34a', inProgress: '#3b82f6', noShow: '#f59e0b', cancelled: '#ef4444' }
+const SERVICE_PALETTE = ['#5b51e8', '#f59e0b', '#06b6d4', '#10b981', '#94a3b8', '#ec4899']
+
+/** Multi-segment SVG donut with a centred total. */
+function DonutChart({ segments, total, colorFor }: { segments: { count: number }[]; total: number; colorFor: (i: number) => string }) {
+  const r = 52, cx = 68, cy = 68, C = 2 * Math.PI * r
+  let acc = 0
+  return (
+    <svg width={136} height={136} viewBox="0 0 136 136" style={{ flexShrink: 0 }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--line,#eef0f4)" strokeWidth={15} />
+      {total > 0 && segments.map((s, i) => {
+        const len = (s.count / total) * C
+        const el = <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={colorFor(i)} strokeWidth={15} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cy})`} />
+        acc += len
+        return el
+      })}
+      <text x={cx} y={cy - 1} textAnchor="middle" fontSize={24} fontWeight={700} fill="var(--ink,#101828)">{total}</text>
+      <text x={cx} y={cy + 15} textAnchor="middle" fontSize={10.5} fill="var(--muted,#98a2b3)">Total Jobs</text>
+    </svg>
+  )
+}
+function LegendRow({ color, label, count, pct }: { color: string; label: string; count: number; pct: number }) {
+  return (
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: 13, gap: 8 }}>
+      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+        <span style={{ width: 9, height: 9, borderRadius: 9, background: color, display: 'inline-block', flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      </span>
+      <span style={{ color: 'var(--muted,#667085)', whiteSpace: 'nowrap' }}><strong style={{ color: 'var(--ink,#101828)' }}>{count}</strong> ({pct}%)</span>
+    </div>
+  )
+}
+function Delta({ v, invert }: { v: number | null; invert?: boolean }) {
+  if (v == null || v === 0) return null
+  const good = invert ? v < 0 : v > 0
+  return <span style={{ fontSize: 11.5, color: good ? '#16a34a' : '#dc2626', fontWeight: 600 }}>{v > 0 ? '▲' : '▼'} {Math.abs(v)}</span>
+}
+function MetricRow({ label, value, delta, invert, last }: { label: string; value: ReactNode; delta?: number | null; invert?: boolean; last?: boolean }) {
+  return (
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: last ? 'none' : '1px solid var(--line,#f1f2f6)', fontSize: 13 }}>
+      <span style={{ color: 'var(--muted,#667085)' }}>{label}</span>
+      <span className="row" style={{ gap: 10, alignItems: 'center' }}><strong>{value}</strong><Delta v={delta ?? null} invert={invert} /></span>
+    </div>
+  )
+}
+function PerfTile({ label, value, sub, subTone }: { label: string; value: ReactNode; sub?: string; subTone?: string }) {
+  return (
+    <div style={{ border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px 14px', minWidth: 0 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--muted,#667085)', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, whiteSpace: 'nowrap' }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, marginTop: 3, color: subTone || 'var(--muted,#98a2b3)', fontWeight: 600 }}>{sub}</div>}
+    </div>
+  )
+}
+
 const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
 const TABS = [['overview', 'Overview'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity']] as const
 
@@ -128,6 +183,8 @@ export default function WorkerDetail() {
   const [notes, setNotes] = useState<WorkerNote[]>([])
   const [noteText, setNoteText] = useState('')
   const [tab, setTab] = useState<string>('overview')
+  const [jobPage, setJobPage] = useState(1)
+  const [jobFilter, setJobFilter] = useState('all')
 
   const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
@@ -158,6 +215,26 @@ export default function WorkerDetail() {
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }
   const softBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card,#fff)', border: '1px solid var(--line,#e4e7ec)', color: 'var(--violet,#5b51e8)', padding: '9px 15px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }
   const show = (t: string) => tab === 'overview' || tab === t
+
+  // ---- Jobs & Performance: table filtering + pagination (client-side over the real jobs list) ----
+  const jp = w.jobsPerformance
+  const ACTIVE_STS = ['confirmed', 'worker_assigned', 'accepted', 'on_the_way', 'on the way', 'travelling', 'arrived', 'in_progress', 'in progress', 'started']
+  const statusGroup = (s: string) => s === 'completed' ? 'completed' : s === 'cancelled' ? 'cancelled' : ACTIVE_STS.includes(String(s).toLowerCase()) ? 'in_progress' : 'other'
+  const statusTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : ACTIVE_STS.includes(String(s).toLowerCase()) ? 'amber' : 'gray'
+  const prettyStatus = (s: string) => String(s || '—').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  const jobsFiltered = jp ? (jobFilter === 'all' ? jp.jobs : jp.jobs.filter((j) => statusGroup(j.status) === jobFilter)) : []
+  const PAGE_SIZE = 10
+  const jobPages = Math.max(1, Math.ceil(jobsFiltered.length / PAGE_SIZE))
+  const curPage = Math.min(jobPage, jobPages)
+  const jobsPageRows = jobsFiltered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE)
+  const exportJobsCsv = () => {
+    if (!jp) return
+    const head = ['Job ID', 'Service', 'Customer', 'Date', 'Time', 'Amount', 'Status', 'Acceptance', 'On Time', 'Rating', 'Earnings']
+    const rows = jobsFiltered.map((j) => [j.ref, j.service, j.customer, j.date, j.time, j.amount, prettyStatus(j.status), j.acceptance, j.onTime, j.rating ?? '', j.earnings])
+    const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = `worker-${w.id}-jobs.csv`; a.click(); URL.revokeObjectURL(url)
+  }
 
   const liveOpPanel = (
     <Panel title="Live Operation" action={w.liveJob && <button className="btn ghost" onClick={() => nav('/bookings')}>View Job</button>}>
@@ -462,7 +539,123 @@ export default function WorkerDetail() {
         </div>
       )}
 
-      {(show('jobs')) && <div style={grid3}>{timelinePanel}{recentJobsPanel}</div>}
+      {tab === 'overview' && <div style={grid3}>{timelinePanel}{recentJobsPanel}</div>}
+
+      {tab === 'jobs' && jp && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 16 }}>
+            <Panel title="Job Performance Summary">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: 10 }}>
+                <PerfTile label="Total Jobs" value={jp.summary.totalJobs} />
+                <PerfTile label="Completed Jobs" value={jp.summary.completed} sub={`${jp.summary.completedPct}%`} subTone="#16a34a" />
+                <PerfTile label="Cancelled Jobs" value={jp.summary.cancelled} sub={`${jp.summary.cancelledPct}%`} subTone="#ef4444" />
+                <PerfTile label="No Show / Missed" value={jp.summary.noShow} sub={`${jp.summary.noShowPct}%`} subTone="#ef4444" />
+                <PerfTile label="On Time Arrivals" value={jp.summary.onTimeArrivals} sub={`${jp.summary.onTimePct}%`} subTone="#16a34a" />
+                <PerfTile label="Average Rating" value={<span>{jp.summary.avgRating || '—'} <Star size={14} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -2 }} /></span>} />
+                <PerfTile label="Total Earnings" value={rupee(jp.summary.totalEarnings)} />
+              </div>
+            </Panel>
+            <Panel title="Performance Trend">
+              {jp.trend.length ? <TrendChart points={jp.trend.map((t) => ({ date: t.date, amount: t.value }))} />
+                : <div className="muted" style={{ fontSize: 13, padding: '24px 0', textAlign: 'center' }}>No completed-job history yet.</div>}
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>On-time completion % per active day.</div>
+            </Panel>
+          </div>
+
+          <div style={grid3}>
+            <Panel title="Jobs by Status (This Month)">
+              <div className="row" style={{ gap: 16, alignItems: 'center' }}>
+                <DonutChart segments={jp.byStatus.segments} total={jp.byStatus.total} colorFor={(i) => STATUS_COLORS[jp.byStatus.segments[i].key || ''] || '#94a3b8'} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {jp.byStatus.segments.map((s) => <LegendRow key={s.key} color={STATUS_COLORS[s.key || ''] || '#94a3b8'} label={s.label || ''} count={s.count} pct={s.pct} />)}
+                </div>
+              </div>
+            </Panel>
+            <Panel title="Jobs by Service Type (This Month)">
+              {jp.byService.segments.length ? (
+                <div className="row" style={{ gap: 16, alignItems: 'center' }}>
+                  <DonutChart segments={jp.byService.segments} total={jp.byService.total} colorFor={(i) => SERVICE_PALETTE[i % SERVICE_PALETTE.length]} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {jp.byService.segments.map((s, i) => <LegendRow key={s.service} color={SERVICE_PALETTE[i % SERVICE_PALETTE.length]} label={s.service || ''} count={s.count} pct={s.pct} />)}
+                  </div>
+                </div>
+              ) : <div className="muted" style={{ fontSize: 13, padding: '24px 0', textAlign: 'center' }}>No jobs this month.</div>}
+            </Panel>
+            <Panel title="Performance Metrics">
+              <MetricRow label="Acceptance Rate" value={`${jp.metrics.acceptanceRate}%`} delta={jp.metrics.acceptanceDelta} />
+              <MetricRow label="On Time Arrival" value={`${jp.metrics.onTimeArrival}%`} delta={jp.metrics.onTimeDelta} />
+              <MetricRow label="Cancellation Rate" value={`${jp.metrics.cancellationRate}%`} delta={jp.metrics.cancellationDelta} invert />
+              <MetricRow label="Customer Rating" value={jp.metrics.customerRating || '—'} delta={jp.metrics.ratingDelta} />
+              <MetricRow label="Jobs per Day (Avg)" value={jp.metrics.jobsPerDay} delta={jp.metrics.jobsPerDayDelta} />
+              <MetricRow label="Earnings per Day (Avg)" value={rupee(jp.metrics.earningsPerDay)} delta={jp.metrics.earningsPerDayDelta} last />
+            </Panel>
+          </div>
+
+          <Card>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 15 }}>Recent Jobs</strong>
+              <div className="row" style={{ gap: 10 }}>
+                <select value={jobFilter} onChange={(e) => { setJobFilter(e.target.value); setJobPage(1) }} style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid var(--line,#e4e7ec)', fontSize: 13, background: 'var(--card,#fff)', cursor: 'pointer' }}>
+                  <option value="all">All Status</option>
+                  <option value="completed">Completed</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <button style={softBtn} onClick={exportJobsCsv}><Download size={15} /> Export</button>
+              </div>
+            </div>
+            {jobsFiltered.length === 0 ? (
+              <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No jobs to show.</div>
+            ) : (
+              <>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 900 }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                        {['Job ID', 'Service', 'Customer', 'Date & Time', 'Amount', 'Status', 'Acceptance', 'On Time', 'Rating', 'Earnings', ''].map((h) => (
+                          <th key={h} style={{ padding: '8px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobsPageRows.map((j) => (
+                        <tr key={j.id} style={{ borderBottom: '1px solid var(--line,#f4f5f8)' }}>
+                          <td style={{ padding: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{j.ref}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{j.service}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{j.customer}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap', color: 'var(--muted,#667085)' }}>{[j.date, j.time].filter(Boolean).join(', ') || '—'}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{rupee(j.amount)}</td>
+                          <td style={{ padding: '10px' }}><Badge tone={statusTone(j.status)} dot={false}>{prettyStatus(j.status)}</Badge></td>
+                          <td style={{ padding: '10px' }}>{j.acceptance === 'Accepted' ? <Badge tone="green" dot={false}>Accepted</Badge> : <span className="muted">—</span>}</td>
+                          <td style={{ padding: '10px' }}>{j.onTime === 'On Time' ? <Badge tone="green" dot={false}>On Time</Badge> : j.onTime === 'Late' ? <Badge tone="red" dot={false}>Late</Badge> : <span className="muted">—</span>}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{j.rating ? <span>{j.rating} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span> : <span className="muted">—</span>}</td>
+                          <td style={{ padding: '10px', whiteSpace: 'nowrap', fontWeight: 600 }}>{j.earnings ? rupee(j.earnings) : <span className="muted" style={{ fontWeight: 400 }}>₹0</span>}</td>
+                          <td style={{ padding: '10px' }}>
+                            <span className="row" style={{ gap: 8 }}>
+                              <Eye size={16} style={{ cursor: 'pointer', color: 'var(--muted,#98a2b3)' }} onClick={() => nav('/bookings')} />
+                              <ChevronRight size={16} style={{ cursor: 'pointer', color: 'var(--muted,#98a2b3)' }} onClick={() => nav('/bookings')} />
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 10, flexWrap: 'wrap' }}>
+                  <span className="muted" style={{ fontSize: 12.5 }}>Showing {(curPage - 1) * PAGE_SIZE + 1} to {Math.min(curPage * PAGE_SIZE, jobsFiltered.length)} of {jobsFiltered.length} jobs</span>
+                  <div className="row" style={{ gap: 4 }}>
+                    <button style={{ ...softBtn, padding: '6px 10px', opacity: curPage <= 1 ? 0.5 : 1 }} disabled={curPage <= 1} onClick={() => setJobPage(curPage - 1)}><ChevronLeft size={15} /></button>
+                    {Array.from({ length: jobPages }, (_, i) => i + 1).map((n) => (
+                      <button key={n} onClick={() => setJobPage(n)} style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--line,#e4e7ec)', cursor: 'pointer', fontSize: 13, fontWeight: n === curPage ? 700 : 500, background: n === curPage ? 'var(--violet,#5b51e8)' : 'var(--card,#fff)', color: n === curPage ? '#fff' : 'var(--ink,#101828)' }}>{n}</button>
+                    ))}
+                    <button style={{ ...softBtn, padding: '6px 10px', opacity: curPage >= jobPages ? 0.5 : 1 }} disabled={curPage >= jobPages} onClick={() => setJobPage(curPage + 1)}><ChevronRight size={15} /></button>
+                  </div>
+                </div>
+              </>
+            )}
+          </Card>
+        </>
+      )}
 
       {(show('earnings')) && <div style={grid3}>{earningsTrendPanel}
         <Panel title="Earnings Summary" action={<button className="btn ghost" onClick={() => nav('/worker-wallet')}>Full Earnings</button>}>
