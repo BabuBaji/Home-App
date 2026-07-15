@@ -357,7 +357,7 @@ export default function WorkerDetail() {
             <Kpi label="Monthly Jobs" value={m?.monthJobs ?? 0} sub={`Completed: ${m?.completedMonth ?? 0}`} />
             <Kpi label="Acceptance Rate" value={`${m?.acceptanceRate ?? 0}%`} tone="#16a34a" />
             <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} trend={m?.trends?.cancellation} invert />
-            <Kpi label="On Time" value={m?.onTimeSamples ? `${m?.onTimePct ?? 0}%` : '—'} tone={!m?.onTimeSamples ? undefined : (m.onTimePct ?? 0) >= 80 ? '#16a34a' : (m.onTimePct ?? 0) >= 50 ? '#d97706' : '#dc2626'} sub={m?.onTimeSamples ? `${m.onTimeSamples} check-ins` : undefined} />
+            <Kpi label="On Time" value={m?.onTimeSamples ? `${m?.onTimePct ?? 0}%` : '—'} tone={!m?.onTimeSamples ? undefined : (m.onTimePct ?? 0) >= 80 ? '#16a34a' : (m.onTimePct ?? 0) >= 50 ? '#d97706' : '#dc2626'} sub={m?.onTimeSamples ? `${m.onTimeSamples} check-in${m.onTimeSamples === 1 ? '' : 's'}` : undefined} />
             <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} trend={m?.trends?.rating} />
             <Kpi label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
           </div>
