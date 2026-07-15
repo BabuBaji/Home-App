@@ -186,11 +186,11 @@ export default function WorkerDetail() {
   const skillsPanel = (
     <Panel title={`Skills & Services (${w.services?.length ?? 0})`}>
       {(w.services && w.services.length > 0) ? (
-        <div className="grid" style={{ gap: 5 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '6px 20px' }}>
           {w.services.map((s) => {
             const lvl = w.profile?.skillLevels?.[s]
             return (
-              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--line,#f1f2f6)' }}>
                 <span style={{ fontSize: 13 }}>{s}</span>
                 {lvl && <Badge tone={lvl === 'Expert' ? 'green' : lvl === 'Advanced' ? 'blue' : lvl === 'Intermediate' ? 'amber' : 'gray'} dot={false}>{lvl}</Badge>}
               </div>
@@ -484,9 +484,6 @@ export default function WorkerDetail() {
       </div>}
 
       {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
-
-      {tab === 'overview' && <div style={grid3}>{availabilityPanel}{notesPanel}{activityPanel}</div>}
-      {tab === 'overview' && <div style={grid3}>{timelinePanel}{earningsTrendPanel}</div>}
     </div>
   )
 }
