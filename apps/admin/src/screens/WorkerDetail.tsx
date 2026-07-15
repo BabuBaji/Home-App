@@ -27,11 +27,14 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
   const t = trend ?? null
   const good = t == null || t === 0 ? null : (invert ? t < 0 : t > 0)
   return (
-    <div style={{ flex: '1 1 0', minWidth: 88, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
-      <div style={{ fontSize: 11, color: 'var(--muted,#667085)', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: tone }}>{value}</div>
-      {t != null && t !== 0 && <div style={{ fontSize: 10.5, marginTop: 2, color: good ? '#16a34a' : '#dc2626' }}>{t > 0 ? '▲' : '▼'} {Math.abs(t)}</div>}
-      {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)', marginTop: 2 }}>{sub}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 4, minHeight: 82, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px', textAlign: 'center' }}>
+      <div style={{ fontSize: 11, color: 'var(--muted,#667085)' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: tone, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ minHeight: 14, fontSize: 11, lineHeight: '14px' }}>
+        {t != null && t !== 0
+          ? <span style={{ color: good ? '#16a34a' : '#dc2626' }}>{t > 0 ? '▲' : '▼'} {Math.abs(t)}</span>
+          : <span style={{ color: 'var(--muted,#98a2b3)' }}>{sub || ''}</span>}
+      </div>
     </div>
   )
 }
@@ -39,12 +42,12 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
 /** One item in the status strip (icon + label + value). */
 function StatusItem({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 100 }}>
-      <span style={{ color: 'var(--muted,#98a2b3)', marginTop: 2, display: 'flex' }}>{icon}</span>
-      <div>
-        <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{label}</div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{value}</div>
-        {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{sub}</div>}
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+      <span style={{ color: 'var(--muted,#98a2b3)', marginTop: 1, display: 'flex', flexShrink: 0 }}>{icon}</span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted,#98a2b3)', fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap' }}>{value}</div>
+        {sub && <div style={{ fontSize: 11, color: 'var(--muted,#98a2b3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
       </div>
     </div>
   )
@@ -309,36 +312,38 @@ export default function WorkerDetail() {
       </div>
 
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 400px) 1fr', gap: 16, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '3fr 7fr', gap: 16, alignItems: 'stretch' }}>
         <Card>
-          {/* 2-column: avatar (left) · name/status/badges/rating/id/action stacked (right) */}
-          <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-            <Avatar name={w.name} src={w.avatar} size={100} />
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <strong style={{ fontSize: 24, lineHeight: 1.1 }}>{w.name}</strong>{w.verified && <BadgeCheck size={20} color="#2563eb" />}
+          {/* Fill card height: avatar + info at top, Live Location pinned to the bottom */}
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <Avatar name={w.name} src={w.avatar} size={100} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <strong style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.15 }}>{w.name}</strong>{w.verified && <BadgeCheck size={18} color="#2563eb" />}
+                </div>
+                <div style={{ marginTop: 8 }}><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                  {badges.map((b) => (
+                    <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {b === 'Verified' ? <BadgeCheck size={13} /> : b === 'Top Performer' ? <Star size={12} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={12} /> : <Zap size={12} />}
+                      {b}
+                    </span>
+                  ))}
+                </div>
+                <div className="row" style={{ gap: 6, alignItems: 'center', marginTop: 16 }}>
+                  <Star size={16} fill="#f59e0b" stroke="#f59e0b" /> <strong style={{ fontSize: 15 }}>{w.rating || '—'}</strong> <span className="muted" style={{ fontSize: 11 }}>({w.jobs} reviews)</span>
+                </div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
               </div>
-              <div><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                {badges.map((b) => (
-                  <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {b === 'Verified' ? <BadgeCheck size={13} /> : b === 'Top Performer' ? <Star size={12} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={12} /> : <Zap size={12} />}
-                    {b}
-                  </span>
-                ))}
-              </div>
-              <div className="row" style={{ gap: 5, alignItems: 'center', fontSize: 14, marginTop: 4 }}>
-                <Star size={15} fill="#f59e0b" stroke="#f59e0b" /> <strong>{w.rating || '—'}</strong> <span className="muted" style={{ fontSize: 13 }}>({w.jobs} reviews)</span>
-              </div>
-              <div className="muted" style={{ fontSize: 13 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
-              <button className="btn" style={{ alignSelf: 'stretch', marginTop: 8, padding: '10px 16px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
             </div>
+            <button className="btn" style={{ marginTop: 'auto', width: '100%', height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '0 16px' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={18} /> Live Location</button>
           </div>
         </Card>
 
         <Card>
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 16, height: '100%' }}>
-          <div className="row" style={{ justifyContent: 'space-between', gap: '14px 12px', flexWrap: 'wrap', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: 16, paddingBottom: 16, borderBottom: '1px solid var(--line,#eef0f4)' }}>
             <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? w.liveJob.status : (onDuty ? 'Available' : 'Offline')} />
             <StatusItem icon={<Briefcase size={14} />} label="Current Job" value={w.liveJob ? w.liveJob.ref : '—'} sub={w.liveJob?.service} />
             <StatusItem icon={<MapPin size={14} />} label="Zone" value={zoneName} />
@@ -348,9 +353,9 @@ export default function WorkerDetail() {
             <StatusItem icon={<MapPin size={14} />} label="Last GPS" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'} />
             <StatusItem icon={<Clock size={14} />} label="Idle Time" value={dev.idleMins != null ? `${dev.idleMins} min` : '—'} />
           </div>
-          <div className="row" style={{ gap: 10, flexWrap: 'wrap', paddingTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 12, paddingTop: 16 }}>
             <Kpi label="Today's Jobs" value={m?.todayJobs ?? 0} sub={`Completed: ${m?.completedToday ?? 0}`} />
-            <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} trend={m?.trends?.weekJobs} />
+            <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} />
             <Kpi label="Monthly Jobs" value={m?.monthJobs ?? 0} sub={`Completed: ${m?.completedMonth ?? 0}`} />
             <Kpi label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" trend={m?.trends?.completion} />
             <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} trend={m?.trends?.cancellation} invert />
