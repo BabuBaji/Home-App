@@ -328,14 +328,14 @@ export default function WorkerDetail() {
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
-            <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 14 }}>
+            <div style={{ minWidth: 0 }}>
               <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13 }}>
                 <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} reviews)</span>
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
             </div>
-            <button className="btn" onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
+            <button className="btn" style={{ flexShrink: 0, padding: '10px 14px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
           </div>
         </Card>
 
