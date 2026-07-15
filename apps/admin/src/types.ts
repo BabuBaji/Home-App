@@ -43,8 +43,10 @@ export interface WorkerDoc { id: number; name: string; fileName?: string; status
 export interface WorkerJob { id: number; ref: string; service: string; status: string; total: number; date?: string; time?: string }
 export interface WorkerMetrics {
   totalJobs: number; completed: number; cancelled: number; todayJobs: number; weekJobs: number
-  monthJobs: number; cancellationPct: number; completionPct: number; todayEarnings: number
+  monthJobs: number; completedToday?: number; completedWeek?: number; completedMonth?: number
+  cancellationPct: number; completionPct: number; todayEarnings: number
 }
+export interface WorkerDevice { battery?: number | null; network?: string | null; idleMins?: number | null; lastSeen?: string | null }
 export interface WorkerLiveJob { id: number; ref: string; service: string; status: string; total: number; apartment?: string; otpStatus?: string; startedAt?: string; date?: string; time?: string }
 export interface WorkerWalletSummary { available?: number; totalEarned?: number; totalWithdrawn?: number; hold?: number; weekEarnings?: number; monthEarnings?: number; todayEarnings?: number; advanceOutstanding?: number }
 export interface WorkerNote { id: number; note: string; author?: string; created?: string }
@@ -54,7 +56,7 @@ export interface TimelineStep { action: string; detail?: string; created?: strin
 export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
-  activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]
+  activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice
 }
 
 export interface AdminBooking {

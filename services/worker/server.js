@@ -490,6 +490,18 @@ app.post('/api/worker/auth/verify', async (req, res) => {
 })
 app.get('/api/worker/bootstrap', auth, async (req, res) => res.json(await bootstrap(req.worker.id)))
 
+// Device heartbeat — the worker app reports battery %, network type and GPS so the admin
+// Worker Details status strip (Battery / Network / Idle Time / Last GPS) shows live values.
+app.post('/api/worker/heartbeat', auth, async (req, res) => {
+  const b = req.body || {}
+  const device = { at: new Date().toISOString() }
+  if (b.battery != null) device.battery = Math.max(0, Math.min(100, Math.round(Number(b.battery))))
+  if (b.network) device.network = String(b.network).slice(0, 12)
+  await mergeProfile(req.worker.id, { device })
+  if (b.lat != null && b.lng != null) await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2 WHERE id=$3', [Number(b.lat), Number(b.lng), req.worker.id])
+  res.json({ ok: true })
+})
+
 // IFSC lookup — resolves the bank + branch from the code (Razorpay's free public IFSC directory)
 // so the app can confirm the IFSC is real and AUTO-FILL the bank name instead of trusting free text.
 // The account-number/holder correctness is a separate step (the penny-drop on save).
@@ -824,15 +836,22 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const cancelled = bk.filter((b) => b.status === 'cancelled')
   const completed = bk.filter((b) => b.status === 'completed')
   const ACTIVE = ['assigned', 'accepted', 'on_the_way', 'on the way', 'travelling', 'arrived', 'in_progress', 'in progress', 'started']
+  const isToday = (ts) => ts && new Date(ts).toDateString() === now.toDateString()
+  const cmpIn = (n) => completed.filter((b) => n === 0 ? isToday(b.created) : within(b.created, n)).length
   const metrics = {
     totalJobs: bk.length, completed: completed.length, cancelled: cancelled.length,
-    todayJobs: bk.filter((b) => b.created && new Date(b.created).toDateString() === now.toDateString()).length,
+    todayJobs: bk.filter((b) => isToday(b.created)).length,
     weekJobs: bk.filter((b) => within(b.created, 7)).length,
     monthJobs: bk.filter((b) => within(b.created, 30)).length,
+    completedToday: cmpIn(0), completedWeek: cmpIn(7), completedMonth: cmpIn(30),
     cancellationPct: bk.length ? Math.round((cancelled.length / bk.length) * 100) : 0,
     completionPct: bk.length ? Math.round((completed.length / bk.length) * 100) : 0,
     todayEarnings: wallet ? (wallet.todayEarnings || 0) : 0,
   }
+  // Device telemetry the worker app reports via /api/worker/heartbeat.
+  const dev = (w.profile && w.profile.device) || {}
+  const idleMins = dev.at ? Math.max(0, Math.round((now - new Date(dev.at)) / 60000)) : null
+  const device = { battery: dev.battery ?? null, network: dev.network ?? null, idleMins, lastSeen: dev.at || null }
   const lj = bk.find((b) => ACTIVE.includes(String(b.status).toLowerCase()))
   const liveJob = lj ? {
     id: lj.id, ref: lj.ref || `BK${lj.id}`, service: svcOf(lj), status: lj.status,
@@ -855,7 +874,7 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     ? (await tryGet(NOTIFICATION_URL, `/internal/timeline/${timelineJob.id}`, [])).map((t) => ({ action: t.action, detail: t.detail, created: t.created }))
     : []
 
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline })
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })

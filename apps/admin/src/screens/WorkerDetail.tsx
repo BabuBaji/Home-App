@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
-  Briefcase, TrendingUp, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
+  Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
+  Clock, Wifi, BatteryMedium, CalendarClock,
 } from 'lucide-react'
 import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote } from '../types'
@@ -22,12 +23,26 @@ function Info({ label, value, verified }: { label: string; value: ReactNode; ver
   )
 }
 
-function Kpi({ icon, label, value, tone }: { icon: ReactNode; label: string; value: ReactNode; tone?: string }) {
+function Kpi({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: string; tone?: string }) {
   return (
-    <div style={{ flex: '1 1 110px', minWidth: 110, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px 14px' }}>
-      <div style={{ color: tone || 'var(--muted,#98a2b3)', marginBottom: 6 }}>{icon}</div>
-      <div style={{ fontSize: 19, fontWeight: 700, color: tone }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted,#667085)' }}>{label}</div>
+    <div style={{ flex: '1 1 96px', minWidth: 96, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+      <div style={{ fontSize: 11, color: 'var(--muted,#667085)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: tone }}>{value}</div>
+      {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+
+/** One item in the status strip (icon + label + value). */
+function StatusItem({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 100 }}>
+      <span style={{ color: 'var(--muted,#98a2b3)', marginTop: 2, display: 'flex' }}>{icon}</span>
+      <div>
+        <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{value}</div>
+        {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{sub}</div>}
+      </div>
     </div>
   )
 }
@@ -100,6 +115,13 @@ export default function WorkerDetail() {
   const p = w.profile?.personal || {}
   const zoneName = zones.find((z) => z.id === w.zone_id)?.name || '—'
   const onDuty = !!w.available
+  const dev = w.device || {}
+  const badges = [
+    ...(w.verified ? ['Verified'] : []),
+    ...((w.rating || 0) >= 4.7 ? ['Top Performer'] : []),
+    w.jobs >= 500 ? '500+ Jobs' : `${w.jobs}+ Jobs`,
+    ...(w.services || []).slice(0, 1),
+  ]
   const act = async (patch: Record<string, unknown>, msg: string) => { try { await updateWorker(w.id, patch); toast(msg); load() } catch (e) { toast((e as Error).message) } }
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }
   const show = (t: string) => tab === 'overview' || tab === t
@@ -252,41 +274,47 @@ export default function WorkerDetail() {
         </div>
       </div>
 
-      {/* Identity + status strip */}
-      <Card>
-        <div className="row" style={{ gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Avatar name={w.name} src={w.avatar} size={64} />
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <strong style={{ fontSize: 19 }}>{w.name}</strong>{w.verified && <BadgeCheck size={18} color="#2563eb" />}
+      {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px, 300px) 1fr', gap: 14, alignItems: 'stretch' }}>
+        <Card>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}>
+            <Avatar name={w.name} src={w.avatar} size={76} />
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <strong style={{ fontSize: 18 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
             </div>
-            <div className="row" style={{ gap: 6, alignItems: 'center', color: 'var(--muted,#667085)', fontSize: 13, marginTop: 2 }}>
-              <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} · WKR{String(w.id).padStart(4, '0')} · {w.designation || 'Worker'}
+            <Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+              {badges.map((b) => <Badge key={b} tone="violet" dot={false}>{b}</Badge>)}
             </div>
-            <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-              {w.verified && <Badge tone="blue" dot={false}>Verified</Badge>}
-              <Badge tone="gray" dot={false}>{w.jobs}+ Jobs</Badge>
-              {(w.services || []).slice(0, 3).map((s) => <Badge key={s} tone="violet" dot={false}>{s}</Badge>)}
+            <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13 }}>
+              <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} jobs)</span>
             </div>
+            <div className="muted" style={{ fontSize: 12 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+            <button className="btn" style={{ width: '100%' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
           </div>
-          <div className="row" style={{ gap: 18, flexWrap: 'wrap' }}>
-            <div><div className="muted" style={{ fontSize: 11 }}>Status</div><div style={{ fontWeight: 600, color: onDuty ? '#16a34a' : '#98a2b3' }}>{onDuty ? 'Online' : 'Offline'}</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Current Job</div><div style={{ fontWeight: 600 }}>{w.liveJob?.ref || '—'}</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Zone</div><div style={{ fontWeight: 600 }}>{zoneName}</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Last GPS</div><div style={{ fontWeight: 600, fontSize: 12 }}>{w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'}</div></div>
-          </div>
-        </div>
-      </Card>
+        </Card>
 
-      {/* KPI tiles */}
-      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-        <Kpi icon={<Briefcase size={17} />} label="Today's Jobs" value={m?.todayJobs ?? 0} />
-        <Kpi icon={<Briefcase size={17} />} label="Weekly Jobs" value={m?.weekJobs ?? 0} />
-        <Kpi icon={<Briefcase size={17} />} label="Monthly Jobs" value={m?.monthJobs ?? 0} />
-        <Kpi icon={<TrendingUp size={17} />} label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" />
-        <Kpi icon={<XCircle size={17} />} label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} />
-        <Kpi icon={<Star size={17} />} label="Avg Rating" value={<span>{w.rating || '—'} <Star size={13} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} />
-        <Kpi icon={<Wallet size={17} />} label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
+        <Card>
+          <div className="row" style={{ gap: 20, flexWrap: 'wrap', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
+            <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? w.liveJob.status : (onDuty ? 'Available' : 'Offline')} />
+            <StatusItem icon={<Briefcase size={14} />} label="Current Job" value={w.liveJob ? w.liveJob.ref : '—'} sub={w.liveJob?.service} />
+            <StatusItem icon={<MapPin size={14} />} label="Zone" value={zoneName} />
+            <StatusItem icon={<CalendarClock size={14} />} label="Last Seen" value={dev.lastSeen ? new Date(dev.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} />
+            <StatusItem icon={<BatteryMedium size={14} />} label="Battery" value={dev.battery != null ? `${dev.battery}%` : '—'} />
+            <StatusItem icon={<Wifi size={14} />} label="Network" value={dev.network || '—'} />
+            <StatusItem icon={<MapPin size={14} />} label="Last GPS" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'} />
+            <StatusItem icon={<Clock size={14} />} label="Idle Time" value={dev.idleMins != null ? `${dev.idleMins} min` : '—'} />
+          </div>
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap', paddingTop: 12 }}>
+            <Kpi label="Today's Jobs" value={m?.todayJobs ?? 0} sub={`Completed: ${m?.completedToday ?? 0}`} />
+            <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} />
+            <Kpi label="Monthly Jobs" value={m?.monthJobs ?? 0} sub={`Completed: ${m?.completedMonth ?? 0}`} />
+            <Kpi label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" />
+            <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} />
+            <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} />
+            <Kpi label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
+          </div>
+        </Card>
       </div>
 
       {/* Tab bar */}
