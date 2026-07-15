@@ -263,14 +263,25 @@ export default function Workers() {
             <Field label="Bank / KYC">
               <div><Badge tone={viewing.bank_status === 'Verified' ? 'green' : viewing.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{viewing.bank_status || 'Pending'}</Badge></div>
             </Field>
-            {viewing.profile?.bank?.bankAccount && (
-              <Field label="Bank Account">
-                <input value={`${viewing.profile.bank.bankName || 'Bank'} ••••${String(viewing.profile.bank.bankAccount).slice(-4)} · ${viewing.profile.bank.bankIfsc || ''}`} readOnly />
-              </Field>
-            )}
-            {viewing.profile?.bankVerification?.registeredName && (
-              <Field label="Registered Name (as per bank)"><input value={viewing.profile.bankVerification.registeredName} readOnly /></Field>
-            )}
+            {(() => {
+              const bank = detail?.profile?.bank || viewing.profile?.bank
+              const bv = detail?.profile?.bankVerification || viewing.profile?.bankVerification
+              return (
+                <>
+                  <Field label="Bank Account">
+                    <input
+                      value={bank?.bankAccount
+                        ? `${bank.bankName || 'Bank'} ••••${String(bank.bankAccount).slice(-4)} · ${bank.bankIfsc || ''}`
+                        : 'No bank account added'}
+                      readOnly
+                    />
+                  </Field>
+                  {bv?.registeredName && (
+                    <Field label="Registered Name (as per bank)"><input value={bv.registeredName} readOnly /></Field>
+                  )}
+                </>
+              )
+            })()}
 
             {/* KYC documents (fetched on open) */}
             <Field label={`KYC Documents${detail?.documents ? ` (${detail.documents.length})` : ''}`}>
