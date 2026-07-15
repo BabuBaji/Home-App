@@ -874,7 +874,25 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     ? (await tryGet(NOTIFICATION_URL, `/internal/timeline/${timelineJob.id}`, [])).map((t) => ({ action: t.action, detail: t.detail, created: t.created }))
     : []
 
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device })
+  // Heuristic worker-health score (no ML — derived from real metrics). Each component is a 0-100
+  // risk %; the overall score is a severity-weighted blend. Lower = healthier.
+  const rating = w.rating || 0
+  const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)))
+  const attendanceRisk = clamp(metrics.cancellationPct * 2.5)                                   // cancellations => unreliable
+  const burnoutRisk = clamp((Math.max(0, metrics.weekJobs - 15) / 25) * 100)                     // heavy weekly load
+  const lateProbability = clamp((100 - metrics.completionPct) * 0.5 + metrics.cancellationPct * 0.5)
+  const complaintProbability = clamp(Math.max(0, 4.8 - rating) * 25)                             // low rating => complaints
+  const riskScore = clamp(0.35 * attendanceRisk + 0.2 * burnoutRisk + 0.25 * lateProbability + 0.2 * complaintProbability)
+  const level = riskScore < 15 ? 'Low' : riskScore < 35 ? 'Medium' : 'High'
+  const top = [['attendance', attendanceRisk], ['burnout', burnoutRisk], ['late', lateProbability], ['complaint', complaintProbability]].sort((a, b) => b[1] - a[1])[0]
+  const suggestion = riskScore < 15 ? 'Performing well — no action needed.'
+    : top[0] === 'attendance' ? 'High cancellations — review reliability before assigning premium jobs.'
+    : top[0] === 'burnout' ? 'Heavy workload — assign nearby jobs only and avoid long-distance travel.'
+    : top[0] === 'late' ? 'On-time risk — monitor ETAs and start windows closely.'
+    : 'Rating dipping — coaching / a check-in is recommended.'
+  const health = { riskScore, level, attendanceRisk, burnoutRisk, lateProbability, complaintProbability, suggestion }
+
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })

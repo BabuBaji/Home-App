@@ -82,6 +82,35 @@ function TrendChart({ points }: { points: { date: string; amount: number }[] }) 
   )
 }
 
+/** Circular risk gauge for the worker-health score. */
+function RiskDonut({ score, level }: { score: number; level: string }) {
+  const r = 34, c = 2 * Math.PI * r
+  const color = level === 'Low' ? '#16a34a' : level === 'Medium' ? '#d97706' : '#dc2626'
+  return (
+    <div style={{ position: 'relative', width: 92, height: 92, flexShrink: 0 }}>
+      <svg width={92} height={92} viewBox="0 0 92 92">
+        <circle cx={46} cy={46} r={r} fill="none" stroke="var(--line,#eef0f4)" strokeWidth={8} />
+        <circle cx={46} cy={46} r={r} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - score / 100)} transform="rotate(-90 46 46)" />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: 20, fontWeight: 700, color }}>{score}%</div>
+        <div style={{ fontSize: 10, color: 'var(--muted,#98a2b3)' }}>{level} Risk</div>
+      </div>
+    </div>
+  )
+}
+function RiskRow({ label, value, pct }: { label: string; value: number; pct?: boolean }) {
+  const tone = value < 15 ? 'green' : value < 35 ? 'amber' : 'red'
+  return (
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
+      <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>{label}</span>
+      {pct
+        ? <span style={{ fontSize: 13, fontWeight: 600, color: value < 15 ? '#16a34a' : value < 35 ? '#d97706' : '#dc2626' }}>{value}%</span>
+        : <Badge tone={tone} dot={false}>{value < 15 ? 'Low' : value < 35 ? 'Medium' : 'High'}</Badge>}
+    </div>
+  )
+}
+
 const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
 const TABS = [['overview', 'Overview'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity']] as const
 
@@ -332,11 +361,24 @@ export default function WorkerDetail() {
         <div style={grid3}>
           {liveOpPanel}
           <Panel title="AI Worker Health">
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '18px 0', color: 'var(--muted,#98a2b3)' }}>
-              <ShieldAlert size={26} />
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted,#667085)' }}>Coming soon</div>
-              <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 240 }}>Risk scoring (burnout, late-probability, complaints) needs a health model — not yet computed.</div>
-            </div>
+            {w.health ? (
+              <>
+                <div className="row" style={{ gap: 14, alignItems: 'center' }}>
+                  <RiskDonut score={w.health.riskScore} level={w.health.level} />
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <RiskRow label="Attendance Risk" value={w.health.attendanceRisk} />
+                    <RiskRow label="Burnout Risk" value={w.health.burnoutRisk} />
+                    <RiskRow label="Late Probability" value={w.health.lateProbability} pct />
+                    <RiskRow label="Complaint Probability" value={w.health.complaintProbability} pct />
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, background: 'var(--soft,#f6f7fb)', borderRadius: 10, padding: 10, fontSize: 12, display: 'flex', gap: 8 }}>
+                  <ShieldAlert size={15} style={{ flexShrink: 0, color: 'var(--muted,#98a2b3)', marginTop: 1 }} />
+                  <span><strong>Suggested action:</strong> {w.health.suggestion}</span>
+                </div>
+                <div className="muted" style={{ fontSize: 10.5, marginTop: 6 }}>Heuristic score from cancellations, completion, rating &amp; workload — not ML.</div>
+              </>
+            ) : <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No data.</div>}
           </Panel>
           <Panel title="Quick Actions">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

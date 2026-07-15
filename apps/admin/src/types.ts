@@ -47,6 +47,7 @@ export interface WorkerMetrics {
   cancellationPct: number; completionPct: number; todayEarnings: number
 }
 export interface WorkerDevice { battery?: number | null; network?: string | null; idleMins?: number | null; lastSeen?: string | null }
+export interface WorkerHealth { riskScore: number; level: string; attendanceRisk: number; burnoutRisk: number; lateProbability: number; complaintProbability: number; suggestion: string }
 export interface WorkerLiveJob { id: number; ref: string; service: string; status: string; total: number; apartment?: string; otpStatus?: string; startedAt?: string; date?: string; time?: string }
 export interface WorkerWalletSummary { available?: number; totalEarned?: number; totalWithdrawn?: number; hold?: number; weekEarnings?: number; monthEarnings?: number; todayEarnings?: number; advanceOutstanding?: number }
 export interface WorkerNote { id: number; note: string; author?: string; created?: string }
@@ -56,7 +57,7 @@ export interface TimelineStep { action: string; detail?: string; created?: strin
 export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
-  activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice
+  activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice; health?: WorkerHealth
 }
 
 export interface AdminBooking {
