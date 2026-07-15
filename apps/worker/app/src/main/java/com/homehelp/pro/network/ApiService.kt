@@ -108,6 +108,43 @@ interface ApiService {
     @POST("api/worker/jobs/end")
     suspend fun endService(@Body body: EndBody): StatusResponse
 
+    // ---- in-service job state (checklist · photos · extras · pause · chat) ----
+    @GET("api/worker/jobs/state")
+    suspend fun jobState(): JobStateResponse
+
+    @POST("api/worker/jobs/checklist")
+    suspend fun saveChecklist(@Body body: ChecklistBody): JobStateResponse
+
+    @POST("api/worker/jobs/photos")
+    suspend fun addJobPhoto(@Body body: PhotoBody): JobStateResponse
+
+    @POST("api/worker/jobs/photos/remove")
+    suspend fun removeJobPhoto(@Body body: PhotoRemoveBody): JobStateResponse
+
+    @POST("api/worker/jobs/notes")
+    suspend fun saveJobNotes(@Body body: NotesBody): JobStateResponse
+
+    @POST("api/worker/jobs/signature")
+    suspend fun saveSignature(@Body body: SignatureBody): JobStateResponse
+
+    @POST("api/worker/jobs/extras")
+    suspend fun addExtra(@Body body: ExtraBody): JobStateResponse
+
+    @POST("api/worker/jobs/extras/remove")
+    suspend fun removeExtra(@Body body: ExtraRemoveBody): JobStateResponse
+
+    @POST("api/worker/jobs/pause")
+    suspend fun pauseJob(@Body body: PauseBody): JobStateResponse
+
+    @POST("api/worker/jobs/resume")
+    suspend fun resumeJob(): JobStateResponse
+
+    @GET("api/worker/jobs/messages")
+    suspend fun jobMessages(): MessagesResponse
+
+    @POST("api/worker/jobs/messages")
+    suspend fun sendJobMessage(@Body body: MessageBody): StatusResponse
+
     @POST("api/worker/jobs/settle")
     suspend fun settle(): SettleResponse
 

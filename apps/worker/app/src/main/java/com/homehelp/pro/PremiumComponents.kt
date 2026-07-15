@@ -26,13 +26,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -649,7 +649,9 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 NavBarItem(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
-                NavBarItem(Icons.Filled.CalendarMonth, "Bookings", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
+                // "Jobs", per the design — the tab shows the worker's jobs, and "Bookings" is
+                // the customer's word for the same thing.
+                NavBarItem(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
                 Spacer(Modifier.weight(1f)) // center gap for the FAB
                 NavBarItem(Icons.Filled.AccountBalanceWallet, "Wallet", current == Routes.WALLET) { nav.navigateApp(Routes.WALLET) }
                 NavBarItem(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
@@ -664,18 +666,27 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
                 }
                 Box(
                     Modifier
-                        .size(56.dp)
+                        .size(68.dp)
                         .shadow(16.dp, RoundedCornerShape(Radius.pill), spotColor = if (online) GreenSuccess else Violet, ambientColor = if (online) GreenSuccess else Violet)
                         .clip(RoundedCornerShape(Radius.pill))
                         .background(if (online) Brush.linearGradient(listOf(GreenSuccess, Color(0xFF16A34A))) else BrandGradient)
                         .clickable { vm.goOnline(!online) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        if (online) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (online) "Go offline" else "Go online",
-                        tint = Color.White, modifier = Modifier.size(26.dp),
-                    )
+                    // Power icon over its label, both inside the circle (as in the reference).
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Filled.PowerSettingsNew,
+                            contentDescription = if (online) "Go offline" else "Go online",
+                            tint = Color.White, modifier = Modifier.size(23.dp),
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            if (online) "Go Offline" else "Go Online",
+                            color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            maxLines = 1, letterSpacing = (-0.2).sp,
+                        )
+                    }
                 }
             }
         }

@@ -41,9 +41,13 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="YOUR_API_KEY_HERE" />
 
+        <!-- Portrait-only: the screens are designed as one-handed portrait phone layouts, and
+             Home fits itself to the viewport height rather than scrolling (see FitToScreen) —
+             landscape would leave it ~300dp to work with and shrink everything to a third. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.HomeHelpPro">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

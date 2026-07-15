@@ -34,7 +34,11 @@ val Violet = Color(0xFF7C3AED)        // brand violet — gradient end (#7C3AED)
 val VioletDeep = Color(0xFF5B21B6)    // deep violet — layered accents
 val IndigoNight = Color(0xFF312E81)   // dark indigo — hero depth / overlays
 val PurpleLight = Color(0xFFE7E5FB)   // primary tint — banners, indicators, nav pill
-val Primary50 = Color(0xFFF3F3FE)     // faint violet tint — icon chips, selected surfaces
+val Primary50 = Color(0xFFF3F3FE)
+// 2_job.png draws the ACTIVE job card on a faint lavender wash with a violet hairline, so it
+// reads as "this is the live one" against the plain white cards below it. Sampled from the mock.
+val ActiveJobTint = Color(0xFFFAF7FE)
+val ActiveJobBorder = Color(0x2E6D28D9)     // faint violet tint — icon chips, selected surfaces
 
 // ---- Accents ----
 val Coral = Color(0xFFFF7A59)         // warm accent — highlights / promos
@@ -52,9 +56,12 @@ val RedLight = Color(0xFFFDECEC)      // error tint
 // ---- Neutrals (enterprise canvas: soft slate background, pure-white surfaces) ----
 val ScreenBg = Color(0xFFF8FAFC)      // app background — soft slate so white cards float
 val CardBg = Color(0xFFFFFFFF)        // surface — pure white
-val TextDark = Color(0xFF111827)      // text primary — near-black slate ink
-val TextGray = Color(0xFF6B7280)      // text secondary — muted slate
-val TextMuted = Color(0xFF9CA3AF)     // text tertiary — captions / placeholders
+// Secondary/tertiary ink sits one slate step darker than stock: Home fits itself to the
+// viewport by scaling down (see FitToScreen), so labels render well under their nominal size
+// and the lighter greys went faint on-device.
+val TextDark = Color(0xFF0F172A)      // text primary — near-black slate ink
+val TextGray = Color(0xFF4B5563)      // text secondary — muted slate
+val TextMuted = Color(0xFF6B7280)     // text tertiary — captions / placeholders
 val Divider = Color(0xFFE5E7EB)       // hairline borders / separators
 val CardBorder = Color(0xFFEEF0F4)    // ultra-light card outline under soft shadows
 val FieldFill = Color(0xFFF3F4F6)     // filled text-field / segmented-track background
@@ -62,6 +69,13 @@ val FieldFill = Color(0xFFF3F4F6)     // filled text-field / segmented-track bac
 // ---- Signature brand gradients (buttons, hero banners) — exact indigo→violet spec ----
 // #4F46E5 → #6366F1 → #7C3AED
 val BrandGradient = Brush.linearGradient(listOf(Purple, PurpleMid, Violet))
+
+// The 1_home earnings hero: a deep, saturated violet sampled straight from the design —
+// top-left #632BDA → bottom-right #4F21BC. Kept separate from BrandGradient, which is a lighter
+// indigo-leaning blend (G≈71–98 vs the design's G≈33–58) and reads as a different brand colour.
+val EarningsGradient = Brush.linearGradient(
+    listOf(Color(0xFF632BDA), Color(0xFF5525C6), Color(0xFF4F21BC)),
+)
 val BrandGradientH = Brush.horizontalGradient(listOf(Purple, Violet))
 // Deeper, layered hero gradient (dark indigo → indigo → violet) for premium depth.
 val HeroGradient = Brush.linearGradient(listOf(IndigoNight, Purple, Violet))
@@ -88,7 +102,7 @@ object Space {
 object Radius {
     val field: Dp = 12.dp
     val button: Dp = 14.dp
-    val card: Dp = 18.dp
+    val card: Dp = 22.dp   // design frame 390×844: cards are 20–24dp rounded
     val sheet: Dp = 24.dp
     val pill: Dp = 50.dp
 }
