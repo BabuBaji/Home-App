@@ -309,26 +309,17 @@ export default function WorkerDetail() {
       </div>
 
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 360px) 1fr', gap: 14, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(310px, 360px) 1fr', gap: 14, alignItems: 'stretch' }}>
         <Card>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-            {/* Left column: avatar + rating + worker id */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0, alignItems: 'flex-start' }}>
-              <Avatar name={w.name} src={w.avatar} size={72} />
-              <div>
-                <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13, whiteSpace: 'nowrap' }}>
-                  <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} reviews)</span>
-                </div>
-                <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'nowrap' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
-              </div>
-            </div>
-            {/* Right column: name + on duty + badges + live location */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* Top: avatar + name / On Duty / badges */}
+          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+            <Avatar name={w.name} src={w.avatar} size={64} />
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <strong style={{ fontSize: 18 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
               </div>
-              <div><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <div style={{ marginTop: 6 }}><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {badges.map((b) => (
                   <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {b === 'Verified' ? <BadgeCheck size={12} /> : b === 'Top Performer' ? <Star size={11} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={11} /> : <Zap size={11} />}
@@ -336,8 +327,17 @@ export default function WorkerDetail() {
                   </span>
                 ))}
               </div>
-              <button className="btn" style={{ alignSelf: 'flex-start', marginTop: 6, padding: '10px 16px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
             </div>
+          </div>
+          {/* Bottom row: rating + Worker ID (left) · Live Location (right) */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10, marginTop: 16 }}>
+            <div style={{ flexShrink: 0 }}>
+              <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13, whiteSpace: 'nowrap' }}>
+                <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} reviews)</span>
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'nowrap' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+            </div>
+            <button className="btn" style={{ flexShrink: 0, padding: '9px 15px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
           </div>
         </Card>
 
