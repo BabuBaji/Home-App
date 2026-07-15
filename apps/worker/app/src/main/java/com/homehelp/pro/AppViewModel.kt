@@ -236,6 +236,7 @@ class AppViewModel : ViewModel() {
     var bankIfsc by mutableStateOf("")
     var bankHolder by mutableStateOf("")
     var bankUpi by mutableStateOf("")
+    var bankAccountType by mutableStateOf("")       // savings / current — sent to the payout gateway
     var bankStatus by mutableStateOf("Not Added")   // Not Added / Pending Verification / Approved / Rejected
         private set
     var bankRemarks by mutableStateOf("")
@@ -320,6 +321,7 @@ class AppViewModel : ViewModel() {
             bankIfsc = w.bankIfsc
             bankHolder = w.bankHolder
             bankUpi = w.bankUpi
+            bankAccountType = w.bankAccountType
             bankStatus = w.bankStatus
             bankRemarks = w.bankRemarks
             bankRegisteredName = w.bankRegisteredName
@@ -753,12 +755,13 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun saveBank(name: String, account: String, ifsc: String, upi: String, chequePhoto: String = "") = sync {
-        val w = api.updateBank(BankBody(workerName, name, account, ifsc, upi, chequePhoto))
+    fun saveBank(name: String, account: String, ifsc: String, upi: String, chequePhoto: String = "", accountType: String = "") = sync {
+        val w = api.updateBank(BankBody(workerName, name, account, ifsc, upi, chequePhoto, accountType))
         bankName = w.bankName
         bankAccount = w.bankAccount
         bankIfsc = w.bankIfsc
         bankUpi = w.bankUpi
+        bankAccountType = w.bankAccountType
         bankStatus = w.bankStatus
         bankRemarks = w.bankRemarks
         bankRegisteredName = w.bankRegisteredName

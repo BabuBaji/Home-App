@@ -18,6 +18,7 @@ data class WorkerDto(
     val bankIfsc: String = "",
     val bankHolder: String = "",
     val bankUpi: String = "",
+    val bankAccountType: String = "",
     val bankStatus: String = "Not Added",
     val bankRemarks: String = "",
     val bankRegisteredName: String = "",
@@ -364,7 +365,7 @@ data class AdvanceBody(val amount: Int)
 data class ReasonBody(val reason: String)
 data class ProfileBody(val name: String, val phone: String, val email: String, val city: String)
 data class UploadDocBody(val name: String, val fileName: String)
-data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "")
+data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
 data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)
 data class AvailabilityBody(val availableDays: Map<String, Boolean>, val shiftStart: String, val shiftEnd: String)

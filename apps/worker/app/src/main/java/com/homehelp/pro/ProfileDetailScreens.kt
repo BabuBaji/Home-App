@@ -435,6 +435,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     var fAccount by remember { mutableStateOf(vm.bankAccount) }
     var fIfsc by remember { mutableStateOf(vm.bankIfsc) }
     var fUpi by remember { mutableStateOf(vm.bankUpi) }
+    var fAccType by remember { mutableStateOf(vm.bankAccountType.ifBlank { "savings" }) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) { chequeName = pickedFileName(ctx, uri); toast(ctx, "Attached: $chequeName") }
     }
@@ -494,7 +495,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             PrimaryButton("Verify & Submit") {
                 if (otp.length < 4) toast(ctx, "Enter the 4-digit OTP")
                 else {
-                    vm.saveBank(fName, fAccount, fIfsc, fUpi, chequeName)
+                    vm.saveBank(fName, fAccount, fIfsc, fUpi, chequeName, fAccType)
                     toast(ctx, "Bank submitted — verifying…")
                     otpStep = false; otp = ""; reenter = ""; editing = false
                 }
@@ -508,6 +509,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                         "Edit", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
                         modifier = Modifier.clickable {
                             fName = vm.bankName; fAccount = vm.bankAccount; fIfsc = vm.bankIfsc; fUpi = vm.bankUpi
+                            fAccType = vm.bankAccountType.ifBlank { "savings" }
                             reenter = ""; editing = true
                         },
                     )
@@ -518,7 +520,11 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                     if (bopt != null) { BankBadge(bopt.code, bopt.color); Spacer(Modifier.width(Space.m)) }
                     Column(Modifier.weight(1f)) {
                         Text(vm.bankName.ifBlank { "Bank account" }, fontWeight = FontWeight.SemiBold, color = TextDark)
-                        Text("A/C ••••${vm.bankAccount.takeLast(4)}   •   ${vm.bankIfsc}", fontSize = 12.sp, color = TextGray)
+                        Text(
+                            "A/C ••••${vm.bankAccount.takeLast(4)}   •   ${vm.bankIfsc}" +
+                                (if (vm.bankAccountType.isNotBlank()) "   •   ${vm.bankAccountType.replaceFirstChar(Char::uppercase)}" else ""),
+                            fontSize = 12.sp, color = TextGray,
+                        )
                     }
                 }
                 if (vm.bankUpi.isNotBlank()) {
@@ -535,6 +541,22 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                     // Account number: digits only — non-numeric input is stripped as it's typed.
                     Field("Account Number", fAccount, KeyboardType.Number) { fAccount = it.filter(Char::isDigit).take(18) }
                     Field("Confirm Account Number", reenter, KeyboardType.Number) { reenter = it.filter(Char::isDigit).take(18) }
+                    // Savings / Current — passed to the payout gateway, which validates it against the account.
+                    SectionLabel("Account Type")
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        listOf("savings" to "Savings", "current" to "Current").forEach { (v, label) ->
+                            val on = fAccType == v
+                            Text(
+                                label, fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (on) Purple else TextGray,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(Radius.field))
+                                    .background(if (on) PurpleLight else FieldFill)
+                                    .clickable { fAccType = v }
+                                    .padding(horizontal = Space.m, vertical = Space.s),
+                            )
+                        }
+                    }
                     Field("IFSC Code", fIfsc) { fIfsc = it.uppercase(); vm.lookupIfsc(it) }
                     // Confirm the IFSC is real + which bank/branch it belongs to (cross-checks the selected bank).
                     when {
