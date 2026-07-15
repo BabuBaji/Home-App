@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
-  Briefcase, TrendingUp, Clock, XCircle, Wallet, ShieldAlert, Zap,
+  Briefcase, TrendingUp, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
 } from 'lucide-react'
 import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote } from '../types'
@@ -11,7 +11,6 @@ import { useStore } from '../store'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
-/** Small labelled cell used across the info panels. */
 function Info({ label, value, verified }: { label: string; value: ReactNode; verified?: boolean }) {
   return (
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '5px 0' }}>
@@ -23,14 +22,12 @@ function Info({ label, value, verified }: { label: string; value: ReactNode; ver
   )
 }
 
-/** A KPI tile in the stats strip. */
-function Kpi({ icon, label, value, sub, tone }: { icon: ReactNode; label: string; value: ReactNode; sub?: string; tone?: string }) {
+function Kpi({ icon, label, value, tone }: { icon: ReactNode; label: string; value: ReactNode; tone?: string }) {
   return (
     <div style={{ flex: '1 1 110px', minWidth: 110, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px 14px' }}>
       <div style={{ color: tone || 'var(--muted,#98a2b3)', marginBottom: 6 }}>{icon}</div>
       <div style={{ fontSize: 19, fontWeight: 700, color: tone }}>{value}</div>
       <div style={{ fontSize: 11.5, color: 'var(--muted,#667085)' }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--muted,#98a2b3)', marginTop: 2 }}>{sub}</div>}
     </div>
   )
 }
@@ -47,7 +44,31 @@ function Panel({ title, action, children }: { title: string; action?: ReactNode;
   )
 }
 
-const rowStatusTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
+/** Inline SVG line+area chart for the earnings trend (no external chart lib). */
+function TrendChart({ points }: { points: { date: string; amount: number }[] }) {
+  if (!points.length) return <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No completed-job earnings yet.</div>
+  const W = 460, H = 120, pad = 8
+  const max = Math.max(...points.map((p) => p.amount), 1)
+  const step = points.length > 1 ? (W - pad * 2) / (points.length - 1) : 0
+  const xy = points.map((p, i) => [pad + i * step, H - pad - (p.amount / max) * (H - pad * 2)] as const)
+  const line = xy.map(([x, y]) => `${x},${y}`).join(' ')
+  const area = `${pad},${H - pad} ${line} ${pad + (points.length - 1) * step},${H - pad}`
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none">
+        <polygon points={area} fill="rgba(91,81,232,.12)" />
+        <polyline points={line} fill="none" stroke="#5b51e8" strokeWidth={2} />
+        {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={2.5} fill="#5b51e8" />)}
+      </svg>
+      <div className="row" style={{ justifyContent: 'space-between', fontSize: 10.5, color: 'var(--muted,#98a2b3)', marginTop: 2 }}>
+        <span>{points[0].date.slice(5)}</span><span>{points[points.length - 1].date.slice(5)}</span>
+      </div>
+    </div>
+  )
+}
+
+const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
+const TABS = [['overview', 'Overview'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity']] as const
 
 export default function WorkerDetail() {
   const { id } = useParams()
@@ -59,6 +80,7 @@ export default function WorkerDetail() {
   const [err, setErr] = useState('')
   const [notes, setNotes] = useState<WorkerNote[]>([])
   const [noteText, setNoteText] = useState('')
+  const [tab, setTab] = useState<string>('overview')
 
   const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
@@ -79,21 +101,154 @@ export default function WorkerDetail() {
   const zoneName = zones.find((z) => z.id === w.zone_id)?.name || '—'
   const onDuty = !!w.available
   const act = async (patch: Record<string, unknown>, msg: string) => { try { await updateWorker(w.id, patch); toast(msg); load() } catch (e) { toast((e as Error).message) } }
-
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }
+  const show = (t: string) => tab === 'overview' || tab === t
+
+  const liveOpPanel = (
+    <Panel title="Live Operation" action={w.liveJob && <button className="btn ghost" onClick={() => nav('/bookings')}>View Job</button>}>
+      {w.liveJob ? (
+        <div className="grid" style={{ gap: 4 }}>
+          <Info label="Current Status" value={<Badge tone="blue" dot={false}>{w.liveJob.status}</Badge>} />
+          <Info label="Job Ref" value={w.liveJob.ref} />
+          <Info label="Service" value={w.liveJob.service} />
+          <Info label="Location" value={w.liveJob.apartment || '—'} />
+          <Info label="Amount" value={rupee(w.liveJob.total)} />
+          <Info label="OTP Status" value={<Badge tone={w.liveJob.otpStatus === 'Set' ? 'green' : 'amber'} dot={false}>{w.liveJob.otpStatus}</Badge>} />
+        </div>
+      ) : <div className="muted" style={{ fontSize: 13, padding: '12px 0' }}>No active job right now.</div>}
+    </Panel>
+  )
+  const documentsPanel = (
+    <Panel title={`Documents (${w.documents?.length ?? 0})`}>
+      {(w.documents && w.documents.length > 0) ? w.documents.map((d) => (
+        <div key={d.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '5px 0' }}>
+          <span style={{ fontSize: 13 }}>{d.name}</span>
+          <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' || d.status === 'Expired' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
+        </div>
+      )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No documents uploaded.</div>}
+    </Panel>
+  )
+  const skillsPanel = (
+    <Panel title={`Skills & Services (${w.services?.length ?? 0})`}>
+      {(w.services && w.services.length > 0) ? (
+        <div className="grid" style={{ gap: 5 }}>
+          {w.services.map((s) => {
+            const lvl = w.profile?.skillLevels?.[s]
+            return (
+              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13 }}>{s}</span>
+                {lvl && <Badge tone={lvl === 'Expert' ? 'green' : lvl === 'Advanced' ? 'blue' : lvl === 'Intermediate' ? 'amber' : 'gray'} dot={false}>{lvl}</Badge>}
+              </div>
+            )
+          })}
+        </div>
+      ) : <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
+    </Panel>
+  )
+  const recentJobsPanel = (
+    <Panel title={`Recent Jobs (${w.recentJobs?.length ?? 0})`} action={<button className="btn ghost" onClick={() => nav('/bookings')}>View All</button>}>
+      {(w.recentJobs && w.recentJobs.length > 0) ? w.recentJobs.map((j) => (
+        <div key={j.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '5px 0' }}>
+          <span style={{ fontSize: 12.5 }}>{j.ref} · {j.service}{j.date ? ` · ${j.date}` : ''}</span>
+          <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 13 }}>{rupee(j.total)}</span>
+            <Badge tone={jobTone(j.status)} dot={false}>{j.status}</Badge>
+          </span>
+        </div>
+      )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No recent jobs.</div>}
+    </Panel>
+  )
+  const timelinePanel = (
+    <Panel title="Job Timeline">
+      {(w.timeline && w.timeline.length > 0) ? (
+        <div className="grid" style={{ gap: 0 }}>
+          {w.timeline.map((t, i) => (
+            <div key={i} className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 9, height: 9, borderRadius: 9, background: '#5b51e8', marginTop: 4 }} />
+                {i < w.timeline!.length - 1 && <div style={{ width: 2, flex: 1, minHeight: 20, background: 'var(--line,#e4e7ec)' }} />}
+              </div>
+              <div style={{ paddingBottom: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500 }}>{t.detail || t.action}</div>
+                <div className="muted" style={{ fontSize: 11 }}>{t.created ? new Date(t.created).toLocaleString() : ''}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No timeline events for the latest job.</div>}
+    </Panel>
+  )
+  const earningsTrendPanel = (
+    <Panel title="Earnings Trend" action={<button className="btn ghost" onClick={() => nav('/worker-wallet')}>Full Earnings</button>}>
+      <TrendChart points={w.earningsTrend || []} />
+    </Panel>
+  )
+  const activityPanel = (
+    <Panel title="Activity Feed">
+      {(w.activity && w.activity.length > 0) ? w.activity.map((a) => (
+        <div key={a.id} className="row" style={{ gap: 8, alignItems: 'flex-start', padding: '4px 0' }}>
+          <ActivityIcon size={13} style={{ marginTop: 3, color: 'var(--muted,#98a2b3)', flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 12.5 }}>{a.detail || a.action}</div>
+            <div className="muted" style={{ fontSize: 11 }}>{a.created ? new Date(a.created).toLocaleString() : ''}</div>
+          </div>
+        </div>
+      )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No activity recorded.</div>}
+    </Panel>
+  )
+  const notesPanel = (
+    <Panel title="Admin Notes">
+      <div className="grid" style={{ gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Add a note…" style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === 'Enter') submitNote() }} />
+          <button className="btn" onClick={submitNote}>Add</button>
+        </div>
+        {notes.length > 0 ? notes.map((n) => (
+          <div key={n.id} style={{ borderLeft: '3px solid var(--violet,#5b51e8)', paddingLeft: 10 }}>
+            <div style={{ fontSize: 13 }}>{n.note}</div>
+            <div className="muted" style={{ fontSize: 11 }}>{n.author || 'Admin'}{n.created ? ` · ${shortDate(n.created)}` : ''}</div>
+          </div>
+        )) : <div className="muted" style={{ fontSize: 13 }}>No notes yet.</div>}
+      </div>
+    </Panel>
+  )
+  const availabilityPanel = (
+    <Panel title="Weekly Availability">
+      {(() => {
+        const av = w.profile?.availability
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        if (!av || !av.availableDays) return <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>Not set by the worker yet.</div>
+        return (
+          <div className="grid" style={{ gap: 4 }}>
+            {days.map((d) => {
+              const on = !!av.availableDays?.[d]
+              return (
+                <div key={d} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13 }}>{d}</span>
+                  <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {on && av.shiftStart && <span className="muted" style={{ fontSize: 12 }}>{av.shiftStart} – {av.shiftEnd}</span>}
+                    <Badge tone={on ? 'green' : 'gray'} dot={false}>{on ? 'Available' : 'Off'}</Badge>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
+    </Panel>
+  )
 
   return (
     <div className="grid" style={{ gap: 14 }}>
       {/* Breadcrumb + title */}
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
-          <button className="btn ghost" onClick={() => nav('/workers')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 4 }}><ChevronLeft size={16} /> Workers</button>
+          <button className="btn ghost" onClick={() => nav('/workers')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 4 }}><ChevronLeft size={16} /> Back to Worker List</button>
           <h2 style={{ margin: 0, display: 'flex', gap: 10, alignItems: 'center' }}>Worker Details <Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></h2>
-          <div className="muted" style={{ fontSize: 12.5 }}>Complete overview and management of the worker profile</div>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn" onClick={() => toast(`Call ${w.phone || ''}`)}><Phone size={15} /> Call</button>
-          <button className="btn" onClick={() => toast('Messaging is not wired yet')}><MessageSquare size={15} /> Message</button>
+          <button className="btn" onClick={() => toast(`Call ${w.phone || ''}`)}><Phone size={15} /> Call Worker</button>
+          <button className="btn" onClick={() => toast('Messaging is not wired yet')}><MessageSquare size={15} /> Send Message</button>
         </div>
       </div>
 
@@ -103,11 +258,10 @@ export default function WorkerDetail() {
           <Avatar name={w.name} src={w.avatar} size={64} />
           <div style={{ flex: 1, minWidth: 200 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <strong style={{ fontSize: 19 }}>{w.name}</strong>
-              {w.verified && <BadgeCheck size={18} color="#2563eb" />}
+              <strong style={{ fontSize: 19 }}>{w.name}</strong>{w.verified && <BadgeCheck size={18} color="#2563eb" />}
             </div>
             <div className="row" style={{ gap: 6, alignItems: 'center', color: 'var(--muted,#667085)', fontSize: 13, marginTop: 2 }}>
-              <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} · Worker ID WKR{String(w.id).padStart(4, '0')} · {w.designation || 'Worker'}
+              <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} · WKR{String(w.id).padStart(4, '0')} · {w.designation || 'Worker'}
             </div>
             <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {w.verified && <Badge tone="blue" dot={false}>Verified</Badge>}
@@ -117,9 +271,9 @@ export default function WorkerDetail() {
           </div>
           <div className="row" style={{ gap: 18, flexWrap: 'wrap' }}>
             <div><div className="muted" style={{ fontSize: 11 }}>Status</div><div style={{ fontWeight: 600, color: onDuty ? '#16a34a' : '#98a2b3' }}>{onDuty ? 'Online' : 'Offline'}</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>On Shift</div><div style={{ fontWeight: 600 }}>{w.on_shift ? 'Yes' : 'No'}</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Last GPS</div><div style={{ fontWeight: 600, fontSize: 12 }}>{w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'}</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Current Job</div><div style={{ fontWeight: 600 }}>{w.liveJob?.ref || '—'}</div></div>
             <div><div className="muted" style={{ fontSize: 11 }}>Zone</div><div style={{ fontWeight: 600 }}>{zoneName}</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Last GPS</div><div style={{ fontWeight: 600, fontSize: 12 }}>{w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'}</div></div>
           </div>
         </div>
       </Card>
@@ -131,183 +285,120 @@ export default function WorkerDetail() {
         <Kpi icon={<Briefcase size={17} />} label="Monthly Jobs" value={m?.monthJobs ?? 0} />
         <Kpi icon={<TrendingUp size={17} />} label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" />
         <Kpi icon={<XCircle size={17} />} label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} />
-        <Kpi icon={<Star size={17} />} label="Rating" value={<span>{w.rating || '—'} <Star size={13} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} />
+        <Kpi icon={<Star size={17} />} label="Avg Rating" value={<span>{w.rating || '—'} <Star size={13} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} />
         <Kpi icon={<Wallet size={17} />} label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
       </div>
 
-      {/* Live Operation + AI Health (stub) */}
-      <div style={grid3}>
-        <Panel title="Live Operation" action={w.liveJob && <button className="btn ghost" onClick={() => nav('/bookings')}>View Job</button>}>
-          {w.liveJob ? (
-            <div className="grid" style={{ gap: 4 }}>
-              <Info label="Current Status" value={<Badge tone="blue" dot={false}>{w.liveJob.status}</Badge>} />
-              <Info label="Job Ref" value={w.liveJob.ref} />
-              <Info label="Service" value={w.liveJob.service} />
-              <Info label="Location" value={w.liveJob.apartment || '—'} />
-              <Info label="Amount" value={rupee(w.liveJob.total)} />
-              <Info label="OTP Status" value={<Badge tone={w.liveJob.otpStatus === 'Set' ? 'green' : 'amber'} dot={false}>{w.liveJob.otpStatus}</Badge>} />
-            </div>
-          ) : <div className="muted" style={{ fontSize: 13, padding: '12px 0' }}>No active job right now.</div>}
-        </Panel>
-
-        <Panel title="AI Worker Health">
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '18px 0', color: 'var(--muted,#98a2b3)' }}>
-            <ShieldAlert size={26} />
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted,#667085)' }}>Coming soon</div>
-            <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 240 }}>Risk scoring (burnout, late-probability, complaints) needs a health model — not yet computed.</div>
-          </div>
-        </Panel>
-
-        <Panel title="Quick Actions">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <button className="btn" onClick={() => nav('/roster')}><Zap size={14} /> Assign Job</button>
-            <button className="btn" onClick={() => nav('/workers')}><MapPin size={14} /> Change Zone</button>
-            <button className="btn" onClick={() => nav('/worker-wallet')}><Wallet size={14} /> Wallet</button>
-            <button className="btn" onClick={() => toast('Messaging not wired')}><MessageSquare size={14} /> Message</button>
-            <button className="btn" onClick={() => act({ status: 'active', verified: true }, 'Worker approved')}><CheckCircle2 size={14} /> Approve</button>
-            <button className="btn danger" onClick={() => act({ status: 'suspended' }, 'Worker suspended')}><XCircle size={14} /> Suspend</button>
-          </div>
-        </Panel>
+      {/* Tab bar */}
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap', borderBottom: '1px solid var(--line,#e4e7ec)', paddingBottom: 0 }}>
+        {TABS.map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: '8px 12px', fontSize: 13,
+            fontWeight: tab === key ? 700 : 500, color: tab === key ? 'var(--violet,#5b51e8)' : 'var(--muted,#667085)',
+            borderBottom: tab === key ? '2px solid var(--violet,#5b51e8)' : '2px solid transparent',
+          }}>{label}</button>
+        ))}
       </div>
 
-      {/* Personal / Contact / Bank */}
-      <div style={grid3}>
-        <Panel title="Personal Information">
-          <Info label="Full Name" value={w.name} />
-          {p.gender && <Info label="Gender" value={p.gender} />}
-          {p.dob && <Info label="Date of Birth" value={p.dob} />}
-          {p.fatherName && <Info label="Father's Name" value={p.fatherName} />}
-          {p.address && <Info label="Address" value={p.address} />}
-          {p.aadhaar && <Info label="Aadhaar" value={`XXXX XXXX ${String(p.aadhaar).slice(-4)}`} />}
-          {p.pan && <Info label="PAN" value={p.pan} />}
-          <Info label="City" value={w.city || '—'} />
-          <Info label="Zone" value={zoneName} />
-          <Info label="Designation" value={w.designation || 'Worker'} />
-          <Info label="Joined On" value={shortDate(w.joined)} />
-          {!(p.gender || p.dob || p.address || p.aadhaar || p.pan) && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Add personal &amp; KYC details via Edit Worker.</div>}
-        </Panel>
-
-        <Panel title="Contact Information">
-          <Info label="Mobile Number" value={w.phone || '—'} verified={w.verified} />
-          {p.whatsapp && <Info label="WhatsApp" value={p.whatsapp} />}
-          <Info label="Email" value={w.email || '—'} verified={w.verified} />
-          {(p.emergencyName || p.emergencyPhone) && <Info label="Emergency Contact" value={`${p.emergencyName || ''}${p.emergencyPhone ? ` · ${p.emergencyPhone}` : ''}`} />}
-          {p.languages && <Info label="Languages Known" value={p.languages} />}
-          <Info label="Last Location" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}` : '—'} />
-        </Panel>
-
-        <Panel title="Bank & Payout" action={<Badge tone={w.bank_status === 'Verified' ? 'green' : w.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{w.bank_status || 'Pending'}</Badge>}>
-          {bank?.bankAccount ? (
-            <>
-              <Info label="Bank Name" value={bank.bankName || '—'} />
-              <Info label="Account Number" value={`••••${String(bank.bankAccount).slice(-4)}`} verified={w.bank_status === 'Verified'} />
-              <Info label="IFSC Code" value={bank.bankIfsc || '—'} />
-              {bank.bankUpi && <Info label="UPI ID" value={bank.bankUpi} />}
-              {bv?.registeredName && <Info label="Registered Name" value={bv.registeredName} />}
-            </>
-          ) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No bank account added.</div>}
-        </Panel>
-      </div>
-
-      {/* Documents / Skills / Recent Jobs */}
-      <div style={grid3}>
-        <Panel title={`Documents (${w.documents?.length ?? 0})`}>
-          {(w.documents && w.documents.length > 0) ? w.documents.map((d) => (
-            <div key={d.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '5px 0' }}>
-              <span style={{ fontSize: 13 }}>{d.name}</span>
-              <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' || d.status === 'Expired' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
+      {show('overview') && (
+        <div style={grid3}>
+          {liveOpPanel}
+          <Panel title="AI Worker Health">
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '18px 0', color: 'var(--muted,#98a2b3)' }}>
+              <ShieldAlert size={26} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted,#667085)' }}>Coming soon</div>
+              <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 240 }}>Risk scoring (burnout, late-probability, complaints) needs a health model — not yet computed.</div>
             </div>
-          )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No documents uploaded.</div>}
-        </Panel>
-
-        <Panel title={`Skills & Services (${w.services?.length ?? 0})`}>
-          {(w.services && w.services.length > 0) ? (
-            <div className="grid" style={{ gap: 5 }}>
-              {w.services.map((s) => {
-                const lvl = w.profile?.skillLevels?.[s]
-                return (
-                  <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13 }}>{s}</span>
-                    {lvl && <Badge tone={lvl === 'Expert' ? 'green' : lvl === 'Advanced' ? 'blue' : lvl === 'Intermediate' ? 'amber' : 'gray'} dot={false}>{lvl}</Badge>}
-                  </div>
-                )
-              })}
+          </Panel>
+          <Panel title="Quick Actions">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <button className="btn" onClick={() => nav('/roster')}><Zap size={14} /> Assign Job</button>
+              <button className="btn" onClick={() => nav('/workers')}><MapPin size={14} /> Change Zone</button>
+              <button className="btn" onClick={() => nav('/worker-wallet')}><Wallet size={14} /> Wallet</button>
+              <button className="btn" onClick={() => toast('Messaging not wired')}><MessageSquare size={14} /> Message</button>
+              <button className="btn" onClick={() => act({ status: 'active', verified: true }, 'Worker approved')}><CheckCircle2 size={14} /> Approve</button>
+              <button className="btn danger" onClick={() => act({ status: 'suspended' }, 'Worker suspended')}><XCircle size={14} /> Suspend</button>
             </div>
-          ) : <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
-        </Panel>
+          </Panel>
+          <Panel title="Bank & Payout" action={<Badge tone={w.bank_status === 'Verified' ? 'green' : w.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{w.bank_status || 'Pending'}</Badge>}>
+            <Info label="Available" value={rupee(w.wallet?.available ?? w.balance)} />
+            <Info label="Lifetime Earned" value={rupee(w.wallet?.totalEarned ?? w.earnings)} />
+            <Info label="On Hold" value={rupee(w.wallet?.hold)} />
+            <Info label="Withdrawn" value={rupee(w.wallet?.totalWithdrawn)} />
+          </Panel>
+        </div>
+      )}
 
-        <Panel title={`Recent Jobs (${w.recentJobs?.length ?? 0})`} action={<button className="btn ghost" onClick={() => nav('/bookings')}>View All</button>}>
-          {(w.recentJobs && w.recentJobs.length > 0) ? w.recentJobs.map((j) => (
-            <div key={j.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '5px 0' }}>
-              <span style={{ fontSize: 12.5 }}>{j.ref} · {j.service}{j.date ? ` · ${j.date}` : ''}</span>
-              <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 13 }}>{rupee(j.total)}</span>
-                <Badge tone={rowStatusTone(j.status)} dot={false}>{j.status}</Badge>
-              </span>
-            </div>
-          )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No recent jobs.</div>}
-        </Panel>
-      </div>
+      {(show('overview')) && (
+        <div style={grid3}>
+          <Panel title="Personal Information">
+            <Info label="Full Name" value={w.name} />
+            {p.gender && <Info label="Gender" value={p.gender} />}
+            {p.dob && <Info label="Date of Birth" value={p.dob} />}
+            {p.fatherName && <Info label="Father's Name" value={p.fatherName} />}
+            {p.address && <Info label="Address" value={p.address} />}
+            {p.aadhaar && <Info label="Aadhaar" value={`XXXX XXXX ${String(p.aadhaar).slice(-4)}`} />}
+            {p.pan && <Info label="PAN" value={p.pan} />}
+            <Info label="City" value={w.city || '—'} />
+            <Info label="Zone" value={zoneName} />
+            <Info label="Joined On" value={shortDate(w.joined)} />
+            {!(p.gender || p.dob || p.address) && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Add personal &amp; KYC details via Edit Worker.</div>}
+          </Panel>
+          <Panel title="Contact Information">
+            <Info label="Mobile Number" value={w.phone || '—'} verified={w.verified} />
+            {p.whatsapp && <Info label="WhatsApp" value={p.whatsapp} />}
+            <Info label="Email" value={w.email || '—'} verified={w.verified} />
+            {(p.emergencyName || p.emergencyPhone) && <Info label="Emergency Contact" value={`${p.emergencyName || ''}${p.emergencyPhone ? ` · ${p.emergencyPhone}` : ''}`} />}
+            {p.languages && <Info label="Languages Known" value={p.languages} />}
+            <Info label="Last Location" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}` : '—'} />
+          </Panel>
+          <Panel title="Bank Details" action={<Badge tone={w.bank_status === 'Verified' ? 'green' : w.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{w.bank_status || 'Pending'}</Badge>}>
+            {bank?.bankAccount ? (
+              <>
+                <Info label="Bank Name" value={bank.bankName || '—'} />
+                <Info label="Account Number" value={`••••${String(bank.bankAccount).slice(-4)}`} verified={w.bank_status === 'Verified'} />
+                <Info label="IFSC Code" value={bank.bankIfsc || '—'} />
+                {bank.bankUpi && <Info label="UPI ID" value={bank.bankUpi} />}
+                {bv?.registeredName && <Info label="Registered Name" value={bv.registeredName} />}
+              </>
+            ) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No bank account added.</div>}
+          </Panel>
+        </div>
+      )}
 
-      {/* Weekly availability + Admin notes */}
-      <div style={grid3}>
-        <Panel title="Weekly Availability">
-          {(() => {
-            const av = w.profile?.availability
-            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            if (!av || !av.availableDays) return <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>Not set by the worker yet.</div>
-            return (
-              <div className="grid" style={{ gap: 4 }}>
-                {days.map((d) => {
-                  const on = !!av.availableDays?.[d]
-                  return (
-                    <div key={d} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 13 }}>{d}</span>
-                      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        {on && av.shiftStart && <span className="muted" style={{ fontSize: 12 }}>{av.shiftStart} – {av.shiftEnd}</span>}
-                        <Badge tone={on ? 'green' : 'gray'} dot={false}>{on ? 'Available' : 'Off'}</Badge>
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })()}
-        </Panel>
+      {(show('docs') || show('skills') || show('jobs')) && (
+        <div style={grid3}>
+          {(show('docs')) && documentsPanel}
+          {(show('skills')) && skillsPanel}
+          {(show('jobs')) && recentJobsPanel}
+        </div>
+      )}
 
-        <Panel title="Admin Notes">
-          <div className="grid" style={{ gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Add a note…" style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === 'Enter') submitNote() }} />
-              <button className="btn" onClick={submitNote}>Add</button>
-            </div>
-            {notes.length > 0 ? notes.map((n) => (
-              <div key={n.id} style={{ borderLeft: '3px solid var(--violet,#5b51e8)', paddingLeft: 10 }}>
-                <div style={{ fontSize: 13 }}>{n.note}</div>
-                <div className="muted" style={{ fontSize: 11 }}>{n.author || 'Admin'}{n.created ? ` · ${shortDate(n.created)}` : ''}</div>
-              </div>
-            )) : <div className="muted" style={{ fontSize: 13 }}>No notes yet.</div>}
-          </div>
-        </Panel>
+      {(show('jobs')) && <div style={grid3}>{timelinePanel}{recentJobsPanel}</div>}
 
+      {(show('earnings')) && <div style={grid3}>{earningsTrendPanel}
+        <Panel title="Earnings Summary" action={<button className="btn ghost" onClick={() => nav('/worker-wallet')}>Full Earnings</button>}>
+          <Info label="Available" value={rupee(w.wallet?.available ?? w.balance)} />
+          <Info label="Lifetime Earned" value={rupee(w.wallet?.totalEarned ?? w.earnings)} />
+          <Info label="This Week" value={rupee(w.wallet?.weekEarnings)} />
+          <Info label="This Month" value={rupee(w.wallet?.monthEarnings)} />
+          <Info label="On Hold" value={rupee(w.wallet?.hold)} />
+          <Info label="Withdrawn" value={rupee(w.wallet?.totalWithdrawn)} />
+        </Panel>
+      </div>}
+
+      {(show('avail')) && <div style={grid3}>{availabilityPanel}
         <Panel title="Attendance & Shift">
           <Info label="On Shift" value={<Badge tone={w.on_shift ? 'green' : 'gray'} dot={false}>{w.on_shift ? 'On shift' : 'Off'}</Badge>} />
           <Info label="Shift Assigned" value={w.shift_def_id ? `Shift #${w.shift_def_id}` : '—'} />
           <Info label="Availability" value={<Badge tone={w.available ? 'green' : 'gray'} dot={false}>{w.available ? 'Online' : 'Offline'}</Badge>} />
         </Panel>
-      </div>
+      </div>}
 
-      {/* Earnings summary */}
-      <Panel title="Earnings Summary" action={<button className="btn ghost" onClick={() => nav('/worker-wallet')}>Full Earnings</button>}>
-        <div className="row" style={{ gap: 24, flexWrap: 'wrap' }}>
-          <div><div className="muted" style={{ fontSize: 12 }}>Available</div><div style={{ fontSize: 18, fontWeight: 700 }}>{rupee(w.wallet?.available ?? w.balance)}</div></div>
-          <div><div className="muted" style={{ fontSize: 12 }}>Lifetime Earned</div><div style={{ fontSize: 18, fontWeight: 700 }}>{rupee(w.wallet?.totalEarned ?? w.earnings)}</div></div>
-          <div><div className="muted" style={{ fontSize: 12 }}>This Week</div><div style={{ fontSize: 18, fontWeight: 700 }}>{rupee(w.wallet?.weekEarnings)}</div></div>
-          <div><div className="muted" style={{ fontSize: 12 }}>This Month</div><div style={{ fontSize: 18, fontWeight: 700 }}>{rupee(w.wallet?.monthEarnings)}</div></div>
-          <div><div className="muted" style={{ fontSize: 12 }}>On Hold</div><div style={{ fontSize: 18, fontWeight: 700 }}>{rupee(w.wallet?.hold)}</div></div>
-          <div><div className="muted" style={{ fontSize: 12 }}>Withdrawn</div><div style={{ fontSize: 18, fontWeight: 700 }}>{rupee(w.wallet?.totalWithdrawn)}</div></div>
-        </div>
-      </Panel>
+      {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
+
+      {tab === 'overview' && <div style={grid3}>{availabilityPanel}{notesPanel}{activityPanel}</div>}
+      {tab === 'overview' && <div style={grid3}>{timelinePanel}{earningsTrendPanel}</div>}
     </div>
   )
 }

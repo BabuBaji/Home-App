@@ -48,9 +48,13 @@ export interface WorkerMetrics {
 export interface WorkerLiveJob { id: number; ref: string; service: string; status: string; total: number; apartment?: string; otpStatus?: string; startedAt?: string; date?: string; time?: string }
 export interface WorkerWalletSummary { available?: number; totalEarned?: number; totalWithdrawn?: number; hold?: number; weekEarnings?: number; monthEarnings?: number; todayEarnings?: number; advanceOutstanding?: number }
 export interface WorkerNote { id: number; note: string; author?: string; created?: string }
+export interface ActivityItem { id: number; action: string; detail?: string; ref?: string; created?: string }
+export interface TrendPoint { date: string; amount: number }
+export interface TimelineStep { action: string; detail?: string; created?: string }
 export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
+  activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]
 }
 
 export interface AdminBooking {

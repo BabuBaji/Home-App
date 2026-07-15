@@ -18,6 +18,7 @@ const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WALLET_URL = (process.env.WALLET_URL || 'http://localhost:4009').replace(/\/$/, '')
+const NOTIFICATION_URL = (process.env.NOTIFICATION_URL || 'http://localhost:4003').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[worker] unhandledRejection:', e?.message || e))
 
@@ -800,13 +801,15 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
-  const [docs, bookings, wallet, noteRows] = await Promise.all([
+  const [docs, bookings, wallet, noteRows, activityRes] = await Promise.all([
     documents(id),
     tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
     tryGet(WALLET_URL, `/internal/summary/${id}`, null),
     pool.query('SELECT * FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 20', [id]),
+    tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=15`, { items: [] }),
   ])
   const notes = noteRows.rows.map((n) => ({ id: n.id, note: n.note, author: n.author, created: n.created }))
+  const activity = ((activityRes && activityRes.items) || []).slice(0, 15).map((a) => ({ id: a.id, action: a.action, detail: a.detail, ref: a.ref, created: a.created }))
   const svcOf = (b) => b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—'
   const bk = bookings || []
   const recentJobs = bk.slice(0, 8).map((b) => ({
@@ -837,7 +840,22 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     startedAt: lj.started_at || '', date: lj.date || '', time: lj.time || '',
   } : null
 
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes })
+  // Earnings trend — sum of completed-job totals per day (most recent days with activity).
+  const byDay = {}
+  for (const b of bk) {
+    if (b.status !== 'completed') continue
+    const key = (b.created ? new Date(b.created) : now).toISOString().slice(0, 10)
+    byDay[key] = (byDay[key] || 0) + (b.total || 0)
+  }
+  const earningsTrend = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-8).map(([date, amount]) => ({ date, amount }))
+
+  // Timeline of the live (or most recent) job, from the activity log.
+  const timelineJob = lj || bk[0]
+  const timeline = timelineJob
+    ? (await tryGet(NOTIFICATION_URL, `/internal/timeline/${timelineJob.id}`, [])).map((t) => ({ action: t.action, detail: t.detail, created: t.created }))
+    : []
+
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
