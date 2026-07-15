@@ -60,6 +60,12 @@ data class WalletSummaryDto(
     val todayCancelled: Int = 0,
     val weekEarnings: Int = 0,
     val monthEarnings: Int = 0,
+    // Prior periods (same window length as the one they compare against), so the wallet can show
+    // "+15% vs yesterday" from real figures instead of a decorative arrow.
+    val yesterdayEarnings: Int = 0,
+    val lastWeekEarnings: Int = 0,
+    val lastMonthEarnings: Int = 0,
+    val totalEarned: Int = 0,
     val totalWithdrawn: Int = 0,
     val advanceOutstanding: Int = 0,
     val nextPayout: String = "",
@@ -166,6 +172,36 @@ data class WalletStateResponse(
     val history: List<LedgerEntry> = emptyList(),
     val withdrawals: List<WithdrawalEntry> = emptyList(),
     val advances: List<AdvanceEntry> = emptyList(),
+)
+
+/* ---------- wallet analytics (3_wallet.png) ---------- */
+
+/** One day of the earnings trend. [date] is ISO (yyyy-MM-dd). */
+data class TrendPoint(val date: String = "", val amount: Int = 0)
+
+data class ServiceEarning(val service: String = "", val amount: Int = 0, val pct: Int = 0)
+
+data class ServiceWiseDto(val total: Int = 0, val services: List<ServiceEarning> = emptyList())
+
+/** Payout rules + where the money goes. [bankAccount] is already masked server-side. */
+data class SettlementDto(
+    val dailyTime: String = "",
+    val minPayout: Int = 0,
+    val mode: String = "",
+    val bankAccount: String = "",
+    val bankVerified: Boolean = false,
+    val bankStatus: String = "",
+)
+
+/** Null when there aren't enough earning peers this month for a percentile to mean anything. */
+data class LeaderboardDto(val rank: Int = 0, val of: Int = 0, val topPercent: Int = 0)
+
+data class WalletAnalyticsResponse(
+    val ok: Boolean = true,
+    val trend: List<TrendPoint> = emptyList(),
+    val serviceWise: ServiceWiseDto? = null,
+    val settlement: SettlementDto? = null,
+    val leaderboard: LeaderboardDto? = null,
 )
 
 data class OtpResponse(val ok: Boolean = true, val devOtp: String = "")

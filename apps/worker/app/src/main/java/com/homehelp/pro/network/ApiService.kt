@@ -109,6 +109,9 @@ interface ApiService {
     suspend fun endService(@Body body: EndBody): StatusResponse
 
     // ---- in-service job state (checklist · photos · extras · pause · chat) ----
+    @GET("api/worker/wallet/analytics")
+    suspend fun walletAnalytics(): WalletAnalyticsResponse
+
     @GET("api/worker/jobs/state")
     suspend fun jobState(): JobStateResponse
 

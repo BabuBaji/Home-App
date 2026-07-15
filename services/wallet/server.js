@@ -196,12 +196,106 @@ async function summary(wid) {
   const ded = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_deductions WHERE worker_id=$1")
   const advanceOutstanding = await s("SELECT COALESCE(SUM(COALESCE(outstanding, amount)),0)::int s FROM worker_advances WHERE worker_id=$1 AND status<>'Cleared'")
   const available = Math.max(0, earned - totalWithdrawn - hold - ded)
+  // Prior periods, so the wallet can show "+15% vs yesterday" honestly. Each window is the same
+  // LENGTH as the one it compares against (rolling, matching weekEarnings/monthEarnings above) —
+  // comparing a rolling 30 days against a calendar month would flatter or punish at random.
+  const yesterdayEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND (created AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date - 1")
+  const lastWeekEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '14 days' AND created <= now()-interval '7 days'")
+  const lastMonthEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '60 days' AND created <= now()-interval '30 days'")
   return {
     available, pending: 0, hold, onHold: hold,
     totalEarned: earned, totalWithdrawn, withdrawn: totalWithdrawn,
     advanceOutstanding, todayEarnings, weekEarnings, monthEarnings,
+    yesterdayEarnings, lastWeekEarnings, lastMonthEarnings,
     thisWeek: weekEarnings, thisMonth: monthEarnings, nextPayout: '',
   }
+}
+
+// ── Wallet analytics (3_wallet.png): trend · service-wise · settlement · leaderboard ──────────
+
+/** Daily earnings for the last [days] days, oldest first. Days with nothing earned return 0. */
+async function earningsTrend(wid, days = 30) {
+  const q = await pool.query(
+    `SELECT to_char(d.day, 'YYYY-MM-DD') date,
+            COALESCE(SUM(i.amount), 0)::int amount
+       FROM generate_series(
+              ((now() AT TIME ZONE 'Asia/Kolkata')::date - ($2::int - 1)),
+              (now() AT TIME ZONE 'Asia/Kolkata')::date,
+              interval '1 day') d(day)
+       LEFT JOIN worker_income i
+         ON i.worker_id = $1
+        AND (i.created AT TIME ZONE 'Asia/Kolkata')::date = d.day
+      GROUP BY d.day ORDER BY d.day`,
+    [wid, days])
+  return q.rows
+}
+
+/**
+ * Earnings grouped by the service that produced them.
+ *
+ * `label` on a Job Earnings row is not consistent: rows settled by settleBooking() carry the
+ * booking REF ("#HH42064"), while older/seeded rows carry the service name outright. So: resolve
+ * refs against the booking service, and take any non-ref label at face value. Anything still
+ * unresolved is grouped as "Other Services" rather than dropped, so the parts always sum to the
+ * total the worker actually earned.
+ */
+const looksLikeRef = (v) => /^(#|SEED-)/i.test(String(v || '').trim())
+
+async function serviceWiseEarnings(wid) {
+  const rows = (await pool.query(
+    "SELECT label, SUM(amount)::int amount FROM worker_income WHERE worker_id=$1 AND category='Job Earnings' GROUP BY label", [wid])).rows
+  if (!rows.length) return { total: 0, services: [] }
+  const byRef = new Map()
+  if (rows.some((r) => looksLikeRef(r.label))) {
+    const bookings = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wid}`, [])
+    for (const b of bookings || []) byRef.set(String(b.ref || `#${b.id}`), (b.items || []).map((i) => i.name).join(', '))
+  }
+  const acc = new Map()
+  for (const r of rows) {
+    const label = String(r.label || '').trim()
+    const name = (looksLikeRef(label) ? byRef.get(label) : label) || 'Other Services'
+    acc.set(name, (acc.get(name) || 0) + Number(r.amount || 0))
+  }
+  const total = [...acc.values()].reduce((t, v) => t + v, 0)
+  const services = [...acc.entries()]
+    .map(([service, amount]) => ({ service, amount, pct: total ? Math.round((amount * 100) / total) : 0 }))
+    .sort((a, b) => b.amount - a.amount)
+  return { total, services }
+}
+
+/** Payout rules + the worker's payout destination, as the Settlement Info card shows them. */
+async function settlementInfo(wid) {
+  const w = await tryGet(WORKER_URL, `/internal/workers/${wid}`, {})
+  // Bank details live under the worker's profile JSON (mergeProfile(id, { bank })), not as
+  // top-level columns — the snapshot only exposes bank_status alongside it.
+  const bank = w?.profile?.bank || {}
+  const acct = String(bank.account || bank.accountNumber || '')
+  const upi = String(bank.upi || '')
+  const status = String(w?.bank_status || w?.bankStatus || '')
+  return {
+    dailyTime: '7:00 AM',
+    minPayout: await getSettingInt(ADMIN_URL, 'min_withdrawal', 200),
+    mode: acct ? 'Bank Transfer' : (upi ? 'UPI' : 'Not set'),
+    bankAccount: acct ? `****${acct.slice(-4)}` : upi,
+    bankVerified: status === 'Verified',
+    bankStatus: status || 'Not Added',
+  }
+}
+
+/**
+ * Where this worker sits against the others this month, by earnings. Real ranking over the
+ * ledger — "Top 20%" means 80% of active earners earned less. Returns null when there aren't
+ * enough peers for the claim to mean anything.
+ */
+async function leaderboard(wid) {
+  const rows = (await pool.query(
+    `SELECT worker_id, SUM(amount)::int total FROM worker_income
+      WHERE created > now()-interval '30 days' GROUP BY worker_id ORDER BY total DESC`)).rows
+  if (rows.length < 3) return null
+  const idx = rows.findIndex((r) => Number(r.worker_id) === Number(wid))
+  if (idx < 0) return null
+  const topPct = Math.max(1, Math.round(((idx + 1) / rows.length) * 100))
+  return { rank: idx + 1, of: rows.length, topPercent: topPct }
 }
 
 // Finalize a withdrawal once the payout service reports back. Idempotent (terminal states are
@@ -274,6 +368,13 @@ async function rewardsDto(wid) {
 /* ---------- worker wallet ---------- */
 app.get('/api/worker/wallet/summary', auth, async (req, res) => res.json(await summary(req.wid)))
 app.get('/api/worker/wallet/state', auth, async (req, res) => res.json(await walletState(req.wid)))
+app.get('/api/worker/wallet/analytics', auth, async (req, res) => res.json({
+  ok: true,
+  trend: await earningsTrend(req.wid, 30),
+  serviceWise: await serviceWiseEarnings(req.wid),
+  settlement: await settlementInfo(req.wid),
+  leaderboard: await leaderboard(req.wid),
+}))
 app.get('/api/worker/wallet/earnings-breakup', auth, async (req, res) => res.json(await earningsBreakupDto(req.wid)))
 app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(await deductionsDto(req.wid)))
 app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await historyLedger(req.wid)))

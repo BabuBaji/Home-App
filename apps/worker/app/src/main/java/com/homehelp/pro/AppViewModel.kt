@@ -52,6 +52,10 @@ import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
 import com.homehelp.pro.network.UploadDocBody
+import com.homehelp.pro.network.LeaderboardDto
+import com.homehelp.pro.network.ServiceWiseDto
+import com.homehelp.pro.network.SettlementDto
+import com.homehelp.pro.network.TrendPoint
 import com.homehelp.pro.network.WalletStateResponse
 import com.homehelp.pro.network.WalletSummaryDto
 import com.homehelp.pro.network.WithdrawBody
@@ -230,6 +234,39 @@ class AppViewModel : ViewModel() {
     val deductionDetail = mutableStateListOf<DeductionEntry>()
     var deductionTotal by mutableIntStateOf(0)
         private set
+    // ─── Wallet analytics (3_wallet.png): trend · service split · settlement · leaderboard ───
+    var yesterdayEarnings by mutableIntStateOf(0)
+        private set
+    var lastWeekEarnings by mutableIntStateOf(0)
+        private set
+    var lastMonthEarnings by mutableIntStateOf(0)
+        private set
+    val earningsTrend = mutableStateListOf<TrendPoint>()
+    var serviceWise by mutableStateOf<ServiceWiseDto?>(null)
+        private set
+    var settlement by mutableStateOf<SettlementDto?>(null)
+        private set
+    var leaderboard by mutableStateOf<LeaderboardDto?>(null)
+        private set
+
+    /** Percentage change vs the previous period, or null when there's no base to compare with. */
+    fun changePct(now: Int, before: Int): Int? =
+        if (before <= 0) null else Math.round(((now - before) * 100f) / before)
+
+    fun loadWalletAnalytics() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.walletAnalytics()
+                earningsTrend.clear(); earningsTrend.addAll(r.trend)
+                serviceWise = r.serviceWise
+                settlement = r.settlement
+                leaderboard = r.leaderboard
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
     val walletHistory = mutableStateListOf<LedgerEntry>()
     val withdrawals = mutableStateListOf<WithdrawalEntry>()
     val advances = mutableStateListOf<AdvanceEntry>()
@@ -837,6 +874,10 @@ class AppViewModel : ViewModel() {
         acceptancePct = s.acceptancePct
         weekEarnings = s.weekEarnings
         monthEarnings = s.monthEarnings
+        yesterdayEarnings = s.yesterdayEarnings
+        lastWeekEarnings = s.lastWeekEarnings
+        lastMonthEarnings = s.lastMonthEarnings
+        totalEarned = s.totalEarned
         withdrawnTotal = s.totalWithdrawn
         advanceOutstanding = s.advanceOutstanding
         nextPayout = s.nextPayout

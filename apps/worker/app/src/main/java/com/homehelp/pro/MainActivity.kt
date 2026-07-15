@@ -191,7 +191,7 @@ fun AppRoot() {
             composable(Routes.LEAVE) { LeaveScreen(vm, nav) }
             composable(Routes.PERFORMANCE) { PerformanceScreen(vm, nav) }
             composable(Routes.EARNINGS) { EarningsScreen(vm, nav) }
-            composable(Routes.WALLET) { WalletScreen(vm, nav) }
+            composable(Routes.WALLET) { WalletDashboardScreen(vm, nav) }
             composable(Routes.WITHDRAW) { WithdrawScreen(vm, nav) }
             composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
             composable(Routes.WALLET_HISTORY) { WalletHistoryScreen(vm, nav) }
