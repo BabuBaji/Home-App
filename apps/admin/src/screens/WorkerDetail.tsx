@@ -311,9 +311,17 @@ export default function WorkerDetail() {
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 400px) 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card>
-          {/* 2-column: avatar (left) · name/status/badges/rating/id/action stacked (right) */}
+          {/* Left: avatar + rating + Worker ID · Right: name/status/badges/action */}
           <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-            <Avatar name={w.name} src={w.avatar} size={100} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0, alignItems: 'flex-start' }}>
+              <Avatar name={w.name} src={w.avatar} size={100} />
+              <div>
+                <div className="row" style={{ gap: 5, alignItems: 'center', fontSize: 14 }}>
+                  <Star size={15} fill="#f59e0b" stroke="#f59e0b" /> <strong>{w.rating || '—'}</strong> <span className="muted" style={{ fontSize: 13 }}>({w.jobs} reviews)</span>
+                </div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 4, whiteSpace: 'nowrap' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+              </div>
+            </div>
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <strong style={{ fontSize: 24, lineHeight: 1.1 }}>{w.name}</strong>{w.verified && <BadgeCheck size={20} color="#2563eb" />}
@@ -327,10 +335,6 @@ export default function WorkerDetail() {
                   </span>
                 ))}
               </div>
-              <div className="row" style={{ gap: 5, alignItems: 'center', fontSize: 14, marginTop: 4 }}>
-                <Star size={15} fill="#f59e0b" stroke="#f59e0b" /> <strong>{w.rating || '—'}</strong> <span className="muted" style={{ fontSize: 13 }}>({w.jobs} reviews)</span>
-              </div>
-              <div className="muted" style={{ fontSize: 13 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
               <button className="btn" style={{ alignSelf: 'stretch', marginTop: 8, padding: '10px 16px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
             </div>
           </div>
