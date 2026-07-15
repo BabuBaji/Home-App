@@ -11,7 +11,24 @@
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path   # repo root (infra/scripts -> ..\..)
-$cf = 'C:\Program Files (x86)\cloudflared\cloudflared.exe'
+
+# cloudflared lives in a different place depending on how it was installed (winget / choco /
+# the standalone .exe dropped in ~/.cloudflared), so find it rather than hardcoding one machine's
+# path. Override with $env:CLOUDFLARED if yours is somewhere else entirely.
+$cf = @(
+    $env:CLOUDFLARED,
+    'C:\Program Files (x86)\cloudflared\cloudflared.exe',
+    'C:\Program Files\cloudflared\cloudflared.exe',
+    (Join-Path $env:USERPROFILE '.cloudflared\cloudflared.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\cloudflared.exe'),
+    'C:\ProgramData\chocolatey\bin\cloudflared.exe'
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $cf) { $cf = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source }
+if (-not $cf) {
+    Write-Host 'cloudflared not found. Install it (winget install Cloudflare.cloudflared) or set $env:CLOUDFLARED.' -ForegroundColor Red
+    exit 1
+}
+Write-Host "Using cloudflared: $cf" -ForegroundColor DarkGray
 
 # 1) Microservices gateway on :8080 (brings up the whole compose stack if needed)
 $running = $false
@@ -57,11 +74,21 @@ Write-Host "Public URL: $url" -ForegroundColor Green
 $json = "{`n  `"apiBase`": `"$url`"`n}"
 $json | Out-File -FilePath (Join-Path $repo 'app-config.json') -Encoding ascii
 Push-Location $repo
+# git reports normal progress on stderr. Under PowerShell 5.1, redirecting a native command's
+# stderr (`2>$null`) wraps every line in a NativeCommandError, which $ErrorActionPreference='Stop'
+# then treats as fatal — the script died here on a SUCCESSFUL push and never reached Wait-Process,
+# so the tunnel was left running with nothing holding it. Let git write to stderr and only fail on
+# a real non-zero exit code.
+$ErrorActionPreference = 'Continue'
 git add app-config.json
-git commit -m 'chore: update live api url' 2>$null | Out-Null
-git push origin Baji 2>$null | Out-Null
+git commit -m 'chore: update live api url' | Out-Null
+git push origin Baji
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "git push failed (exit $LASTEXITCODE) — the tunnel is up but apps will not see the new URL." -ForegroundColor Red
+}
+$ErrorActionPreference = 'Stop'
 Pop-Location
-Write-Host 'Published to GitHub. Apps pick it up on next launch (GitHub may take up to ~1 min).' -ForegroundColor Green
+Write-Host 'Published to GitHub. Apps pick it up on next launch (GitHub raw can lag a few minutes).' -ForegroundColor Green
 Write-Host 'Leave this window open while testing. Ctrl+C stops the tunnel.' -ForegroundColor Yellow
 
 # 4) Keep the tunnel alive until Ctrl+C
