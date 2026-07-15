@@ -455,11 +455,10 @@ export default function WorkerDetail() {
         </div>
       )}
 
-      {(show('docs') || show('skills') || show('jobs')) && (
+      {(show('docs') || show('skills')) && (
         <div style={grid3}>
           {(show('docs')) && documentsPanel}
           {(show('skills')) && skillsPanel}
-          {(show('jobs')) && recentJobsPanel}
         </div>
       )}
 
