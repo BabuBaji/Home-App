@@ -155,7 +155,7 @@ export default function WorkerDetail() {
     ...(w.services || []).slice(0, 1),
   ]
   const act = async (patch: Record<string, unknown>, msg: string) => { try { await updateWorker(w.id, patch); toast(msg); load() } catch (e) { toast((e as Error).message) } }
-  const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }
+  const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }
   const softBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card,#fff)', border: '1px solid var(--line,#e4e7ec)', color: 'var(--violet,#5b51e8)', padding: '9px 15px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }
   const show = (t: string) => tab === 'overview' || tab === t
 
@@ -294,7 +294,7 @@ export default function WorkerDetail() {
   )
 
   return (
-    <div className="grid" style={{ gap: 14 }}>
+    <div className="grid" style={{ gap: 18 }}>
       {/* Breadcrumb + title + actions */}
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
         <div>
@@ -309,35 +309,30 @@ export default function WorkerDetail() {
       </div>
 
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(310px, 360px) 1fr', gap: 14, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 400px) 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card>
-          {/* Top: avatar + name / On Duty / badges */}
-          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-            <Avatar name={w.name} src={w.avatar} size={64} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <strong style={{ fontSize: 18 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
+          {/* 2-column: avatar (left) · name/status/badges/rating/id/action stacked (right) */}
+          <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+            <Avatar name={w.name} src={w.avatar} size={100} />
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <strong style={{ fontSize: 24, lineHeight: 1.1 }}>{w.name}</strong>{w.verified && <BadgeCheck size={20} color="#2563eb" />}
               </div>
-              <div style={{ marginTop: 6 }}><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              <div><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
                 {badges.map((b) => (
-                  <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {b === 'Verified' ? <BadgeCheck size={12} /> : b === 'Top Performer' ? <Star size={11} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={11} /> : <Zap size={11} />}
+                  <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {b === 'Verified' ? <BadgeCheck size={13} /> : b === 'Top Performer' ? <Star size={12} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={12} /> : <Zap size={12} />}
                     {b}
                   </span>
                 ))}
               </div>
-            </div>
-          </div>
-          {/* Bottom row: rating + Worker ID (left) · Live Location (right) */}
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 16, width: '100%' }}>
-            <div style={{ flexShrink: 0 }}>
-              <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13, whiteSpace: 'nowrap' }}>
-                <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} reviews)</span>
+              <div className="row" style={{ gap: 5, alignItems: 'center', fontSize: 14, marginTop: 4 }}>
+                <Star size={15} fill="#f59e0b" stroke="#f59e0b" /> <strong>{w.rating || '—'}</strong> <span className="muted" style={{ fontSize: 13 }}>({w.jobs} reviews)</span>
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: 'nowrap' }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+              <div className="muted" style={{ fontSize: 13 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+              <button className="btn" style={{ alignSelf: 'stretch', marginTop: 8, padding: '10px 16px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
             </div>
-            <button className="btn" style={{ flexShrink: 0, marginLeft: 'auto', padding: '9px 15px', whiteSpace: 'nowrap' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
           </div>
         </Card>
 
@@ -366,8 +361,8 @@ export default function WorkerDetail() {
         </Card>
       </div>
 
-      {/* Tab bar */}
-      <div className="row" style={{ gap: 4, flexWrap: 'wrap', borderBottom: '1px solid var(--line,#e4e7ec)', paddingBottom: 0 }}>
+      {/* Tab bar — sticky while scrolling */}
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap', borderBottom: '1px solid var(--line,#e4e7ec)', position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg,#f5f5fb)', paddingTop: 6 }}>
         {TABS.map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: '8px 12px', fontSize: 13,
