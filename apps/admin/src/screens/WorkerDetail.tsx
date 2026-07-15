@@ -309,7 +309,7 @@ export default function WorkerDetail() {
       </div>
 
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) 1fr', gap: 16, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 400px) 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card>
           {/* Left: avatar + rating + Worker ID · Right: name/status/badges/action */}
           <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
@@ -327,9 +327,9 @@ export default function WorkerDetail() {
                 <strong style={{ fontSize: 24, lineHeight: 1.1 }}>{w.name}</strong>{w.verified && <BadgeCheck size={20} color="#2563eb" />}
               </div>
               <div><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
                 {badges.map((b) => (
-                  <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <span key={b} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'rgba(91,81,232,.10)', color: 'var(--violet,#5b51e8)', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {b === 'Verified' ? <BadgeCheck size={13} /> : b === 'Top Performer' ? <Star size={12} fill="currentColor" /> : b.includes('Jobs') ? <Briefcase size={12} /> : <Zap size={12} />}
                     {b}
                   </span>
