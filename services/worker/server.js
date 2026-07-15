@@ -40,6 +40,8 @@ async function init() {
     )`,
     `CREATE TABLE IF NOT EXISTS worker_documents (id SERIAL PRIMARY KEY, worker_id INTEGER, name TEXT, file_name TEXT, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_notes (id SERIAL PRIMARY KEY, worker_id INTEGER, note TEXT, author TEXT, created TIMESTAMPTZ DEFAULT now())`,
+    `CREATE TABLE IF NOT EXISTS worker_metric_snapshots (id SERIAL PRIMARY KEY, worker_id INTEGER, snap_date DATE, week_jobs INTEGER, month_jobs INTEGER, completion_pct INTEGER, cancellation_pct INTEGER, rating REAL, earnings INTEGER)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_worker_snap ON worker_metric_snapshots(worker_id, snap_date)`,
     // Columns added on top of the earlier worker schema (idempotent).
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
@@ -813,13 +815,15 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
-  const [docs, bookings, wallet, noteRows, activityRes] = await Promise.all([
+  const [docs, bookings, wallet, noteRows, activityRes, snapRes] = await Promise.all([
     documents(id),
     tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
     tryGet(WALLET_URL, `/internal/summary/${id}`, null),
     pool.query('SELECT * FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 20', [id]),
     tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=15`, { items: [] }),
+    pool.query('SELECT * FROM worker_metric_snapshots WHERE worker_id=$1 AND snap_date < CURRENT_DATE ORDER BY snap_date DESC LIMIT 1', [id]),
   ])
+  const prevSnap = snapRes.rows[0]
   const notes = noteRows.rows.map((n) => ({ id: n.id, note: n.note, author: n.author, created: n.created }))
   const activity = ((activityRes && activityRes.items) || []).slice(0, 15).map((a) => ({ id: a.id, action: a.action, detail: a.detail, ref: a.ref, created: a.created }))
   const svcOf = (b) => b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—'
@@ -848,6 +852,13 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     completionPct: bk.length ? Math.round((completed.length / bk.length) * 100) : 0,
     todayEarnings: wallet ? (wallet.todayEarnings || 0) : 0,
   }
+  // Trend vs the most recent prior daily snapshot (▲/▼ on the KPI tiles). null until history exists.
+  metrics.trends = prevSnap ? {
+    weekJobs: metrics.weekJobs - (prevSnap.week_jobs || 0),
+    completion: metrics.completionPct - (prevSnap.completion_pct || 0),
+    cancellation: metrics.cancellationPct - (prevSnap.cancellation_pct || 0),
+    rating: Math.round(((w.rating || 0) - (prevSnap.rating || 0)) * 10) / 10,
+  } : null
   // Device telemetry the worker app reports via /api/worker/heartbeat.
   const dev = (w.profile && w.profile.device) || {}
   const idleMins = dev.at ? Math.max(0, Math.round((now - new Date(dev.at)) / 60000)) : null
@@ -1107,9 +1118,37 @@ function scheduleShaktiSettlement() {
   setTimeout(tick, 15000) // and shortly after boot (catches a missed run)
 }
 
+// Daily snapshot of each active worker's metrics, so the Worker Details KPI tiles can show a
+// real period-over-period trend (▲/▼) instead of a faked delta. One row per worker per day.
+async function snapshotMetrics() {
+  const workers = (await pool.query("SELECT id, rating, earnings FROM workers WHERE status='active'")).rows
+  const today = new Date().toISOString().slice(0, 10)
+  const now = new Date(), dayMs = 86400000
+  const within = (ts, n) => ts && (now - new Date(ts)) <= n * dayMs
+  for (const wk of workers) {
+    const bk = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wk.id}`, [])
+    const completed = bk.filter((b) => b.status === 'completed').length
+    const cancelled = bk.filter((b) => b.status === 'cancelled').length
+    await pool.query(
+      `INSERT INTO worker_metric_snapshots (worker_id,snap_date,week_jobs,month_jobs,completion_pct,cancellation_pct,rating,earnings)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (worker_id,snap_date) DO UPDATE SET
+       week_jobs=EXCLUDED.week_jobs, month_jobs=EXCLUDED.month_jobs, completion_pct=EXCLUDED.completion_pct,
+       cancellation_pct=EXCLUDED.cancellation_pct, rating=EXCLUDED.rating, earnings=EXCLUDED.earnings`,
+      [wk.id, today, bk.filter((b) => within(b.created, 7)).length, bk.filter((b) => within(b.created, 30)).length,
+        bk.length ? Math.round((completed / bk.length) * 100) : 0, bk.length ? Math.round((cancelled / bk.length) * 100) : 0,
+        wk.rating || 0, wk.earnings || 0])
+  }
+  console.log(`[worker] metric snapshot captured for ${workers.length} workers (${today})`)
+}
+function scheduleMetricSnapshots() {
+  setInterval(() => snapshotMetrics().catch((e) => console.error('[worker] snapshot error:', e.message)), 24 * 3600 * 1000)
+  setTimeout(() => snapshotMetrics().catch((e) => console.error('[worker] snapshot error:', e.message)), 25000)
+}
+
 init()
   .then(() => {
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
     scheduleShaktiSettlement()
+    scheduleMetricSnapshots()
   })
   .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) });

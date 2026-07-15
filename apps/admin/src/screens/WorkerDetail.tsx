@@ -23,11 +23,14 @@ function Info({ label, value, verified }: { label: string; value: ReactNode; ver
   )
 }
 
-function Kpi({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: string; tone?: string }) {
+function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value: ReactNode; sub?: string; tone?: string; trend?: number | null; invert?: boolean }) {
+  const t = trend ?? null
+  const good = t == null || t === 0 ? null : (invert ? t < 0 : t > 0)
   return (
     <div style={{ flex: '1 1 96px', minWidth: 96, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
       <div style={{ fontSize: 11, color: 'var(--muted,#667085)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, color: tone }}>{value}</div>
+      {t != null && t !== 0 && <div style={{ fontSize: 10.5, marginTop: 2, color: good ? '#16a34a' : '#dc2626' }}>{t > 0 ? '▲' : '▼'} {Math.abs(t)}</div>}
       {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)', marginTop: 2 }}>{sub}</div>}
     </div>
   )
@@ -336,11 +339,11 @@ export default function WorkerDetail() {
           </div>
           <div className="row" style={{ gap: 10, flexWrap: 'wrap', paddingTop: 12 }}>
             <Kpi label="Today's Jobs" value={m?.todayJobs ?? 0} sub={`Completed: ${m?.completedToday ?? 0}`} />
-            <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} />
+            <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} trend={m?.trends?.weekJobs} />
             <Kpi label="Monthly Jobs" value={m?.monthJobs ?? 0} sub={`Completed: ${m?.completedMonth ?? 0}`} />
-            <Kpi label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" />
-            <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} />
-            <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} />
+            <Kpi label="Completion" value={`${m?.completionPct ?? 0}%`} tone="#16a34a" trend={m?.trends?.completion} />
+            <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} trend={m?.trends?.cancellation} invert />
+            <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} trend={m?.trends?.rating} />
             <Kpi label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
           </div>
         </Card>

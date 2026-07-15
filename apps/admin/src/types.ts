@@ -45,6 +45,7 @@ export interface WorkerMetrics {
   totalJobs: number; completed: number; cancelled: number; todayJobs: number; weekJobs: number
   monthJobs: number; completedToday?: number; completedWeek?: number; completedMonth?: number
   cancellationPct: number; completionPct: number; todayEarnings: number
+  trends?: { weekJobs: number; completion: number; cancellation: number; rating: number } | null
 }
 export interface WorkerDevice { battery?: number | null; network?: string | null; idleMins?: number | null; lastSeen?: string | null }
 export interface WorkerHealth { riskScore: number; level: string; attendanceRisk: number; burnoutRisk: number; lateProbability: number; complaintProbability: number; suggestion: string }
