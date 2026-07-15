@@ -1,18 +1,22 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio / IDE
+.idea/
+*.iml
+captures/
+.cxx/
+
+# Local config (machine-specific)
+local.properties
+
 # Build output / binaries
 *.apk
 HomeHelp-debug.apk
 
-# Gradle / Android build output, at ANY level. apps/worker/.gitignore already covers its own
-# subtree, but that does nothing for a root-level .gradle/ cache — which is how build caches,
-# lock files and local.properties end up committed.
-.gradle/
-build/
-.cxx/
-captures/
-local.properties
-*.iml
-
-# Signing keys — must never be committed
+# Keystore / secrets — must never be committed
 *.jks
 *.keystore
 
@@ -39,8 +43,8 @@ infra/.env
 docs/admin-mockups/
 
 # OS / editor
-Thumbs.db
 .DS_Store
+Thumbs.db
 
 # Office temp files
 ~$*

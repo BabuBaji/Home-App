@@ -74,6 +74,11 @@ object Routes {
     const val START_SERVICE = "startservice"
     const val IN_PROGRESS = "inprogress"
     const val JOB_COMPLETED = "jobcompleted"
+    const val JOB_CHAT = "jobchat"
+    const val JOB_EXTRAS = "jobextras"
+    const val BEFORE_PHOTOS = "beforephotos"
+    const val AFTER_PHOTOS = "afterphotos"
+    const val CUSTOMER_SIGN = "customersign"
     const val P_PERSONAL = "profile_personal"
     const val P_DOCUMENTS = "profile_documents"
     const val P_BANK = "profile_bank"
@@ -186,7 +191,7 @@ fun AppRoot() {
             composable(Routes.LEAVE) { LeaveScreen(vm, nav) }
             composable(Routes.PERFORMANCE) { PerformanceScreen(vm, nav) }
             composable(Routes.EARNINGS) { EarningsScreen(vm, nav) }
-            composable(Routes.WALLET) { WalletScreen(vm, nav) }
+            composable(Routes.WALLET) { WalletDashboardScreen(vm, nav) }
             composable(Routes.WITHDRAW) { WithdrawScreen(vm, nav) }
             composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
             composable(Routes.WALLET_HISTORY) { WalletHistoryScreen(vm, nav) }
@@ -205,6 +210,11 @@ fun AppRoot() {
             composable(Routes.START_SERVICE) { StartServiceScreen(vm, nav) }
             composable(Routes.IN_PROGRESS) { InProgressScreen(vm, nav) }
             composable(Routes.JOB_COMPLETED) { JobCompletedScreen(vm, nav) }
+            composable(Routes.JOB_CHAT) { JobChatScreen(vm, nav) }
+            composable(Routes.JOB_EXTRAS) { AddExtraServiceScreen(vm, nav) }
+            composable(Routes.BEFORE_PHOTOS) { BeforePhotosScreen(vm, nav) }
+            composable(Routes.AFTER_PHOTOS) { AfterPhotosScreen(vm, nav) }
+            composable(Routes.CUSTOMER_SIGN) { CustomerSignScreen(vm, nav) }
             composable(Routes.P_PERSONAL) { PersonalInfoScreen(vm, nav) }
             composable(Routes.P_DOCUMENTS) { DocumentsScreen(vm, nav) }
             composable(Routes.P_BANK) { BankDetailsScreen(vm, nav) }

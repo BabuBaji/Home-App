@@ -30,9 +30,122 @@ const skipSet = (id) => { if (!skips.has(id)) skips.set(id, new Set()); return s
 async function init() {
   await migrate(pool, [
     `CREATE TABLE IF NOT EXISTS dispatch_offers (worker_id INTEGER PRIMARY KEY, booking_id INTEGER, created TIMESTAMPTZ DEFAULT now())`,
+    // Per-job working state for the in-service flow: checklist ticks, before/after photo sets,
+    // worker-added extra services, and pause bookkeeping. Keyed by booking — a booking IS a job.
+    `CREATE TABLE IF NOT EXISTS job_state (
+       booking_id INTEGER PRIMARY KEY,
+       checklist JSONB NOT NULL DEFAULT '[]'::jsonb,
+       before_photos JSONB NOT NULL DEFAULT '[]'::jsonb,
+       after_photos JSONB NOT NULL DEFAULT '[]'::jsonb,
+       extras JSONB NOT NULL DEFAULT '[]'::jsonb,
+       paused BOOLEAN NOT NULL DEFAULT false,
+       paused_ms BIGINT NOT NULL DEFAULT 0,
+       paused_at TIMESTAMPTZ,
+       updated TIMESTAMPTZ DEFAULT now()
+     )`,
+    `CREATE TABLE IF NOT EXISTS job_messages (
+       id SERIAL PRIMARY KEY,
+       booking_id INTEGER NOT NULL,
+       sender TEXT NOT NULL,
+       body TEXT NOT NULL,
+       created TIMESTAMPTZ DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS job_messages_booking ON job_messages (booking_id, id)`,
+    // Step 5/7/8 of the job flow: named before/after photo slots, per-phase notes, and the
+    // customer's sign-off + rating. Added as ALTERs so existing job_state rows survive.
+    `ALTER TABLE job_state ADD COLUMN IF NOT EXISTS photo_slots JSONB NOT NULL DEFAULT '[]'::jsonb`,
+    `ALTER TABLE job_state ADD COLUMN IF NOT EXISTS before_notes TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE job_state ADD COLUMN IF NOT EXISTS after_notes TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE job_state ADD COLUMN IF NOT EXISTS signature TEXT`,
+    `ALTER TABLE job_state ADD COLUMN IF NOT EXISTS customer_rating INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE job_state ADD COLUMN IF NOT EXISTS customer_notes TEXT NOT NULL DEFAULT ''`,
   ])
-  console.log('[dispatch] Postgres ready (dispatch_offers)')
+  console.log('[dispatch] Postgres ready (dispatch_offers, job_state, job_messages)')
 }
+
+// Default per-service task list, seeded on first read of a job's state. Mirrors the task lists the
+// worker app used to hardcode client-side, so ticks now survive nav/restart and reach the server.
+const CHECKLIST_BY_SERVICE = [
+  [/bathroom/i, ['Scrub toilet & seat', 'Clean washbasin & mirror', 'Scrub floor & tiles', 'Wipe fittings dry', 'Empty dustbin']],
+  [/kitchen/i, ['Clear & wipe counters', 'Clean stove & backsplash', 'Degrease chimney/hob', 'Wipe cabinet fronts', 'Mop floor', 'Take out trash']],
+  [/dish/i, ['Wash utensils', 'Rinse & stack to dry', 'Wipe sink area']],
+  [/sweep|mop/i, ['Sweep all rooms', 'Mop all rooms', 'Clean under furniture']],
+  [/laundry/i, ['Sort colours & whites', 'Run wash cycle', 'Dry & fold', 'Stack neatly']],
+  [/window/i, ['Dust frames & grills', 'Wash glass both sides', 'Wipe streak-free']],
+  [/fan/i, ['Dust blades', 'Wipe blades damp', 'Clean fan mount']],
+  [/fridge|refrigerator/i, ['Empty & discard expired', 'Wipe shelves & trays', 'Clean door seals']],
+  [/sofa|upholstery/i, ['Vacuum cushions', 'Spot-treat stains', 'Deodorise fabric']],
+]
+function defaultChecklist(b) {
+  const names = (b.items || []).map((i) => String(i.name || ''))
+  const tasks = []
+  for (const n of names) {
+    const hit = CHECKLIST_BY_SERVICE.find(([re]) => re.test(n))
+    const list = hit ? hit[1] : ['Complete the service', 'Tidy the work area']
+    for (const label of list) tasks.push({ label, service: n, done: false })
+  }
+  if (tasks.length === 0) tasks.push({ label: 'Complete the service', service: '', done: false })
+  return tasks.map((t, i) => ({ id: i + 1, ...t }))
+}
+
+// The named shots the worker must take before/after, per the job-flow design ("Photos Required
+// 2/3" — Kitchen Overall View, Sink Area, …). Derived from the booked service, like the checklist.
+const PHOTO_SLOTS_BY_SERVICE = [
+  [/kitchen/i, ['Kitchen Overall View', 'Sink Area', 'Cabinets & Platform']],
+  [/bathroom/i, ['Bathroom Overall View', 'Toilet & Seat', 'Washbasin & Mirror']],
+  [/sweep|mop/i, ['Room Overall View', 'Floor Area', 'Corners & Under Furniture']],
+  [/dish/i, ['Sink & Utensils', 'Counter Area']],
+  [/laundry/i, ['Clothes Pile', 'Washing Area']],
+  [/window/i, ['Window Overall View', 'Glass Close-up']],
+  [/fan/i, ['Fan Overall View', 'Blades Close-up']],
+  [/sofa|upholstery/i, ['Sofa Overall View', 'Cushions & Corners']],
+]
+function defaultPhotoSlots(b) {
+  const first = (b.items || [])[0]?.name || ''
+  const hit = PHOTO_SLOTS_BY_SERVICE.find(([re]) => re.test(first))
+  return hit ? hit[1] : ['Overall View', 'Work Area']
+}
+
+// Reads a job's state, seeding the row (its checklist + photo slots) on first touch.
+async function jobState(b) {
+  const q = await pool.query('SELECT * FROM job_state WHERE booking_id=$1', [b.id])
+  if (q.rows.length) {
+    const row = q.rows[0]
+    // Backfill slots for rows created before the photo step existed.
+    if (!row.photo_slots || row.photo_slots.length === 0) {
+      const up = await pool.query('UPDATE job_state SET photo_slots=$2::jsonb WHERE booking_id=$1 RETURNING *', [b.id, JSON.stringify(defaultPhotoSlots(b))])
+      return up.rows[0]
+    }
+    return row
+  }
+  const ins = await pool.query(
+    `INSERT INTO job_state (booking_id, checklist, photo_slots) VALUES ($1, $2::jsonb, $3::jsonb)
+     ON CONFLICT (booking_id) DO UPDATE SET updated=now() RETURNING *`,
+    [b.id, JSON.stringify(defaultChecklist(b)), JSON.stringify(defaultPhotoSlots(b))],
+  )
+  return ins.rows[0]
+}
+
+// Milliseconds this job has spent paused, counting an in-flight pause up to now.
+const pausedMsNow = (s) =>
+  Number(s.paused_ms || 0) + (s.paused && s.paused_at ? Date.now() - new Date(s.paused_at).getTime() : 0)
+
+const stateDto = (s) => ({
+  checklist: s.checklist || [],
+  photoSlots: s.photo_slots || [],
+  beforePhotos: s.before_photos || [],
+  afterPhotos: s.after_photos || [],
+  beforeNotes: s.before_notes || '',
+  afterNotes: s.after_notes || '',
+  signature: s.signature || null,
+  signed: !!s.signature,
+  customerRating: s.customer_rating || 0,
+  customerNotes: s.customer_notes || '',
+  extras: s.extras || [],
+  paused: !!s.paused,
+  pausedMs: pausedMsNow(s),
+  extrasTotal: (s.extras || []).reduce((t, e) => t + Number(e.price || 0), 0),
+})
 
 const STATUS_TO_ENUM = { worker_assigned: 'ACCEPTED', on_the_way: 'ON_THE_WAY', arrived: 'ARRIVED', in_progress: 'IN_PROGRESS', completed: 'COMPLETED' }
 const ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
@@ -148,6 +261,9 @@ app.post('/api/worker/jobs/accept', auth, async (req, res) => {
   const offeredId = req.worker.offered_booking
   await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: null })
   if (!offeredId) return res.status(409).json({ ok: false, error: 'Job no longer available' })
+  // Log the acceptance before claiming: the worker said yes, so it counts toward their
+  // acceptance rate even if another worker wins the race for the booking below.
+  await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offer-outcome`, { bookingId: offeredId, outcome: 'accepted' })
   const claim = await internalPost(BOOKING_URL, `/api/internal/bookings/${offeredId}/assign`, { worker_id: req.worker.id, pro_name: req.worker.name, pro_rating: req.worker.rating })
   if (!claim.ok) return res.status(409).json({ ok: false, error: 'Job already taken by another expert' })
   publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id, ref: claim.booking?.ref })
@@ -156,7 +272,12 @@ app.post('/api/worker/jobs/accept', auth, async (req, res) => {
 })
 
 app.post('/api/worker/jobs/reject', auth, async (req, res) => {
-  if (req.worker.offered_booking) { skipSet(req.worker.id).add(req.worker.offered_booking); await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: null }) }
+  if (req.worker.offered_booking) {
+    const offeredId = req.worker.offered_booking
+    skipSet(req.worker.id).add(offeredId)
+    await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: null })
+    await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offer-outcome`, { bookingId: offeredId, outcome: 'declined' })
+  }
   res.json({ ok: true, jobStatus: 'NONE' })
 })
 
@@ -195,10 +316,146 @@ app.post('/api/worker/jobs/verify-otp', auth, async (req, res) => {
 app.post('/api/worker/jobs/end', auth, async (req, res) => {
   const b = await activeBooking(req.worker.id)
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
-  if (req.body?.photo) await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/work-photo`, { url: req.body.photo })
+  // The proof photo now comes from the after-photo set captured at step 7; an explicit body photo
+  // is still honoured so an older client keeps working.
+  const st = await jobState(b)
+  const proof = req.body?.photo || (st.after_photos || [])[0]?.url || null
+  if (proof) await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/work-photo`, { url: proof })
   await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'completed' }) // booking emits booking.completed → wallet settles
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.complete', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Job completed${req.body?.photo ? ' (proof photo attached)' : ''}`, meta: { status: 'completed' } })
+  const shots = (st.after_photos || []).length
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.complete', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Job completed${shots ? ` (${shots} after photo${shots > 1 ? 's' : ''})` : ''}${st.signature ? ' · customer signed' : ''}`, meta: { status: 'completed' } })
   res.json({ ok: true, jobStatus: 'COMPLETED', activeJob: await jobFromBooking({ ...b, status: 'completed' }) })
+})
+
+// ─── In-service job state: checklist · photos · extras · pause/resume · chat ──────────────
+// All of these hang off the worker's ACTIVE booking, so none of them take an id: the worker app
+// only ever drives one live job at a time (mirroring /on-the-way, /arrived, /end above).
+
+const activeOr409 = async (req, res) => {
+  const b = await activeBooking(req.worker.id)
+  if (!b) { res.status(409).json({ ok: false, error: 'No active job' }); return null }
+  return b
+}
+const saveState = async (id, patch) => {
+  const keys = Object.keys(patch)
+  const sets = keys.map((k, i) => `${k}=$${i + 2}`).join(', ')
+  const vals = keys.map((k) => (typeof patch[k] === 'object' && patch[k] !== null ? JSON.stringify(patch[k]) : patch[k]))
+  const q = await pool.query(`UPDATE job_state SET ${sets}, updated=now() WHERE booking_id=$1 RETURNING *`, [id, ...vals])
+  return q.rows[0]
+}
+
+app.get('/api/worker/jobs/state', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  res.json({ ok: true, ...stateDto(await jobState(b)) })
+})
+
+// Whole-list save: the app owns the tick state and posts the list back, so a stale client can
+// never resurrect a task the worker removed.
+app.post('/api/worker/jobs/checklist', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  await jobState(b)
+  const items = Array.isArray(req.body?.items) ? req.body.items : []
+  const clean = items.map((t, i) => ({ id: Number(t.id) || i + 1, label: String(t.label || ''), service: String(t.service || ''), done: !!t.done }))
+  res.json({ ok: true, ...stateDto(await saveState(b.id, { checklist: clean })) })
+})
+
+// Photos are keyed by slot ("Sink Area"), so a retake replaces that shot rather than appending a
+// second copy, and "Photos Required (2/3)" can be counted honestly.
+app.post('/api/worker/jobs/photos', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const s = await jobState(b)
+  const phase = req.body?.phase === 'after' ? 'after_photos' : 'before_photos'
+  const photo = String(req.body?.photo || '')
+  const slot = String(req.body?.slot || '').trim() || 'Additional'
+  if (!photo.startsWith('data:image/')) return res.status(400).json({ ok: false, error: 'photo must be a data URL' })
+  const list = [...(s[phase] || [])].filter((p) => p.slot !== slot)
+  list.push({ slot, url: photo, at: new Date().toISOString() })
+  res.json({ ok: true, ...stateDto(await saveState(b.id, { [phase]: list.slice(-8) })) })
+})
+
+app.post('/api/worker/jobs/photos/remove', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const s = await jobState(b)
+  const phase = req.body?.phase === 'after' ? 'after_photos' : 'before_photos'
+  const slot = String(req.body?.slot || '')
+  res.json({ ok: true, ...stateDto(await saveState(b.id, { [phase]: (s[phase] || []).filter((p) => p.slot !== slot) })) })
+})
+
+app.post('/api/worker/jobs/notes', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  await jobState(b)
+  const col = req.body?.phase === 'after' ? 'after_notes' : 'before_notes'
+  res.json({ ok: true, ...stateDto(await saveState(b.id, { [col]: String(req.body?.text || '').slice(0, 200) })) })
+})
+
+// Step 8 — the customer signs off and rates the service on the worker's device.
+app.post('/api/worker/jobs/signature', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  await jobState(b)
+  const sig = String(req.body?.signature || '')
+  if (!sig.startsWith('data:image/')) return res.status(400).json({ ok: false, error: 'signature must be a data URL' })
+  const rating = Math.min(5, Math.max(0, Math.round(Number(req.body?.rating) || 0)))
+  const out = stateDto(await saveState(b.id, {
+    signature: sig, customer_rating: rating, customer_notes: String(req.body?.notes || '').slice(0, 200),
+  }))
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.signed', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Customer signed off${rating ? ` · rated ${rating}★` : ''}` })
+  res.json({ ok: true, ...out })
+})
+
+app.post('/api/worker/jobs/extras', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const s = await jobState(b)
+  const name = String(req.body?.name || '').trim()
+  const price = Math.max(0, Math.round(Number(req.body?.price) || 0))
+  if (!name || !price) return res.status(400).json({ ok: false, error: 'name and price are required' })
+  const extras = [...(s.extras || []), { id: Date.now(), name, price }]
+  const out = stateDto(await saveState(b.id, { extras }))
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.extra', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Added extra: ${name} (₹${price})` })
+  res.json({ ok: true, ...out })
+})
+
+app.post('/api/worker/jobs/extras/remove', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const s = await jobState(b)
+  const id = Number(req.body?.id)
+  res.json({ ok: true, ...stateDto(await saveState(b.id, { extras: (s.extras || []).filter((e) => Number(e.id) !== id) })) })
+})
+
+// Pause bookkeeping: paused_at marks the current pause's start; paused_ms accumulates finished
+// pauses. The app subtracts pausedMs from the server-anchored timer so a pause stops the clock.
+app.post('/api/worker/jobs/pause', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const s = await jobState(b)
+  if (s.paused) return res.json({ ok: true, ...stateDto(s) })
+  const out = stateDto(await saveState(b.id, { paused: true, paused_at: new Date().toISOString() }))
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.pause', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${req.worker.name} paused the service${req.body?.reason ? ` — ${req.body.reason}` : ''}` })
+  res.json({ ok: true, ...out })
+})
+
+app.post('/api/worker/jobs/resume', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const s = await jobState(b)
+  if (!s.paused) return res.json({ ok: true, ...stateDto(s) })
+  const add = s.paused_at ? Date.now() - new Date(s.paused_at).getTime() : 0
+  const out = stateDto(await saveState(b.id, { paused: false, paused_at: null, paused_ms: Number(s.paused_ms || 0) + add }))
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.resume', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${req.worker.name} resumed the service` })
+  res.json({ ok: true, ...out })
+})
+
+app.get('/api/worker/jobs/messages', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const q = await pool.query('SELECT id, sender, body, created FROM job_messages WHERE booking_id=$1 ORDER BY id', [b.id])
+  res.json({ ok: true, messages: q.rows })
+})
+
+app.post('/api/worker/jobs/messages', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const body = String(req.body?.text || '').trim().slice(0, 1000)
+  if (!body) return res.status(400).json({ ok: false, error: 'text is required' })
+  const q = await pool.query('INSERT INTO job_messages (booking_id, sender, body) VALUES ($1, $2, $3) RETURNING id, sender, body, created', [b.id, 'worker', body])
+  // Surfaces to the customer side via the same realtime bus the status changes use.
+  publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: req.worker.id, sender: 'worker', body })
+  res.json({ ok: true, message: q.rows[0] })
 })
 
 app.post('/api/worker/jobs/settle', auth, async (req, res) => {

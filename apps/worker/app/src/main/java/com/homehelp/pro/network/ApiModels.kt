@@ -58,11 +58,24 @@ data class WalletSummaryDto(
     val todayEarnings: Int = 0,
     val todayJobs: Int = 0,
     val todayCompleted: Int = 0,
+    val todayCancelled: Int = 0,
     val weekEarnings: Int = 0,
     val monthEarnings: Int = 0,
+    // Prior periods (same window length as the one they compare against), so the wallet can show
+    // "+15% vs yesterday" from real figures instead of a decorative arrow.
+    val yesterdayEarnings: Int = 0,
+    val lastWeekEarnings: Int = 0,
+    val lastMonthEarnings: Int = 0,
+    val totalEarned: Int = 0,
     val totalWithdrawn: Int = 0,
     val advanceOutstanding: Int = 0,
     val nextPayout: String = "",
+    // Lifetime performance rates. Null when the worker has no history yet — the Home
+    // Performance Overview renders "—" rather than a misleading 0%.
+    val completionPct: Int? = null,
+    val cancellationPct: Int? = null,
+    val punctualityPct: Int? = null,
+    val acceptancePct: Int? = null,
 )
 
 data class BreakupItem(val category: String = "", val amount: Int = 0)
@@ -162,6 +175,36 @@ data class WalletStateResponse(
     val advances: List<AdvanceEntry> = emptyList(),
 )
 
+/* ---------- wallet analytics (3_wallet.png) ---------- */
+
+/** One day of the earnings trend. [date] is ISO (yyyy-MM-dd). */
+data class TrendPoint(val date: String = "", val amount: Int = 0)
+
+data class ServiceEarning(val service: String = "", val amount: Int = 0, val pct: Int = 0)
+
+data class ServiceWiseDto(val total: Int = 0, val services: List<ServiceEarning> = emptyList())
+
+/** Payout rules + where the money goes. [bankAccount] is already masked server-side. */
+data class SettlementDto(
+    val dailyTime: String = "",
+    val minPayout: Int = 0,
+    val mode: String = "",
+    val bankAccount: String = "",
+    val bankVerified: Boolean = false,
+    val bankStatus: String = "",
+)
+
+/** Null when there aren't enough earning peers this month for a percentile to mean anything. */
+data class LeaderboardDto(val rank: Int = 0, val of: Int = 0, val topPercent: Int = 0)
+
+data class WalletAnalyticsResponse(
+    val ok: Boolean = true,
+    val trend: List<TrendPoint> = emptyList(),
+    val serviceWise: ServiceWiseDto? = null,
+    val settlement: SettlementDto? = null,
+    val leaderboard: LeaderboardDto? = null,
+)
+
 data class OtpResponse(val ok: Boolean = true, val devOtp: String = "")
 
 data class NotificationItem(
@@ -243,7 +286,7 @@ data class ShiftDto(
     val start: String = "",
     val end: String = "",
     val hours: Int = 8,
-    val graceMin: Int = 10,
+    val graceMin: Int = 15,
     val penalty: Int = 50,
     val minGuarantee: Int = 0,
 )
@@ -281,6 +324,13 @@ data class ScheduleItem(
     val customerName: String = "",
     val paymentStatus: String = "",
     val status: String = "",
+    // Straight-line distance from the worker's last reported position, and a speed-based ETA
+    // estimate. Both null when either side has no GPS fix yet — the app then renders "—".
+    val distanceKm: Double? = null,
+    val etaMins: Int? = null,
+    /** Booking reference, and the worker's share of this job (not the customer's total). */
+    val ref: String? = null,
+    val earnings: Int = 0,
 )
 
 data class DocumentsResponse(val ok: Boolean = true, val documents: List<DocumentDto> = emptyList())
@@ -292,6 +342,72 @@ data class StatusResponse(
     val error: String? = null,
     val jobStatus: String? = null,
     val activeJob: Job? = null,
+)
+
+/* ---------- In-service job state: checklist · photos · extras · pause · chat ---------- */
+
+/** One task on the job's checklist. Seeded server-side from the booked services. */
+data class ChecklistTask(
+    val id: Int = 0,
+    val label: String = "",
+    val service: String = "",
+    val done: Boolean = false,
+)
+
+/** A worker-added extra service billed on top of the booking. */
+data class JobExtra(val id: Long = 0, val name: String = "", val price: Int = 0)
+
+/** One captured shot, keyed by its named slot ("Sink Area") so a retake replaces it. */
+data class JobPhoto(val slot: String = "", val url: String = "", val at: String = "")
+
+/**
+ * The live working state of the active job. [pausedMs] is the total time the service has spent
+ * paused (including any pause still running), which the in-progress timer subtracts so a pause
+ * genuinely stops the clock.
+ */
+data class JobStateResponse(
+    val ok: Boolean = true,
+    val error: String? = null,
+    val checklist: List<ChecklistTask> = emptyList(),
+    /** The named shots this job requires, seeded server-side from the booked service. */
+    val photoSlots: List<String> = emptyList(),
+    val beforePhotos: List<JobPhoto> = emptyList(),
+    val afterPhotos: List<JobPhoto> = emptyList(),
+    val beforeNotes: String = "",
+    val afterNotes: String = "",
+    val signature: String? = null,
+    val signed: Boolean = false,
+    val customerRating: Int = 0,
+    val customerNotes: String = "",
+    val extras: List<JobExtra> = emptyList(),
+    val paused: Boolean = false,
+    val pausedMs: Long = 0,
+    val extrasTotal: Int = 0,
+)
+
+data class ChecklistBody(val items: List<ChecklistTask>)
+data class PhotoBody(val phase: String, val slot: String, val photo: String)
+data class PhotoRemoveBody(val phase: String, val slot: String)
+data class NotesBody(val phase: String, val text: String)
+data class SignatureBody(val signature: String, val rating: Int, val notes: String)
+data class ExtraBody(val name: String, val price: Int)
+data class ExtraRemoveBody(val id: Long)
+data class PauseBody(val reason: String? = null)
+data class MessageBody(val text: String)
+
+data class JobMessage(
+    val id: Int = 0,
+    val sender: String = "",
+    val body: String = "",
+    val created: String = "",
+) {
+    val fromWorker: Boolean get() = sender == "worker"
+}
+
+data class MessagesResponse(
+    val ok: Boolean = true,
+    val error: String? = null,
+    val messages: List<JobMessage> = emptyList(),
 )
 
 data class SettleResponse(

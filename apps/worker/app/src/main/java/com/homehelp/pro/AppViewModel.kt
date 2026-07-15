@@ -8,6 +8,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.runtime.mutableLongStateOf
+import com.homehelp.pro.network.ChecklistBody
+import com.homehelp.pro.network.ChecklistTask
+import com.homehelp.pro.network.ExtraBody
+import com.homehelp.pro.network.ExtraRemoveBody
+import com.homehelp.pro.network.JobExtra
+import com.homehelp.pro.network.JobMessage
+import com.homehelp.pro.network.JobStateResponse
+import com.homehelp.pro.network.JobPhoto
+import com.homehelp.pro.network.MessageBody
+import com.homehelp.pro.network.NotesBody
+import com.homehelp.pro.network.SignatureBody
+import com.homehelp.pro.network.PauseBody
+import com.homehelp.pro.network.PhotoBody
+import com.homehelp.pro.network.PhotoRemoveBody
 import com.homehelp.pro.network.AdvanceBody
 import com.homehelp.pro.network.AdvanceEligibilityDto
 import com.homehelp.pro.network.AdvanceEntry
@@ -37,6 +52,10 @@ import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
 import com.homehelp.pro.network.UploadDocBody
+import com.homehelp.pro.network.LeaderboardDto
+import com.homehelp.pro.network.ServiceWiseDto
+import com.homehelp.pro.network.SettlementDto
+import com.homehelp.pro.network.TrendPoint
 import com.homehelp.pro.network.WalletStateResponse
 import com.homehelp.pro.network.WalletSummaryDto
 import com.homehelp.pro.network.WithdrawBody
@@ -177,6 +196,18 @@ class AppViewModel : ViewModel() {
         private set
     var todayCompleted by mutableIntStateOf(0)
         private set
+    var todayCancelled by mutableIntStateOf(0)
+        private set
+    // Lifetime performance rates from the backend; null until it reports history, so the
+    // Home Performance Overview can show "—" instead of a misleading 0%.
+    var completionPct by mutableStateOf<Int?>(null)
+        private set
+    var cancellationPct by mutableStateOf<Int?>(null)
+        private set
+    var punctualityPct by mutableStateOf<Int?>(null)
+        private set
+    var acceptancePct by mutableStateOf<Int?>(null)
+        private set
     var walletBalance by mutableIntStateOf(0)
         private set
     var totalEarned by mutableIntStateOf(0)
@@ -203,6 +234,39 @@ class AppViewModel : ViewModel() {
     val deductionDetail = mutableStateListOf<DeductionEntry>()
     var deductionTotal by mutableIntStateOf(0)
         private set
+    // ─── Wallet analytics (3_wallet.png): trend · service split · settlement · leaderboard ───
+    var yesterdayEarnings by mutableIntStateOf(0)
+        private set
+    var lastWeekEarnings by mutableIntStateOf(0)
+        private set
+    var lastMonthEarnings by mutableIntStateOf(0)
+        private set
+    val earningsTrend = mutableStateListOf<TrendPoint>()
+    var serviceWise by mutableStateOf<ServiceWiseDto?>(null)
+        private set
+    var settlement by mutableStateOf<SettlementDto?>(null)
+        private set
+    var leaderboard by mutableStateOf<LeaderboardDto?>(null)
+        private set
+
+    /** Percentage change vs the previous period, or null when there's no base to compare with. */
+    fun changePct(now: Int, before: Int): Int? =
+        if (before <= 0) null else Math.round(((now - before) * 100f) / before)
+
+    fun loadWalletAnalytics() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.walletAnalytics()
+                earningsTrend.clear(); earningsTrend.addAll(r.trend)
+                serviceWise = r.serviceWise
+                settlement = r.settlement
+                leaderboard = r.leaderboard
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
     val walletHistory = mutableStateListOf<LedgerEntry>()
     val withdrawals = mutableStateListOf<WithdrawalEntry>()
     val advances = mutableStateListOf<AdvanceEntry>()
@@ -287,6 +351,11 @@ class AppViewModel : ViewModel() {
         DocItem("Passport Size Photo", "Pending"),
     )
 
+    /** True only when every required document has been reviewed and approved — drives the
+     *  verified badge on the Home profile header. */
+    val isKycVerified: Boolean
+        get() = documents.isNotEmpty() && documents.all { it.status == "Approved" }
+
     // ---- networking helpers ----
     /** Fire a backend call without blocking the UI; failures degrade to offline mode. */
     private fun sync(block: suspend () -> Unit) {
@@ -365,6 +434,9 @@ class AppViewModel : ViewModel() {
         // back to Home) keeps the active/in-progress job visible instead of losing it.
         activeJob = b.activeJob
         jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
+        // Re-hydrate the in-service working state (ticks/photos/extras/pause) for a job that was
+        // already running when the app was killed — this is what makes it survive a restart.
+        if (activeJob != null) loadJobState()
     }
 
     // ---- lifecycle transitions ----
@@ -526,7 +598,9 @@ class AppViewModel : ViewModel() {
     fun acceptJob() {
         jobStatus = JobStatus.ACCEPTED
         jobAcceptedAtMs = System.currentTimeMillis()
+        clearJobState()          // never inherit the previous job's ticks/photos/extras
         sync { api.acceptJob() }
+        loadJobState()           // seeds the checklist for this job's services
     }
 
     fun rejectJob() {
@@ -574,6 +648,168 @@ class AppViewModel : ViewModel() {
         return true
     }
 
+    // ─── In-service job state: checklist · before/after photos · extras · pause ───────────
+    // All server-owned (dispatch `job_state`, keyed by booking), so ticks, photos and extras
+    // survive navigation, process death and reinstalls. Every mutator posts and adopts the
+    // server's reply as the new truth rather than editing local copies optimistically.
+
+    var checklist by mutableStateOf<List<ChecklistTask>>(emptyList())
+        private set
+    /** The named shots this job requires (step 5/7), seeded server-side from the booked service. */
+    var photoSlots by mutableStateOf<List<String>>(emptyList())
+        private set
+    var beforePhotos by mutableStateOf<List<JobPhoto>>(emptyList())
+        private set
+    var afterPhotos by mutableStateOf<List<JobPhoto>>(emptyList())
+        private set
+    var beforeNotes by mutableStateOf("")
+        private set
+    var afterNotes by mutableStateOf("")
+        private set
+    var signature by mutableStateOf<String?>(null)
+        private set
+    var customerSigned by mutableStateOf(false)
+        private set
+    var customerRating by mutableIntStateOf(0)
+        private set
+    var customerNotes by mutableStateOf("")
+        private set
+    var extras by mutableStateOf<List<JobExtra>>(emptyList())
+        private set
+    var extrasTotal by mutableIntStateOf(0)
+        private set
+    var jobPaused by mutableStateOf(false)
+        private set
+    /** Total time the service has been paused, including a pause still in flight. */
+    var pausedMs by mutableLongStateOf(0L)
+        private set
+    var jobStateLoading by mutableStateOf(false)
+        private set
+    /**
+     * When [pausedMs] was last read from the server. [pausedMs] already counts an in-flight pause
+     * up to that instant, so a live timer must measure the running pause from here — not from now —
+     * or it would double-count it.
+     */
+    var stateAtMs by mutableLongStateOf(0L)
+        private set
+
+    val checklistDone: Int get() = checklist.count { it.done }
+
+    /** Total paused time as of [nowMs], extending an in-flight pause in real time. */
+    fun pausedMsAt(nowMs: Long): Long =
+        pausedMs + if (jobPaused && stateAtMs > 0) (nowMs - stateAtMs).coerceAtLeast(0L) else 0L
+
+    private fun adopt(s: JobStateResponse) {
+        stateAtMs = System.currentTimeMillis()
+        checklist = s.checklist
+        photoSlots = s.photoSlots
+        beforePhotos = s.beforePhotos
+        afterPhotos = s.afterPhotos
+        beforeNotes = s.beforeNotes
+        afterNotes = s.afterNotes
+        signature = s.signature
+        customerSigned = s.signed
+        customerRating = s.customerRating
+        customerNotes = s.customerNotes
+        extras = s.extras
+        extrasTotal = s.extrasTotal
+        jobPaused = s.paused
+        pausedMs = s.pausedMs
+    }
+
+    /** Pulls the active job's working state. Safe to call when there's no active job (409 → no-op). */
+    fun loadJobState() {
+        if (activeJob == null) return
+        jobStateLoading = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                adopt(api.jobState())
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+            jobStateLoading = false
+        }
+    }
+
+    private fun mutateState(block: suspend () -> JobStateResponse) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                adopt(block())
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun toggleTask(id: Int) {
+        val next = checklist.map { if (it.id == id) it.copy(done = !it.done) else it }
+        checklist = next                                    // instant tick; server reply confirms
+        mutateState { api.saveChecklist(ChecklistBody(next)) }
+    }
+
+    fun addJobPhoto(phase: String, slot: String, dataUrl: String) =
+        mutateState { api.addJobPhoto(PhotoBody(phase, slot, dataUrl)) }
+    fun removeJobPhoto(phase: String, slot: String) =
+        mutateState { api.removeJobPhoto(PhotoRemoveBody(phase, slot)) }
+    fun saveJobNotes(phase: String, text: String) = mutateState { api.saveJobNotes(NotesBody(phase, text)) }
+    fun saveSignature(dataUrl: String, rating: Int, notes: String) =
+        mutateState { api.saveSignature(SignatureBody(dataUrl, rating, notes)) }
+
+    /** How many of the required slots have a shot for this phase — drives "Photos Required (2/3)". */
+    fun photosDone(phase: String): Int {
+        val taken = (if (phase == "after") afterPhotos else beforePhotos).map { it.slot }.toSet()
+        return photoSlots.count { it in taken }
+    }
+    fun photoFor(phase: String, slot: String): JobPhoto? =
+        (if (phase == "after") afterPhotos else beforePhotos).firstOrNull { it.slot == slot }
+    fun addExtra(name: String, price: Int) = mutateState { api.addExtra(ExtraBody(name, price)) }
+    fun removeExtra(id: Long) = mutateState { api.removeExtra(ExtraRemoveBody(id)) }
+    fun pauseJob(reason: String?) = mutateState { api.pauseJob(PauseBody(reason)) }
+    fun resumeJob() = mutateState { api.resumeJob() }
+
+    // ─── Customer chat (module: Chat / Call Customer) ─────────────────────────────────────
+    val messages = mutableStateListOf<JobMessage>()
+    var chatSending by mutableStateOf(false)
+        private set
+
+    fun loadMessages() {
+        if (activeJob == null) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.jobMessages()
+                messages.clear(); messages.addAll(r.messages)
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun sendMessage(text: String) {
+        val body = text.trim()
+        if (body.isEmpty() || activeJob == null) return
+        chatSending = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.sendJobMessage(MessageBody(body))
+                val r = api.jobMessages()
+                messages.clear(); messages.addAll(r.messages)
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+            chatSending = false
+        }
+    }
+
+    /** Clears per-job working state so a finished job never bleeds into the next one. */
+    private fun clearJobState() {
+        checklist = emptyList(); photoSlots = emptyList()
+        beforePhotos = emptyList(); afterPhotos = emptyList()
+        beforeNotes = ""; afterNotes = ""; signature = null; customerSigned = false
+        customerRating = 0; customerNotes = ""
+        extras = emptyList(); extrasTotal = 0; jobPaused = false; pausedMs = 0L
+        messages.clear(); beforePhoto = null
+    }
+
     // Before-photo captured on arrival (module: Start Job → Before Photos). Held locally and
     // attached to the completion payload; cleared when a new job starts.
     var beforePhoto: String? = null
@@ -604,6 +840,7 @@ class AppViewModel : ViewModel() {
         activeJob = null
         jobStatus = JobStatus.NONE
         jobAcceptedAtMs = 0L
+        clearJobState()
         // Reconcile with the authoritative server totals (earnings stay 0 until the customer confirms).
         sync {
             val r = api.settle()
@@ -620,6 +857,7 @@ class AppViewModel : ViewModel() {
         activeJob = null
         jobStatus = JobStatus.NONE
         jobAcceptedAtMs = 0L
+        clearJobState()
         sync { api.cancel(ReasonBody(reason)) }
     }
 
@@ -631,8 +869,17 @@ class AppViewModel : ViewModel() {
         todayEarnings = s.todayEarnings
         todayJobs = s.todayJobs
         todayCompleted = s.todayCompleted
+        todayCancelled = s.todayCancelled
+        completionPct = s.completionPct
+        cancellationPct = s.cancellationPct
+        punctualityPct = s.punctualityPct
+        acceptancePct = s.acceptancePct
         weekEarnings = s.weekEarnings
         monthEarnings = s.monthEarnings
+        yesterdayEarnings = s.yesterdayEarnings
+        lastWeekEarnings = s.lastWeekEarnings
+        lastMonthEarnings = s.lastMonthEarnings
+        totalEarned = s.totalEarned
         withdrawnTotal = s.totalWithdrawn
         advanceOutstanding = s.advanceOutstanding
         nextPayout = s.nextPayout

@@ -270,10 +270,17 @@ async function summary(wid) {
   const payoutDay = await getSettingInt(ADMIN_URL, 'payout_day', 4)
   const minPayout = await minPayoutLimit()
   const nextPayout = nextPayoutDate(freq, payoutDay)
+  // Prior periods, so the wallet can show "+15% vs yesterday" honestly. Each window is the same
+  // LENGTH as the one it compares against (rolling, matching weekEarnings/monthEarnings above) —
+  // comparing a rolling 30 days against a calendar month would flatter or punish at random.
+  const yesterdayEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND (created AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date - 1")
+  const lastWeekEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '14 days' AND created <= now()-interval '7 days'")
+  const lastMonthEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '60 days' AND created <= now()-interval '30 days'")
   return {
     available, pending: 0, hold, onHold: hold,
     totalEarned: earned, totalWithdrawn, withdrawn: totalWithdrawn,
     advanceOutstanding, todayEarnings, weekEarnings, monthEarnings,
+    yesterdayEarnings, lastWeekEarnings, lastMonthEarnings,
     thisWeek: weekEarnings, thisMonth: monthEarnings,
     // Payout policy (see nextPayoutDate). nextPayout is an ESTIMATE from the configured schedule,
     // not a commitment — nothing pays automatically. nextPayoutEst is what would be withdrawable,
@@ -291,6 +298,107 @@ async function summary(wid) {
 async function setPayoutReference(withdrawalId, reference, utr) {
   if (!reference && !utr) return
   await pool.query('UPDATE worker_withdrawals SET reference=COALESCE($2, reference), utr=COALESCE($3, utr) WHERE id=$1', [withdrawalId, reference || null, utr || null])
+}
+
+// ── Wallet analytics (3_wallet.png): trend · service-wise · settlement · leaderboard ──────────
+
+/** Daily earnings for the last [days] days, oldest first. Days with nothing earned return 0. */
+async function earningsTrend(wid, days = 30) {
+  const q = await pool.query(
+    `SELECT to_char(d.day, 'YYYY-MM-DD') date,
+            COALESCE(SUM(i.amount), 0)::int amount
+       FROM generate_series(
+              ((now() AT TIME ZONE 'Asia/Kolkata')::date - ($2::int - 1)),
+              (now() AT TIME ZONE 'Asia/Kolkata')::date,
+              interval '1 day') d(day)
+       LEFT JOIN worker_income i
+         ON i.worker_id = $1
+        AND (i.created AT TIME ZONE 'Asia/Kolkata')::date = d.day
+      GROUP BY d.day ORDER BY d.day`,
+    [wid, days])
+  return q.rows
+}
+
+/**
+ * Earnings grouped by the service that produced them.
+ *
+ * `label` on a Job Earnings row comes in three shapes, because the format has changed over time:
+ *   "Kitchen Cleaning · #HH42064"  — current: settleBooking() writes "<service> · <ref>"
+ *   "#HH42064"                     — older rows: the booking ref alone
+ *   "Kitchen Cleaning"             — older/seeded rows: the service name outright
+ * Take the service name straight off the current shape, resolve a bare ref against the booking,
+ * and treat anything else at face value. Whatever is still unresolved groups as "Other Services"
+ * rather than being dropped, so the parts always sum to the total the worker actually earned.
+ */
+const looksLikeRef = (v) => /^(#|SEED-)/i.test(String(v || '').trim())
+// "<service> · <ref>" → "<service>". Returns '' for any other shape.
+const serviceFromLabel = (v) => {
+  const [head, ...rest] = String(v || '').split(' · ')
+  return rest.length && !looksLikeRef(head) ? head.trim() : ''
+}
+
+async function serviceWiseEarnings(wid) {
+  const rows = (await pool.query(
+    "SELECT label, SUM(amount)::int amount FROM worker_income WHERE worker_id=$1 AND category='Job Earnings' GROUP BY label", [wid])).rows
+  if (!rows.length) return { total: 0, services: [] }
+  const byRef = new Map()
+  if (rows.some((r) => looksLikeRef(r.label))) {
+    const bookings = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wid}`, [])
+    for (const b of bookings || []) byRef.set(String(b.ref || `#${b.id}`), (b.items || []).map((i) => i.name).join(', '))
+  }
+  const acc = new Map()
+  for (const r of rows) {
+    const label = String(r.label || '').trim()
+    const name = serviceFromLabel(label) || (looksLikeRef(label) ? byRef.get(label) : label) || 'Other Services'
+    acc.set(name, (acc.get(name) || 0) + Number(r.amount || 0))
+  }
+  const total = [...acc.values()].reduce((t, v) => t + v, 0)
+  const services = [...acc.entries()]
+    .map(([service, amount]) => ({ service, amount, pct: total ? Math.round((amount * 100) / total) : 0 }))
+    .sort((a, b) => b.amount - a.amount)
+  return { total, services }
+}
+
+/** Payout rules + the worker's payout destination, as the Settlement Info card shows them. */
+async function settlementInfo(wid) {
+  const w = await tryGet(WORKER_URL, `/internal/workers/${wid}`, {})
+  // Bank details live under the worker's profile JSON (mergeProfile(id, { bank })), not as
+  // top-level columns — the snapshot only exposes bank_status alongside it.
+  const bank = w?.profile?.bank || {}
+  // Field names are bankAccount / bankUpi — see workerDto() in the worker service. `bank.account`
+  // and `bank.upi` do not exist, so reading those made this card always say "Not set".
+  const acct = String(bank.bankAccount || '')
+  const upi = String(bank.bankUpi || '')
+  const status = String(w?.bank_status || w?.bankStatus || '')
+  const freq = await getSetting(ADMIN_URL, 'payout_frequency', 'weekly')
+  return {
+    // Derived from the configured payout policy — the same one summary() estimates nextPayout from.
+    // A hardcoded time here would contradict the admin's setting the moment it changed.
+    dailyTime: FREQ_LABEL[freq] || 'On demand',
+    // MUST be the key the withdrawal endpoint actually enforces (min_payout_limit). Reading a
+    // different key told the worker "min ₹200" while the server rejected anything under ₹500.
+    minPayout: await minPayoutLimit(),
+    mode: acct ? 'Bank Transfer' : (upi ? 'UPI' : 'Not set'),
+    bankAccount: acct ? `****${acct.slice(-4)}` : upi,
+    bankVerified: status === 'Verified',
+    bankStatus: status || 'Not Added',
+  }
+}
+
+/**
+ * Where this worker sits against the others this month, by earnings. Real ranking over the
+ * ledger — "Top 20%" means 80% of active earners earned less. Returns null when there aren't
+ * enough peers for the claim to mean anything.
+ */
+async function leaderboard(wid) {
+  const rows = (await pool.query(
+    `SELECT worker_id, SUM(amount)::int total FROM worker_income
+      WHERE created > now()-interval '30 days' GROUP BY worker_id ORDER BY total DESC`)).rows
+  if (rows.length < 3) return null
+  const idx = rows.findIndex((r) => Number(r.worker_id) === Number(wid))
+  if (idx < 0) return null
+  const topPct = Math.max(1, Math.round(((idx + 1) / rows.length) * 100))
+  return { rank: idx + 1, of: rows.length, topPercent: topPct }
 }
 
 // Finalize a withdrawal once the payout service reports back. Idempotent (terminal states are
@@ -370,6 +478,13 @@ async function rewardsDto(wid) {
 /* ---------- worker wallet ---------- */
 app.get('/api/worker/wallet/summary', auth, async (req, res) => res.json(await summary(req.wid)))
 app.get('/api/worker/wallet/state', auth, async (req, res) => res.json(await walletState(req.wid)))
+app.get('/api/worker/wallet/analytics', auth, async (req, res) => res.json({
+  ok: true,
+  trend: await earningsTrend(req.wid, 30),
+  serviceWise: await serviceWiseEarnings(req.wid),
+  settlement: await settlementInfo(req.wid),
+  leaderboard: await leaderboard(req.wid),
+}))
 app.get('/api/worker/wallet/earnings-breakup', auth, async (req, res) => res.json(await earningsBreakupDto(req.wid)))
 app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(await deductionsDto(req.wid)))
 app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await historyLedger(req.wid)))

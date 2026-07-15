@@ -8,7 +8,8 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings, getSettingInt,
+  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
+  getSettingInt,
 } from '@homehelp/shared'
 
 const PORT = Number(process.env.PORT || 4004)
@@ -56,6 +57,17 @@ async function init() {
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `CREATE INDEX IF NOT EXISTS ix_shift_worker ON shifts(worker_id)`,
+    // Job offer log — one row per booking offered to a worker, with how they responded.
+    // This is the ONLY record of offers-vs-declines, so it's what the acceptance rate is
+    // computed from (workers.offered_booking holds just the current offer and is overwritten).
+    `CREATE TABLE IF NOT EXISTS job_offers (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, booking_id INTEGER NOT NULL,
+      offered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      outcome TEXT NOT NULL DEFAULT 'offered',
+      responded_at TIMESTAMPTZ,
+      UNIQUE(worker_id, booking_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_job_offers_worker ON job_offers(worker_id, offered_at)`,
     // Daily attendance: one row per worker per day with check-in/out times + GPS.
     `CREATE TABLE IF NOT EXISTS attendance (
       id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, day DATE NOT NULL,
@@ -69,10 +81,13 @@ async function init() {
     `CREATE TABLE IF NOT EXISTS shift_defs (
       id SERIAL PRIMARY KEY, code TEXT UNIQUE, name TEXT NOT NULL,
       start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
-      grace_min INTEGER NOT NULL DEFAULT 10, penalty INTEGER NOT NULL DEFAULT 50,
+      grace_min INTEGER NOT NULL DEFAULT 15, penalty INTEGER NOT NULL DEFAULT 50,
       min_g_weekday INTEGER NOT NULL DEFAULT 850, min_g_weekend INTEGER NOT NULL DEFAULT 950,
       active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0
     )`,
+    // Business rule: check-in later than 15 min after shift start ⇒ ₹50 penalty. Normalize any
+    // rows still on the old 10-min default to 15 (leaves admin-customized values untouched).
+    `UPDATE shift_defs SET grace_min = 15 WHERE grace_min = 10`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS shift_def_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS shift_def_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_minutes INTEGER`,
@@ -223,9 +238,15 @@ function periodEarnings(bookings) {
   const monthStr = todayStr.slice(0, 7)
   const weekAgoStr = new Date(nowIstMs - 6 * 86400 * 1000).toISOString().slice(0, 10)
   let todayEarnings = 0, weekEarnings = 0, monthEarnings = 0, todayCompleted = 0, todayJobs = 0
+  let todayCancelled = 0, lifetimeTotal = 0, lifetimeCompleted = 0, lifetimeCancelled = 0
   for (const b of bookings || []) {
+    lifetimeTotal++
+    if (b.status === 'completed') lifetimeCompleted++
+    if (b.status === 'cancelled') lifetimeCancelled++
     // Today's job count = everything scheduled/created today that wasn't cancelled.
-    if (istDay(b.date || b.created) === todayStr && b.status !== 'cancelled') todayJobs++
+    const scheduledToday = istDay(b.date || b.created) === todayStr
+    if (scheduledToday && b.status !== 'cancelled') todayJobs++
+    if (scheduledToday && b.status === 'cancelled') todayCancelled++
     if (b.status !== 'completed') continue
     const day = istDay(b.completed_at || b.created)
     if (!day) continue
@@ -234,26 +255,109 @@ function periodEarnings(bookings) {
     if (day >= weekAgoStr) weekEarnings += amt
     if (day.startsWith(monthStr)) monthEarnings += amt
   }
-  return { todayEarnings, weekEarnings, monthEarnings, todayCompleted, todayJobs }
+  return {
+    todayEarnings, weekEarnings, monthEarnings, todayCompleted, todayJobs, todayCancelled,
+    // Lifetime rates for the Home "Performance Overview". Null (not 0) when the worker has no
+    // jobs yet, so the app renders "—" instead of a misleading 0%.
+    completionPct: lifetimeTotal ? Math.round((lifetimeCompleted / lifetimeTotal) * 100) : null,
+    cancellationPct: lifetimeTotal ? Math.round((lifetimeCancelled / lifetimeTotal) * 100) : null,
+  }
+}
+
+/**
+ * Acceptance % over the worker's last 30 days of job offers: accepted / (accepted + declined).
+ * Offers still sitting at 'offered' (never answered) are excluded — they're pending, not refusals.
+ * Returns null when the worker has answered no offers yet (the app renders "—").
+ */
+async function acceptancePct(workerId) {
+  try {
+    const r = await pool.query(
+      `SELECT COUNT(*) FILTER (WHERE outcome='accepted')::int AS accepted,
+              COUNT(*) FILTER (WHERE outcome IN ('accepted','declined'))::int AS answered
+         FROM job_offers
+        WHERE worker_id = $1 AND offered_at >= now() - INTERVAL '30 days'`,
+      [workerId],
+    )
+    const row = r.rows[0]
+    if (!row || !row.answered) return null
+    return Math.round((row.accepted / row.answered) * 100)
+  } catch (e) {
+    console.error('[worker] acceptancePct:', e?.message || e)
+    return null
+  }
+}
+
+// Great-circle distance in km between two lat/lng points.
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+// Rough city-traffic travel speed used to turn straight-line distance into an ETA. This is an
+// ESTIMATE, not a routed time — there's no routing engine here.
+const CITY_SPEED_KMH = 22
+
+/**
+ * Punctuality % over the worker's last 30 attendance days: on-time check-ins / days attended.
+ * Returns null when the worker has no attendance history yet (the app renders "—").
+ */
+async function punctualityPct(workerId) {
+  try {
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS days, COUNT(*) FILTER (WHERE on_time IS TRUE)::int AS ontime
+         FROM attendance
+        WHERE worker_id = $1 AND check_in IS NOT NULL AND day >= (CURRENT_DATE - INTERVAL '30 days')`,
+      [workerId],
+    )
+    const row = r.rows[0]
+    if (!row || !row.days) return null
+    return Math.round((row.ontime / row.days) * 100)
+  } catch (e) {
+    console.error('[worker] punctualityPct:', e?.message || e)
+    return null
+  }
 }
 // IST calendar date (YYYY-MM-DD) and 12-hour clock label for a timestamp — used by Today's Schedule.
 const istDateStr = (d) => { try { return new Date(new Date(d).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) } catch { return '' } }
 const istClock = (d) => { try { const t = new Date(new Date(d).getTime() + 5.5 * 3600 * 1000); let h = t.getUTCHours(); const m = String(t.getUTCMinutes()).padStart(2, '0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${h}:${m} ${ap}` } catch { return '' } }
 // Build Today's Schedule timeline from the worker's non-cancelled jobs dated today, in order.
-function todaySchedule(bookings, custNames) {
+// The worker's cut of a booking — the same commission split dispatch applies when it offers a
+// job. The Jobs list must show what the worker earns, not what the customer pays.
+async function workerShareOf(total) {
+  const pct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  return Math.max(0, Math.round((Number(total || 0) * (100 - pct)) / 100))
+}
+
+async function todaySchedule(bookings, custNames, worker) {
   const today = istDateStr(Date.now())
   const inProgress = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
-  return (bookings || [])
+  // The worker's last known position (reported by the app's device heartbeat). Without it we
+  // can't measure distance, so distanceKm/etaMins stay null and the app renders "—".
+  const wLat = worker && worker.last_lat != null ? Number(worker.last_lat) : null
+  const wLng = worker && worker.last_lng != null ? Number(worker.last_lng) : null
+  const rows = (bookings || [])
     .filter((b) => b.status !== 'cancelled' && istDateStr(b.date || b.created) === today)
     .sort((a, b) => new Date(a.created) - new Date(b.created))
-    .map((b) => ({
-      time: b.time || istClock(b.created),
-      service: (b.items || []).map((i) => i.name).join(', ') || 'Service',
-      location: b.address || '—',
-      durationMins: bookingDurationMinutes(b),
-      customerName: (custNames && custNames[b.user_id]) || 'Customer',
-      paymentStatus: b.payment_status === 'paid' ? 'Paid' : (String(b.payment || '').toLowerCase() === 'cash' ? 'Cash' : 'Pending'),
-      status: b.status === 'completed' ? 'Completed' : (inProgress.includes(b.status) ? 'In progress' : 'Upcoming'),
+  return await Promise.all(rows.map(async (b) => {
+      const canGeo = wLat != null && wLng != null && b.cust_lat != null && b.cust_lng != null
+      const km = canGeo ? haversineKm(wLat, wLng, Number(b.cust_lat), Number(b.cust_lng)) : null
+      return {
+        time: b.time || istClock(b.created),
+        service: (b.items || []).map((i) => i.name).join(', ') || 'Service',
+        location: b.address || '—',
+        durationMins: bookingDurationMinutes(b),
+        customerName: (custNames && custNames[b.user_id]) || 'Customer',
+        paymentStatus: b.payment_status === 'paid' ? 'Paid' : (String(b.payment || '').toLowerCase() === 'cash' ? 'Cash' : 'Pending'),
+        status: b.status === 'completed' ? 'Completed' : (inProgress.includes(b.status) ? 'In progress' : 'Upcoming'),
+        // Straight-line distance + a speed-based ETA estimate (no routing engine here).
+        distanceKm: km == null ? null : Math.round(km * 10) / 10,
+        etaMins: km == null ? null : Math.max(1, Math.round((km / CITY_SPEED_KMH) * 60)),
+        ref: b.ref,
+        earnings: await workerShareOf(b.total),
+      }
     }))
 }
 async function getWorker(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM workers WHERE id=$1', [id]); return rows[0] || null }
@@ -366,7 +470,18 @@ async function bootstrap(wid) {
   // fall back to the local snapshot only if the wallet service is unreachable.
   const wsum = await tryGet(WALLET_URL, `/internal/summary/${wid}`, null)
   const pe = periodEarnings(mine)
-  const walletSummaryOut = wsum ? { ...wsum, todayJobs: pe.todayJobs, todayCompleted: pe.todayCompleted } : { ...walletSummary(w), ...pe }
+  // The wallet service owns the money figures; the booking-derived counts + rates are always
+  // ours, so they survive the wallet path too (Home's Progress + Performance cards read them).
+  const bookingStats = {
+    todayJobs: pe.todayJobs,
+    todayCompleted: pe.todayCompleted,
+    todayCancelled: pe.todayCancelled,
+    completionPct: pe.completionPct,
+    cancellationPct: pe.cancellationPct,
+    punctualityPct: await punctualityPct(wid),
+    acceptancePct: await acceptancePct(wid),
+  }
+  const walletSummaryOut = wsum ? { ...wsum, ...bookingStats } : { ...walletSummary(w), ...pe, ...bookingStats }
   return {
     worker: workerDto(w), wallet: walletDto(w), walletSummary: walletSummaryOut,
     jobStatus: active ? (STATUS_TO_ENUM[active.status] || 'NONE') : 'NONE',
@@ -392,7 +507,7 @@ async function bootstrap(wid) {
       }
     })() : null,
     bookings: mine.map(bookingDto),
-    schedule: todaySchedule(mine, custNames),
+    schedule: await todaySchedule(mine, custNames, w),
     attendance: await attendanceToday(wid),
     shift: await shiftPlans(wid),
     leaves: await leaveList(wid),
@@ -1187,7 +1302,36 @@ app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
 })
 app.get('/internal/workers/:id', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
 app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json({ services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available, status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null, last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null }) })
-app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET offered_booking=$1 WHERE id=$2', [req.body?.bookingId ?? null, Number(req.params.id)]); res.json({ ok: true }) })
+app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => {
+  const wid = Number(req.params.id)
+  const bookingId = req.body?.bookingId ?? null
+  await pool.query('UPDATE workers SET offered_booking=$1 WHERE id=$2', [bookingId, wid])
+  // Log every offer so the acceptance rate has a denominator. Re-offering the same booking
+  // to the same worker must not create a second row, hence ON CONFLICT DO NOTHING.
+  if (bookingId != null) {
+    await pool.query(
+      `INSERT INTO job_offers (worker_id, booking_id) VALUES ($1, $2)
+       ON CONFLICT (worker_id, booking_id) DO NOTHING`,
+      [wid, Number(bookingId)],
+    ).catch((e) => console.error('[worker] job_offers insert:', e?.message || e))
+  }
+  res.json({ ok: true })
+})
+
+// Records how a worker responded to an offer ('accepted' | 'declined'). Called by dispatch.
+// Only ever moves a row off 'offered', so a late duplicate can't rewrite a real response.
+app.post('/internal/workers/:id/offer-outcome', internalOnly, async (req, res) => {
+  const wid = Number(req.params.id)
+  const bookingId = Number(req.body?.bookingId)
+  const outcome = String(req.body?.outcome || '')
+  if (!bookingId || !['accepted', 'declined'].includes(outcome)) return res.status(400).json({ ok: false, error: 'bad outcome' })
+  await pool.query(
+    `UPDATE job_offers SET outcome=$1, responded_at=now()
+      WHERE worker_id=$2 AND booking_id=$3 AND outcome='offered'`,
+    [outcome, wid, bookingId],
+  ).catch((e) => console.error('[worker] offer-outcome:', e?.message || e))
+  res.json({ ok: true })
+})
 app.post('/internal/workers/:id/location', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2 WHERE id=$3', [req.body?.lat, req.body?.lng, Number(req.params.id)]); res.json({ ok: true }) })
 app.get('/internal/workers/:id/public-profile', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json(w ? { id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, phone: w.phone, avatar: w.avatar, verified: !!w.verified, city: w.city, services: Array.isArray(w.services) ? w.services : [] } : null) })
 app.patch('/internal/workers/:id', internalOnly, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))

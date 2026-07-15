@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -887,7 +888,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             SectionLabel("Your Shift Plan")
             Text(
-                "Pick one shift. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 10)} min of the start time — later check-ins are penalised.",
+                "Pick one shift. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
                 fontSize = 12.sp, color = TextGray,
             )
             Spacer(Modifier.height(Space.m))

@@ -654,7 +654,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             }
             Spacer(Modifier.height(Space.l))
             PrimaryButton("Start Service", enabled = otp.length == 4) {
-                if (vm.verifyOtpAndStart(otp)) nav.navigate(Routes.IN_PROGRESS) else error = true
+                if (vm.verifyOtpAndStart(otp)) nav.navigate(Routes.BEFORE_PHOTOS) else error = true
             }
             Spacer(Modifier.height(Space.s))
             Text(
@@ -689,6 +689,9 @@ private fun haversineKm(aLat: Double, aLng: Double, bLat: Double, bLng: Double):
 
 // Parse an ISO-8601 UTC instant (e.g. "2026-06-30T06:18:05.510Z") to epoch millis.
 // minSdk 24 → use SimpleDateFormat (java.time.Instant needs API 26 / desugaring).
+/** Public twin of [parseIsoMillis] so the Jobs list can anchor its elapsed timer identically. */
+fun parseIsoMillisPublic(iso: String?): Long? = parseIsoMillis(iso)
+
 private fun parseIsoMillis(s: String?): Long? {
     if (s.isNullOrBlank()) return null
     for (pattern in arrayOf("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'")) {
@@ -727,7 +730,9 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         parseIsoMillis(job.startedAt) ?: vm.serviceStartMs.takeIf { it > 0L } ?: System.currentTimeMillis()
     }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val rawElapsed = ((nowMs - startMs) / 1000L).toInt().coerceAtLeast(0)
+    // Paused time is excluded from elapsed, so a pause genuinely stops the clock rather than
+    // letting the booked duration burn down while the worker waits.
+    val rawElapsed = ((nowMs - startMs - vm.pausedMsAt(nowMs)) / 1000L).toInt().coerceAtLeast(0)
     // Booked time is up once elapsed reaches the duration. Freeze the on-screen timer at the
     // booked length and raise a one-time "service time completed" popup (worker still ends
     // the service manually with the proof photo).
@@ -736,29 +741,18 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val elapsed = if (timeUp) targetSec else rawElapsed
     var timeUpDismissed by remember { mutableStateOf(false) }
 
-    // Live-camera proof of work: capture a photo, attach it to the job, end the service,
-    // then move on. The customer app receives the completion (+ photo) and opens its
-    // review/feedback page automatically.
-    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp ->
-        if (bmp != null) {
-            vm.endService(bitmapToDataUrl(bmp))
-            toast(ctx, "Proof photo uploaded · service ended")
-            nav.navigate(Routes.JOB_COMPLETED)
-        } else {
-            toast(ctx, "A photo is required to end the service")
-        }
-    }
-    val cameraPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) cameraLauncher.launch(null) else toast(ctx, "Camera permission is needed to capture the proof photo")
-    }
-    fun captureAndEnd() {
-        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
-            cameraLauncher.launch(null)
-        else cameraPerm.launch(Manifest.permission.CAMERA)
-    }
+    // Ending the service hands off to step 7 (After Photos) → step 8 (Customer Sign) → complete.
+    // The proof photo the customer sees is the first after-photo, attached server-side.
 
     LaunchedEffect(Unit) {
+        vm.loadJobState()   // checklist / extras / pause state for this job
         while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
+    }
+    var pauseDialog by remember { mutableStateOf(false) }
+    if (pauseDialog) {
+        PauseReasonDialog(onDismiss = { pauseDialog = false }) { reason ->
+            vm.pauseJob(reason); pauseDialog = false
+        }
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
@@ -774,7 +768,24 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(ms))
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                StatusPill(if (timeUp) "Time Completed" else "Service In Progress", if (timeUp) GreenLight else PurpleLight, if (timeUp) GreenSuccess else Purple)
+                StatusPill(
+                    if (vm.jobPaused) "Paused" else if (timeUp) "Time Completed" else "Service In Progress",
+                    if (vm.jobPaused) GoldLight else if (timeUp) GreenLight else PurpleLight,
+                    if (vm.jobPaused) Amber else if (timeUp) GreenSuccess else Purple,
+                )
+            }
+            if (vm.jobPaused) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(GoldLight).padding(Space.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("⏸", fontSize = 18.sp)
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text("Service paused", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 14.sp)
+                        Text("The timer is stopped. Resume when you're back on the job.", color = TextGray, fontSize = 12.sp)
+                    }
+                }
             }
             Card {
                 TimeInfoRow("⏳", "Duration", "${job.durationMinutes} Minutes")
@@ -833,42 +844,78 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                         modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
                     Spacer(Modifier.width(Space.l))
                     Icon(Icons.Filled.Chat, contentDescription = "Chat", tint = Purple,
-                        modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })
+                        modifier = Modifier.size(22.dp).clickable { nav.navigate(Routes.JOB_CHAT) })
                 }
             }
-            // Service checklist — tick tasks as you finish them (builds customer confidence).
-            val tasks = remember(job.services) { checklistFor(job.services.firstOrNull() ?: "") }
-            var doneSet by remember(job.services) { mutableStateOf(setOf<Int>()) }
+            // Service checklist — server-held, so ticks survive leaving the screen and reach the
+            // customer/admin. The list itself is seeded from the booked services.
             Card {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Service Checklist", fontWeight = FontWeight.SemiBold, color = TextDark)
-                    Text("${doneSet.size}/${tasks.size}", fontWeight = FontWeight.Bold, color = if (doneSet.size == tasks.size) GreenSuccess else Purple)
+                    Text(
+                        "${vm.checklistDone}/${vm.checklist.size}",
+                        fontWeight = FontWeight.Bold,
+                        color = if (vm.checklist.isNotEmpty() && vm.checklistDone == vm.checklist.size) GreenSuccess else Purple,
+                    )
                 }
                 Spacer(Modifier.height(Space.xs))
-                tasks.forEachIndexed { i, t ->
-                    val ticked = i in doneSet
+                if (vm.checklist.isEmpty()) {
+                    Text("Loading tasks…", fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(vertical = Space.s))
+                }
+                vm.checklist.forEachIndexed { i, t ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { doneSet = if (ticked) doneSet - i else doneSet + i }.padding(vertical = Space.s),
+                        Modifier.fillMaxWidth().clickable { vm.toggleTask(t.id) }.padding(vertical = Space.s),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (ticked) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
+                        if (t.done) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
                         else Box(Modifier.size(22.dp).border(1.5.dp, Divider, RoundedCornerShape(Radius.pill)))
                         Spacer(Modifier.width(Space.m))
-                        Text(t, fontSize = 14.sp, color = if (ticked) TextGray else TextDark, modifier = Modifier.weight(1f))
+                        Text(t.label, fontSize = 14.sp, color = if (t.done) TextGray else TextDark, modifier = Modifier.weight(1f))
                     }
-                    if (i < tasks.lastIndex) Divider(color = Divider)
+                    if (i < vm.checklist.lastIndex) Divider(color = Divider)
+                }
+            }
+            // Extra services added on this job (module: Add Extra Service).
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Extra Services", fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    if (vm.extras.isNotEmpty()) {
+                        Text("+₹${vm.extrasTotal}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 14.sp)
+                        Spacer(Modifier.width(Space.s))
+                    }
+                    Text(
+                        "Add", color = Purple, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                        modifier = Modifier.clickable { nav.navigate(Routes.JOB_EXTRAS) },
+                    )
+                }
+                if (vm.extras.isEmpty()) {
+                    Spacer(Modifier.height(Space.xs))
+                    Text("Customer asked for something extra? Add it here so it's billed.", fontSize = 12.sp, color = TextGray)
+                } else {
+                    vm.extras.forEach { e ->
+                        Row(Modifier.fillMaxWidth().padding(top = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                            Text("• ${e.name}", fontSize = 13.sp, color = TextDark, modifier = Modifier.weight(1f))
+                            Text("₹${e.price}", fontSize = 13.sp, color = TextDark, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
             SafetyCard()
             Text(
-                "📷 Tap “End Service” to take a live proof-of-work photo. The customer gets it and is asked to rate the service.",
+                "📷 Tap “End Service” to capture the after photos, then collect the customer's signature and rating.",
                 fontSize = 12.sp, color = TextGray,
             )
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
-            Box(Modifier.padding(Space.l)) {
-                PrimaryButton("📷  End Service & Capture Photo") {
-                    captureAndEnd()
+            Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                // Pause/Resume sits beside the end action: it's a state toggle, not a way out.
+                if (vm.jobPaused) {
+                    PrimaryButton("▶  Resume Service") { vm.resumeJob() }
+                } else {
+                    OutlineButton("⏸  Pause Service", modifier = Modifier.fillMaxWidth(), color = Amber) { pauseDialog = true }
+                }
+                PrimaryButton("End Service & Capture After Photos", enabled = !vm.jobPaused) {
+                    nav.navigate(Routes.AFTER_PHOTOS)
                 }
             }
         }
@@ -883,6 +930,43 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
             text = { Text("The booked ${job.durationMinutes} min for this service is over. Wrap up and tap “End Service” to capture the proof photo.", color = TextGray, fontSize = 14.sp) },
         )
     }
+}
+
+/**
+ * Why the service is pausing. The reason rides along to the activity feed so ops can see why a
+ * job's clock stopped — a pause with no reason is indistinguishable from a worker walking off.
+ */
+@Composable
+private fun PauseReasonDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val reasons = listOf(
+        "Water supply cut",
+        "Power cut",
+        "Customer asked to wait",
+        "Short break",
+        "Waiting for supplies",
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text("Pause the service?", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text("The timer stops until you resume. Pick a reason:", color = TextGray, fontSize = 13.sp)
+                Spacer(Modifier.height(Space.m))
+                reasons.forEach { r ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(r) }.padding(vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("⏸", fontSize = 14.sp)
+                        Spacer(Modifier.width(Space.m))
+                        Text(r, fontSize = 14.sp, color = TextDark)
+                    }
+                    Divider(color = Divider)
+                }
+            }
+        },
+    )
 }
 
 // One row of the In-Progress info card: emoji + bold label on the left, value on the right.
