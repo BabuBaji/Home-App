@@ -149,6 +149,43 @@ export default function SettingsScreen() {
           <ToggleRow label="Show GST-inclusive prices to customers" on={s.gst_inclusive !== 'false'} onClick={() => toggle('gst_inclusive')} disabled={!editable} />
         </div>
 
+        {/* Worker Payout Policy — read by the wallet service. min_payout_limit is enforced on every
+            withdrawal request; frequency/day only drive the estimated next-payout date shown to
+            workers and admins. Nothing pays automatically — payouts stay worker-requested and
+            admin-approved — so 'On demand' is the honest setting when there is no stated cycle. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Worker Payout Policy</h4>
+        <div className="form-grid">
+          <Field label="Minimum payout (₹)">
+            <input disabled={!editable} type="number" min={0} value={s.min_payout_limit || ''} onChange={(e) => set('min_payout_limit', e.target.value)} placeholder="500" />
+          </Field>
+          <Field label="Payout frequency">
+            <select disabled={!editable} value={s.payout_frequency || 'weekly'} onChange={(e) => set('payout_frequency', e.target.value)}>
+              <option value="weekly">Weekly</option>
+              <option value="fortnightly">Fortnightly</option>
+              <option value="monthly">Monthly</option>
+              <option value="daily">Daily</option>
+              <option value="on_demand">On demand (no schedule)</option>
+            </select>
+          </Field>
+          {s.payout_frequency !== 'on_demand' && s.payout_frequency !== 'daily' && (
+            s.payout_frequency === 'monthly' ? (
+              <Field label="Payout day of month">
+                <input disabled={!editable} type="number" min={1} max={28} value={s.payout_day || ''} onChange={(e) => set('payout_day', e.target.value)} placeholder="1" />
+              </Field>
+            ) : (
+              <Field label="Payout day">
+                <select disabled={!editable} value={s.payout_day || '4'} onChange={(e) => set('payout_day', e.target.value)}>
+                  {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
+                </select>
+              </Field>
+            )
+          )}
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          The minimum is enforced on every withdrawal request. Frequency sets the payout date estimated for
+          workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
+        </p>
+
         {/* Session & Security */}
         <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Session &amp; Security</h4>
         <div className="form-grid">

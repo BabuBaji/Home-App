@@ -113,35 +113,6 @@ export default function Pricing() {
             </form>
           )}
         </Card>
-
-        <Card title="Worker Payout Policy">
-          {!s ? <Loading /> : (
-            <form className="form-grid" onSubmit={saveFees} style={{ maxWidth: 640 }}>
-              <Field label="Minimum payout (₹)"><input disabled={!editable} value={s.min_payout_limit || ''} onChange={(e) => set('min_payout_limit', e.target.value)} type="number" /></Field>
-              <Field label="Payout frequency">
-                <select className="select" disabled={!editable} value={s.payout_frequency || 'weekly'} onChange={(e) => set('payout_frequency', e.target.value)}>
-                  {[['weekly', 'Weekly'], ['fortnightly', 'Fortnightly'], ['monthly', 'Monthly'], ['daily', 'Daily'], ['on_demand', 'On demand (no schedule)']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </Field>
-              {s.payout_frequency !== 'on_demand' && s.payout_frequency !== 'daily' && (
-                <Field label={s.payout_frequency === 'monthly' ? 'Payout day of month' : 'Payout day'}>
-                  {s.payout_frequency === 'monthly'
-                    ? <input disabled={!editable} value={s.payout_day || ''} onChange={(e) => set('payout_day', e.target.value)} type="number" min={1} max={28} />
-                    : (
-                      <select className="select" disabled={!editable} value={s.payout_day || '4'} onChange={(e) => set('payout_day', e.target.value)}>
-                        {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
-                      </select>
-                    )}
-                </Field>
-              )}
-              <div className="muted" style={{ gridColumn: '1 / -1', fontSize: 12.5, marginTop: -4 }}>
-                The minimum is enforced on every withdrawal request. Frequency sets the payout date estimated
-                for workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
-              </div>
-              {editable && <div style={{ gridColumn: '1 / -1' }}><button className="btn">Save changes</button></div>}
-            </form>
-          )}
-        </Card>
       </div>
 
       <div className="col-rail">
