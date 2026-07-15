@@ -324,7 +324,7 @@ export default function WorkerDetail() {
             </div>
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <strong style={{ fontSize: 24, lineHeight: 1.1 }}>{w.name}</strong>{w.verified && <BadgeCheck size={20} color="#2563eb" />}
+                <strong style={{ fontSize: 20, lineHeight: 1.15 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
               </div>
               <div><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
