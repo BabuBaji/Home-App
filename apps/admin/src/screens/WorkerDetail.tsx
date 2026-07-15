@@ -27,7 +27,7 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
   const t = trend ?? null
   const good = t == null || t === 0 ? null : (invert ? t < 0 : t > 0)
   return (
-    <div style={{ flex: '1 1 96px', minWidth: 96, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+    <div style={{ flex: '1 1 0', minWidth: 88, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
       <div style={{ fontSize: 11, color: 'var(--muted,#667085)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, color: tone }}>{value}</div>
       {t != null && t !== 0 && <div style={{ fontSize: 10.5, marginTop: 2, color: good ? '#16a34a' : '#dc2626' }}>{t > 0 ? '▲' : '▼'} {Math.abs(t)}</div>}
@@ -156,6 +156,7 @@ export default function WorkerDetail() {
   ]
   const act = async (patch: Record<string, unknown>, msg: string) => { try { await updateWorker(w.id, patch); toast(msg); load() } catch (e) { toast((e as Error).message) } }
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }
+  const softBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card,#fff)', border: '1px solid var(--line,#e4e7ec)', color: 'var(--violet,#5b51e8)', padding: '9px 15px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }
   const show = (t: string) => tab === 'overview' || tab === t
 
   const liveOpPanel = (
@@ -294,15 +295,16 @@ export default function WorkerDetail() {
 
   return (
     <div className="grid" style={{ gap: 14 }}>
-      {/* Breadcrumb + title */}
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      {/* Breadcrumb + title + actions */}
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
         <div>
-          <button className="btn ghost" onClick={() => nav('/workers')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 4 }}><ChevronLeft size={16} /> Back to Worker List</button>
+          <button onClick={() => nav('/workers')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--violet,#5b51e8)', fontWeight: 600, fontSize: 13, padding: 0, marginBottom: 6 }}><ChevronLeft size={16} /> Back to Worker List</button>
           <h2 style={{ margin: 0, display: 'flex', gap: 10, alignItems: 'center' }}>Worker Details <Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></h2>
         </div>
-        <div className="row" style={{ gap: 8 }}>
-          <button className="btn" onClick={() => toast(`Call ${w.phone || ''}`)}><Phone size={15} /> Call Worker</button>
-          <button className="btn" onClick={() => toast('Messaging is not wired yet')}><MessageSquare size={15} /> Send Message</button>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button style={softBtn} onClick={() => toast(`Call ${w.phone || ''}`)}><Phone size={15} /> Call Worker</button>
+          <button style={softBtn} onClick={() => toast('Messaging is not wired yet')}><MessageSquare size={15} /> Send Message</button>
+          <button className="btn" onClick={() => setTab('notes')}>More Actions</button>
         </div>
       </div>
 
@@ -327,7 +329,8 @@ export default function WorkerDetail() {
         </Card>
 
         <Card>
-          <div className="row" style={{ gap: 20, flexWrap: 'wrap', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 16, height: '100%' }}>
+          <div className="row" style={{ justifyContent: 'space-between', gap: '14px 12px', flexWrap: 'wrap', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
             <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? w.liveJob.status : (onDuty ? 'Available' : 'Offline')} />
             <StatusItem icon={<Briefcase size={14} />} label="Current Job" value={w.liveJob ? w.liveJob.ref : '—'} sub={w.liveJob?.service} />
             <StatusItem icon={<MapPin size={14} />} label="Zone" value={zoneName} />
@@ -345,6 +348,7 @@ export default function WorkerDetail() {
             <Kpi label="Cancellation" value={`${m?.cancellationPct ?? 0}%`} tone={(m?.cancellationPct ?? 0) > 10 ? '#dc2626' : undefined} trend={m?.trends?.cancellation} invert />
             <Kpi label="Avg Rating" value={<span>{w.rating || '—'} <Star size={12} fill="#f59e0b" stroke="#f59e0b" style={{ verticalAlign: -1 }} /></span>} trend={m?.trends?.rating} />
             <Kpi label="Today's Earnings" value={rupee(m?.todayEarnings)} tone="#7c3aed" />
+          </div>
           </div>
         </Card>
       </div>
