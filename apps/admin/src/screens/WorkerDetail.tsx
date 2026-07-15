@@ -27,7 +27,7 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
   const t = trend ?? null
   const good = t == null || t === 0 ? null : (invert ? t < 0 : t > 0)
   return (
-    <div style={{ flex: '1 1 0', minWidth: 88, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+    <div style={{ minWidth: 0, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
       <div style={{ fontSize: 11, color: 'var(--muted,#667085)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, color: tone }}>{value}</div>
       {t != null && t !== 0 && <div style={{ fontSize: 10.5, marginTop: 2, color: good ? '#16a34a' : '#dc2626' }}>{t > 0 ? '▲' : '▼'} {Math.abs(t)}</div>}
@@ -351,7 +351,7 @@ export default function WorkerDetail() {
             <StatusItem icon={<MapPin size={14} />} label="Last GPS" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(3)}, ${Number(w.last_lng).toFixed(3)}` : '—'} />
             <StatusItem icon={<Clock size={14} />} label="Idle Time" value={dev.idleMins != null ? `${dev.idleMins} min` : '—'} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: 10, paddingTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', gap: 8, paddingTop: 12 }}>
             <Kpi label="Today's Jobs" value={m?.todayJobs ?? 0} sub={`Completed: ${m?.completedToday ?? 0}`} />
             <Kpi label="Weekly Jobs" value={m?.weekJobs ?? 0} sub={`Completed: ${m?.completedWeek ?? 0}`} trend={m?.trends?.weekJobs} />
             <Kpi label="Monthly Jobs" value={m?.monthJobs ?? 0} sub={`Completed: ${m?.completedMonth ?? 0}`} />
