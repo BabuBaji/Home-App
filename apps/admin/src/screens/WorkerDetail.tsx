@@ -230,8 +230,8 @@ export default function WorkerDetail() {
   const ws = wal?.walletSummary || w.wallet
   const paidWd = (wal?.withdrawals || []).filter((x) => x.status === 'Paid')
   const lastPayout = paidWd[0] || null
-  const nextThu = new Date(Date.now() + (((4 - new Date().getDay() + 7) % 7) || 7) * 86400000)
-  const fmtShort = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+  const lastMethod = (paidWd[0]?.method || wal?.withdrawals?.[0]?.method || '').toLowerCase()
+  const payoutMethod = lastMethod === 'upi' ? 'UPI' : lastMethod === 'bank' ? 'Bank Transfer' : (w.profile?.bank?.bankAccount ? 'Bank Transfer' : w.profile?.bank?.bankUpi ? 'UPI' : '—')
   const thisYm = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
   const credits = (wal?.history || []).filter((h) => h.isCredit)
   const catLabel = (t: string) => { const s = (t || '').toLowerCase(); if (s.includes('job') || s.includes('base')) return 'Base Earnings'; if (s.includes('incentive')) return 'Incentives'; if (s.includes('tip')) return 'Tips'; if (s.includes('guarantee')) return 'Guarantee'; if (s.includes('bonus') || s.includes('sitara') || s.includes('shakti')) return 'Bonus'; return t || 'Other' }
@@ -459,7 +459,7 @@ export default function WorkerDetail() {
               <Kpi label="Total Earnings" value={rupee(ws?.totalEarned ?? w.earnings)} />
               <Kpi label="Pending Payout" value={rupee(ws?.hold)} tone={(ws?.hold ?? 0) > 0 ? '#d97706' : undefined} />
               <Kpi label="Last Payout" value={lastPayout ? rupee(lastPayout.amount) : '—'} sub={lastPayout?.date} />
-              <Kpi label="Next Payout" value={fmtShort(nextThu)} sub="On Thursday" />
+              <Kpi label="Available" value={rupee(ws?.available ?? w.balance)} tone="#16a34a" sub="Withdrawable" />
             </div>
           ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', gap: 8, paddingTop: 12 }}>
@@ -709,7 +709,7 @@ export default function WorkerDetail() {
               <Info label="Pending Settlement" value={rupee(ws?.hold)} />
               <Info label="Last Payout" value={lastPayout ? `${rupee(lastPayout.amount)} · ${lastPayout.date}` : '—'} />
               <Info label="Total Payouts" value={rupee(ws?.totalWithdrawn)} />
-              <Info label="Payout Method" value="Bank Transfer" />
+              <Info label="Payout Method" value={payoutMethod} />
               <Info label="Bank Account" value={bank?.bankAccount ? `••••${String(bank.bankAccount).slice(-4)}${bank.bankName ? ` · ${bank.bankName}` : ''}` : '—'} verified={w.bank_status === 'Verified'} />
               <button className="btn" style={{ width: '100%', marginTop: 12, justifyContent: 'center' }} onClick={() => setTab('docs')}><Wallet size={15} /> View Payout Settings</button>
             </Panel>
