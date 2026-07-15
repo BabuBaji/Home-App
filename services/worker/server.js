@@ -203,6 +203,7 @@ const workerDto = (w) => {
     // verification result (registered name / rejection reason).
     bankHolder: bank.bankHolder || '', bankName: bank.bankName || '', bankAccount: bank.bankAccount || '',
     bankIfsc: bank.bankIfsc || '', bankUpi: bank.bankUpi || '', chequePhoto: bank.chequePhoto || '',
+    bankAccountType: bank.bankAccountType || '', // 'savings' | 'current' — passed to RazorpayX on payout
     bankRemarks: bv.reason || '',
     bankRegisteredName: bv.registeredName || '',
     bankNameMatch: (bv.nameMatch === undefined || bv.nameMatch === null) ? null : !!bv.nameMatch,

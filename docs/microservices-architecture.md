@@ -71,7 +71,8 @@ cd infra/migrate && npm install && node index.js           # services/api/homehe
 - `booking.completed` (booking) → wallet (credit worker), payment (record settlement), notification
 - `booking.cancelled` (booking) → wallet (comp), notification
 - `payment.succeeded` (booking/payment) → payment (record), booking (mark paid), notification
-- `payout.completed` (payment) → wallet (mark paid)
+- `payout.completed` / `payout.failed` (payment) → wallet (finalize withdrawal, record gateway reference)
+- `payout.processing` (payment) → wallet (record gateway reference while the payout is in flight)
 - `job.accepted` (dispatch), `customer.login` (auth), `admin.action` (admin), `activity` (all) → notification
 - `settings.updated` (admin) → config caches
 ```

@@ -58,6 +58,11 @@ const DEFAULT_SETTINGS = {
   razorpay_webhook_secret: '', payment_webhook_secret: '', payout_webhook_secret: '', payout_provider: '',
   razorpayx_account_number: '', payout_mode: 'IMPS',
   earnings_auto_release: 'true', advance_recovery_percent: '30', auto_approve_withdrawal_below: '2000', advance_max: '5000',
+  // Payout policy. There is no auto-payout scheduler — payouts are still worker-requested and
+  // admin-approved. These declare the ORG'S POLICY: min_payout_limit is enforced on every
+  // withdrawal request, and payout_frequency/payout_day drive the estimated next-payout date
+  // shown to workers and admins. 'on_demand' frequency = no schedule, so no estimate is shown.
+  payout_frequency: 'weekly', payout_day: '4', min_payout_limit: '500',
 }
 const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key',
   'razorpay_webhook_secret', 'payment_webhook_secret', 'payout_webhook_secret']

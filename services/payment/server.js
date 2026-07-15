@@ -120,6 +120,13 @@ async function rzpxGet(cfg, path) {
 const PAYOUT_DONE = new Set(['processed'])
 const PAYOUT_FAILED = new Set(['reversed', 'failed', 'rejected', 'cancelled'])
 
+// RazorpayX accepts bank_account.account_type as 'savings' | 'current'. Send it only when the
+// worker actually chose one — an empty/unknown value would be rejected by the API.
+const bankAccountType = (bank) => {
+  const t = String(bank?.bankAccountType || '').toLowerCase()
+  return t === 'savings' || t === 'current' ? { account_type: t } : {}
+}
+
 // Initiate a single worker payout. Idempotent per withdrawal via the unique index; safe to re-run.
 async function initiatePayout({ withdrawalId, workerId, amount, method }) {
   if (!withdrawalId || !amount || amount <= 0) return
@@ -131,9 +138,10 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
 
   // MOCK mode — no real gateway configured. Complete instantly so the ledger reconciles.
   if (!cfg.live) {
+    const reference = 'MOCK-' + withdrawalId
     await pool.query("INSERT INTO payouts (worker_id,withdrawal_id,amount,status,provider,mode,reference) VALUES ($1,$2,$3,'paid','mock',$4,$5) ON CONFLICT (withdrawal_id) WHERE withdrawal_id IS NOT NULL DO NOTHING",
-      [workerId, withdrawalId, amount, method || 'bank', 'MOCK-' + withdrawalId])
-    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId })
+      [workerId, withdrawalId, amount, method || 'bank', reference])
+    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId, reference })
     console.log(`[payment] payout ${withdrawalId} completed (MOCK — RazorpayX not configured)`)
     return
   }
@@ -152,9 +160,11 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
       name: holder, type: 'employee', reference_id: `worker_${workerId}`,
       ...(worker?.phone ? { contact: String(worker.phone) } : {}),
     })
+    // NB: the outer account_type is RazorpayX's vpa/bank_account discriminator; bank_account.account_type
+    // is the worker's actual savings/current selection. Omitted entirely when not on file.
     const fundAccount = await rzpxCall(cfg, '/v1/fund_accounts', useUpi
       ? { contact_id: contact.id, account_type: 'vpa', vpa: { address: bank.bankUpi } }
-      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount } })
+      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount, ...bankAccountType(bank) } })
 
     const payout = await rzpxCall(cfg, '/v1/payouts', {
       account_number: cfg.account,
@@ -170,9 +180,13 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
     await pool.query("INSERT INTO payouts (worker_id,withdrawal_id,amount,status,provider,mode,reference) VALUES ($1,$2,$3,$4,'razorpayx',$5,$6) ON CONFLICT (withdrawal_id) WHERE withdrawal_id IS NOT NULL DO NOTHING",
       [workerId, withdrawalId, amount, status, useUpi ? 'UPI' : cfg.mode, payout.id])
 
-    if (status === 'paid') publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId })
-    else if (status === 'failed') publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: 'Payout rejected' })
-    // else: queued/processing — the payout webhook will finalize it.
+    // payout.utr is the bank transfer number — usually null until the rail actually settles, so the
+    // webhook is where it normally arrives.
+    if (status === 'paid') publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId, reference: payout.id, utr: payout.utr || '' })
+    else if (status === 'failed') publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: 'Payout rejected', reference: payout.id, utr: payout.utr || '' })
+    // else: queued/processing — the webhook will finalize it, but hand the ledger the gateway
+    // reference now so support can trace an in-flight payout instead of waiting for the webhook.
+    else publishEvent(REDIS_URL, 'payout.processing', { withdrawalId, workerId, reference: payout.id })
     console.log(`[payment] payout ${withdrawalId} -> RazorpayX ${payout.id} (${payout.status})`)
   } catch (e) {
     await pool.query("INSERT INTO payouts (worker_id,withdrawal_id,amount,status,provider,failure_reason) VALUES ($1,$2,$3,'failed','razorpayx',$4) ON CONFLICT (withdrawal_id) WHERE withdrawal_id IS NOT NULL DO NOTHING",
@@ -216,7 +230,7 @@ async function initiateBankVerification({ workerId, bank, name }) {
     const contact = await rzpxCall(cfg, '/v1/contacts', { name: holder, type: 'employee', reference_id: `worker_${workerId}` })
     const fa = await rzpxCall(cfg, '/v1/fund_accounts', useUpi
       ? { contact_id: contact.id, account_type: 'vpa', vpa: { address: bank.bankUpi } }
-      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount } })
+      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount, ...bankAccountType(bank) } })
     const val = await rzpxCall(cfg, '/v1/fund_accounts/validations', {
       account_number: cfg.account, fund_account: { id: fa.id }, amount: 100, currency: 'INR',
       notes: { workerId: String(workerId), holder },
@@ -371,12 +385,16 @@ app.post('/api/payments/payout/webhook', async (req, res) => {
   if (!dup.rowCount) return res.json({ ok: true, duplicate: true })
 
   const type = evt.event || 'payout.processed'
+  // entity.id is the gateway payout id (pout_…). Keep whatever we stored at initiation if the
+  // webhook body doesn't carry one, so a sparse payload can't blank an existing reference.
+  const reference = entity.id || null
+  const utr = entity.utr || '' // the bank's transfer number — what the worker sees on their statement
   if (type === 'payout.processed' || (!evt.event && evt.withdrawalId)) {
-    await pool.query("UPDATE payouts SET status='paid' WHERE withdrawal_id=$1", [withdrawalId])
-    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId })
+    await pool.query("UPDATE payouts SET status='paid', reference=COALESCE($2, reference) WHERE withdrawal_id=$1", [withdrawalId, reference])
+    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId, reference, utr })
   } else if (type === 'payout.reversed' || type === 'payout.failed' || type === 'payout.rejected') {
-    await pool.query("UPDATE payouts SET status='failed', failure_reason=$2 WHERE withdrawal_id=$1", [withdrawalId, entity.status_details?.description || type])
-    publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: entity.status_details?.description || type })
+    await pool.query("UPDATE payouts SET status='failed', failure_reason=$2, reference=COALESCE($3, reference) WHERE withdrawal_id=$1", [withdrawalId, entity.status_details?.description || type, reference])
+    publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: entity.status_details?.description || type, reference, utr })
   }
   res.json({ ok: true })
 })
