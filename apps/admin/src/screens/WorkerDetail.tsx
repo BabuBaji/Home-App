@@ -5,7 +5,7 @@ import {
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
   Clock, Wifi, BatteryMedium, CalendarClock, Download,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, fetchSettings, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate } from '../components/UI'
 import { useStore } from '../store'
@@ -186,14 +186,11 @@ export default function WorkerDetail() {
   const [wal, setWal] = useState<WalletState | null>(null)
   const [earnTab, setEarnTab] = useState<'txns' | 'payouts'>('txns')
   const [earnPage, setEarnPage] = useState(1)
-  const [commissionPct, setCommissionPct] = useState(20)
-  const [calcAmount, setCalcAmount] = useState(1000)
 
   const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
   useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
   useEffect(() => { if (tab === 'earnings' && !wal && id) fetchWorkerWallet(Number(id)).then(setWal).catch(() => {}) }, [tab, wal, id])
-  useEffect(() => { fetchSettings().then((s) => setCommissionPct(Number(s.commission_percent) || 20)).catch(() => {}) }, [])
   const submitNote = async () => {
     const text = noteText.trim(); if (!text || !w) return
     try { const n = await addWorkerNote(w.id, text, admin?.name || 'Admin'); setNotes([n, ...notes]); setNoteText('') }
@@ -252,8 +249,6 @@ export default function WorkerDetail() {
   const earnPages = Math.max(1, Math.ceil(earnRows.length / EARN_PAGE))
   const curEarnPage = Math.min(earnPage, earnPages)
   const earnPageRows = earnRows.slice((curEarnPage - 1) * EARN_PAGE, curEarnPage * EARN_PAGE)
-  const calcCommission = Math.round((calcAmount * commissionPct) / 100)
-  const calcNet = Math.max(0, calcAmount - calcCommission)
   const exportEarnCsv = () => {
     const head = earnTab === 'txns' ? ['Date', 'Time', 'Type', 'Ref', 'Amount', 'Credit/Debit', 'Status', 'Remarks'] : ['Date', 'Amount', 'Method', 'Status', 'Reference']
     const rows = earnTab === 'txns'
@@ -720,8 +715,7 @@ export default function WorkerDetail() {
             </Panel>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 16 }}>
-            <Card>
+          <Card>
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
                 <div className="row" style={{ gap: 4 }}>
                   {([['txns', 'Earnings Transactions'], ['payouts', 'Payout History']] as const).map(([k, label]) => (
@@ -778,25 +772,7 @@ export default function WorkerDetail() {
                   </div>
                 </>
               )}
-            </Card>
-
-            <Card>
-              <strong style={{ fontSize: 15 }}>Earnings Calculator</strong>
-              <div style={{ marginTop: 14 }}>
-                <label style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Service Amount (₹)</label>
-                <input type="number" value={calcAmount} min={0} onChange={(e) => setCalcAmount(Math.max(0, Number(e.target.value) || 0))} style={{ width: '100%', marginTop: 5, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--line,#e4e7ec)', fontSize: 14 }} />
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <div className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--line,#f1f2f6)', fontSize: 13 }}><span className="muted">Service Amount</span><strong>{rupee(calcAmount)}</strong></div>
-                <div className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--line,#f1f2f6)', fontSize: 13 }}><span className="muted">Platform Commission ({commissionPct}%)</span><strong style={{ color: '#dc2626' }}>−{rupee(calcCommission)}</strong></div>
-                <div className="row" style={{ justifyContent: 'space-between', padding: '10px 0', fontSize: 15 }}><strong>You Earn</strong><strong style={{ color: '#16a34a' }}>{rupee(calcNet)}</strong></div>
-              </div>
-              <div style={{ marginTop: 10, background: 'var(--soft,#f6f7fb)', borderRadius: 10, padding: 10, fontSize: 12, display: 'flex', gap: 8 }}>
-                <ShieldAlert size={15} style={{ flexShrink: 0, color: 'var(--muted,#98a2b3)', marginTop: 1 }} />
-                <span>Worker share is {100 - commissionPct}% of the service amount. Payouts are processed on payout runs to the verified bank account.</span>
-              </div>
-            </Card>
-          </div>
+          </Card>
         </>
       )}
 
