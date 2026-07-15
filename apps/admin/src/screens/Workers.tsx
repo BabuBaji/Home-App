@@ -11,8 +11,8 @@ type Stats = { total: number; active: number; pending: number; inactive: number 
 
 type Personal = { gender: string; dob: string; fatherName: string; address: string; aadhaar: string; pan: string; whatsapp: string; emergencyName: string; emergencyPhone: string; languages: string }
 const EMPTY_PERSONAL: Personal = { gender: '', dob: '', fatherName: '', address: '', aadhaar: '', pan: '', whatsapp: '', emergencyName: '', emergencyPhone: '', languages: '' }
-type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string; personal: Personal }
-const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker', personal: { ...EMPTY_PERSONAL } }
+type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string; personal: Personal; skillLevels: Record<string, string> }
+const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker', personal: { ...EMPTY_PERSONAL }, skillLevels: {} }
 
 export default function Workers() {
   const { admin } = useStore()
@@ -65,7 +65,7 @@ export default function Workers() {
   const addWorker = async () => {
     setBusy(true)
     try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation, personal: draft.personal })
+      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation, personal: draft.personal, skillLevels: draft.skillLevels })
       toast('Worker added')
       setAddOpen(false); setDraft(EMPTY_DRAFT); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -75,7 +75,7 @@ export default function Workers() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation, personal: editDraft.personal })
+      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation, personal: editDraft.personal, skillLevels: editDraft.skillLevels })
       toast('Worker updated')
       setEditing(null); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -91,7 +91,7 @@ export default function Workers() {
   }
 
   const openEdit = (w: Worker) => {
-    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker', personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) } })
+    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker', personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) }, skillLevels: { ...((w as { profile?: { skillLevels?: Record<string, string> } }).profile?.skillLevels || {}) } })
     setEditing(w)
   }
 
@@ -275,6 +275,26 @@ function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChan
               ))}
         </div>
       </div>
+
+      {draft.services.length > 0 && (
+        <div className="field">
+          <span>Skill Levels</span>
+          <div className="grid" style={{ gap: 6, border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
+            {draft.services.map((s) => (
+              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13 }}>{s}</span>
+                <select value={draft.skillLevels[s] || ''} onChange={(e) => onChange({ ...draft, skillLevels: { ...draft.skillLevels, [s]: e.target.value } })} style={{ width: 160 }}>
+                  <option value="">— Level —</option>
+                  <option value="Basic">Basic</option>
+                  <option value="Intermediate">Intermediate</option>
+                  <option value="Advanced">Advanced</option>
+                  <option value="Expert">Expert</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Personal & KYC details (optional — stored on the worker profile) */}
       <div className="field"><span style={{ fontWeight: 600 }}>Personal & KYC details</span></div>

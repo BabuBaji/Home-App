@@ -4,9 +4,10 @@ import {
   ChevronLeft, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, TrendingUp, Clock, XCircle, Wallet, ShieldAlert, Zap,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, type Zone } from '../api'
-import type { WorkerDetail } from '../types'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, type Zone } from '../api'
+import type { WorkerDetail, WorkerNote } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate } from '../components/UI'
+import { useStore } from '../store'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
@@ -52,13 +53,21 @@ export default function WorkerDetail() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
+  const { admin } = useStore()
   const [w, setW] = useState<WorkerDetail | null>(null)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
+  const [notes, setNotes] = useState<WorkerNote[]>([])
+  const [noteText, setNoteText] = useState('')
 
-  const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then(setW).catch((e: Error) => setErr(e.message)) }
+  const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
   useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
+  const submitNote = async () => {
+    const text = noteText.trim(); if (!text || !w) return
+    try { const n = await addWorkerNote(w.id, text, admin?.name || 'Admin'); setNotes([n, ...notes]); setNoteText('') }
+    catch (e) { toast((e as Error).message) }
+  }
 
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!w) return <Loading />
@@ -212,11 +221,19 @@ export default function WorkerDetail() {
         </Panel>
 
         <Panel title={`Skills & Services (${w.services?.length ?? 0})`}>
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {(w.services || []).map((s) => <Badge key={s} tone="blue" dot={false}>{s}</Badge>)}
-            {(!w.services || w.services.length === 0) && <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
-          </div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>Skill levels (Expert/Advanced) aren't captured yet.</div>
+          {(w.services && w.services.length > 0) ? (
+            <div className="grid" style={{ gap: 5 }}>
+              {w.services.map((s) => {
+                const lvl = w.profile?.skillLevels?.[s]
+                return (
+                  <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13 }}>{s}</span>
+                    {lvl && <Badge tone={lvl === 'Expert' ? 'green' : lvl === 'Advanced' ? 'blue' : lvl === 'Intermediate' ? 'amber' : 'gray'} dot={false}>{lvl}</Badge>}
+                  </div>
+                )
+              })}
+            </div>
+          ) : <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
         </Panel>
 
         <Panel title={`Recent Jobs (${w.recentJobs?.length ?? 0})`} action={<button className="btn ghost" onClick={() => nav('/bookings')}>View All</button>}>
@@ -229,6 +246,54 @@ export default function WorkerDetail() {
               </span>
             </div>
           )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No recent jobs.</div>}
+        </Panel>
+      </div>
+
+      {/* Weekly availability + Admin notes */}
+      <div style={grid3}>
+        <Panel title="Weekly Availability">
+          {(() => {
+            const av = w.profile?.availability
+            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            if (!av || !av.availableDays) return <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>Not set by the worker yet.</div>
+            return (
+              <div className="grid" style={{ gap: 4 }}>
+                {days.map((d) => {
+                  const on = !!av.availableDays?.[d]
+                  return (
+                    <div key={d} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 13 }}>{d}</span>
+                      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {on && av.shiftStart && <span className="muted" style={{ fontSize: 12 }}>{av.shiftStart} – {av.shiftEnd}</span>}
+                        <Badge tone={on ? 'green' : 'gray'} dot={false}>{on ? 'Available' : 'Off'}</Badge>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+        </Panel>
+
+        <Panel title="Admin Notes">
+          <div className="grid" style={{ gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Add a note…" style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === 'Enter') submitNote() }} />
+              <button className="btn" onClick={submitNote}>Add</button>
+            </div>
+            {notes.length > 0 ? notes.map((n) => (
+              <div key={n.id} style={{ borderLeft: '3px solid var(--violet,#5b51e8)', paddingLeft: 10 }}>
+                <div style={{ fontSize: 13 }}>{n.note}</div>
+                <div className="muted" style={{ fontSize: 11 }}>{n.author || 'Admin'}{n.created ? ` · ${shortDate(n.created)}` : ''}</div>
+              </div>
+            )) : <div className="muted" style={{ fontSize: 13 }}>No notes yet.</div>}
+          </div>
+        </Panel>
+
+        <Panel title="Attendance & Shift">
+          <Info label="On Shift" value={<Badge tone={w.on_shift ? 'green' : 'gray'} dot={false}>{w.on_shift ? 'On shift' : 'Off'}</Badge>} />
+          <Info label="Shift Assigned" value={w.shift_def_id ? `Shift #${w.shift_def_id}` : '—'} />
+          <Info label="Availability" value={<Badge tone={w.available ? 'green' : 'gray'} dot={false}>{w.available ? 'Online' : 'Offline'}</Badge>} />
         </Panel>
       </div>
 

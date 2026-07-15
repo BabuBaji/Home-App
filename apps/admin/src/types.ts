@@ -34,6 +34,8 @@ export interface Worker {
     bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string }
     bankVerification?: { status?: string; registeredName?: string; nameMatch?: boolean | null; reason?: string }
     personal?: { gender?: string; dob?: string; fatherName?: string; address?: string; aadhaar?: string; pan?: string; whatsapp?: string; emergencyName?: string; emergencyPhone?: string; languages?: string }
+    skillLevels?: Record<string, string>
+    availability?: { availableDays?: Record<string, boolean>; shiftStart?: string; shiftEnd?: string }
   }
 }
 
@@ -45,8 +47,9 @@ export interface WorkerMetrics {
 }
 export interface WorkerLiveJob { id: number; ref: string; service: string; status: string; total: number; apartment?: string; otpStatus?: string; startedAt?: string; date?: string; time?: string }
 export interface WorkerWalletSummary { available?: number; totalEarned?: number; totalWithdrawn?: number; hold?: number; weekEarnings?: number; monthEarnings?: number; todayEarnings?: number; advanceOutstanding?: number }
+export interface WorkerNote { id: number; note: string; author?: string; created?: string }
 export interface WorkerDetail extends Worker {
-  documents?: WorkerDoc[]; recentJobs?: WorkerJob[]
+  documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
 }
 

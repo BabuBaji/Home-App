@@ -38,6 +38,7 @@ async function init() {
       profile JSONB NOT NULL DEFAULT '{}', joined TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `CREATE TABLE IF NOT EXISTS worker_documents (id SERIAL PRIMARY KEY, worker_id INTEGER, name TEXT, file_name TEXT, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
+    `CREATE TABLE IF NOT EXISTS worker_notes (id SERIAL PRIMARY KEY, worker_id INTEGER, note TEXT, author TEXT, created TIMESTAMPTZ DEFAULT now())`,
     // Columns added on top of the earlier worker schema (idempotent).
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
@@ -788,7 +789,10 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const { rows } = await pool.query(
     `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id,designation) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *`,
     [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker'])
-  if (b.personal && typeof b.personal === 'object') await mergeProfile(rows[0].id, { personal: b.personal })
+  const profPatch = {}
+  if (b.personal && typeof b.personal === 'object') profPatch.personal = b.personal
+  if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = b.skillLevels
+  if (Object.keys(profPatch).length) await mergeProfile(rows[0].id, profPatch)
   res.status(201).json(rowToWorker(await getWorker(rows[0].id)))
 })
 // Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
@@ -796,11 +800,13 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
-  const [docs, bookings, wallet] = await Promise.all([
+  const [docs, bookings, wallet, noteRows] = await Promise.all([
     documents(id),
     tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
     tryGet(WALLET_URL, `/internal/summary/${id}`, null),
+    pool.query('SELECT * FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 20', [id]),
   ])
+  const notes = noteRows.rows.map((n) => ({ id: n.id, note: n.note, author: n.author, created: n.created }))
   const svcOf = (b) => b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—'
   const bk = bookings || []
   const recentJobs = bk.slice(0, 8).map((b) => ({
@@ -831,10 +837,18 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     startedAt: lj.started_at || '', date: lj.date || '', time: lj.time || '',
   } : null
 
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet })
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+// Admin notes on a worker.
+app.get('/api/admin/workers/:id/notes', adminAuth, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
+app.post('/api/admin/workers/:id/notes', adminAuth, async (req, res) => {
+  const note = String(req.body?.note || '').trim().slice(0, 2000)
+  if (!note) return res.status(400).json({ error: 'Note is empty' })
+  const { rows } = await pool.query('INSERT INTO worker_notes (worker_id,note,author) VALUES ($1,$2,$3) RETURNING id, note, author, created', [Number(req.params.id), note, req.body?.author || 'Admin'])
+  res.status(201).json(rows[0])
+})
 
 /* ---------- shifts / roster (admin) ---------- */
 app.get('/api/admin/shifts', adminAuth, async (_q, res) => {
@@ -955,7 +969,10 @@ async function patchWorker(id, b, res) {
     JSON.stringify(b.services ?? w.services), b.status ?? w.status,
     b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
     b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), b.designation ?? null, id])
-  if (b.personal && typeof b.personal === 'object') await mergeProfile(id, { personal: { ...(w.profile?.personal || {}), ...b.personal } })
+  const profPatch = {}
+  if (b.personal && typeof b.personal === 'object') profPatch.personal = { ...(w.profile?.personal || {}), ...b.personal }
+  if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = { ...(w.profile?.skillLevels || {}), ...b.skillLevels }
+  if (Object.keys(profPatch).length) await mergeProfile(id, profPatch)
   return rowToWorker(await getWorker(id))
 }
 
