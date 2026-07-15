@@ -39,7 +39,7 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
 /** One item in the status strip (icon + label + value). */
 function StatusItem({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 100 }}>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
       <span style={{ color: 'var(--muted,#98a2b3)', marginTop: 2, display: 'flex' }}>{icon}</span>
       <div>
         <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{label}</div>
@@ -341,7 +341,7 @@ export default function WorkerDetail() {
 
         <Card>
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 16, height: '100%' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '14px 12px', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', gap: '14px 10px', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
             <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? w.liveJob.status : (onDuty ? 'Available' : 'Offline')} />
             <StatusItem icon={<Briefcase size={14} />} label="Current Job" value={w.liveJob ? w.liveJob.ref : '—'} sub={w.liveJob?.service} />
             <StatusItem icon={<MapPin size={14} />} label="Zone" value={zoneName} />
