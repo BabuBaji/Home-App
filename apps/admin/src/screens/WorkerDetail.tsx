@@ -311,21 +311,23 @@ export default function WorkerDetail() {
       {/* Top: worker card (left) + status strip & KPI tiles (right) — matches the mock */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px, 300px) 1fr', gap: 14, alignItems: 'stretch' }}>
         <Card>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}>
-            <Avatar name={w.name} src={w.avatar} size={76} />
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <strong style={{ fontSize: 18 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
+          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+            <Avatar name={w.name} src={w.avatar} size={72} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <strong style={{ fontSize: 18 }}>{w.name}</strong>{w.verified && <BadgeCheck size={17} color="#2563eb" />}
+              </div>
+              <div style={{ marginTop: 6 }}><Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge></div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {badges.map((b) => <Badge key={b} tone="violet" dot={false}>{b}</Badge>)}
+              </div>
             </div>
-            <Badge tone={onDuty ? 'green' : 'gray'} dot={false}>{onDuty ? 'On Duty' : 'Off Duty'}</Badge>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
-              {badges.map((b) => <Badge key={b} tone="violet" dot={false}>{b}</Badge>)}
-            </div>
-            <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13 }}>
-              <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} jobs)</span>
-            </div>
-            <div className="muted" style={{ fontSize: 12 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
-            <button className="btn" style={{ width: '100%' }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
           </div>
+          <div className="row" style={{ gap: 4, alignItems: 'center', fontSize: 13, marginTop: 12 }}>
+            <Star size={14} fill="#f59e0b" stroke="#f59e0b" /> {w.rating || '—'} <span className="muted">({w.jobs} reviews)</span>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Worker ID: WKR{String(w.id).padStart(4, '0')}</div>
+          <button className="btn" style={{ width: '100%', marginTop: 12 }} onClick={() => w.last_lat != null ? toast(`Last GPS: ${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}`) : toast('No GPS reported yet')}><MapPin size={15} /> Live Location</button>
         </Card>
 
         <Card>
