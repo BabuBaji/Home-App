@@ -795,17 +795,42 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
-  const [docs, bookings] = await Promise.all([
+  const [docs, bookings, wallet] = await Promise.all([
     documents(id),
     tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
+    tryGet(WALLET_URL, `/internal/summary/${id}`, null),
   ])
-  const recentJobs = (bookings || []).slice(0, 8).map((b) => ({
-    id: b.id, ref: b.ref || `BK${b.id}`,
-    service: b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—',
+  const svcOf = (b) => b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—'
+  const bk = bookings || []
+  const recentJobs = bk.slice(0, 8).map((b) => ({
+    id: b.id, ref: b.ref || `BK${b.id}`, service: svcOf(b),
     status: b.status || '', total: b.total || 0, date: b.date || '', time: b.time || '',
   }))
   const documentsOut = (docs || []).map((d) => ({ id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created }))
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs })
+
+  // KPIs computed from the worker's bookings.
+  const now = new Date(); const dayMs = 86400000
+  const within = (ts, n) => ts && (now - new Date(ts)) <= n * dayMs
+  const cancelled = bk.filter((b) => b.status === 'cancelled')
+  const completed = bk.filter((b) => b.status === 'completed')
+  const ACTIVE = ['assigned', 'accepted', 'on_the_way', 'on the way', 'travelling', 'arrived', 'in_progress', 'in progress', 'started']
+  const metrics = {
+    totalJobs: bk.length, completed: completed.length, cancelled: cancelled.length,
+    todayJobs: bk.filter((b) => b.created && new Date(b.created).toDateString() === now.toDateString()).length,
+    weekJobs: bk.filter((b) => within(b.created, 7)).length,
+    monthJobs: bk.filter((b) => within(b.created, 30)).length,
+    cancellationPct: bk.length ? Math.round((cancelled.length / bk.length) * 100) : 0,
+    completionPct: bk.length ? Math.round((completed.length / bk.length) * 100) : 0,
+    todayEarnings: wallet ? (wallet.todayEarnings || 0) : 0,
+  }
+  const lj = bk.find((b) => ACTIVE.includes(String(b.status).toLowerCase()))
+  const liveJob = lj ? {
+    id: lj.id, ref: lj.ref || `BK${lj.id}`, service: svcOf(lj), status: lj.status,
+    total: lj.total || 0, apartment: lj.address || '', otpStatus: lj.service_otp ? 'Set' : 'Pending',
+    startedAt: lj.started_at || '', date: lj.date || '', time: lj.time || '',
+  } : null
+
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })

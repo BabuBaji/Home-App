@@ -1,7 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
-import { fetchWorkers, fetchWorkerDetail, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
-import type { Worker, WorkerDetail } from '../types'
+import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
+import type { Worker } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
 import { useStore, can } from '../store'
 import { CITIES } from '../cities'
@@ -29,10 +30,7 @@ export default function Workers() {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<Worker | null>(null)
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
-  const [viewing, setViewing] = useState<Worker | null>(null)
-  const [detail, setDetail] = useState<WorkerDetail | null>(null)
-  // Open the details modal instantly with the list data, then enrich with documents + recent jobs.
-  const openView = (w: Worker) => { setViewing(w); setDetail(null); fetchWorkerDetail(w.id).then(setDetail).catch(() => {}) }
+  const nav = useNavigate()
   const [busy, setBusy] = useState(false)
   const [allServices, setAllServices] = useState<string[]>([])
   const [zones, setZones] = useState<Zone[]>([])
@@ -181,7 +179,7 @@ export default function Workers() {
                         <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={(e) => { e.stopPropagation(); setMenuId(menuId === w.id ? null : w.id) }}><MoreVertical size={16} /></button>
                         {menuId === w.id && (
                           <div className="menu" style={{ position: 'absolute', right: 0, top: 34, zIndex: 20, background: 'var(--card, #fff)', border: '1px solid var(--line, #e4e7ec)', borderRadius: 8, boxShadow: '0 8px 24px rgba(16,24,40,.12)', minWidth: 150, padding: 4 }} onClick={(e) => e.stopPropagation()}>
-                            <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openView(w) }}>View</button>
+                            <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); nav(`/workers/${w.id}`) }}>View</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openEdit(w) }}>Edit</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'active', verified: true }, 'Worker approved') }}>Approve</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'suspended' }, 'Worker suspended') }}>Suspend</button>
@@ -224,102 +222,6 @@ export default function Workers() {
         </Modal>
       )}
 
-      {viewing && (
-        <Modal title="Worker Details" onClose={() => { setViewing(null); setDetail(null) }}>
-          <div className="grid" style={{ gap: 12 }}>
-            <div className="cell-user">
-              <Avatar name={viewing.name} src={viewing.avatar} size={48} />
-              <div><strong>{viewing.name}</strong><div className="muted" style={{ fontSize: 12 }}>{viewing.designation || 'Worker'} · ID {viewing.id}</div></div>
-            </div>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="Mobile Number"><input value={viewing.phone || '—'} readOnly /></Field>
-              <Field label="Email"><input value={viewing.email || '—'} readOnly /></Field>
-            </div>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="City"><input value={viewing.city || '—'} readOnly /></Field>
-              <Field label="Zone"><input value={zones.find((z) => z.id === viewing.zone_id)?.name || '—'} readOnly /></Field>
-            </div>
-            <Field label="Services"><input value={(viewing.services || []).join(', ') || '—'} readOnly /></Field>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="Status"><div><Badge tone={viewing.status === 'active' ? 'green' : viewing.status === 'pending' ? 'amber' : 'red'}>{viewing.status}</Badge></div></Field>
-              <Field label="Verified"><div><Badge tone={viewing.verified ? 'green' : 'gray'} dot={false}>{viewing.verified ? 'Verified' : 'Unverified'}</Badge></div></Field>
-              <Field label="Availability"><div><Badge tone={viewing.available ? 'green' : 'gray'} dot={false}>{viewing.available ? 'Online' : 'Offline'}</Badge></div></Field>
-              <Field label="On Shift"><div><Badge tone={viewing.on_shift ? 'green' : 'gray'} dot={false}>{viewing.on_shift ? 'On shift' : 'Off'}</Badge></div></Field>
-            </div>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="Jobs Completed"><input value={String(viewing.jobs)} readOnly /></Field>
-              <Field label="Rating"><input value={viewing.rating ? String(viewing.rating) : '—'} readOnly /></Field>
-              <Field label="Last Location"><input value={viewing.last_lat != null ? `${Number(viewing.last_lat).toFixed(4)}, ${Number(viewing.last_lng).toFixed(4)}` : '—'} readOnly /></Field>
-            </div>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="Balance"><input value={`₹${viewing.balance ?? 0}`} readOnly /></Field>
-              <Field label="Lifetime Earnings"><input value={`₹${viewing.earnings ?? 0}`} readOnly /></Field>
-              <Field label="On Hold"><input value={`₹${viewing.hold ?? 0}`} readOnly /></Field>
-            </div>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="Withdrawn"><input value={`₹${viewing.withdrawn ?? 0}`} readOnly /></Field>
-              <Field label="Advance Outstanding"><input value={`₹${viewing.advance_outstanding ?? 0}`} readOnly /></Field>
-            </div>
-            <Field label="Bank / KYC">
-              <div><Badge tone={viewing.bank_status === 'Verified' ? 'green' : viewing.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{viewing.bank_status || 'Pending'}</Badge></div>
-            </Field>
-            {(() => {
-              const bank = detail?.profile?.bank || viewing.profile?.bank
-              const bv = detail?.profile?.bankVerification || viewing.profile?.bankVerification
-              return (
-                <>
-                  <Field label="Bank Account">
-                    <input
-                      value={bank?.bankAccount
-                        ? `${bank.bankName || 'Bank'} ••••${String(bank.bankAccount).slice(-4)} · ${bank.bankIfsc || ''}`
-                        : 'No bank account added'}
-                      readOnly
-                    />
-                  </Field>
-                  {bv?.registeredName && (
-                    <Field label="Registered Name (as per bank)"><input value={bv.registeredName} readOnly /></Field>
-                  )}
-                </>
-              )
-            })()}
-
-            {/* KYC documents (fetched on open) */}
-            <Field label={`KYC Documents${detail?.documents ? ` (${detail.documents.length})` : ''}`}>
-              {!detail ? <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
-                : (detail.documents && detail.documents.length > 0) ? (
-                  <div className="grid" style={{ gap: 6 }}>
-                    {detail.documents.map((d) => (
-                      <div key={d.id} className="row" style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 13 }}>{d.name}{d.fileName ? ` · ${d.fileName}` : ''}</span>
-                        <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : <div className="muted" style={{ fontSize: 12 }}>No documents uploaded.</div>}
-            </Field>
-
-            {/* Recent jobs (fetched on open) */}
-            <Field label={`Recent Jobs${detail?.recentJobs ? ` (${detail.recentJobs.length})` : ''}`}>
-              {!detail ? <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
-                : (detail.recentJobs && detail.recentJobs.length > 0) ? (
-                  <div className="grid" style={{ gap: 6 }}>
-                    {detail.recentJobs.map((j) => (
-                      <div key={j.id} className="row" style={{ gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 13 }}>{j.ref} · {j.service}{j.date ? ` · ${j.date}` : ''}</span>
-                        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <span style={{ fontSize: 13 }}>₹{j.total}</span>
-                          <Badge tone={j.status === 'completed' ? 'green' : j.status === 'cancelled' ? 'red' : 'blue'} dot={false}>{j.status}</Badge>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : <div className="muted" style={{ fontSize: 12 }}>No recent jobs.</div>}
-            </Field>
-
-            <Field label="Joined On"><input value={shortDate(viewing.joined)} readOnly /></Field>
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }
