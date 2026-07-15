@@ -28,8 +28,8 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
   const good = t == null || t === 0 ? null : (invert ? t < 0 : t > 0)
   return (
     <div style={{ minWidth: 0, background: 'var(--card,#fff)', border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-      <div style={{ fontSize: 11, color: 'var(--muted,#667085)', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: tone }}>{value}</div>
+      <div style={{ fontSize: 10.5, lineHeight: 1.2, color: 'var(--muted,#667085)', marginBottom: 5, minHeight: 25, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 700, color: tone, whiteSpace: 'nowrap' }}>{value}</div>
       {t != null && t !== 0 && <div style={{ fontSize: 10.5, marginTop: 2, color: good ? '#16a34a' : '#dc2626' }}>{t > 0 ? '▲' : '▼'} {Math.abs(t)}</div>}
       {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)', marginTop: 2 }}>{sub}</div>}
     </div>
