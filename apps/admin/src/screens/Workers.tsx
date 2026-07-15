@@ -9,8 +9,10 @@ import { CITIES } from '../cities'
 
 type Stats = { total: number; active: number; pending: number; inactive: number }
 
-type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string }
-const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker' }
+type Personal = { gender: string; dob: string; fatherName: string; address: string; aadhaar: string; pan: string; whatsapp: string; emergencyName: string; emergencyPhone: string; languages: string }
+const EMPTY_PERSONAL: Personal = { gender: '', dob: '', fatherName: '', address: '', aadhaar: '', pan: '', whatsapp: '', emergencyName: '', emergencyPhone: '', languages: '' }
+type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string; personal: Personal }
+const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker', personal: { ...EMPTY_PERSONAL } }
 
 export default function Workers() {
   const { admin } = useStore()
@@ -63,7 +65,7 @@ export default function Workers() {
   const addWorker = async () => {
     setBusy(true)
     try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation })
+      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation, personal: draft.personal })
       toast('Worker added')
       setAddOpen(false); setDraft(EMPTY_DRAFT); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -73,7 +75,7 @@ export default function Workers() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation })
+      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation, personal: editDraft.personal })
       toast('Worker updated')
       setEditing(null); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -89,7 +91,7 @@ export default function Workers() {
   }
 
   const openEdit = (w: Worker) => {
-    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker' })
+    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker', personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) } })
     setEditing(w)
   }
 
@@ -230,6 +232,7 @@ const MENU_ITEM: CSSProperties = { display: 'block', width: '100%', textAlign: '
 
 function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChange: (d: Draft) => void; services: string[]; zones: Zone[] }) {
   const set = (k: 'name' | 'phone' | 'email' | 'city' | 'status' | 'designation', v: string) => onChange({ ...draft, [k]: v })
+  const setP = (k: keyof Personal, v: string) => onChange({ ...draft, personal: { ...draft.personal, [k]: v } })
   const toggleService = (name: string) => {
     const has = draft.services.includes(name)
     onChange({ ...draft, services: has ? draft.services.filter((s) => s !== name) : [...draft.services, name] })
@@ -272,6 +275,32 @@ function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChan
               ))}
         </div>
       </div>
+
+      {/* Personal & KYC details (optional — stored on the worker profile) */}
+      <div className="field"><span style={{ fontWeight: 600 }}>Personal & KYC details</span></div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Gender">
+          <select value={draft.personal.gender} onChange={(e) => setP('gender', e.target.value)}>
+            <option value="">—</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
+          </select>
+        </Field>
+        <Field label="Date of Birth"><input type="date" value={draft.personal.dob} onChange={(e) => setP('dob', e.target.value)} /></Field>
+      </div>
+      <Field label="Father's Name"><input value={draft.personal.fatherName} onChange={(e) => setP('fatherName', e.target.value)} placeholder="Father's name" /></Field>
+      <Field label="Home Address"><textarea value={draft.personal.address} onChange={(e) => setP('address', e.target.value)} placeholder="Residential address" rows={2} /></Field>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Aadhaar Number"><input value={draft.personal.aadhaar} onChange={(e) => setP('aadhaar', e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="12-digit Aadhaar" /></Field>
+        <Field label="PAN Number"><input value={draft.personal.pan} onChange={(e) => setP('pan', e.target.value.toUpperCase().slice(0, 10))} placeholder="ABCDE1234F" /></Field>
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="WhatsApp Number"><input value={draft.personal.whatsapp} onChange={(e) => setP('whatsapp', e.target.value)} placeholder="WhatsApp (if different)" /></Field>
+        <Field label="Languages Known"><input value={draft.personal.languages} onChange={(e) => setP('languages', e.target.value)} placeholder="e.g. Telugu, Hindi, English" /></Field>
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Emergency Contact Name"><input value={draft.personal.emergencyName} onChange={(e) => setP('emergencyName', e.target.value)} placeholder="Contact name" /></Field>
+        <Field label="Emergency Contact Phone"><input value={draft.personal.emergencyPhone} onChange={(e) => setP('emergencyPhone', e.target.value)} placeholder="Contact phone" /></Field>
+      </div>
+
       <Field label="Status">
         <select value={draft.status} onChange={(e) => set('status', e.target.value)}>
           <option value="pending">Pending</option>

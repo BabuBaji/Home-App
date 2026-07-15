@@ -33,6 +33,7 @@ export interface Worker {
   profile?: {
     bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string }
     bankVerification?: { status?: string; registeredName?: string; nameMatch?: boolean | null; reason?: string }
+    personal?: { gender?: string; dob?: string; fatherName?: string; address?: string; aadhaar?: string; pan?: string; whatsapp?: string; emergencyName?: string; emergencyPhone?: string; languages?: string }
   }
 }
 

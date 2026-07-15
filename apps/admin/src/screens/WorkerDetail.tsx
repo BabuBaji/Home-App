@@ -66,6 +66,7 @@ export default function WorkerDetail() {
   const m = w.metrics
   const bank = w.profile?.bank
   const bv = w.profile?.bankVerification
+  const p = w.profile?.personal || {}
   const zoneName = zones.find((z) => z.id === w.zone_id)?.name || '—'
   const onDuty = !!w.available
   const act = async (patch: Record<string, unknown>, msg: string) => { try { await updateWorker(w.id, patch); toast(msg); load() } catch (e) { toast((e as Error).message) } }
@@ -164,18 +165,26 @@ export default function WorkerDetail() {
       <div style={grid3}>
         <Panel title="Personal Information">
           <Info label="Full Name" value={w.name} />
+          {p.gender && <Info label="Gender" value={p.gender} />}
+          {p.dob && <Info label="Date of Birth" value={p.dob} />}
+          {p.fatherName && <Info label="Father's Name" value={p.fatherName} />}
+          {p.address && <Info label="Address" value={p.address} />}
+          {p.aadhaar && <Info label="Aadhaar" value={`XXXX XXXX ${String(p.aadhaar).slice(-4)}`} />}
+          {p.pan && <Info label="PAN" value={p.pan} />}
           <Info label="City" value={w.city || '—'} />
           <Info label="Zone" value={zoneName} />
           <Info label="Designation" value={w.designation || 'Worker'} />
           <Info label="Joined On" value={shortDate(w.joined)} />
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Gender, DOB, address, Aadhaar &amp; PAN aren't captured yet.</div>
+          {!(p.gender || p.dob || p.address || p.aadhaar || p.pan) && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Add personal &amp; KYC details via Edit Worker.</div>}
         </Panel>
 
         <Panel title="Contact Information">
           <Info label="Mobile Number" value={w.phone || '—'} verified={w.verified} />
+          {p.whatsapp && <Info label="WhatsApp" value={p.whatsapp} />}
           <Info label="Email" value={w.email || '—'} verified={w.verified} />
+          {(p.emergencyName || p.emergencyPhone) && <Info label="Emergency Contact" value={`${p.emergencyName || ''}${p.emergencyPhone ? ` · ${p.emergencyPhone}` : ''}`} />}
+          {p.languages && <Info label="Languages Known" value={p.languages} />}
           <Info label="Last Location" value={w.last_lat != null ? `${Number(w.last_lat).toFixed(4)}, ${Number(w.last_lng).toFixed(4)}` : '—'} />
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>WhatsApp, emergency contact &amp; languages aren't captured yet.</div>
         </Panel>
 
         <Panel title="Bank & Payout" action={<Badge tone={w.bank_status === 'Verified' ? 'green' : w.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{w.bank_status || 'Pending'}</Badge>}>

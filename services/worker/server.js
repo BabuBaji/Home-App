@@ -788,7 +788,8 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const { rows } = await pool.query(
     `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id,designation) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *`,
     [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker'])
-  res.status(201).json(rowToWorker(rows[0]))
+  if (b.personal && typeof b.personal === 'object') await mergeProfile(rows[0].id, { personal: b.personal })
+  res.status(201).json(rowToWorker(await getWorker(rows[0].id)))
 })
 // Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
 app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
@@ -954,6 +955,7 @@ async function patchWorker(id, b, res) {
     JSON.stringify(b.services ?? w.services), b.status ?? w.status,
     b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
     b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), b.designation ?? null, id])
+  if (b.personal && typeof b.personal === 'object') await mergeProfile(id, { personal: { ...(w.profile?.personal || {}), ...b.personal } })
   return rowToWorker(await getWorker(id))
 }
 
