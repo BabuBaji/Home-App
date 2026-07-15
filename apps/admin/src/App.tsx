@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
-import { ToastHost } from './components/UI'
+import { ToastHost, ConfirmHost } from './components/UI'
+import SosAlert from './components/SosAlert'
 import Layout from './components/Layout'
 import { useStore } from './store'
 import { fetchMe, getToken } from './api'
@@ -9,12 +10,18 @@ import Login from './screens/Login'
 import Dashboard from './screens/Dashboard'
 import Customers from './screens/Customers'
 import Workers from './screens/Workers'
+import WorkerDetail from './screens/WorkerDetail'
 import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import Services from './screens/Services'
+import Campaigns from './screens/Campaigns'
 import ServiceAreas from './screens/ServiceAreas'
+import ZoneOnboarding from './screens/ZoneOnboarding'
+import Stores from './screens/Stores'
+import { CitiesPage, ClustersPage, ApartmentsPage, InventoryPage, PricingPage, ServiceCoveragePage } from './screens/ZoneEntities'
 import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
+import Shifts from './screens/Shifts'
 import Pricing from './screens/Pricing'
 import Payments from './screens/Payments'
 import Refunds from './screens/Refunds'
@@ -37,19 +44,32 @@ export default function App() {
 
   return (
     <ToastHost>
+     <ConfirmHost>
+      {admin && <SosAlert />}
       <Routes>
         <Route path="/login" element={admin ? <Navigate to="/dashboard" replace /> : <Login />} />
         <Route element={<Guard authed={!!admin} />}>
           <Route path="/dashboard" element={<Page><Dashboard /></Page>} />
           <Route path="/customers" element={<Page><Customers /></Page>} />
           <Route path="/workers" element={<Page><Workers /></Page>} />
+          <Route path="/workers/:id" element={<Page><WorkerDetail /></Page>} />
           <Route path="/worker-wallet" element={<Page><WorkerWallet /></Page>} />
           <Route path="/bookings" element={<Page><Bookings /></Page>} />
           <Route path="/cancellations" element={<Page><Bookings /></Page>} />
           <Route path="/services" element={<Page><Services /></Page>} />
+          <Route path="/campaigns" element={<Page><Campaigns /></Page>} />
           <Route path="/service-areas" element={<Page><ServiceAreas /></Page>} />
+          <Route path="/zones" element={<Page><ZoneOnboarding /></Page>} />
+          <Route path="/zones/cities" element={<Page><CitiesPage /></Page>} />
+          <Route path="/zones/clusters" element={<Page><ClustersPage /></Page>} />
+          <Route path="/zones/apartments" element={<Page><ApartmentsPage /></Page>} />
+          <Route path="/zones/stores" element={<Page><Stores /></Page>} />
+          <Route path="/zones/pricing" element={<Page><PricingPage /></Page>} />
+          <Route path="/zones/coverage" element={<Page><ServiceCoveragePage /></Page>} />
+          <Route path="/zones/inventory" element={<Page><InventoryPage /></Page>} />
           <Route path="/live-ops" element={<Page><LiveOps /></Page>} />
           <Route path="/roster" element={<Page><Roster /></Page>} />
+          <Route path="/shift-plans" element={<Page><Shifts /></Page>} />
           <Route path="/pricing" element={<Page><Pricing /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
           <Route path="/refunds" element={<Page><Refunds /></Page>} />
@@ -65,6 +85,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to={admin ? '/dashboard' : '/login'} replace />} />
       </Routes>
+     </ConfirmHost>
     </ToastHost>
   )
 }

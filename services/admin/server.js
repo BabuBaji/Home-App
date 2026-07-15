@@ -46,12 +46,23 @@ const DEFAULT_SETTINGS = {
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
   auto_assign: 'true', maintenance_mode: 'false', dispatch_timeout_min: '5',
+  gst_inclusive: 'false',   // GST is added on top of the shown price (exclusive) — the market norm; toggle in Settings
+  // Seller details printed on the customer tax invoice (edit to your registered company).
+  company_name: 'HomeHelp Services Pvt. Ltd.', company_gstin: '36AABCH1234M1Z7',
+  company_address: '3rd Floor, Cyber Heights, HITEC City, Hyderabad, Telangana 500081',
+  company_state: 'Telangana', service_sac: '9987', invoice_prefix: 'INV',
   razorpay_key_id: '', razorpay_key_secret: '', google_maps_key: '', msg91_key: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
   serviceable_pincodes: '', service_cities: '',
   razorpay_webhook_secret: '', payment_webhook_secret: '', payout_webhook_secret: '', payout_provider: '',
+  razorpayx_account_number: '', payout_mode: 'IMPS',
   earnings_auto_release: 'true', advance_recovery_percent: '30', auto_approve_withdrawal_below: '2000', advance_max: '5000',
+  // Payout policy. There is no auto-payout scheduler — payouts are still worker-requested and
+  // admin-approved. These declare the ORG'S POLICY: min_payout_limit is enforced on every
+  // withdrawal request, and payout_frequency/payout_day drive the estimated next-payout date
+  // shown to workers and admins. 'on_demand' frequency = no schedule, so no estimate is shown.
+  payout_frequency: 'weekly', payout_day: '4', min_payout_limit: '500',
 }
 const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key',
   'razorpay_webhook_secret', 'payment_webhook_secret', 'payout_webhook_secret']
@@ -142,6 +153,16 @@ app.post('/api/admin/login', async (req, res) => {
   res.json({ token: 'admin-' + a.id, admin: publicAdmin(a) })
 })
 app.get('/api/admin/me', admin, (req, res) => res.json({ admin: publicAdmin(req.admin) }))
+
+// Run the month-end Shakti Bonus settlement (delegates to the worker service, which credits
+// each qualifying worker's tier bonus via the wallet — idempotent per worker/month).
+app.post('/api/admin/shakti/settle', admin, async (req, res) => {
+  try {
+    const r = await internalPost(U.worker, '/internal/shakti/settle', { month: req.body?.month })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: req.admin?.name || 'Admin', action: 'sitara.settle', entityType: 'system', entityId: 0, detail: `Ran Sitara Bonus settlement for ${r.month} — ${r.qualified} worker(s) qualified` })
+    res.json(r)
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+})
 
 /* ---------- settings (config) ---------- */
 app.get('/api/admin/settings', admin, async (_q, res) => res.json(await getPublicSettings()))

@@ -19,6 +19,7 @@ html, body, #root { height: 100%; margin: 0; }
 body {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased;
+  font-size: 13.5px;
 }
 a { color: inherit; text-decoration: none; }
 h1, h2, h3, h4 { margin: 0; letter-spacing: -.01em; }
@@ -59,14 +60,39 @@ input, select, textarea { font-family: inherit; }
 .navitem.active .nav-chev { color: #fff; }
 .navitem:hover .nav-chev { color: #fff; }
 .signout { display: flex; align-items: center; gap: 9px; background: #ffffff10; color: #e7e5f5; border: none; padding: 10px 12px; border-radius: 11px; font-size: 13px; font-weight: 600; margin-top: 6px; }
+
+/* ---- collapsible sidebar (in / out) — desktop icon-rail ---- */
+.sidebar { transition: width .18s ease, padding .18s ease; }
+.shell.collapsed .sidebar { width: 66px; padding: 14px 8px; }
+.shell.collapsed .sidebar .brand { justify-content: center; }
+.shell.collapsed .sidebar .navitem { justify-content: center; padding: 9px 0; gap: 0; }
+.shell.collapsed .sidebar .signout { justify-content: center; gap: 0; }
+.shell.collapsed .sidebar .navitem span,
+.shell.collapsed .sidebar .navgrp-title,
+.shell.collapsed .sidebar .brand div,
+.shell.collapsed .sidebar .signout span,
+.shell.collapsed .sidebar .nav-chev { display: none; }
+.nav-toggle { color: var(--ink-2); }
 .signout:hover { background: #ffffff1f; }
 .scrim { display: none; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.topbar { position: sticky; top: 0; z-index: 20; background: #fbfbfeee; backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 13px 26px; }
-.titlewrap { display: flex; flex-direction: column; gap: 3px; }
-.page-title { font-size: 25px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
+.topbar { position: sticky; top: 0; z-index: 20; background: #fbfbfeee; backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 9px 26px; }
+.titlewrap { display: flex; flex-direction: column; gap: 1px; }
+.page-title { font-size: 17px; font-weight: 800; line-height: 1.15; letter-spacing: -.02em; }
 .page-sub { font-size: 13.5px; color: var(--muted); font-weight: 500; }
+
+/* ---- custom dropdown (Dropdown component) ---- */
+.dd-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--line); background: #fff; border-radius: 9px; padding: 8px 10px; font-size: 12.5px; color: var(--ink); font-family: inherit; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s; }
+.dd-trigger:hover:not(:disabled) { border-color: #c3c8d2; }
+.dd-trigger:focus-visible { outline: none; border-color: var(--primary, #4f46e5); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+.dd-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.dd-ph { color: var(--muted); }
+.dd-panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 40px rgba(16,24,40,.18); padding: 5px; max-height: 280px; overflow-y: auto; animation: dd-in .12s ease; }
+@keyframes dd-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.dd-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; border: none; background: transparent; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; color: var(--ink); font-family: inherit; cursor: pointer; text-align: left; }
+.dd-opt:hover { background: #f3f4f7; }
+.dd-opt.sel { background: #eef2ff; color: #4338ca; font-weight: 700; }
 .page-sub .wave { font-size: 14px; }
 .crumb { font-size: 12.5px; color: var(--muted); font-weight: 500; display: inline-flex; align-items: center; gap: 3px; }
 .crumb svg { color: var(--violet-3); }
@@ -103,7 +129,7 @@ input, select, textarea { font-family: inherit; }
 /* ============ cards / stats ============ */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; transition: box-shadow .18s, transform .18s; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.card-head h3 { font-size: 14.5px; font-weight: 800; }
+.card-head h3 { font-size: 13.5px; font-weight: 800; }
 .grid { display: grid; gap: 14px; }
 /* let grid/flex children shrink below their content width so tables & charts scroll
    inside their cards instead of blowing the whole page wider than the viewport */
@@ -117,7 +143,7 @@ input, select, textarea { font-family: inherit; }
 .stat-body { position: relative; z-index: 1; min-width: 0; }
 .stat-label { font-size: 11.5px; color: var(--muted); font-weight: 600; }
 .stat-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 1px; }
-.stat-value { font-size: 19px; font-weight: 800; letter-spacing: -.025em; display: block; line-height: 1.15; color: var(--ink); }
+.stat-value { font-size: 16px; font-weight: 800; letter-spacing: -.025em; display: block; line-height: 1.15; color: var(--ink); }
 .stat-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--green); font-weight: 700; }
 .stat-delta.down { color: var(--red); }
 .stat-sub { display: block; font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 3px; }
@@ -152,6 +178,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 .searchbox { display: flex; align-items: center; gap: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; color: var(--muted); flex: 1; min-width: 180px; transition: .15s; }
 .searchbox:focus-within { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(91,81,232,.12); }
 .searchbox input { border: none; outline: none; background: none; flex: 1; font-size: 13.5px; color: var(--ink); }
+/* compact variant — matches .dd-trigger's metrics so a search sits flush beside a Dropdown */
+.searchbox.sm { padding: 8px 10px; border-radius: 9px; gap: 7px; flex: 0 1 250px; min-width: 150px; }
+.searchbox.sm input { font-size: 12.5px; }
+.searchbox.sm svg { width: 15px; height: 15px; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
 .select { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; font-size: 13.5px; color: var(--ink); outline: none; cursor: pointer; }
 .select:focus { border-color: var(--violet); }
@@ -311,5 +341,5 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 }
 @media (max-width: 560px) {
   .page-title { font-size: 18px; }
-  .stat-value { font-size: 20px; }
+  .stat-value { font-size: 17px; }
 }

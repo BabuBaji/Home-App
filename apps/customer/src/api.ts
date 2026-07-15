@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
-import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification } from './types'
+import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification, Offer } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the apps
 // can be repointed at a new tunnel/host WITHOUT rebuilding the APK. Falls back to the
@@ -9,14 +9,21 @@ const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app
 export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 export async function initApiBase(): Promise<void> {
-  // A build-time URL (VITE_API_URL, e.g. a LAN IP for local device testing) takes priority —
-  // don't let the remote config override it.
+  // In the browser dev server, keep API_BASE empty so requests go to relative /api and
+  // are handled by the Vite proxy -> localhost:8080. (The PC can't reach its own LAN IP
+  // via the Docker-published port, so we must NOT switch dev to the LAN IP.)
+  if (import.meta.env.DEV) return
+  // Packaged app: the LAN IP baked at build time (VITE_API_URL via build-apk.ps1) wins.
+  // We do NOT trust the remote config here because GitHub's raw CDN serves a stale copy
+  // for several minutes after a push, which would point the app at a dead IP. Rebuild
+  // (build-apk.ps1 auto-detects the current Wi-Fi IP) to repoint.
   if (API_BASE) return
+  // Only when nothing was baked, fall back to the remote config.
   try {
     const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
     if (r.ok) {
       const j = await r.json()
-      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+      if (j && j.apiBase) { API_BASE = String(j.apiBase).replace(/\/$/, ''); return }
     }
   } catch { /* keep the baked fallback */ }
 }
@@ -46,9 +53,25 @@ export const verifyOtp = (phone: string, otp: string) => req<{ token: string; us
 export const googleAuth = (p: { credential?: string; demo?: boolean }) => req<{ token: string; user: User }>('/api/auth/google', { method: 'POST', body: JSON.stringify(p) })
 
 /* catalogue */
-export const fetchServices = () => req<{ categories: string[]; services: Service[] }>('/api/services')
-export const fetchService = (id: string) => req<ServiceDetail>(`/api/services/${id}`)
+const pinQ = (pincode?: string) => (pincode ? `?pincode=${encodeURIComponent(pincode)}` : '')
+export const fetchServices = (pincode?: string) => req<{ categories: string[]; services: Service[] }>(`/api/services${pinQ(pincode)}`)
+export const fetchService = (id: string, pincode?: string) => req<ServiceDetail>(`/api/services/${id}${pinQ(pincode)}`)
 export const fetchHome = () => req<HomeContent>('/api/home')
+export interface InvoiceInfo { name: string; gstin: string; address: string; state: string; sac: string; prefix: string; gstInclusive: boolean }
+export const fetchInvoiceInfo = () => req<InvoiceInfo>('/api/invoice-info')
+export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ(pincode)}`)
+import type { ZoneHours } from './components/Calendar'
+// Working hours for the zone serving a pincode — the Schedule screen builds its slot grid from this.
+export const fetchZoneHours = (pincode: string) => req<ZoneHours>(`/api/zone-hours?pincode=${encodeURIComponent(pincode)}`)
+// Live service areas (for the "we are live in" coming-soon screen).
+export const fetchLiveAreas = () => req<{ name: string; state: string; city: string }[]>('/api/zones')
+// Authoritative bookable slots for a date: zone working hours + per-slot availability (capacity).
+export interface SlotInfo { hour: number; time: string; booked: number; available: boolean }
+export const fetchSlots = (date: string, pincode: string, services: string) =>
+  req<{ serviceable: boolean; workerCount: number; slots: SlotInfo[]; closed: boolean }>(
+    `/api/slots?date=${encodeURIComponent(date)}&pincode=${encodeURIComponent(pincode)}&services=${encodeURIComponent(services)}`)
+// Google Maps JS key for the interactive map location picker.
+export const fetchMapsKey = () => req<{ key: string }>('/api/maps-key')
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
 
 /* favourites */
@@ -59,13 +82,14 @@ export const removeFavouriteApi = (id: string) => req<string[]>(`/api/favourites
 /* coupons & quote */
 export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
 export const validateCoupon = (code: string, subtotal: number) => req<{ code: string; discount: number; label: string }>('/api/coupons/validate', { method: 'POST', body: JSON.stringify({ code, subtotal }) })
-export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon }) })
+export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string, at?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode, at }) })
 
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
 export const updateMe = (patch: Partial<User>) => req<{ user: User }>('/api/me', { method: 'PATCH', body: JSON.stringify(patch) })
 export const fetchAddresses = () => req<Address[]>('/api/addresses')
 export const addAddressApi = (a: Partial<Address>) => req<Address>('/api/addresses', { method: 'POST', body: JSON.stringify(a) })
+export const updateAddressApi = (id: number, a: Partial<Address>) => req<Address>(`/api/addresses/${id}`, { method: 'PATCH', body: JSON.stringify(a) })
 export const setDefaultAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}/default`, { method: 'PATCH' })
 export const deleteAddressApi = (id: number) => req<Address[]>(`/api/addresses/${id}`, { method: 'DELETE' })
 
@@ -127,6 +151,13 @@ export const createBookingApi = async (payload: any) => {
   return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
 }
 export const fetchBookings = () => req<Booking[]>('/api/bookings')
+// Real customer reviews for a service (from reviewed bookings). Public/read-only.
+export const fetchServiceReviews = (serviceId: string) =>
+  req<{ name: string; rating: number; text: string; date: string; pro: string }[]>(`/api/bookings/service-reviews?serviceId=${encodeURIComponent(serviceId)}`)
+// Real workers offering a service (from the worker service), with distance from the customer.
+export const fetchServiceWorkers = (service: string, lat?: number, lng?: number) =>
+  req<{ id: number; name: string; rating: number; jobs: number; online: boolean; km: number | null }[]>(
+    `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })

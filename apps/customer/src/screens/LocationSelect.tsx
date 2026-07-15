@@ -1,101 +1,157 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../components/UI'
-import { useStore } from '../store'
-import { updateMe } from '../api'
-import { getCurrentPosition, reverseGeocode, nearbyPlaces, searchPlaces, GeoError, type Place } from '../geo'
+import { fetchMapsKey } from '../api'
+import { loadGoogleMaps } from '../maps'
+import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
 
+const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GPS is unavailable
+
+// Rapido/Pronto-style location picker: a live Google map with a fixed centre pin. Panning the map
+// reverse-geocodes the pin's point (via our Google-backed endpoint) into an address + pincode.
 export default function LocationSelect() {
   const nav = useNavigate()
   const toast = useToast()
-  const { user, setUser } = useStore()
-  const changing = !!user?.location // re-opened from Home to change location, not onboarding
-  const [detecting, setDetecting] = useState(false)
-  const [current, setCurrent] = useState<Place | null>(null)
-  const [nearby, setNearby] = useState<Place[]>([])
+  const initCentre = (useLocation().state as { center?: { lat: number; lng: number } } | null)?.center || null
+  const mapDiv = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<any>(null)
+  const revTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [ready, setReady] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const [addr, setAddr] = useState<{ label: string; name: string; sub: string; pincode: string | null; lat: number; lng: number } | null>(null)
+  const [resolving, setResolving] = useState(false)
+  const [checking, setChecking] = useState(false)   // serviceability check on Confirm (not while panning)
   const [q, setQ] = useState('')
   const [results, setResults] = useState<Place[]>([])
-  const [sel, setSel] = useState<Place | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [geoErr, setGeoErr] = useState('')
 
-  async function detect() {
-    setDetecting(true); setGeoErr('')
-    try {
-      const { lat, lng } = await getCurrentPosition()
-      const rev = await reverseGeocode(lat, lng).catch(() => ({ label: 'Current location', sub: '', raw: {} }))
-      const cur: Place = { label: rev.label, sub: rev.sub, lat, lng }
-      setCurrent(cur); setSel(cur)
-      const city = (rev as any).raw?.address?.city || (rev as any).raw?.address?.state || rev.label.split(',').pop()?.trim() || ''
-      setNearby(await nearbyPlaces(lat, lng, city))
-    } catch (e) {
-      const reason = e instanceof GeoError ? e.reason : 'unavailable'
-      const msg = reason === 'permission'
-        ? 'Location permission is needed. Please allow it, or search your area below.'
-        : reason === 'disabled'
-        ? 'Turn on Location/GPS to detect your area, or search it below.'
-        : 'Could not detect your location. Please search your area below.'
-      setGeoErr(msg); toast(msg)
-    } finally { setDetecting(false) }
+  // reverse-geocode the current map centre (the pin sits at the centre)
+  async function resolveCentre() {
+    const m = mapRef.current
+    if (!m) return
+    const c = m.getCenter()
+    if (!c) return
+    const lat = c.lat(), lng = c.lng()
+    setResolving(true)
+    const g = await reverseGeocodeFull(lat, lng)
+    setResolving(false)
+    if (g) {
+      const label = g.label || [g.area, g.city].filter(Boolean).join(', ') || 'Selected location'
+      setAddr({ label, name: g.name, sub: g.sub, pincode: g.pincode, lat, lng })
+    }
   }
-  useEffect(() => { detect() }, [])
 
-  // debounced search
+  // init the map once
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { key } = await fetchMapsKey()
+        const gmaps = await loadGoogleMaps(key)
+        if (cancelled || !mapDiv.current) return
+        // a search result passes an explicit centre; otherwise use the live GPS fix (fall back to Hyderabad)
+        let centre = initCentre || HYD
+        if (!initCentre) { try { centre = await getCurrentPosition() } catch { /* keep default centre */ } }
+        if (cancelled || !mapDiv.current) return
+        const map = new gmaps.Map(mapDiv.current, {
+          center: centre, zoom: 17, disableDefaultUI: true, gestureHandling: 'greedy',
+          clickableIcons: false, keyboardShortcuts: false,
+        })
+        mapRef.current = map
+        setReady(true)
+        map.addListener('idle', () => {
+          if (revTimer.current) clearTimeout(revTimer.current)
+          revTimer.current = setTimeout(resolveCentre, 350)
+        })
+      } catch (e) {
+        setLoadErr((e as Error).message || 'Could not load the map')
+      }
+    })()
+    return () => { cancelled = true; if (revTimer.current) clearTimeout(revTimer.current) }
+  }, [])
+
+  // debounced place search
   useEffect(() => {
     if (!q.trim()) { setResults([]); return }
-    const t = setTimeout(() => { searchPlaces(q).then(setResults) }, 450)
+    const t = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
     return () => clearTimeout(t)
   }, [q])
 
-  async function confirm() {
-    if (!sel) return toast('Select a location')
-    setBusy(true)
-    try {
-      const city = sel.label.split(',').pop()?.trim() || sel.label
-      const { user } = await updateMe({ city, location: sel.label })
-      setUser(user); nav('/home', { replace: true })
-    } catch (e) { toast((e as Error).message); setBusy(false) }
+  async function pickResult(p: Place) {
+    setQ(''); setResults([])
+    let { lat, lng } = p
+    if ((!lat || !lng) && p.placeId) { const d = await placeDetails(p.placeId); if (d?.lat && d?.lng) { lat = d.lat; lng = d.lng } }
+    if (lat && lng) mapRef.current?.panTo({ lat, lng })
   }
 
-  const Row = (p: Place, key: string, icon = '📍') => (
-    <button key={key} className={`loc-row ${sel?.label === p.label ? 'sel' : ''}`} onClick={() => setSel(p)}>
-      <span className="lr-ic">{icon}</span>
-      <span className="grow"><span className="lr-l">{p.label}</span>{p.sub && <span className="lr-s">{p.sub}</span>}</span>
-      <span className="radio">{sel?.label === p.label ? '✓' : ''}</span>
-    </button>
-  )
+  async function goToCurrent() {
+    try { mapRef.current?.panTo(await getCurrentPosition()) }
+    catch (e) { toast(e instanceof GeoError && e.reason === 'permission' ? 'Allow location permission to use this' : 'Could not get your location') }
+  }
+
+  // Confirm → verify we serve this spot (checked ONCE here, not while panning), then continue.
+  async function confirm() {
+    if (!addr) return toast('Move the map to your location')
+    setChecking(true)
+    let ok = true
+    try { ok = (await checkServiceable(addr.pincode || undefined, undefined)).serviceable } catch { ok = true }
+    setChecking(false)
+    if (!ok) return nav('/coming-soon')   // not served → show the "not available in your area yet" screen
+    nav('/address-details', { state: { label: addr.label, name: addr.name, sub: addr.sub, pincode: addr.pincode, lat: addr.lat, lng: addr.lng } })
+  }
+
+  const headline = resolving ? 'Locating…' : (addr ? (addr.name || addr.label.split(' - ')[0]) : 'Move the map to your spot')
 
   return (
-    <div className="screen">
-      <div className="onb-hero">
-        <div className="onb-step">{changing ? 'Change location' : 'Step 2 of 2'}</div>
-        <h1>Your location</h1>
-        <p>We'll find experts near you.</p>
+    <div className="mp-screen">
+      <div className="mp-top">
+        <button className="mp-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
+        <b>Confirm your location</b>
       </div>
-      <div className="content pad-cta">
-        <button className="gps-btn" onClick={detect} disabled={detecting}>
-          <span className="gps-ic">{detecting ? '⏳' : '🎯'}</span>
-          <span className="grow"><b>{detecting ? 'Detecting your location…' : 'Use my current location'}</b><span className="muted sm">via GPS</span></span>
-        </button>
 
-        {geoErr && !detecting && (
-          <div className="loc-warn">
-            <span>⚠️ {geoErr}</span>
-            <button className="bk-btn" onClick={detect}>Turn on & retry</button>
+      <div className="mp-search">
+        <div className="mp-search-box">
+          <Search size={18} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search locality, sector, area" />
+        </div>
+        {results.length > 0 && (
+          <div className="mp-results">
+            {results.map((p, i) => (
+              <button key={i} className="mp-result" onClick={() => pickResult(p)}>
+                <MapPin size={15} />
+                <span className="grow"><b>{p.label}</b>{p.sub && <span className="mp-r-sub">{p.sub}</span>}</span>
+              </button>
+            ))}
           </div>
         )}
-
-        <div className="search" style={{ marginTop: 14 }}><span>🔍</span><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search area, street, city…" /></div>
-
-        {q && results.length > 0 && (<><div className="label">Search results</div>{results.map((p, i) => Row(p, 'r' + i, '🔎'))}</>)}
-
-        {!q && current && (<><div className="label">Current location</div>{Row(current, 'cur', '🎯')}</>)}
-        {!q && nearby.length > 0 && (<><div className="label">Nearby</div>{nearby.map((p, i) => Row(p, 'n' + i))}</>)}
-
-        {!q && !current && !detecting && <p className="muted center-text" style={{ marginTop: 20 }}>Allow location access or search for your area above.</p>}
       </div>
-      <div className="footer-cta">
-        <button className="btn full" onClick={confirm} disabled={busy || !sel}>{busy ? 'Saving…' : sel ? `Confirm · ${sel.label.split(',')[0]}` : 'Select a location'}</button>
+
+      <div className="mp-map-wrap">
+        <div ref={mapDiv} className="mp-map" />
+        <div className="mp-pin" aria-hidden>
+          {addr && (
+            <div className="mp-pin-tip">
+              <span>Set this as your location</span>
+              <b>{addr.name || addr.label.split(' - ')[0].split(',')[0]}</b>
+            </div>
+          )}
+          <MapPin size={42} className="mp-pin-ic" fill="currentColor" />
+        </div>
+        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> Go to current location</button>
+        {!ready && !loadErr && <div className="mp-map-msg">Loading map…</div>}
+        {loadErr && <div className="mp-map-msg err">{loadErr}</div>}
+      </div>
+
+      <div className="mp-sheet">
+        <div className="mp-addr">
+          <MapPin size={22} className="mp-addr-ic" />
+          <div className="grow">
+            <b>{headline}</b>
+            <div className="mp-addr-sub">{addr?.sub || (addr?.pincode ? `Pincode ${addr.pincode}` : 'Pan the map to place the pin')}</div>
+          </div>
+        </div>
+        <button className="mp-confirm" onClick={confirm} disabled={!addr || checking}>{checking ? 'Checking…' : 'Confirm location'}</button>
       </div>
     </div>
   )

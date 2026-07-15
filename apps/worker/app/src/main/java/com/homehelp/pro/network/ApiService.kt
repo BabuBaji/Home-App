@@ -26,8 +26,47 @@ interface ApiService {
     @PUT("api/worker/bank")
     suspend fun updateBank(@Body body: BankBody): WorkerDto
 
+    @GET("api/worker/ifsc/{code}")
+    suspend fun ifscLookup(@Path("code") code: String): IfscDto
+
+    @POST("api/worker/heartbeat")
+    suspend fun heartbeat(@Body body: HeartbeatBody): Map<String, Any>
+
     @PUT("api/worker/availability")
     suspend fun updateAvailability(@Body body: AvailabilityBody): WorkerDto
+
+    @POST("api/worker/attendance/checkin")
+    suspend fun checkIn(@Body body: AttendanceBody): AttendanceDto
+
+    @POST("api/worker/attendance/checkout")
+    suspend fun checkOut(@Body body: AttendanceBody): AttendanceDto
+
+    @GET("api/worker/shifts")
+    suspend fun getShifts(): ShiftInfo
+
+    @POST("api/worker/shift")
+    suspend fun selectShift(@Body body: SelectShiftBody): AttendanceDto
+
+    @POST("api/worker/geofence/report")
+    suspend fun reportGeofence(@Body body: GeofenceReportBody): GeofenceStatus
+
+    @POST("api/worker/status")
+    suspend fun setStatus(@Body body: StatusBody): WorkerDto
+
+    @GET("api/worker/leave")
+    suspend fun getLeaves(): List<LeaveItem>
+
+    @POST("api/worker/leave")
+    suspend fun requestLeave(@Body body: LeaveBody): List<LeaveItem>
+
+    @GET("api/worker/support")
+    suspend fun getSupport(): List<TicketItem>
+
+    @POST("api/worker/support")
+    suspend fun raiseTicket(@Body body: TicketBody): List<TicketItem>
+
+    @POST("api/worker/sos")
+    suspend fun sos(@Body body: SosBody): SosResponse
 
     @PUT("api/worker/preferences")
     suspend fun updatePreferences(@Body body: PreferencesBody): WorkerDto
@@ -121,6 +160,28 @@ interface ApiService {
 
     @GET("api/worker/wallet/payslip")
     suspend fun payslip(): PayslipDto
+
+    @GET("api/worker/wallet/rewards")
+    suspend fun walletRewards(): RewardsDto
+
+    // ---- refer & earn / insurance / merch ----
+    @GET("api/worker/referral")
+    suspend fun referral(): ReferralDto
+
+    @GET("api/worker/insurance")
+    suspend fun insurance(): InsuranceDto
+
+    @POST("api/worker/insurance/claim")
+    suspend fun claimInsurance(@Body body: ClaimBody): SimpleResult
+
+    @GET("api/worker/shakti-bonus")
+    suspend fun shaktiBonus(): ShaktiBonusDto
+
+    @GET("api/worker/merch")
+    suspend fun merch(): MerchResponse
+
+    @POST("api/worker/merch/order")
+    suspend fun orderMerch(@Body body: MerchOrderBody): SimpleResult
 
     @GET("api/worker/wallet/notifications")
     suspend fun walletNotifications(): NotificationsResponse

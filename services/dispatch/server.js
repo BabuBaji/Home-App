@@ -17,6 +17,7 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
+const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '')
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 
@@ -78,11 +79,24 @@ async function matchingBookings(w) {
   const pool_ = await tryGet(BOOKING_URL, '/api/internal/pool', [])
   const skip = skipSet(w.id)
   const cands = []
+  // Per-call cache of each zone's capacity so we fetch a zone's Max Travel Distance at most once.
+  const capCache = new Map()
+  const capFor = async (zid) => {
+    if (zid == null) return null
+    if (capCache.has(zid)) return capCache.get(zid)
+    const r = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?zoneId=${zid}`, null)
+    const cap = r?.capacity || null; capCache.set(zid, cap); return cap
+  }
   for (const b of pool_) {
     if (skip.has(b.id)) continue
     const names = (b.items || []).map((i) => String(i.name || '').toLowerCase().trim())
     if (!names.some((n) => svc.has(n))) continue
     const dist = w.last ? distanceKm(w.last.lat, w.last.lng, b.cust_lat, b.cust_lng) : null
+    // Max Travel Distance: don't offer a job to a worker farther than the job's zone allows.
+    if (dist != null) {
+      const maxKm = Number((await capFor(b.zone_id))?.maxTravelKm) || 0
+      if (maxKm > 0 && dist > maxKm) continue
+    }
     cands.push({ b, dist })
   }
   // Zone-first: a worker's own-zone jobs rank ahead of out-of-zone ones; then nearest by GPS.
@@ -136,7 +150,7 @@ app.post('/api/worker/jobs/accept', auth, async (req, res) => {
   if (!offeredId) return res.status(409).json({ ok: false, error: 'Job no longer available' })
   const claim = await internalPost(BOOKING_URL, `/api/internal/bookings/${offeredId}/assign`, { worker_id: req.worker.id, pro_name: req.worker.name, pro_rating: req.worker.rating })
   if (!claim.ok) return res.status(409).json({ ok: false, error: 'Job already taken by another expert' })
-  publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id })
+  publishEvent(REDIS_URL, 'job.accepted', { bookingId: offeredId, workerId: req.worker.id, ref: claim.booking?.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.accept', entityType: 'booking', entityId: offeredId, ref: claim.booking?.ref, detail: `${req.worker.name} accepted the job` })
   res.json({ ok: true, jobStatus: 'ACCEPTED', activeJob: await jobFromBooking(claim.booking) })
 })
@@ -172,6 +186,8 @@ app.post('/api/worker/jobs/verify-otp', auth, async (req, res) => {
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
   if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
   await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'in_progress' })
+  // Domain event: the wallet service uses this to decide the on-time-start incentive vs late penalty.
+  publishEvent(REDIS_URL, 'job.start', { bookingId: b.id, workerId: req.worker.id, ref: b.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)' })
   res.json({ ok: true, jobStatus: 'IN_PROGRESS', activeJob: await jobFromBooking({ ...b, status: 'in_progress' }) })
 })

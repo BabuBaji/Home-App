@@ -94,6 +94,7 @@ class JobAlertService : Service() {
         const val ALERT_CHANNEL = "hh_pro_jobs"
         const val ONGOING_ID = 4711
         const val ALERT_ID = 4712
+        const val GEOFENCE_ID = 4713
 
         fun ensureChannels(ctx: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -113,6 +114,21 @@ class JobAlertService : Service() {
 
         fun stop(ctx: Context) {
             try { ctx.stopService(Intent(ctx, JobAlertService::class.java)) } catch (_: Exception) { }
+        }
+
+        /** Fire a heads-up system notification when the worker leaves their assigned apartment. */
+        fun notifyGeofence(ctx: Context, text: String) {
+            ensureChannels(ctx)
+            val n = NotificationCompat.Builder(ctx, ALERT_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle("Left your assigned area")
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .build()
+            try { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(GEOFENCE_ID, n) } catch (_: Exception) { }
         }
     }
 }

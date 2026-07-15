@@ -8,14 +8,14 @@ import type { Quote, Coupon } from '../types'
 export default function Summary() {
   const nav = useNavigate()
   const toast = useToast()
-  const { cart, bookingType, date, time, addressLine, coupon, setCoupon } = useStore()
+  const { cart, bookingType, date, time, addressLine, coupon, setCoupon, pincode } = useStore()
   const [quote, setQuote] = useState<Quote | null>(null)
   const [code, setCode] = useState(coupon)
   const [coupons, setCoupons] = useState<Coupon[]>([])
   const [showCoupons, setShowCoupons] = useState(false)
 
   function refresh(c: string) {
-    fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), c || undefined)
+    fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), c || undefined, pincode || undefined)
       .then((q) => { setQuote(q); if (c && !q.coupon) toast('Coupon not applicable'); })
       .catch((e) => toast((e as Error).message))
   }
@@ -27,15 +27,19 @@ export default function Summary() {
   if (!quote) return <div className="screen"><Header title="Booking Summary" /><div className="center"><div className="spinner" /></div></div>
 
   const when = bookingType === 'instant' ? 'Now · arrives in ~12 min' : `${date}, ${time}`
+  // Pre-discount item total → total savings (auto campaigns + coupon), shown as one green line.
+  const listTotal = quote.items.reduce((s, i) => s + (i.listPrice ?? i.price), 0)
+  const savings = quote.savings ?? Math.max(0, listTotal - quote.total)
 
   return (
     <div className="screen">
       <Header title="Booking Summary" />
       <div className="content pad-cta">
         <div className="card pad">
-          <div className="row first"><strong className="lg">Services ({cart.length})</strong><button className="btn-text" onClick={() => nav('/cart')}>Edit</button></div>
-          {cart.map((c) => (
-            <div className="row" key={c.id}><span className="rl"><span className="ri">{c.icon}</span><span>{c.name}<div className="muted sm">{c.durationLabel}</div></span></span><strong>₹{c.price}</strong></div>
+          <div className="row first"><strong className="lg">Services ({quote.items.length})</strong><button className="btn-text" onClick={() => nav('/cart')}>Edit</button></div>
+          {quote.items.map((c) => (
+            <div className="row" key={c.id + c.durationId}><span className="rl"><span className="ri">{c.icon}</span><span>{c.name}<div className="muted sm">{c.durationLabel}</div></span></span>
+              <strong>₹{c.price}{c.listPrice && c.listPrice > c.price ? <s className="muted sm" style={{ marginLeft: 6, fontWeight: 400 }}>₹{c.listPrice}</s> : null}</strong></div>
           ))}
         </div>
 
@@ -71,15 +75,18 @@ export default function Summary() {
 
         <div className="card pad mt">
           <div className="label">Bill Details</div>
-          <div className="kv"><span className="k">Item total</span><span className="v">₹{quote.subtotal}</span></div>
-          {quote.discount > 0 && <div className="kv"><span className="k" style={{ color: 'var(--green)' }}>Discount{quote.coupon ? ` (${quote.coupon})` : ''}</span><span className="v" style={{ color: 'var(--green)' }}>-₹{quote.discount}</span></div>}
+          <div className="kv"><span className="k">Item total</span><span className="v">₹{listTotal}</span></div>
+          {savings > 0 && <div className="kv"><span className="k" style={{ color: 'var(--green)' }}>Discount{quote.coupon ? ` (incl. ${quote.coupon})` : ''}</span><span className="v" style={{ color: 'var(--green)' }}>-₹{savings}</span></div>}
+          {(quote.peakSurcharge || 0) > 0 && <div className="kv"><span className="k">Peak-hour surcharge{quote.peakPct ? ` (+${quote.peakPct}%)` : ''}</span><span className="v">+₹{quote.peakSurcharge}</span></div>}
+          {(quote.fee || 0) > 0 && <div className="kv"><span className="k">Convenience fee</span><span className="v">+₹{quote.fee}</span></div>}
+          {(quote.tax || 0) > 0 && <div className="kv"><span className="k">{quote.gstIncluded ? `Incl. GST${quote.gstPct ? ` (${quote.gstPct}%)` : ''}` : `GST${quote.gstPct ? ` (${quote.gstPct}%)` : ''}`}</span><span className="v">{quote.gstIncluded ? '' : '+'}₹{quote.tax}</span></div>}
           <div className="divider" />
           <div className="kv total"><span className="k">Total</span><span className="v">₹{quote.total}</span></div>
         </div>
       </div>
 
       <FooterCTA>
-        <div className="sumbar"><div className="grow"><div className="cnt">₹{quote.total}</div>{quote.discount > 0 && <div className="sub" style={{ color: 'var(--green)' }}>Saved ₹{quote.discount}</div>}</div>
+        <div className="sumbar"><div className="grow"><div className="cnt">₹{quote.total}</div>{savings > 0 && <div className="sub" style={{ color: 'var(--green)' }}>Saved ₹{savings}</div>}</div>
           <button className="btn" onClick={() => nav('/payment')}>Proceed to Pay →</button></div>
       </FooterCTA>
     </div>

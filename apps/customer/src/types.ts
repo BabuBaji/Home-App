@@ -2,7 +2,9 @@ export interface Service {
   id: string
   name: string
   icon: string
-  price: number
+  price: number            // zone "from" price the customer pays (after any zone offer)
+  listPrice?: number       // pre-discount price (for strikethrough) when a zone offer applies
+  zoneDiscount?: number    // zone offer % (0/undefined = none)
   category: string
   available: boolean
   image?: string | null
@@ -44,6 +46,20 @@ export interface CartItem {
   durationId: string
   durationLabel: string
   price: number
+  listPrice?: number       // pre-discount price (strikethrough) when a campaign applies
+  zoneDiscount?: number    // discount % applied to this item
+}
+
+// A zone/customer/coupon campaign surfaced to the customer as an Offers-carousel card.
+export interface Offer {
+  id: number
+  type: 'zone' | 'customer' | 'coupon'
+  title: string
+  subtitle: string
+  badge: string
+  code: string | null
+  serviceId: string | null
+  category: string | null
 }
 
 export interface User {
@@ -68,16 +84,26 @@ export interface Address {
   label: string
   line: string
   house?: string
+  floor?: string
   apartment?: string
   street?: string
   landmark?: string
   city?: string
   pincode?: string
+  receiver_phone?: string
+  lat?: number
+  lng?: number
+  // Home profile (captured while adding the address).
+  home_size?: string        // '1BHK' | '2BHK' | '3BHK' | '4+ BHK'
+  bedrooms?: number
+  bathrooms?: number
+  fans?: number
+  acs?: number
   is_default: number
 }
 
 export interface Coupon { code: string; type: string; value: number; min: number; max?: number; label: string }
-export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number }
+export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number; savings?: number; appliedCampaignIds?: (number | string)[]; peakSurcharge?: number; peakPct?: number; isPeak?: boolean; gstPct?: number; gstIncluded?: boolean }
 
 export type BookingTypeId = 'instant' | 'schedule'
 export type BookingStatus =
@@ -127,10 +153,11 @@ export interface Booking {
   pos?: { lat: number; lng: number }
   serviceAvailable?: boolean
   pro?: {
-    id: number; name: string; phone?: string; avatar?: string | null
-    rating: number; servicesDone: number; reviewsCount: number
-    services: string[]
-    reviews: { rating: number; review: string; customer: string; created: string }[]
+    id: number; name: string; phone?: string | null; avatar?: string | null
+    rating: number; servicesDone?: number; jobs?: number; reviewsCount?: number
+    verified?: boolean; city?: string | null
+    services?: string[]; skills?: string[]
+    reviews?: { rating: number; review: string; customer: string; created: string }[]
   }
 }
 

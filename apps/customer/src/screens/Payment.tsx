@@ -34,7 +34,7 @@ const VALID = METHODS.map((m) => m.id)
 export default function Payment() {
   const nav = useNavigate()
   const toast = useToast()
-  const { cart, bookingType, date, time, addressLine, coupon, payment, setPayment, note, clearCart, user } = useStore()
+  const { cart, bookingType, date, time, addressLine, coupon, payment, setPayment, note, clearCart, user, pincode } = useStore()
   const [total, setTotal] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [provider, setProvider] = useState<'razorpay' | 'mock'>('mock')
@@ -44,7 +44,7 @@ export default function Payment() {
   useEffect(() => {
     // Default to UPI (priority) unless a valid method is already chosen.
     if (!VALID.includes(payment)) setPayment('upi')
-    fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), coupon || undefined)
+    fetchQuote(cart.map((x) => ({ id: x.id, durationId: x.durationId })), coupon || undefined, pincode || undefined)
       .then((q) => setTotal(q.total)).catch(() => {})
     fetchPaymentConfig().then((c) => { setProvider(c.provider); setDemo(c.upiMode === 'demo') }).catch(() => {})
   }, [])
@@ -60,7 +60,7 @@ export default function Payment() {
 
   const bookingPayload = (extra: Record<string, unknown> = {}) => ({
     items: cart.map((x) => ({ id: x.id, durationId: x.durationId })),
-    type: bookingType, payment, coupon, note, address: addressLine,
+    type: bookingType, payment, coupon, note, address: addressLine, pincode: pincode || undefined,
     date: bookingType === 'schedule' ? date : null, time: bookingType === 'schedule' ? time : null,
     ...extra,
   })

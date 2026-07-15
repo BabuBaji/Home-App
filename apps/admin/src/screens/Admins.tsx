@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { UserCog, UserCheck, UserX, ShieldCheck, Pencil, MoreVertical, Filter, Plus, UserPlus, KeyRound } from 'lucide-react'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, shortDate } from '../components/UI'
+import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, useConfirm, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
 import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit } from '../api'
 import type { Admin } from '../types'
@@ -28,6 +28,7 @@ const blank = { name: '', email: '', phone: '', role: 'support' as Admin['role']
 
 export default function Admins() {
   const toast = useToast()
+  const confirm = useConfirm()
   const { admin } = useStore()
   const [rows, setRows] = useState<Admin[] | null>(null)
   const [audit, setAudit] = useState<AuditRow[]>([])
@@ -77,7 +78,7 @@ export default function Admins() {
   }
   async function removeAdmin(a: Admin) {
     setMenuFor(null)
-    if (!window.confirm(`Delete admin user ${a.name}?`)) return
+    if (!(await confirm({ title: `Delete admin user ${a.name}?`, message: 'They will lose all console access.', confirmLabel: 'Delete', danger: true }))) return
     try { await deleteAdminUser(a.id); toast('Admin user deleted'); load() } catch (e: any) { toast(e.message, 'err') }
   }
 

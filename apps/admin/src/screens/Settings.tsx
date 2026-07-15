@@ -26,6 +26,9 @@ const NAV = [
 const KEYS = [
   { k: 'razorpay_key_id', label: 'Razorpay Key ID', hint: 'rzp_live_… / rzp_test_…', secret: false },
   { k: 'razorpay_key_secret', label: 'Razorpay Key Secret', hint: 'Stored securely, enables live payments', secret: true },
+  { k: 'razorpayx_account_number', label: 'RazorpayX Account Number', hint: 'Source account for worker payouts & penny-drop (from RazorpayX dashboard). Enables real payouts.', secret: false },
+  { k: 'payout_mode', label: 'Payout Mode', hint: 'IMPS / NEFT / UPI (default IMPS)', secret: false },
+  { k: 'payout_webhook_secret', label: 'Payout Webhook Secret', hint: 'Verifies RazorpayX payout & fund-account-validation webhooks', secret: true },
   { k: 'google_maps_key', label: 'Google Maps API Key', hint: 'Geocoding & live tracking maps', secret: true },
   { k: 'msg91_key', label: 'MSG91 / SMS Key', hint: 'OTP & transactional SMS', secret: true },
   { k: 'firebase_server_key', label: 'Firebase Server Key', hint: 'Push notifications (FCM)', secret: true },
@@ -96,6 +99,11 @@ export default function SettingsScreen() {
           <Field label="Platform Tagline"><input disabled={!editable} value={s.platform_tagline || ''} onChange={(e) => set('platform_tagline', e.target.value)} placeholder="We make home services simple" /></Field>
           <Field label="Support Email"><input disabled={!editable} value={s.support_email || ''} onChange={(e) => set('support_email', e.target.value)} /></Field>
           <Field label="Support Phone"><input disabled={!editable} value={s.support_phone || ''} onChange={(e) => set('support_phone', e.target.value)} /></Field>
+          <Field label="Company Legal Name (tax invoice)"><input disabled={!editable} value={s.company_name || ''} onChange={(e) => set('company_name', e.target.value)} placeholder="HomeHelp Services Pvt. Ltd." /></Field>
+          <Field label="Company GSTIN"><input disabled={!editable} value={s.company_gstin || ''} onChange={(e) => set('company_gstin', e.target.value)} placeholder="36AABCH1234M1Z7" /></Field>
+          <Field label="Registered Address (invoice)"><input disabled={!editable} value={s.company_address || ''} onChange={(e) => set('company_address', e.target.value)} placeholder="Street, City, State, PIN" /></Field>
+          <Field label="State — Place of Supply"><input disabled={!editable} value={s.company_state || ''} onChange={(e) => set('company_state', e.target.value)} placeholder="Telangana" /></Field>
+          <Field label="Service SAC Code"><input disabled={!editable} value={s.service_sac || ''} onChange={(e) => set('service_sac', e.target.value)} placeholder="9987" /></Field>
         </div>
 
         {/* Default Currency & Time */}
@@ -138,7 +146,45 @@ export default function SettingsScreen() {
           <ToggleRow label="Maintenance Mode" on={s.maintenance_mode === 'true'} onClick={() => toggle('maintenance_mode')} disabled={!editable} />
           <ToggleRow label="Enable Promo Codes" on={s.enable_promo !== 'false'} onClick={() => toggle('enable_promo')} disabled={!editable} />
           <ToggleRow label="Enable Review & Ratings" on={s.enable_reviews !== 'false'} onClick={() => toggle('enable_reviews')} disabled={!editable} />
+          <ToggleRow label="Show GST-inclusive prices to customers" on={s.gst_inclusive !== 'false'} onClick={() => toggle('gst_inclusive')} disabled={!editable} />
         </div>
+
+        {/* Worker Payout Policy — read by the wallet service. min_payout_limit is enforced on every
+            withdrawal request; frequency/day only drive the estimated next-payout date shown to
+            workers and admins. Nothing pays automatically — payouts stay worker-requested and
+            admin-approved — so 'On demand' is the honest setting when there is no stated cycle. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Worker Payout Policy</h4>
+        <div className="form-grid">
+          <Field label="Minimum payout (₹)">
+            <input disabled={!editable} type="number" min={0} value={s.min_payout_limit || ''} onChange={(e) => set('min_payout_limit', e.target.value)} placeholder="500" />
+          </Field>
+          <Field label="Payout frequency">
+            <select disabled={!editable} value={s.payout_frequency || 'weekly'} onChange={(e) => set('payout_frequency', e.target.value)}>
+              <option value="weekly">Weekly</option>
+              <option value="fortnightly">Fortnightly</option>
+              <option value="monthly">Monthly</option>
+              <option value="daily">Daily</option>
+              <option value="on_demand">On demand (no schedule)</option>
+            </select>
+          </Field>
+          {s.payout_frequency !== 'on_demand' && s.payout_frequency !== 'daily' && (
+            s.payout_frequency === 'monthly' ? (
+              <Field label="Payout day of month">
+                <input disabled={!editable} type="number" min={1} max={28} value={s.payout_day || ''} onChange={(e) => set('payout_day', e.target.value)} placeholder="1" />
+              </Field>
+            ) : (
+              <Field label="Payout day">
+                <select disabled={!editable} value={s.payout_day || '4'} onChange={(e) => set('payout_day', e.target.value)}>
+                  {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
+                </select>
+              </Field>
+            )
+          )}
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          The minimum is enforced on every withdrawal request. Frequency sets the payout date estimated for
+          workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
+        </p>
 
         {/* Session & Security */}
         <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Session &amp; Security</h4>

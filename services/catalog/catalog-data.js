@@ -92,6 +92,15 @@ const SERVICE_TERMS = [
   { t: 'Payments', d: 'Online payments are charged at the time of booking. Cash payments are made directly to the expert after the service.' },
 ]
 
+export const descFor = (id) => (DETAILS[id] && DETAILS[id].desc) || ''
+// Average on-site service time (minutes) per service — the real, editable duration.
+// Standard durations only: 1h / 1:30 / 2h / 2:30 / 3h (60/90/120/150/180 min).
+export const SERVICE_DURATION = {
+  mopping: 60, dusting: 60, dishwashing: 60, bathroom: 60, kitchen: 90,
+  laundry: 90, window: 60, fan: 60, bedmaking: 60, garbage: 60,
+  organization: 90, ironing: 60, deepclean: 180, fridge: 60, sanitization: 120,
+}
+export const durationMinFor = (id) => SERVICE_DURATION[id] || 60
 export function detailsFor(id, base) {
   const d = DETAILS[id] || { desc: '', includes: [], excludes: [] }
   return {

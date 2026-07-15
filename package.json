@@ -19,6 +19,7 @@
   "scripts": {
     "up": "docker compose -f infra/docker-compose.yml up --build",
     "down": "docker compose -f infra/docker-compose.yml down",
-    "migrate": "node infra/migrate/index.js"
+    "migrate": "node infra/migrate/index.js",
+    "seed:earnings": "sh infra/seed/run-in-container.sh"
   }
 }

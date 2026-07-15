@@ -10,10 +10,19 @@ import { runTopBackHandler } from './backStack'
 
 import Login from './screens/Login'
 import NameSelect from './screens/NameSelect'
+import SelectCity from './screens/SelectCity'
+import Permissions from './screens/Permissions'
 import CountrySelect from './screens/CountrySelect'
 import LocationSelect from './screens/LocationSelect'
+import AddressDetails from './screens/AddressDetails'
+import SearchLocation from './screens/SearchLocation'
+import ComingSoon from './screens/ComingSoon'
 import Home from './screens/Home'
+import PopularServices from './screens/PopularServices'
+import ContinueBooking from './screens/ContinueBooking'
 import ServiceDetails from './screens/ServiceDetails'
+import ServiceFlow from './screens/ServiceFlow'
+import BookingFlow from './screens/BookingFlow'
 import Book from './screens/Book'
 import Confirmed from './screens/Confirmed'
 import Notifications from './screens/Notifications'
@@ -23,9 +32,9 @@ import Schedule from './screens/Schedule'
 import Summary from './screens/Summary'
 import Payment from './screens/Payment'
 import Track from './screens/Track'
+import BookingTracking from './screens/BookingTracking'
 import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
-import Rate from './screens/Rate'
 import Bookings from './screens/Bookings'
 import History from './screens/History'
 import BookingDetail from './screens/BookingDetail'
@@ -33,9 +42,30 @@ import Wallet from './screens/Wallet'
 import Profile from './screens/Profile'
 import Support from './screens/Support'
 import Addresses from './screens/Addresses'
+import AddAddress from './screens/address/AddAddress'
+import SavedAddresses from './screens/SavedAddresses'
+import DefaultAddress from './screens/DefaultAddress'
 import CancelPolicy from './screens/CancelPolicy'
 import PersonalInfo from './screens/PersonalInfo'
 import Terms from './screens/Terms'
+// Module 6 — Live Job Tracking
+import JobTracking from './screens/job/JobTracking'
+import WorkerProfile from './screens/job/WorkerProfile'
+import OnTheWay from './screens/job/OnTheWay'
+import LiveTrack from './screens/job/LiveTrack'
+import Chat from './screens/job/Chat'
+import CallWorker from './screens/job/CallWorker'
+import ShareOtp from './screens/job/ShareOtp'
+import ServiceStarted from './screens/job/ServiceStarted'
+import LiveProgress from './screens/job/LiveProgress'
+import ServiceCompleted from './screens/job/ServiceCompleted'
+// Module 7 — Rating
+import RateWorker from './screens/rate/RateWorker'
+import UploadPhotos from './screens/rate/UploadPhotos'
+import Complaint from './screens/rate/Complaint'
+import TipWorker from './screens/rate/TipWorker'
+import Rebook from './screens/rate/Rebook'
+import ReferFriend from './screens/rate/ReferFriend'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
@@ -97,12 +127,21 @@ export default function App() {
             <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
             <Route element={<Guard authed={!!user} />}>
               <Route path="/onboarding/name" element={<NameSelect />} />
+              <Route path="/onboarding/city" element={<SelectCity />} />
+              <Route path="/onboarding/permission" element={<Permissions />} />
               <Route path="/onboarding/country" element={<CountrySelect />} />
               <Route path="/onboarding/location" element={<LocationSelect />} />
+              <Route path="/address-details" element={<AddressDetails />} />
+              <Route path="/locations" element={<SearchLocation />} />
+              <Route path="/coming-soon" element={<ComingSoon standalone />} />
             </Route>
             <Route element={<AppGuard user={user} />}>
               <Route path="/home" element={<Home />} />
+              <Route path="/popular-services" element={<PopularServices />} />
+              <Route path="/continue-booking" element={<ContinueBooking />} />
               <Route path="/service/:id" element={<ServiceDetails />} />
+              <Route path="/configure/:id" element={<ServiceFlow />} />
+              <Route path="/booking/:id" element={<BookingFlow />} />
               <Route path="/book/:id" element={<Book />} />
               <Route path="/confirmed/:id" element={<Confirmed />} />
               <Route path="/notifications" element={<Notifications />} />
@@ -111,10 +150,28 @@ export default function App() {
               <Route path="/schedule" element={<Schedule />} />
               <Route path="/summary" element={<Summary />} />
               <Route path="/payment" element={<Payment />} />
+              <Route path="/tracking/:id" element={<BookingTracking />} />
               <Route path="/track/:id" element={<Track />} />
               <Route path="/reschedule/:id" element={<Reschedule />} />
               <Route path="/cancel/:id" element={<Cancel />} />
-              <Route path="/rate/:id" element={<Rate />} />
+              {/* Module 6 — Live Job Tracking */}
+              <Route path="/job/:id" element={<JobTracking />} />
+              <Route path="/job/:id/worker" element={<WorkerProfile />} />
+              <Route path="/job/:id/otw" element={<OnTheWay />} />
+              <Route path="/job/:id/map" element={<LiveTrack />} />
+              <Route path="/job/:id/chat" element={<Chat />} />
+              <Route path="/job/:id/call" element={<CallWorker />} />
+              <Route path="/job/:id/otp" element={<ShareOtp />} />
+              <Route path="/job/:id/started" element={<ServiceStarted />} />
+              <Route path="/job/:id/progress" element={<LiveProgress />} />
+              <Route path="/job/:id/completed" element={<ServiceCompleted />} />
+              {/* Module 7 — Rating */}
+              <Route path="/rate/:id" element={<RateWorker />} />
+              <Route path="/rate/:id/photos" element={<UploadPhotos />} />
+              <Route path="/complaint/:id" element={<Complaint />} />
+              <Route path="/tip/:id" element={<TipWorker />} />
+              <Route path="/rebook/:id" element={<Rebook />} />
+              <Route path="/refer" element={<ReferFriend />} />
               <Route path="/bookings" element={<Bookings />} />
               <Route path="/history" element={<History />} />
               <Route path="/booking/:id" element={<BookingDetail />} />
@@ -122,6 +179,9 @@ export default function App() {
               <Route path="/profile" element={<Profile />} />
               <Route path="/support" element={<Support />} />
               <Route path="/addresses" element={<Addresses />} />
+              <Route path="/addresses/add" element={<AddAddress />} />
+              <Route path="/addresses/saved" element={<SavedAddresses />} />
+              <Route path="/addresses/default" element={<DefaultAddress />} />
               <Route path="/cancellation-policy" element={<CancelPolicy />} />
               <Route path="/personal" element={<PersonalInfo />} />
               <Route path="/terms" element={<Terms />} />
@@ -166,12 +226,12 @@ function Guard({ authed }: { authed: boolean }) {
   return <Outlet />
 }
 
-// Gate for the main app: an authenticated user must have a name and a location
-// before reaching the home screen. Sends them to whichever step is missing.
+// Gate for the main app: an authenticated user must have picked a city (location)
+// before reaching home. Matches the Module-1 flow (Select City → Permission). Name
+// is optional here (no name screen in the flow) and stays editable in Profile.
 function AppGuard({ user }: { user: ReturnType<typeof useStore>['user'] }) {
   const loc = useLocation()
   if (!user) return <Navigate to="/login" replace state={{ from: loc }} />
-  if (!user.name?.trim()) return <Navigate to="/onboarding/name" replace />
-  if (!user.location) return <Navigate to="/onboarding/location" replace />
+  if (!user.location) return <Navigate to="/onboarding/city" replace />
   return <Outlet />
 }

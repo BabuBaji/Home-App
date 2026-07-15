@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { MapPin, CheckCircle2, Clock, Hash, Plus, Pencil, Trash2, Play, Pause } from 'lucide-react'
-import { fetchZones, createZone, updateZone, deleteZone, type Zone } from '../api'
-import { StatCard, Card, Badge, SearchBox, Loading, ErrorState, Modal, Field, useToast } from '../components/UI'
+import { fetchZones, createZone, updateZone, deleteZone, fetchLiveOps, type Zone, type LiveOpsZone } from '../api'
+import { StatCard, Card, Badge, SearchBox, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
+import { CITIES, stateForCity } from '../cities'
+
+const HEALTH_TONE: Record<string, 'green' | 'amber' | 'red' | 'gray'> = { healthy: 'green', short: 'amber', critical: 'red', idle: 'gray', off: 'gray' }
+const HEALTH_LABEL: Record<string, string> = { healthy: 'Healthy', short: 'Short', critical: 'No supply', idle: 'Idle', off: '—' }
 
 type Draft = { name: string; state: string; city: string; pincodes: string; status: Zone['status']; slaMinutes: string }
 const emptyDraft: Draft = { name: '', state: '', city: '', pincodes: '', status: 'planned', slaMinutes: '' }
@@ -10,6 +14,7 @@ const STATUS_LABEL = { live: 'Live', planned: 'Planned', paused: 'Paused' } as c
 
 export default function ServiceAreas() {
   const toast = useToast()
+  const confirm = useConfirm()
   const [rows, setRows] = useState<Zone[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -18,9 +23,11 @@ export default function ServiceAreas() {
   const [active, setActive] = useState<Zone | null>(null)
   const [draft, setDraft] = useState<Draft>(emptyDraft)
   const [saving, setSaving] = useState(false)
+  const [ops, setOps] = useState<Record<number, LiveOpsZone>>({})
 
-  const load = () => { setErr(''); fetchZones().then(setRows).catch((e: Error) => setErr(e.message)) }
-  useEffect(load, [])
+  const loadOps = () => fetchLiveOps().then((d) => setOps(Object.fromEntries(d.zones.map((z) => [z.id, z])))).catch(() => {})
+  const load = () => { setErr(''); fetchZones().then(setRows).catch((e: Error) => setErr(e.message)); loadOps() }
+  useEffect(() => { load(); const iv = setInterval(loadOps, 8000); return () => clearInterval(iv) }, [])
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!rows) return <Loading />
 
@@ -63,8 +70,8 @@ export default function ServiceAreas() {
       .catch((e: Error) => toast(e.message, 'err'))
   }
 
-  const remove = (z: Zone) => {
-    if (!window.confirm(`Delete zone "${z.name}"? Customers in its pincodes may lose service.`)) return
+  const remove = async (z: Zone) => {
+    if (!(await confirm({ title: `Delete zone "${z.name}"?`, message: 'Customers in its pincodes may lose service. This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return
     deleteZone(z.id).then(() => { toast('Zone deleted', 'ok'); load() }).catch((e: Error) => toast(e.message, 'err'))
   }
 
@@ -78,10 +85,12 @@ export default function ServiceAreas() {
       </div>
 
       <Card>
-        <div style={{ padding: '2px 4px 12px', color: 'var(--muted)', fontSize: 13, lineHeight: 1.5 }}>
-          A <b>Zone</b> is a launchable area (a set of pincodes) — your hyperlocal "dark store". Only <b>Live</b> zones are
-          serviceable, so you roll out <b>area by area</b>. When <b>no zones exist at all</b>, the app serves everywhere;
-          create your first zone to start gating by area.
+        <div style={{ padding: '2px 4px 12px', color: 'var(--muted)', fontSize: 13, lineHeight: 1.55 }}>
+          A <b>Zone</b> is a launchable area (a set of pincodes) — your hyperlocal "dark store". What a live zone <b>operates</b>:
+          it turns those pincodes <b>serviceable</b> (customers there can book), it <b>scopes dispatch</b> (jobs go to experts in the
+          zone first), and the server <b>auto-assigns</b> jobs to on-shift experts here. The columns below show each zone's live
+          <b> experts</b>, <b>open/active jobs</b>, and supply/demand <b>health</b> (auto-refreshing).
+          <br /><b>Go Live</b> = start serving the area · <b>Pause</b> = stop taking new bookings there. No zones at all = serves everywhere.
         </div>
         <div className="toolbar">
           <SearchBox value={q} onChange={setQ} placeholder="Search by zone, city, state or pincode..." />
@@ -98,10 +107,10 @@ export default function ServiceAreas() {
         <div className="tablewrap">
           <table className="tbl">
             <thead>
-              <tr><th>Zone</th><th>State / City</th><th>Pincodes</th><th>SLA</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Zone</th><th>State / City</th><th>Pincodes</th><th>SLA</th><th>Experts</th><th>Live Jobs</th><th>Health</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              {filtered.map((z) => (
+              {filtered.map((z) => { const o = ops[z.id]; return (
                 <tr key={z.id}>
                   <td><strong>{z.name}</strong></td>
                   <td>{[z.state, z.city].filter(Boolean).join(' / ') || <span className="muted">—</span>}</td>
@@ -112,6 +121,9 @@ export default function ServiceAreas() {
                     </div>
                   </td>
                   <td>{z.sla_minutes ? `${z.sla_minutes} min` : <span className="muted">—</span>}</td>
+                  <td>{o ? <span><b>{o.supply.onShift}</b> <span className="muted" style={{ fontSize: 12 }}>on shift / {o.supply.assigned}</span></span> : <span className="muted">—</span>}</td>
+                  <td>{o ? <span><b>{o.demand.open}</b> <span className="muted" style={{ fontSize: 12 }}>open · {o.demand.active} active</span></span> : <span className="muted">—</span>}</td>
+                  <td>{o && z.status === 'live' ? <Badge tone={HEALTH_TONE[o.health]}>{HEALTH_LABEL[o.health]}</Badge> : <span className="muted">—</span>}</td>
                   <td><Badge tone={STATUS_TONE[z.status]}>{STATUS_LABEL[z.status]}</Badge></td>
                   <td>
                     <div className="actions">
@@ -123,9 +135,9 @@ export default function ServiceAreas() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              ) })}
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 24 }}>No zones yet. Click “Add Zone” to launch your first area.</td></tr>
+                <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>No zones yet. Click “Add Zone” to launch your first area.</td></tr>
               )}
             </tbody>
           </table>
@@ -147,8 +159,14 @@ export default function ServiceAreas() {
             <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Kondapur" />
           </Field>
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="State"><input value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} placeholder="Telangana" /></Field>
-            <Field label="City"><input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} placeholder="Hyderabad" /></Field>
+            <Field label="City">
+              <select value={draft.city} onChange={(e) => { const city = e.target.value; setDraft({ ...draft, city, state: stateForCity(city) || draft.state }) }}>
+                <option value="">— Select city —</option>
+                {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city} · {c.state}</option>)}
+                {draft.city && !CITIES.some((c) => c.city === draft.city) && <option value={draft.city}>{draft.city}</option>}
+              </select>
+            </Field>
+            <Field label="State"><input value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} placeholder="Auto-filled from city" /></Field>
           </div>
           <Field label="Pincodes (comma or space separated, 6-digit)">
             <textarea value={draft.pincodes} onChange={(e) => setDraft({ ...draft, pincodes: e.target.value })} rows={3}

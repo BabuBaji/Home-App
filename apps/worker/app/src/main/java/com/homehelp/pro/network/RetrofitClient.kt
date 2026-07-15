@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * same-Wi-Fi testing).
  */
 object RetrofitClient {
-    private const val FALLBACK_URL = "http://192.168.0.114:8080/"
+    private const val FALLBACK_URL = "http://192.168.0.112:8080/"
     private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
 
     /** Current backend base URL — updated by [refreshBaseUrl]. */
@@ -33,8 +33,8 @@ object RetrofitClient {
 
     // Bare client used ONLY to fetch the config (not host-rewritten by the interceptor).
     private val bare = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
         .build()
 
     /** Pull the live backend URL from the public config. Blocking — call off the main thread. */
@@ -68,11 +68,14 @@ object RetrofitClient {
             token?.let { req.header("Authorization", "Bearer $it") }
             chain.proceed(req.build())
         }
+        // Generous timeouts: a cold Cloudflare quick-tunnel can take >8s for the first
+        // round-trip, which previously surfaced as "could not reach the server" on login.
         val client = OkHttpClient.Builder()
             .addInterceptor(dynamic)
             .addInterceptor(logging)
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(25, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(35, TimeUnit.SECONDS)
             .build()
         Retrofit.Builder()
             .baseUrl(FALLBACK_URL) // placeholder for path resolution; interceptor swaps the host

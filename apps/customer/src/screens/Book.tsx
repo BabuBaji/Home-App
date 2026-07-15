@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { Tag, Check, X } from 'lucide-react'
 import { Loading, useToast } from '../components/UI'
 import PaymentSheet from '../components/PaymentSheet'
-import Calendar, { startOfDay, fmtDate, sameDay, SLOT_HOURS, slotLabel, isSlotDisabled } from '../components/Calendar'
+import Calendar, { startOfDay, fmtDate, sameDay, slotLabel, isSlotDisabled, isZoneOpenNow, todayHoursLabel } from '../components/Calendar'
+import type { ZoneHours } from '../components/Calendar'
 import { useStore } from '../store'
-import { fetchService, fetchHome, fetchQuote, validateCoupon, createBookingApi } from '../api'
+import { fetchService, fetchHome, fetchQuote, validateCoupon, createBookingApi, fetchZoneHours, fetchSlots, type SlotInfo } from '../api'
 import type { ServiceDetail, Duration, Quote } from '../types'
 
 export default function Book() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
-  const { bookingType } = useStore()
+  const { bookingType, setBookingType, pincode } = useStore()
+  const preDurationId = (useLocation().state as { durationId?: string } | null)?.durationId
   const instant = bookingType !== 'schedule'
 
   const [s, setS] = useState<ServiceDetail | null>(null)
@@ -27,26 +29,46 @@ export default function Book() {
   const [placing, setPlacing] = useState(false)
 
   useEffect(() => {
-    fetchService(id!).then((d) => { setS(d); setDur(d.durations[0]) }).catch(() => toast('Could not load service'))
+    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations.find((x) => x.id === preDurationId) || d.durations[0]) }).catch(() => toast('Could not load service'))
     fetchHome().then((h) => setEta(h.instantEta)).catch(() => {})
-  }, [id])
+  }, [id, pincode])
 
-  // recompute the bill whenever duration or coupon changes
+  // recompute the bill whenever duration / coupon / chosen slot changes (slot drives peak-hour pricing)
   useEffect(() => {
     if (!dur) return
-    fetchQuote([{ id: id!, durationId: dur.id }], coupon || undefined).then(setQuote).catch(() => {})
-  }, [dur, coupon, id])
+    const now = new Date()
+    const at = instant ? `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}` : (slot !== null ? `${slot}:00` : undefined)
+    fetchQuote([{ id: id!, durationId: dur.id }], coupon || undefined, pincode || undefined, at).then(setQuote).catch(() => {})
+  }, [dur, coupon, id, pincode, slot, instant])
 
-  // time slots for the chosen date (past slots on "today" are disabled)
-  const slots = useMemo(() => SLOT_HOURS.map((h) => ({ h, label: slotLabel(h), disabled: isSlotDisabled(selDate, h) })), [selDate])
-  const isToday = sameDay(selDate, startOfDay(new Date()))
-  // when the date changes, keep a valid slot selected (first available)
+  // the serving zone's working hours (drives the calendar's closed-day greying + instant "open now")
+  const [zh, setZh] = useState<ZoneHours | null>(null)
   useEffect(() => {
-    if (slot === null || isSlotDisabled(selDate, slot)) {
-      const first = slots.find((x) => !x.disabled)
-      setSlot(first ? first.h : null)
-    }
-  }, [selDate]) // eslint-disable-line
+    if (!pincode) { setZh(null); return }
+    fetchZoneHours(pincode).then(setZh).catch(() => setZh(null))
+  }, [pincode])
+  const closedNow = instant && !isZoneOpenNow(zh)   // instant but the zone is shut right now
+
+  // Authoritative bookable slots for the chosen date — server applies zone working hours + capacity,
+  // so we always reflect the real availability ("sold out" when no expert/slot is free).
+  const [slotData, setSlotData] = useState<{ slots: SlotInfo[]; closed: boolean; serviceable: boolean } | null>(null)
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const dateStr = fmtDate(selDate)   // same format bookings are stored in → capacity counts line up
+  useEffect(() => {
+    if (instant || !pincode || !s) { setSlotData(null); return }
+    setSlotsLoading(true)
+    fetchSlots(dateStr, pincode, s.name).then(setSlotData).catch(() => setSlotData(null)).finally(() => setSlotsLoading(false))
+  }, [dateStr, pincode, instant, s])
+
+  const dayClosed = !!slotData?.closed
+  const slots = (slotData?.slots || []).map((x) => ({ h: x.hour, label: x.time, disabled: !x.available || isSlotDisabled(selDate, x.hour), soldout: !x.available }))
+  const bookableCount = slots.filter((x) => !x.disabled).length
+  const isToday = sameDay(selDate, startOfDay(new Date()))
+  // keep a valid slot selected (first bookable one)
+  useEffect(() => {
+    const first = slots.find((x) => !x.disabled)
+    if (slot === null || !slots.some((x) => x.h === slot && !x.disabled)) setSlot(first ? first.h : null)
+  }, [slotData, selDate]) // eslint-disable-line
 
   if (!s || !dur) return <div className="screen"><Loading /></div>
 
@@ -66,11 +88,14 @@ export default function Book() {
     if (placing) return
     setPlacing(true)
     try {
+      const bnow = new Date()
+      const bookAt = instant ? `${bnow.getHours()}:${String(bnow.getMinutes()).padStart(2, '0')}` : (slot !== null ? `${slot}:00` : undefined)
       const b = await createBookingApi({
         items: [{ id: s!.id, durationId: dur!.id }],
         type: instant ? 'instant' : 'schedule',
-        payment: method, coupon: coupon || undefined,
+        payment: method, coupon: coupon || undefined, pincode: pincode || undefined,
         paymentId: txnId, // Razorpay payment id (verified server-side before the booking is accepted)
+        at: bookAt, // slot time (24h) → peak-hour surcharge is applied server-side on the authoritative price
         ...(instant ? {} : { date: fmtDate(selDate), time: slot !== null ? slotLabel(slot) : '' }),
       })
       nav(`/confirmed/${b.id}`, { replace: true })
@@ -82,20 +107,32 @@ export default function Book() {
       <button className="sheet-back" onClick={() => nav(-1)}><X size={18} /></button>
       <div className="content sheet-body pad-cta">
         {instant
-          ? <h1 className="sheet-title pink">Arrives in {eta} min ⚡</h1>
+          ? (closedNow ? <h1 className="sheet-title">We're closed right now 🌙</h1> : <h1 className="sheet-title pink">Arrives in {eta} min ⚡</h1>)
           : <h1 className="sheet-title">Schedule your slot</h1>}
+
+        {closedNow && (
+          <div className="note-box" style={{ background: '#fff4ec', borderColor: '#fed7aa', color: '#c2410c' }}>
+            🌙 We're closed right now{todayHoursLabel(zh) ? ` · Hours ${todayHoursLabel(zh)}` : ''}. Please come back during working hours or <b onClick={() => setBookingType('schedule')} style={{ textDecoration: 'underline', cursor: 'pointer' }}>schedule for later</b>.
+          </div>
+        )}
 
         {!instant && (
           <>
             <h3 className="incl-head">Pick a date</h3>
-            <Calendar value={selDate} onChange={setSelDate} />
+            <Calendar value={selDate} onChange={setSelDate} zh={zh} />
             <h3 className="incl-head" style={{ marginTop: 18 }}>Pick a time{isToday ? ' · today' : ''}</h3>
-            {slots.every((x) => x.disabled) ? (
-              <div className="note-box">No more slots today — pick another date above.</div>
+            {slotsLoading ? (
+              <div className="note-box">Checking availability…</div>
+            ) : dayClosed ? (
+              <div className="note-box">🚫 Not available — we're closed on {selDate.toLocaleDateString('en-IN', { weekday: 'long' })}. Please pick another date above.</div>
+            ) : bookableCount === 0 ? (
+              <div className="note-box">😔 Sold out — no slots available for this day. Please try another date.</div>
             ) : (
               <div className="slot-grid">
                 {slots.map((x) => (
-                  <button key={x.h} className={`slot ${slot === x.h ? 'sel' : ''}`} disabled={x.disabled} onClick={() => setSlot(x.h)}>{x.label}</button>
+                  <button key={x.h} className={`slot ${slot === x.h ? 'sel' : ''} ${x.soldout ? 'soldout' : ''}`} disabled={x.disabled} onClick={() => setSlot(x.h)}>
+                    {x.label}{x.soldout && <span className="slot-out">Sold out</span>}
+                  </button>
                 ))}
               </div>
             )}
@@ -138,6 +175,11 @@ export default function Book() {
           <div className="bill">
             <div className="bill-row"><span>Item total</span><span>₹{quote.subtotal}</span></div>
             {quote.discount > 0 && <div className="bill-row disc"><span><Check size={14} /> Coupon discount</span><span>−₹{quote.discount}</span></div>}
+            {(quote.peakSurcharge || 0) > 0 && <div className="bill-row"><span>Peak-hour surcharge{quote.peakPct ? ` (+${quote.peakPct}%)` : ''}</span><span>+₹{quote.peakSurcharge}</span></div>}
+            {(quote.fee || 0) > 0 && <div className="bill-row"><span>Convenience fee</span><span>+₹{quote.fee}</span></div>}
+            {(quote.tax || 0) > 0 && (quote.gstIncluded
+              ? <div className="bill-row"><span>Incl. GST{quote.gstPct ? ` (${quote.gstPct}%)` : ''}</span><span>₹{quote.tax}</span></div>
+              : <div className="bill-row"><span>GST{quote.gstPct ? ` (${quote.gstPct}%)` : ''}</span><span>+₹{quote.tax}</span></div>)}
             <div className="bill-row total"><span>To pay</span><span>₹{quote.total}</span></div>
           </div>
         )}
@@ -147,11 +189,11 @@ export default function Book() {
       <div className="footer-cta">
         <div className="paybar">
           <div className="pay-using">
-            <span className="muted sm">Total payable</span>
-            <span className="pay-name">₹{total}</span>
+            <span className="muted sm">{closedNow ? 'Currently closed' : 'Total payable'}</span>
+            <span className="pay-name">{closedNow ? 'Opens later' : `₹${total}`}</span>
           </div>
-          <button className="btn pay-now" onClick={() => { if (!instant && slot === null) return toast('Please pick a time slot'); setSheet(true) }} disabled={placing}>
-            <b>₹{total}</b><span>{placing ? 'Booking…' : 'Pay Now'} →</span>
+          <button className="btn pay-now" onClick={() => { if (closedNow) { setBookingType('schedule'); return } if (!instant && slot === null) return toast('Please pick a time slot'); setSheet(true) }} disabled={placing}>
+            {closedNow ? <span>Schedule for later →</span> : <><b>₹{total}</b><span>{placing ? 'Booking…' : 'Pay Now'} →</span></>}
           </button>
         </div>
       </div>

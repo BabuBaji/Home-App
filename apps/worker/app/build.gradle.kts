@@ -11,8 +11,8 @@ android {
         applicationId = "com.homehelp.pro"
         minSdk = 24
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 16
+        versionName = "1.15"
     }
 
     buildTypes {

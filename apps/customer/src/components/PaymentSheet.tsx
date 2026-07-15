@@ -51,6 +51,65 @@ const APP_THEME: Record<string, { bg: string; name: string }> = {
   upi: { bg: '#0b8f3f', name: 'UPI' },
 }
 
+// --- Brand logos (inline SVG, no external assets — render offline on-device) ---
+const UpiLogo = ({ s = 26 }: { s?: number }) => (
+  <svg viewBox="0 0 40 40" width={s} height={s} aria-hidden>
+    <rect width="40" height="40" rx="9" fill="#fff" stroke="#e5e7eb" />
+    <text x="20" y="18" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="11" fontWeight="800" fill="#e97730">UPI</text>
+    <path d="M11 24 l8 0 -3 6 z" fill="#e97730" />
+    <path d="M21 24 l8 0 -3 6 z" fill="#0d8a3f" />
+  </svg>
+)
+const PhonePeLogo = ({ s = 18 }: { s?: number }) => (
+  <svg viewBox="0 0 32 32" width={s} height={s} aria-hidden>
+    <rect width="32" height="32" rx="7" fill="#5f259f" />
+    <text x="16" y="21" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="13" fontWeight="700" fill="#fff">Pe</text>
+  </svg>
+)
+const GPayLogo = ({ s = 18 }: { s?: number }) => (
+  <svg viewBox="0 0 24 24" width={s} height={s} aria-hidden style={{ background: '#fff', borderRadius: 6, border: '1px solid #eee', padding: 1 }}>
+    <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z" />
+    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z" />
+    <path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z" />
+    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z" />
+  </svg>
+)
+const PaytmLogo = ({ s = 18 }: { s?: number }) => (
+  <svg viewBox="0 0 44 24" width={(s * 44) / 24} height={s} aria-hidden>
+    <rect width="44" height="24" rx="5" fill="#fff" stroke="#eee" />
+    <text x="22" y="17" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="12" fontWeight="800">
+      <tspan fill="#002970">pay</tspan><tspan fill="#00baf2">tm</tspan>
+    </text>
+  </svg>
+)
+const CardLogo = ({ s = 26 }: { s?: number }) => (
+  <svg viewBox="0 0 40 40" width={s} height={s} aria-hidden>
+    <rect width="40" height="40" rx="9" fill="#eef0ff" />
+    <rect x="9" y="13" width="22" height="15" rx="2.5" fill="#5b51e8" />
+    <rect x="9" y="16.5" width="22" height="3" fill="#3a32a8" />
+    <rect x="12" y="23" width="7" height="2.4" rx="1" fill="#fff" opacity="0.9" />
+  </svg>
+)
+const VisaMark = () => (
+  <svg viewBox="0 0 40 24" width={26} height={16} aria-hidden><rect width="40" height="24" rx="3" fill="#fff" stroke="#eee" /><text x="20" y="17" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="12" fontStyle="italic" fontWeight="800" fill="#1a1f71">VISA</text></svg>
+)
+const McMark = () => (
+  <svg viewBox="0 0 40 24" width={26} height={16} aria-hidden><rect width="40" height="24" rx="3" fill="#fff" stroke="#eee" /><circle cx="17" cy="12" r="7" fill="#eb001b" /><circle cx="24" cy="12" r="7" fill="#f79e1b" fillOpacity="0.85" /></svg>
+)
+const RupayMark = () => (
+  <svg viewBox="0 0 44 24" width={30} height={16} aria-hidden><rect width="44" height="24" rx="3" fill="#fff" stroke="#eee" /><text x="22" y="16" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="10" fontWeight="800"><tspan fill="#097dc6">Ru</tspan><tspan fill="#f47b20">Pay</tspan></text></svg>
+)
+
+// Trailing mini-logo cluster shown next to a row's name (like the Razorpay checkout).
+function BrandCluster({ id }: { id: string }) {
+  const marks =
+    id === 'upi' ? [<PhonePeLogo key="p" s={16} />, <GPayLogo key="g" s={16} />, <PaytmLogo key="t" s={16} />]
+    : id === 'card' ? [<VisaMark key="v" />, <McMark key="m" />, <RupayMark key="r" />]
+    : null
+  if (!marks) return null
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>{marks}</span>
+}
+
 export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
   const toast = useToast()
   const [groups, setGroups] = useState<PaymentGroup[]>([])
@@ -176,6 +235,8 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
     const pkg = PKG[id]
     const real = pkg ? icons[pkg]?.icon : undefined
     if (real) return <img src={real} alt="" width={26} height={26} style={{ borderRadius: 6 }} />
+    if (id === 'upi') return <UpiLogo />
+    if (id === 'card') return <CardLogo />
     const b = BRAND[id]
     if (b) return <span style={{ width: 26, height: 26, borderRadius: 6, background: b.bg, color: b.fg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 12, border: b.border ? '1px solid #e5e7eb' : 'none' }}>{b.label}</span>
     return <span className="pm-ic">{emoji}</span>
@@ -202,7 +263,7 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
                   {g.options.map((o) => (
                     <button key={o.id} className={`pm-row ${method === o.id ? 'sel' : ''}`} onClick={() => setMethod(o.id)}>
                       <RowIcon id={o.id} emoji={o.icon} />
-                      <span className="grow"><span className="pm-name">{o.name}</span>{o.sub && <span className="pm-sub">{provider !== 'razorpay' && PKG[o.id] && icons[PKG[o.id]!]?.installed === false ? 'Not installed' : o.sub}</span>}</span>
+                      <span className="grow"><span className="pm-name">{o.name}<BrandCluster id={o.id} /></span>{o.sub && <span className="pm-sub">{provider !== 'razorpay' && PKG[o.id] && icons[PKG[o.id]!]?.installed === false ? 'Not installed' : o.sub}</span>}</span>
                       <span className="pm-radio">{method === o.id ? '●' : ''}</span>
                     </button>
                   ))}
