@@ -190,7 +190,9 @@ async function summary(wid) {
   const monthEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '30 days'")
   const todayEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND (created AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date")
   const totalWithdrawn = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status='Paid'")
-  const hold = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status='Pending'")
+  // Held = awaiting admin approval (Pending) or a payout in flight (Processing). Both reduce
+  // the withdrawable balance so a worker can't request the same money twice before it lands.
+  const hold = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status IN ('Pending','Processing')")
   const ded = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_deductions WHERE worker_id=$1")
   const advanceOutstanding = await s("SELECT COALESCE(SUM(COALESCE(outstanding, amount)),0)::int s FROM worker_advances WHERE worker_id=$1 AND status<>'Cleared'")
   const available = Math.max(0, earned - totalWithdrawn - hold - ded)
@@ -199,6 +201,23 @@ async function summary(wid) {
     totalEarned: earned, totalWithdrawn, withdrawn: totalWithdrawn,
     advanceOutstanding, todayEarnings, weekEarnings, monthEarnings,
     thisWeek: weekEarnings, thisMonth: monthEarnings, nextPayout: '',
+  }
+}
+
+// Finalize a withdrawal once the payout service reports back. Idempotent (terminal states are
+// left untouched) so a redelivered event can't refund or pay twice. ok=true → money left the
+// held bucket for good; ok=false → the payout bounced, so release the hold back to the balance.
+async function finalizePayout(withdrawalId, ok, reason) {
+  const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [withdrawalId])).rows[0]
+  if (!w || ['Paid', 'Failed', 'Rejected'].includes(w.status)) return
+  if (ok) {
+    await pool.query("UPDATE worker_withdrawals SET status='Paid' WHERE id=$1", [withdrawalId])
+    await adjustBalance(w.worker_id, { hold: -w.amount, withdrawn: w.amount })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.payout', entityType: 'worker', entityId: w.worker_id, detail: `Payout ₹${w.amount} completed (withdrawal #${withdrawalId})`, meta: { amount: w.amount } })
+  } else {
+    await pool.query("UPDATE worker_withdrawals SET status='Failed' WHERE id=$1", [withdrawalId])
+    await adjustBalance(w.worker_id, { hold: -w.amount, balance: w.amount })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.payout', entityType: 'worker', entityId: w.worker_id, detail: `Payout ₹${w.amount} failed (${reason || 'bank error'}) — refunded to balance`, meta: { amount: w.amount } })
   }
 }
 const rowsFor = async (table, wid) => (await pool.query(`SELECT * FROM ${table} WHERE worker_id=$1 ORDER BY id DESC`, [wid])).rows
@@ -260,6 +279,35 @@ app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(awai
 app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await historyLedger(req.wid)))
 app.get('/api/worker/wallet/rewards', auth, async (req, res) => res.json(await rewardsDto(req.wid)))
 app.get('/api/worker/wallet/withdrawals', auth, async (req, res) => res.json(await rowsFor('worker_withdrawals', req.wid)))
+// Receipt for one withdrawal — shape matches the worker app's WithdrawalReceiptDto.
+app.get('/api/worker/wallet/withdrawals/:id/receipt', auth, async (req, res) => {
+  const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1 AND worker_id=$2', [Number(req.params.id), req.wid])).rows[0]
+  if (!w) return res.status(404).json({ error: 'Withdrawal not found' })
+  const snap = await workerSnapshot(req.wid)
+  const bank = (snap && snap.profile && snap.profile.bank) || {}
+  const dest = bank.bankAccount
+    ? `${bank.bankName || 'Bank'} ••••${String(bank.bankAccount).slice(-4)}`
+    : (bank.bankUpi || (w.method === 'upi' ? 'Linked UPI' : 'Bank account'))
+  const f = fmtDate(w.created)
+  const paid = w.status === 'Paid'
+  const note = paid ? 'Amount transferred to your bank account.'
+    : w.status === 'Failed' ? 'Payout failed — the amount was refunded to your balance.'
+    : w.status === 'Rejected' ? 'This withdrawal was rejected — the amount is back in your balance.'
+    : 'Your withdrawal is being processed.'
+  res.json({
+    reference: w.reference || `WD${String(w.id).padStart(6, '0')}`,
+    workerName: (snap && snap.name) || '',
+    workerId: String(req.wid),
+    amount: w.amount || 0,
+    method: w.method || 'Bank',
+    destination: dest,
+    status: w.status || 'Pending',
+    date: f.date, time: f.time,
+    processedDate: paid ? f.date : '',
+    bankDetails: dest,
+    note,
+  })
+})
 app.get('/api/worker/wallet/advances', auth, async (req, res) => res.json(await rowsFor('worker_advances', req.wid)))
 app.get('/api/worker/wallet/notifications', auth, async (req, res) => {
   const rows = await rowsFor('worker_notifications', req.wid)
@@ -278,9 +326,15 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
   if (amount > avail) return res.json({ ok: false, error: 'Amount exceeds available balance' })
   const autoBelow = await getSettingInt(ADMIN_URL, 'auto_approve_withdrawal_below', 2000)
-  const status = amount <= autoBelow ? 'Paid' : 'Pending'
-  await pool.query('INSERT INTO worker_withdrawals (worker_id,amount,method,status) VALUES ($1,$2,$3,$4)', [req.wid, amount, req.body?.method || 'bank', status])
-  await adjustBalance(req.wid, { balance: -amount, withdrawn: status === 'Paid' ? amount : 0, hold: status === 'Pending' ? amount : 0 })
+  const method = req.body?.method || 'bank'
+  // Auto-approved small amounts go straight to payout ('Processing'); larger amounts wait for an
+  // admin ('Pending'). Either way the money is HELD now and only marked 'withdrawn' once the real
+  // payout lands (payout.completed) — or refunded to balance if it fails (payout.failed).
+  const auto = amount <= autoBelow
+  const status = auto ? 'Processing' : 'Pending'
+  const { rows } = await pool.query('INSERT INTO worker_withdrawals (worker_id,amount,method,status) VALUES ($1,$2,$3,$4) RETURNING id', [req.wid, amount, method, status])
+  await adjustBalance(req.wid, { balance: -amount, hold: amount })
+  if (auto) publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: rows[0].id, workerId: req.wid, amount, method })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'wallet.withdraw', entityType: 'wallet', entityId: req.wid, detail: `Requested withdrawal ₹${amount} (${status})`, meta: { amount } })
   res.json({ ok: true, ...(await walletState(req.wid)) })
 })
@@ -305,8 +359,10 @@ app.post('/api/admin/workers/:id/wallet/bonus', adminAuth, async (req, res) => {
 app.post('/api/admin/workers/:id/wallet/penalty', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_deductions (worker_id,category,label,amount) VALUES ($1,'Penalty',$2,$3)", [wid, req.body?.label || 'Admin penalty', amt]); await adjustBalance(wid, { balance: -amt }); res.json(await walletState(wid)) })
 app.post('/api/admin/workers/:id/wallet/hold', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: -amt, hold: amt }); res.json(await walletState(wid)) })
 app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: amt, hold: -amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w) { await pool.query("UPDATE worker_withdrawals SET status='Paid' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, withdrawn: w.amount }) } res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
+// Approve → trigger the real payout (money is already held from the request). Status becomes
+// 'Processing'; the payout.completed/failed event finalizes it. Do NOT mark Paid directly here.
+app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
 
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
@@ -321,7 +377,9 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
     const ins = await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Compensation',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id", [b.worker_id, `Comp ${b.ref}`, comp, `comp-${b.id}`])
     if (ins.rowCount) await adjustBalance(b.worker_id, { balance: comp, earnings: comp })
   } else if (type === 'payout.completed' && data.withdrawalId) {
-    await pool.query("UPDATE worker_withdrawals SET status='Paid' WHERE id=$1", [data.withdrawalId])
+    await finalizePayout(data.withdrawalId, true)
+  } else if (type === 'payout.failed' && data.withdrawalId) {
+    await finalizePayout(data.withdrawalId, false, data.reason)
   } else if (type === 'shift.late') await applyShiftLatePenalty(data)
   else if (type === 'shift.settle') await settleMinGuarantee(data)
   else if (type === 'geofence.breach') await notifyGeofenceBreach(data)

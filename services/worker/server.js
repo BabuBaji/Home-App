@@ -18,6 +18,7 @@ const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WALLET_URL = (process.env.WALLET_URL || 'http://localhost:4009').replace(/\/$/, '')
+const NOTIFICATION_URL = (process.env.NOTIFICATION_URL || 'http://localhost:4003').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[worker] unhandledRejection:', e?.message || e))
 
@@ -38,6 +39,9 @@ async function init() {
       profile JSONB NOT NULL DEFAULT '{}', joined TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `CREATE TABLE IF NOT EXISTS worker_documents (id SERIAL PRIMARY KEY, worker_id INTEGER, name TEXT, file_name TEXT, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
+    `CREATE TABLE IF NOT EXISTS worker_notes (id SERIAL PRIMARY KEY, worker_id INTEGER, note TEXT, author TEXT, created TIMESTAMPTZ DEFAULT now())`,
+    `CREATE TABLE IF NOT EXISTS worker_metric_snapshots (id SERIAL PRIMARY KEY, worker_id INTEGER, snap_date DATE, week_jobs INTEGER, month_jobs INTEGER, completion_pct INTEGER, cancellation_pct INTEGER, rating REAL, earnings INTEGER)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_worker_snap ON worker_metric_snapshots(worker_id, snap_date)`,
     // Columns added on top of the earlier worker schema (idempotent).
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
@@ -184,7 +188,30 @@ async function init() {
 
 /* ---------- helpers ---------- */
 const rowToWorker = (w) => w && ({ ...w, verified: !!w.verified, available: !!w.available })
-const workerDto = (w) => w && ({ id: w.id, name: w.name, phone: w.phone, email: w.email, city: w.city, services: w.services, avatar: w.avatar, status: w.status, verified: !!w.verified, rating: w.rating, jobs: w.jobs, available: !!w.available, bankStatus: w.bank_status, ...(w.profile || {}) })
+// Worker app's bank_status vocabulary differs from the DB's — map it so the app shows the
+// right pill and unlocks withdrawals on a verified account.
+const APP_BANK_STATUS = { Verified: 'Approved', Pending: 'Pending Verification', Rejected: 'Rejected' }
+const workerDto = (w) => {
+  if (!w) return w
+  const p = w.profile || {}
+  const bank = p.bank || {}
+  const bv = p.bankVerification || {}
+  const hasBank = !!(bank.bankAccount || bank.bankUpi)
+  return {
+    id: w.id, name: w.name, phone: w.phone, email: w.email, city: w.city, services: w.services,
+    avatar: w.avatar, status: w.status, verified: !!w.verified, rating: w.rating, jobs: w.jobs,
+    available: !!w.available,
+    ...p,
+    // Flatten bank.* to the top-level fields the worker app's WorkerDto reads, and expose the
+    // verification result (registered name / rejection reason).
+    bankHolder: bank.bankHolder || '', bankName: bank.bankName || '', bankAccount: bank.bankAccount || '',
+    bankIfsc: bank.bankIfsc || '', bankUpi: bank.bankUpi || '', chequePhoto: bank.chequePhoto || '',
+    bankRemarks: bv.reason || '',
+    bankRegisteredName: bv.registeredName || '',
+    bankNameMatch: (bv.nameMatch === undefined || bv.nameMatch === null) ? null : !!bv.nameMatch,
+    bankStatus: hasBank ? (APP_BANK_STATUS[w.bank_status] || w.bank_status || 'Pending Verification') : 'Not Added',
+  }
+}
 const walletDto = (w) => ({ balance: w.balance, pending: w.pending, hold: w.hold, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding, earnings: w.earnings })
 const walletSummary = (w) => ({ available: w.balance, pending: w.pending, onHold: w.hold, totalEarned: w.earnings, withdrawn: w.withdrawn, advanceOutstanding: w.advance_outstanding })
 // Real period earnings for the wallet/earnings dashboard: the worker's 80% share of jobs
@@ -468,9 +495,35 @@ app.post('/api/worker/auth/verify', async (req, res) => {
 })
 app.get('/api/worker/bootstrap', auth, async (req, res) => res.json(await bootstrap(req.worker.id)))
 
+// Device heartbeat — the worker app reports battery %, network type and GPS so the admin
+// Worker Details status strip (Battery / Network / Idle Time / Last GPS) shows live values.
+app.post('/api/worker/heartbeat', auth, async (req, res) => {
+  const b = req.body || {}
+  const device = { at: new Date().toISOString() }
+  if (b.battery != null) device.battery = Math.max(0, Math.min(100, Math.round(Number(b.battery))))
+  if (b.network) device.network = String(b.network).slice(0, 12)
+  await mergeProfile(req.worker.id, { device })
+  if (b.lat != null && b.lng != null) await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2 WHERE id=$3', [Number(b.lat), Number(b.lng), req.worker.id])
+  res.json({ ok: true })
+})
+
+// IFSC lookup — resolves the bank + branch from the code (Razorpay's free public IFSC directory)
+// so the app can confirm the IFSC is real and AUTO-FILL the bank name instead of trusting free text.
+// The account-number/holder correctness is a separate step (the penny-drop on save).
+app.get('/api/worker/ifsc/:code', auth, async (req, res) => {
+  const code = String(req.params.code || '').trim().toUpperCase()
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) return res.json({ valid: false, error: 'Invalid IFSC format' })
+  try {
+    const r = await fetch('https://ifsc.razorpay.com/' + code)
+    if (!r.ok) return res.json({ valid: false, error: 'IFSC not found' })
+    const d = await r.json()
+    res.json({ valid: true, ifsc: code, bank: d.BANK || '', branch: d.BRANCH || '', city: d.CITY || d.CENTRE || '', state: d.STATE || '' })
+  } catch { res.json({ valid: false, error: 'Could not verify IFSC right now' }) }
+})
+
 /* ---------- profile / documents ---------- */
 app.put('/api/worker/profile', auth, async (req, res) => { const b = req.body || {}; await pool.query('UPDATE workers SET name=COALESCE($1,name), email=COALESCE($2,email), city=COALESCE($3,city), avatar=COALESCE($4,avatar) WHERE id=$5', [b.name ?? null, b.email ?? null, b.city ?? null, b.avatar ?? null, req.worker.id]); res.json(workerDto(await getWorker(req.worker.id))) })
-app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (pending verification)' }); res.json(workerDto(await getWorker(req.worker.id))) })
+app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'bank.verify.requested', { workerId: req.worker.id, bank: req.body || {}, name: req.worker.name }); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (verifying)' }); res.json(workerDto(await getWorker(req.worker.id))) })
 app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
 
 /* ---------- shift plans (min-guarantee) ---------- */
@@ -754,11 +807,117 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const { rows } = await pool.query(
     `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id,designation) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *`,
     [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker'])
-  res.status(201).json(rowToWorker(rows[0]))
+  const profPatch = {}
+  if (b.personal && typeof b.personal === 'object') profPatch.personal = b.personal
+  if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = b.skillLevels
+  if (Object.keys(profPatch).length) await mergeProfile(rows[0].id, profPatch)
+  res.status(201).json(rowToWorker(await getWorker(rows[0].id)))
 })
-app.get('/api/admin/workers/:id', adminAuth, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
+// Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
+app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Not found' })
+  const [docs, bookings, wallet, noteRows, activityRes, snapRes] = await Promise.all([
+    documents(id),
+    tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
+    tryGet(WALLET_URL, `/internal/summary/${id}`, null),
+    pool.query('SELECT * FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 20', [id]),
+    tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=15`, { items: [] }),
+    pool.query('SELECT * FROM worker_metric_snapshots WHERE worker_id=$1 AND snap_date < CURRENT_DATE ORDER BY snap_date DESC LIMIT 1', [id]),
+  ])
+  const prevSnap = snapRes.rows[0]
+  const notes = noteRows.rows.map((n) => ({ id: n.id, note: n.note, author: n.author, created: n.created }))
+  const activity = ((activityRes && activityRes.items) || []).slice(0, 15).map((a) => ({ id: a.id, action: a.action, detail: a.detail, ref: a.ref, created: a.created }))
+  const svcOf = (b) => b.service || (Array.isArray(b.items) && b.items[0] && (b.items[0].name || b.items[0].service)) || '—'
+  const bk = bookings || []
+  const recentJobs = bk.slice(0, 8).map((b) => ({
+    id: b.id, ref: b.ref || `BK${b.id}`, service: svcOf(b),
+    status: b.status || '', total: b.total || 0, date: b.date || '', time: b.time || '',
+  }))
+  const documentsOut = (docs || []).map((d) => ({ id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created }))
+
+  // KPIs computed from the worker's bookings.
+  const now = new Date(); const dayMs = 86400000
+  const within = (ts, n) => ts && (now - new Date(ts)) <= n * dayMs
+  const cancelled = bk.filter((b) => b.status === 'cancelled')
+  const completed = bk.filter((b) => b.status === 'completed')
+  const ACTIVE = ['assigned', 'accepted', 'on_the_way', 'on the way', 'travelling', 'arrived', 'in_progress', 'in progress', 'started']
+  const isToday = (ts) => ts && new Date(ts).toDateString() === now.toDateString()
+  const cmpIn = (n) => completed.filter((b) => n === 0 ? isToday(b.created) : within(b.created, n)).length
+  const metrics = {
+    totalJobs: bk.length, completed: completed.length, cancelled: cancelled.length,
+    todayJobs: bk.filter((b) => isToday(b.created)).length,
+    weekJobs: bk.filter((b) => within(b.created, 7)).length,
+    monthJobs: bk.filter((b) => within(b.created, 30)).length,
+    completedToday: cmpIn(0), completedWeek: cmpIn(7), completedMonth: cmpIn(30),
+    cancellationPct: bk.length ? Math.round((cancelled.length / bk.length) * 100) : 0,
+    completionPct: bk.length ? Math.round((completed.length / bk.length) * 100) : 0,
+    todayEarnings: wallet ? (wallet.todayEarnings || 0) : 0,
+  }
+  // Trend vs the most recent prior daily snapshot (▲/▼ on the KPI tiles). null until history exists.
+  metrics.trends = prevSnap ? {
+    weekJobs: metrics.weekJobs - (prevSnap.week_jobs || 0),
+    completion: metrics.completionPct - (prevSnap.completion_pct || 0),
+    cancellation: metrics.cancellationPct - (prevSnap.cancellation_pct || 0),
+    rating: Math.round(((w.rating || 0) - (prevSnap.rating || 0)) * 10) / 10,
+  } : null
+  // Device telemetry the worker app reports via /api/worker/heartbeat.
+  const dev = (w.profile && w.profile.device) || {}
+  const idleMins = dev.at ? Math.max(0, Math.round((now - new Date(dev.at)) / 60000)) : null
+  const device = { battery: dev.battery ?? null, network: dev.network ?? null, idleMins, lastSeen: dev.at || null }
+  const lj = bk.find((b) => ACTIVE.includes(String(b.status).toLowerCase()))
+  const liveJob = lj ? {
+    id: lj.id, ref: lj.ref || `BK${lj.id}`, service: svcOf(lj), status: lj.status,
+    total: lj.total || 0, apartment: lj.address || '', otpStatus: lj.service_otp ? 'Set' : 'Pending',
+    startedAt: lj.started_at || '', date: lj.date || '', time: lj.time || '',
+  } : null
+
+  // Earnings trend — sum of completed-job totals per day (most recent days with activity).
+  const byDay = {}
+  for (const b of bk) {
+    if (b.status !== 'completed') continue
+    const key = (b.created ? new Date(b.created) : now).toISOString().slice(0, 10)
+    byDay[key] = (byDay[key] || 0) + (b.total || 0)
+  }
+  const earningsTrend = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-8).map(([date, amount]) => ({ date, amount }))
+
+  // Timeline of the live (or most recent) job, from the activity log.
+  const timelineJob = lj || bk[0]
+  const timeline = timelineJob
+    ? (await tryGet(NOTIFICATION_URL, `/internal/timeline/${timelineJob.id}`, [])).map((t) => ({ action: t.action, detail: t.detail, created: t.created }))
+    : []
+
+  // Heuristic worker-health score (no ML — derived from real metrics). Each component is a 0-100
+  // risk %; the overall score is a severity-weighted blend. Lower = healthier.
+  const rating = w.rating || 0
+  const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)))
+  const attendanceRisk = clamp(metrics.cancellationPct * 2.5)                                   // cancellations => unreliable
+  const burnoutRisk = clamp((Math.max(0, metrics.weekJobs - 15) / 25) * 100)                     // heavy weekly load
+  const lateProbability = clamp((100 - metrics.completionPct) * 0.5 + metrics.cancellationPct * 0.5)
+  const complaintProbability = clamp(Math.max(0, 4.8 - rating) * 25)                             // low rating => complaints
+  const riskScore = clamp(0.35 * attendanceRisk + 0.2 * burnoutRisk + 0.25 * lateProbability + 0.2 * complaintProbability)
+  const level = riskScore < 15 ? 'Low' : riskScore < 35 ? 'Medium' : 'High'
+  const top = [['attendance', attendanceRisk], ['burnout', burnoutRisk], ['late', lateProbability], ['complaint', complaintProbability]].sort((a, b) => b[1] - a[1])[0]
+  const suggestion = riskScore < 15 ? 'Performing well — no action needed.'
+    : top[0] === 'attendance' ? 'High cancellations — review reliability before assigning premium jobs.'
+    : top[0] === 'burnout' ? 'Heavy workload — assign nearby jobs only and avoid long-distance travel.'
+    : top[0] === 'late' ? 'On-time risk — monitor ETAs and start windows closely.'
+    : 'Rating dipping — coaching / a check-in is recommended.'
+  const health = { riskScore, level, attendanceRisk, burnoutRisk, lateProbability, complaintProbability, suggestion }
+
+  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health })
+})
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+// Admin notes on a worker.
+app.get('/api/admin/workers/:id/notes', adminAuth, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
+app.post('/api/admin/workers/:id/notes', adminAuth, async (req, res) => {
+  const note = String(req.body?.note || '').trim().slice(0, 2000)
+  if (!note) return res.status(400).json({ error: 'Note is empty' })
+  const { rows } = await pool.query('INSERT INTO worker_notes (worker_id,note,author) VALUES ($1,$2,$3) RETURNING id, note, author, created', [Number(req.params.id), note, req.body?.author || 'Admin'])
+  res.status(201).json(rows[0])
+})
 
 /* ---------- shifts / roster (admin) ---------- */
 app.get('/api/admin/shifts', adminAuth, async (_q, res) => {
@@ -879,6 +1038,10 @@ async function patchWorker(id, b, res) {
     JSON.stringify(b.services ?? w.services), b.status ?? w.status,
     b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
     b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), b.designation ?? null, id])
+  const profPatch = {}
+  if (b.personal && typeof b.personal === 'object') profPatch.personal = { ...(w.profile?.personal || {}), ...b.personal }
+  if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = { ...(w.profile?.skillLevels || {}), ...b.skillLevels }
+  if (Object.keys(profPatch).length) await mergeProfile(id, profPatch)
   return rowToWorker(await getWorker(id))
 }
 
@@ -926,7 +1089,23 @@ app.post('/api/admin/workers/:id/bank/approve', adminAuth, async (req, res) => {
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 
 /* ---------- events ---------- */
-subscribeEvents(REDIS_URL, 'worker', (type) => { if (type === 'settings.updated') invalidateSettings() })
+// Result of the RazorpayX bank-account validation (penny-drop) kicked off on bank save.
+async function applyBankVerification(workerId, ok, data = {}) {
+  if (!workerId) return
+  const status = ok ? 'Verified' : 'Rejected'
+  await pool.query('UPDATE workers SET bank_status=$1 WHERE id=$2', [status, workerId])
+  await mergeProfile(workerId, { bankVerification: { status, registeredName: data.registeredName || '', nameMatch: data.nameMatch ?? null, reason: data.reason || '', at: new Date().toISOString() } })
+  const detail = ok
+    ? `Bank verified${data.registeredName ? ' — ' + data.registeredName : ''}${data.nameMatch === false ? ' (name mismatch — review)' : ''}`
+    : `Bank verification failed (${data.reason || 'invalid account'})`
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Payments', action: 'kyc.bank.verify', entityType: 'worker', entityId: workerId, detail })
+}
+
+subscribeEvents(REDIS_URL, 'worker', async (type, data) => {
+  if (type === 'settings.updated') return invalidateSettings()
+  if (type === 'bank.verified') return applyBankVerification(data.workerId, true, data)
+  if (type === 'bank.verify.failed') return applyBankVerification(data.workerId, false, data)
+})
 
 // Auto-settle Shakti bonuses at the start of each month (pays out the PREVIOUS month).
 // Runs daily but only acts on the 1st–2nd; the wallet credit is idempotent per worker/month.
@@ -942,9 +1121,37 @@ function scheduleShaktiSettlement() {
   setTimeout(tick, 15000) // and shortly after boot (catches a missed run)
 }
 
+// Daily snapshot of each active worker's metrics, so the Worker Details KPI tiles can show a
+// real period-over-period trend (▲/▼) instead of a faked delta. One row per worker per day.
+async function snapshotMetrics() {
+  const workers = (await pool.query("SELECT id, rating, earnings FROM workers WHERE status='active'")).rows
+  const today = new Date().toISOString().slice(0, 10)
+  const now = new Date(), dayMs = 86400000
+  const within = (ts, n) => ts && (now - new Date(ts)) <= n * dayMs
+  for (const wk of workers) {
+    const bk = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wk.id}`, [])
+    const completed = bk.filter((b) => b.status === 'completed').length
+    const cancelled = bk.filter((b) => b.status === 'cancelled').length
+    await pool.query(
+      `INSERT INTO worker_metric_snapshots (worker_id,snap_date,week_jobs,month_jobs,completion_pct,cancellation_pct,rating,earnings)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (worker_id,snap_date) DO UPDATE SET
+       week_jobs=EXCLUDED.week_jobs, month_jobs=EXCLUDED.month_jobs, completion_pct=EXCLUDED.completion_pct,
+       cancellation_pct=EXCLUDED.cancellation_pct, rating=EXCLUDED.rating, earnings=EXCLUDED.earnings`,
+      [wk.id, today, bk.filter((b) => within(b.created, 7)).length, bk.filter((b) => within(b.created, 30)).length,
+        bk.length ? Math.round((completed / bk.length) * 100) : 0, bk.length ? Math.round((cancelled / bk.length) * 100) : 0,
+        wk.rating || 0, wk.earnings || 0])
+  }
+  console.log(`[worker] metric snapshot captured for ${workers.length} workers (${today})`)
+}
+function scheduleMetricSnapshots() {
+  setInterval(() => snapshotMetrics().catch((e) => console.error('[worker] snapshot error:', e.message)), 24 * 3600 * 1000)
+  setTimeout(() => snapshotMetrics().catch((e) => console.error('[worker] snapshot error:', e.message)), 25000)
+}
+
 init()
   .then(() => {
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
     scheduleShaktiSettlement()
+    scheduleMetricSnapshots()
   })
   .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) });

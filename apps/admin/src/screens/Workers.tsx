@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
 import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
 import type { Worker } from '../types'
@@ -8,8 +9,10 @@ import { CITIES } from '../cities'
 
 type Stats = { total: number; active: number; pending: number; inactive: number }
 
-type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string }
-const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker' }
+type Personal = { gender: string; dob: string; fatherName: string; address: string; aadhaar: string; pan: string; whatsapp: string; emergencyName: string; emergencyPhone: string; languages: string }
+const EMPTY_PERSONAL: Personal = { gender: '', dob: '', fatherName: '', address: '', aadhaar: '', pan: '', whatsapp: '', emergencyName: '', emergencyPhone: '', languages: '' }
+type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string; personal: Personal; skillLevels: Record<string, string> }
+const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker', personal: { ...EMPTY_PERSONAL }, skillLevels: {} }
 
 export default function Workers() {
   const { admin } = useStore()
@@ -29,7 +32,7 @@ export default function Workers() {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<Worker | null>(null)
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
-  const [viewing, setViewing] = useState<Worker | null>(null)
+  const nav = useNavigate()
   const [busy, setBusy] = useState(false)
   const [allServices, setAllServices] = useState<string[]>([])
   const [zones, setZones] = useState<Zone[]>([])
@@ -62,7 +65,7 @@ export default function Workers() {
   const addWorker = async () => {
     setBusy(true)
     try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation })
+      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation, personal: draft.personal, skillLevels: draft.skillLevels })
       toast('Worker added')
       setAddOpen(false); setDraft(EMPTY_DRAFT); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -72,7 +75,7 @@ export default function Workers() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation })
+      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation, personal: editDraft.personal, skillLevels: editDraft.skillLevels })
       toast('Worker updated')
       setEditing(null); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
@@ -88,7 +91,7 @@ export default function Workers() {
   }
 
   const openEdit = (w: Worker) => {
-    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker' })
+    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker', personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) }, skillLevels: { ...((w as { profile?: { skillLevels?: Record<string, string> } }).profile?.skillLevels || {}) } })
     setEditing(w)
   }
 
@@ -178,7 +181,7 @@ export default function Workers() {
                         <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={(e) => { e.stopPropagation(); setMenuId(menuId === w.id ? null : w.id) }}><MoreVertical size={16} /></button>
                         {menuId === w.id && (
                           <div className="menu" style={{ position: 'absolute', right: 0, top: 34, zIndex: 20, background: 'var(--card, #fff)', border: '1px solid var(--line, #e4e7ec)', borderRadius: 8, boxShadow: '0 8px 24px rgba(16,24,40,.12)', minWidth: 150, padding: 4 }} onClick={(e) => e.stopPropagation()}>
-                            <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); setViewing(w) }}>View</button>
+                            <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); nav(`/workers/${w.id}`) }}>View</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openEdit(w) }}>Edit</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'active', verified: true }, 'Worker approved') }}>Approve</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'suspended' }, 'Worker suspended') }}>Suspend</button>
@@ -221,23 +224,6 @@ export default function Workers() {
         </Modal>
       )}
 
-      {viewing && (
-        <Modal title="Worker Details" onClose={() => setViewing(null)}>
-          <div className="grid" style={{ gap: 12 }}>
-            <div className="cell-user"><Avatar name={viewing.name} src={viewing.avatar} size={48} /><div><strong>{viewing.name}</strong></div></div>
-            <Field label="Mobile Number"><input value={viewing.phone || '—'} readOnly /></Field>
-            <Field label="Email"><input value={viewing.email || '—'} readOnly /></Field>
-            <Field label="City"><input value={viewing.city || '—'} readOnly /></Field>
-            <Field label="Services"><input value={(viewing.services || []).join(', ') || '—'} readOnly /></Field>
-            <Field label="Status"><div><Badge tone={viewing.status === 'active' ? 'green' : viewing.status === 'pending' ? 'amber' : 'red'}>{viewing.status}</Badge></div></Field>
-            <div className="row" style={{ gap: 24 }}>
-              <Field label="Jobs Completed"><input value={String(viewing.jobs)} readOnly /></Field>
-              <Field label="Rating"><input value={String(viewing.rating)} readOnly /></Field>
-            </div>
-            <Field label="Joined On"><input value={shortDate(viewing.joined)} readOnly /></Field>
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }
@@ -246,6 +232,7 @@ const MENU_ITEM: CSSProperties = { display: 'block', width: '100%', textAlign: '
 
 function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChange: (d: Draft) => void; services: string[]; zones: Zone[] }) {
   const set = (k: 'name' | 'phone' | 'email' | 'city' | 'status' | 'designation', v: string) => onChange({ ...draft, [k]: v })
+  const setP = (k: keyof Personal, v: string) => onChange({ ...draft, personal: { ...draft.personal, [k]: v } })
   const toggleService = (name: string) => {
     const has = draft.services.includes(name)
     onChange({ ...draft, services: has ? draft.services.filter((s) => s !== name) : [...draft.services, name] })
@@ -288,6 +275,52 @@ function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChan
               ))}
         </div>
       </div>
+
+      {draft.services.length > 0 && (
+        <div className="field">
+          <span>Skill Levels</span>
+          <div className="grid" style={{ gap: 6, border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
+            {draft.services.map((s) => (
+              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13 }}>{s}</span>
+                <select value={draft.skillLevels[s] || ''} onChange={(e) => onChange({ ...draft, skillLevels: { ...draft.skillLevels, [s]: e.target.value } })} style={{ width: 160 }}>
+                  <option value="">— Level —</option>
+                  <option value="Basic">Basic</option>
+                  <option value="Intermediate">Intermediate</option>
+                  <option value="Advanced">Advanced</option>
+                  <option value="Expert">Expert</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Personal & KYC details (optional — stored on the worker profile) */}
+      <div className="field"><span style={{ fontWeight: 600 }}>Personal & KYC details</span></div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Gender">
+          <select value={draft.personal.gender} onChange={(e) => setP('gender', e.target.value)}>
+            <option value="">—</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
+          </select>
+        </Field>
+        <Field label="Date of Birth"><input type="date" value={draft.personal.dob} onChange={(e) => setP('dob', e.target.value)} /></Field>
+      </div>
+      <Field label="Father's Name"><input value={draft.personal.fatherName} onChange={(e) => setP('fatherName', e.target.value)} placeholder="Father's name" /></Field>
+      <Field label="Home Address"><textarea value={draft.personal.address} onChange={(e) => setP('address', e.target.value)} placeholder="Residential address" rows={2} /></Field>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Aadhaar Number"><input value={draft.personal.aadhaar} onChange={(e) => setP('aadhaar', e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="12-digit Aadhaar" /></Field>
+        <Field label="PAN Number"><input value={draft.personal.pan} onChange={(e) => setP('pan', e.target.value.toUpperCase().slice(0, 10))} placeholder="ABCDE1234F" /></Field>
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="WhatsApp Number"><input value={draft.personal.whatsapp} onChange={(e) => setP('whatsapp', e.target.value)} placeholder="WhatsApp (if different)" /></Field>
+        <Field label="Languages Known"><input value={draft.personal.languages} onChange={(e) => setP('languages', e.target.value)} placeholder="e.g. Telugu, Hindi, English" /></Field>
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Emergency Contact Name"><input value={draft.personal.emergencyName} onChange={(e) => setP('emergencyName', e.target.value)} placeholder="Contact name" /></Field>
+        <Field label="Emergency Contact Phone"><input value={draft.personal.emergencyPhone} onChange={(e) => setP('emergencyPhone', e.target.value)} placeholder="Contact phone" /></Field>
+      </div>
+
       <Field label="Status">
         <select value={draft.status} onChange={(e) => set('status', e.target.value)}>
           <option value="pending">Pending</option>

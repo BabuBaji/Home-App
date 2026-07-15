@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS = {
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
   serviceable_pincodes: '', service_cities: '',
   razorpay_webhook_secret: '', payment_webhook_secret: '', payout_webhook_secret: '', payout_provider: '',
+  razorpayx_account_number: '', payout_mode: 'IMPS',
   earnings_auto_release: 'true', advance_recovery_percent: '30', auto_approve_withdrawal_below: '2000', advance_max: '5000',
 }
 const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key',

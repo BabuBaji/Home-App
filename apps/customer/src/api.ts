@@ -9,14 +9,21 @@ const CONFIG_URL = 'https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app
 export let API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 export async function initApiBase(): Promise<void> {
-  // A build-time URL (VITE_API_URL, e.g. a LAN IP for local device testing) takes priority —
-  // don't let the remote config override it.
+  // In the browser dev server, keep API_BASE empty so requests go to relative /api and
+  // are handled by the Vite proxy -> localhost:8080. (The PC can't reach its own LAN IP
+  // via the Docker-published port, so we must NOT switch dev to the LAN IP.)
+  if (import.meta.env.DEV) return
+  // Packaged app: the LAN IP baked at build time (VITE_API_URL via build-apk.ps1) wins.
+  // We do NOT trust the remote config here because GitHub's raw CDN serves a stale copy
+  // for several minutes after a push, which would point the app at a dead IP. Rebuild
+  // (build-apk.ps1 auto-detects the current Wi-Fi IP) to repoint.
   if (API_BASE) return
+  // Only when nothing was baked, fall back to the remote config.
   try {
     const r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' })
     if (r.ok) {
       const j = await r.json()
-      if (j && j.apiBase) API_BASE = String(j.apiBase).replace(/\/$/, '')
+      if (j && j.apiBase) { API_BASE = String(j.apiBase).replace(/\/$/, ''); return }
     }
   } catch { /* keep the baked fallback */ }
 }
