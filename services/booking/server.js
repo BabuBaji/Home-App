@@ -96,6 +96,10 @@ async function init() {
     )`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pincode TEXT`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
+    // Control Tower: an executive can flag a live job as escalated and leave operational notes.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalate_reason TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -583,10 +587,26 @@ app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   res.json({ ...b, customer: u?.user?.name || 'Customer' })
 })
+// Admin booking actions — used by both the Bookings screen and the Control Tower console:
+// status change, reschedule (date/time), reassign / unassign a pro, escalate + reason, and an
+// operational note. Built as a deduped column map so any subset can be sent in one call.
 app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
-  if (req.body?.status) { await pool.query('UPDATE bookings SET status=$1 WHERE id=$2', [req.body.status, b.id]); await emitBookingUpdate(b.id) }
+  const body = req.body || {}
+  const u = {}
+  if (body.status) u.status = String(body.status)
+  if (body.date !== undefined) u.date = body.date || null
+  if (body.time !== undefined) u.time = body.time || null
+  if (body.adminNote !== undefined) u.admin_note = String(body.adminNote || '')
+  if (body.escalated !== undefined) { u.escalated = !!body.escalated; u.escalate_reason = body.escalated ? String(body.escalateReason || '') : '' }
+  if (body.unassign) { u.worker_id = null; u.pro_name = ''; u.status = 'confirmed' }
+  else if (body.workerId) { u.worker_id = Number(body.workerId); u.pro_name = String(body.workerName || ''); if (b.status === 'confirmed' && !body.status) u.status = 'worker_assigned' }
+  const cols = Object.keys(u)
+  if (cols.length) {
+    await pool.query(`UPDATE bookings SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')} WHERE id=$${cols.length + 1}`, [...cols.map((c) => u[c]), b.id])
+    await emitBookingUpdate(b.id)
+  }
   res.json(await getBooking(b.id))
 })
 

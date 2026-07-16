@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -348,6 +348,8 @@ export const issueRefund = (bookingId: number) => req<ActionResult>('/actions/re
 
 /* operations command center — live network operating picture */
 export const fetchCommandCenter = () => req<CommandCenter>('/command-center')
+/* control tower — per-job executive console (actions reuse updateBooking) */
+export const fetchControlTower = () => req<ControlTowerData>('/control-tower')
 
 /* approvals (maker-checker) */
 export const fetchApprovals = (status: 'pending' | 'all' = 'pending') => req<{ ok: boolean; requests: ApprovalRequest[]; meId: number }>(`/approvals?status=${status}`)

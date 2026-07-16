@@ -363,6 +363,19 @@ export interface CommandCenter {
   dailySummary: { orders: number; completed: number; cancelled: number; active: number; revenue: number; newWorkers: number }
   generatedAt: string
 }
+
+/* Control Tower — per-job Executive console. */
+export interface CTJob {
+  id: number; ref: string; status: string; service: string
+  customer: string; customerPhone: string
+  worker: string; workerPhone: string; workerId: number | null
+  zoneId: number | null; zone: string
+  date: string; time: string; total: number
+  ageMin: number; sla: 'onTime' | 'atRisk' | 'breached'
+  escalated: boolean; escalateReason: string; adminNote: string
+}
+export interface CTPro { id: number; name: string; zoneId: number | null; available: boolean }
+export interface ControlTowerData { jobs: CTJob[]; pros: CTPro[]; generatedAt: string }
 export interface ActionResult { ok: boolean; executed?: boolean; pending?: boolean; request?: ApprovalRequest; result?: unknown }
 export interface IncentiveRule {
   id: number; code: string; name: string; description: string; category: string
