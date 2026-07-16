@@ -475,9 +475,20 @@ app.get('/api/admin/refunds', adminAuth, async (_q, res) => {
     payment_status: b.payment_status ?? null, created: b.created,
   })))
 })
+// Legacy refund path. Rather than refunding directly, forward to the approval matrix (admin service)
+// with the caller's session, so this endpoint can't bypass an approval rule any more than the panel's
+// /api/admin/actions/refund can. The admin service decides: execute now, or queue for sign-off, and
+// its response (200 executed / 202 pending / 4xx) is relayed back unchanged.
 app.post('/api/admin/refunds/:id', adminAuth, requirePerm('refunds.approve'), async (req, res) => {
-  await internalPost(BOOKING_URL, `/api/internal/bookings/${Number(req.params.id)}/refund`, {})
-  res.json({ ok: true })
+  try {
+    const r = await fetch(`${ADMIN_URL}/api/admin/actions/refund`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: req.headers.authorization || '' },
+      body: JSON.stringify({ bookingId: Number(req.params.id) }),
+    })
+    const body = await r.json().catch(() => ({}))
+    res.status(r.status).json(body)
+  } catch { res.status(502).json({ error: 'Approval service unavailable' }) }
 })
 
 /* ---------- event consumers ---------- */
