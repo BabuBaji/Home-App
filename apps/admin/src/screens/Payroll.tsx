@@ -109,7 +109,7 @@ export default function Payroll() {
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{rupees(l.net)}</td>
                   </tr>
                 ))}
-                {!(open.lines || []).length && <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 20 }}>No workers on a monthly salary this month.</td></tr>}
+                {!(open.lines || []).length && <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 20 }}>No one is due monthly pay this month.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -121,7 +121,7 @@ export default function Payroll() {
   return (
     <>
       <div className="stat-row">
-        <StatCard icon={<Users size={18} />} tint="#eef0ff" label="On a monthly salary" value={onMonthly} sub="Fixed & hybrid workers" />
+        <StatCard icon={<Users size={18} />} tint="#eef0ff" label="Paid by payroll" value={onMonthly} sub="Salaries + monthly bonuses" />
         <StatCard icon={<Wallet size={18} />} tint="#e7f7ee" label="Runs" value={runs.length} sub={`${runs.filter((r) => r.status === 'approved').length} approved`} />
       </div>
 
@@ -133,8 +133,8 @@ export default function Payroll() {
       }>
         {onMonthly === 0 ? (
           <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>
-            No workers are on a fixed or hybrid salary plan yet, so there's nothing for payroll to pay.
-            Per-job workers are paid by the wallet as they complete jobs.
+            No one is due monthly pay yet — payroll covers fixed/hybrid salaries and any attendance or quality bonuses,
+            including per-job workers who earn those bonuses. Per-job earnings themselves are paid by the wallet as jobs complete.
           </div>
         ) : (
           <div className="muted" style={{ fontSize: 12.5 }}>Pick a month and build a draft. You review every line before anything is paid.</div>

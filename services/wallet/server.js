@@ -653,11 +653,15 @@ async function creditPayroll(d) {
   if (!d?.workerId || !d?.runId) return
   const net = Number(d.net) || 0
   if (net <= 0) return
+  // A per-job worker's line is bonuses only — categorise it 'Incentive', not 'Salary', so their
+  // wallet doesn't claim a monthly salary they're not on.
+  const isBonus = d.kind === 'bonus'
+  const category = isBonus ? 'Incentive' : 'Salary'
   const ref = `payroll-${d.runId}-${d.workerId}`
   const ins = await pool.query(
     `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
-     VALUES ($1,'Salary',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [d.workerId, d.label || `Salary ${d.month}`, net, ref])
+     VALUES ($1,$2,$3,$4,$5,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [d.workerId, category, d.label || `Salary ${d.month}`, net, ref])
   if (!ins.rowCount) return // already credited — a re-approve or a redelivered event
   await adjustBalance(d.workerId, { balance: net, earnings: net })
   for (const ded of (d.deductions || [])) {
@@ -666,10 +670,10 @@ async function creditPayroll(d) {
       `INSERT INTO worker_deductions (worker_id, category, label, amount, source) VALUES ($1,'Statutory',$2,$3,'Payroll')`,
       [d.workerId, `${ded.label} · ${d.month}`, ded.amount])
   }
-  await notify(d.workerId, 'Salary credited', `₹${net} for ${d.month} is in your wallet.`)
+  await notify(d.workerId, isBonus ? 'Bonus credited' : 'Salary credited', `₹${net} for ${d.month} is in your wallet.`)
   publishEvent(REDIS_URL, 'activity', {
-    actorType: 'system', actorName: 'Payroll', action: 'wallet.salary', entityType: 'worker', entityId: d.workerId,
-    detail: `Salary ₹${net} credited for ${d.month}`, meta: { amount: net },
+    actorType: 'system', actorName: 'Payroll', action: isBonus ? 'wallet.bonus' : 'wallet.salary', entityType: 'worker', entityId: d.workerId,
+    detail: `${isBonus ? 'Bonus' : 'Salary'} ₹${net} credited for ${d.month}`, meta: { amount: net },
   })
 }
 

@@ -2208,18 +2208,31 @@ async function attendanceForMonth(w, month) {
   return { scheduled, present, pct: scheduled ? Math.round((present / scheduled) * 100) : 0 }
 }
 
-/** One worker's line for a month. Returns null when they aren't on a monthly salary. */
+/**
+ * One worker's line for a month. Returns null only when there's nothing to pay.
+ *
+ * Two independent parts:
+ *  - SALARY (basic + allowances) — only fixed/hybrid workers have one, and only once their salary
+ *    has started (effective-from).
+ *  - Monthly BONUSES (attendance, quality) — ANY worker on an incentive plan earns these, per-job
+ *    included. That's the point: a per-job worker who shows up and keeps their rating high should
+ *    get the bonus their plan promises, not miss it because they have no monthly salary.
+ */
 async function payrollLine(w, month) {
   const { plan } = await resolveCommission(w)
-  if (!plan || !MONTHLY_TYPES.includes(plan.salary_type)) return null
-  // Someone whose salary starts after this month hasn't earned it. Back-dating a hire must not
-  // silently pay them for months they hadn't joined.
-  if (w.salary_effective_from && monthKey(new Date(w.salary_effective_from)) > month) return null
+  const isMonthly = plan && MONTHLY_TYPES.includes(plan.salary_type)
 
-  const amt = salaryAmounts(w, plan)
-  const basic = amt.basic
-  // The guaranteed monthly attendance allowance rides with the allowance line on the payslip.
-  const allowance = amt.allowance + amt.attendance
+  // Salary — fixed/hybrid only. Someone whose salary starts after this month hasn't earned it;
+  // back-dating a hire must not silently pay them for months they hadn't joined. Bonuses below are
+  // still evaluated, because a worker can earn a bonus for a month their salary doesn't yet cover.
+  let basic = 0, allowance = 0
+  const salaryStarted = !(w.salary_effective_from && monthKey(new Date(w.salary_effective_from)) > month)
+  if (isMonthly && salaryStarted) {
+    const amt = salaryAmounts(w, plan)
+    basic = amt.basic
+    // The guaranteed monthly attendance allowance rides with the allowance line on the payslip.
+    allowance = amt.allowance + amt.attendance
+  }
   const incentives = []
 
   const inc = await incentivePlanFor(w)
@@ -2234,6 +2247,9 @@ async function payrollLine(w, month) {
   }
 
   const gross = basic + allowance + incentives.reduce((n, i) => n + i.amount, 0)
+  // Nothing to pay this month — no salary and no bonus earned. Keeps per-job workers who earned no
+  // bonus out of the run entirely, rather than adding empty ₹0 lines.
+  if (gross <= 0) return null
 
   // Rates come from Settings — the admin's numbers, applied to their own policy.
   const deductions = []
@@ -2257,7 +2273,11 @@ async function payrollLine(w, month) {
   const totalDeductions = deductions.reduce((n, d) => n + d.amount, 0)
 
   return {
-    workerId: w.id, name: w.name, planName: plan.name, salaryType: plan.salary_type,
+    workerId: w.id, name: w.name,
+    planName: plan?.name || '',
+    salaryType: plan?.salary_type || 'per_job',
+    // A bonus-only line has no salary — the payslip and credit label say "Bonuses", not "Salary".
+    kind: basic > 0 ? 'salary' : 'bonus',
     basic, allowance, incentives, deductions,
     gross, totalDeductions, net: Math.max(0, gross - totalDeductions),
     // Flagged, not silently dropped: a rate switched on with no percentage set deducts nothing.
@@ -2292,9 +2312,13 @@ app.get('/api/admin/payroll', adminAuth, async (_q, res) => {
     `SELECT r.*, (SELECT COUNT(*)::int FROM payroll_lines l WHERE l.run_id=r.id) workers,
             (SELECT COALESCE(SUM(l.net),0)::int FROM payroll_lines l WHERE l.run_id=r.id) net
      FROM payroll_runs r ORDER BY r.month DESC LIMIT 24`)
+  // Everyone this month's run would pay: a monthly salary, OR an incentive plan carrying a monthly
+  // bonus (attendance/quality) — which now includes per-job workers.
   const onMonthly = (await pool.query(
-    `SELECT COUNT(*)::int n FROM workers w JOIN salary_plans p ON p.id=w.salary_plan_id
-     WHERE p.salary_type = ANY($1) AND w.status='active'`, [MONTHLY_TYPES])).rows[0].n
+    `SELECT COUNT(*)::int n FROM workers w WHERE w.status='active' AND (
+       EXISTS (SELECT 1 FROM salary_plans p WHERE p.id=w.salary_plan_id AND p.salary_type = ANY($1))
+       OR EXISTS (SELECT 1 FROM incentive_plans i WHERE i.id=w.incentive_plan_id AND (i.attendance_bonus_amount > 0 OR i.quality_bonus_amount > 0))
+     )`, [MONTHLY_TYPES])).rows[0].n
   res.json({
     ok: true, workersOnMonthlySalary: onMonthly,
     runs: rows.map((r) => ({ id: r.id, month: r.month, status: r.status, workers: r.workers, net: r.net, createdBy: r.created_by, approvedBy: r.approved_by, created: r.created, approvedAt: r.approved_at })),
@@ -2325,7 +2349,9 @@ app.post('/api/admin/payroll', adminAuth, async (req, res) => {
     : (await pool.query('INSERT INTO payroll_runs (month, created_by) VALUES ($1,$2) RETURNING *', [month, who])).rows[0]
   await pool.query('DELETE FROM payroll_lines WHERE run_id=$1', [run.id]) // a rebuild reflects today's plans
 
-  const workers = (await pool.query("SELECT * FROM workers WHERE status='active' AND salary_plan_id IS NOT NULL")).rows
+  // Include incentive-plan-only workers (per-job earning attendance/quality bonuses), not just
+  // those on a salary plan. payrollLine returns null for anyone who earned nothing this month.
+  const workers = (await pool.query("SELECT * FROM workers WHERE status='active' AND (salary_plan_id IS NOT NULL OR incentive_plan_id IS NOT NULL)")).rows
   let n = 0
   for (const w of workers) {
     const line = await payrollLine(w, month)
@@ -2358,11 +2384,15 @@ app.post('/api/admin/payroll/:id/approve', adminAuth, async (req, res) => {
   const who = req.admin?.name || req.admin?.email || 'Admin'
   await pool.query("UPDATE payroll_runs SET status='approved', approved_by=$1, approved_at=now() WHERE id=$2", [who, id])
   for (const l of lines) {
+    // A line with no basic salary is bonuses only (a per-job worker's attendance/quality bonus) —
+    // label and categorise it as such so their wallet doesn't show a "Salary" they don't have.
+    const bonusOnly = !l.basic
     publishEvent(REDIS_URL, 'payroll.credit', {
       runId: id, month: run.month, workerId: l.worker_id,
       net: l.net, gross: l.gross,
       deductions: l.deductions || [],
-      label: `Salary ${run.month}`,
+      kind: bonusOnly ? 'bonus' : 'salary',
+      label: bonusOnly ? `Bonuses ${run.month}` : `Salary ${run.month}`,
     })
   }
   publishEvent(REDIS_URL, 'activity', {
