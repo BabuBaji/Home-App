@@ -409,9 +409,11 @@ export default function AddWorker() {
                     </div>
                   </div>
                   <div>
-                    <Field label="Salary Plan *">
-                      <Dropdown value={d.salary_plan_id} width="100%" placeholder={typePlans.length ? 'Select Salary Plan' : 'No plans of this type'}
-                        options={typePlans.map((p) => ({ value: String(p.id), label: p.name }))}
+                    <Field label="Salary Plan">
+                      <Dropdown value={d.salary_plan_id} width="100%"
+                        disabled={typePlans.length === 0}
+                        placeholder={typePlans.length ? 'Select Salary Plan (optional)' : 'No saved plans — enter amounts below'}
+                        options={[{ value: '', label: 'None — enter amounts manually' }, ...typePlans.map((p) => ({ value: String(p.id), label: p.name }))]}
                         onChange={(v) => set('salary_plan_id', v)} />
                     </Field>
                     <button onClick={() => nav('/salary-plans')} style={{ background: 'none', border: 0, color: '#4f46e5', fontSize: 12, cursor: 'pointer', padding: '4px 0 8px' }}>+ Create New Plan</button>
@@ -422,13 +424,6 @@ export default function AddWorker() {
                     )}
                   </div>
                 </div>
-
-                {typePlans.length === 0 && (
-                  <div style={{ padding: 12, borderLeft: '3px solid #d97706', background: '#fffbeb', borderRadius: 8, fontSize: 12.5, marginTop: 12 }}>
-                    No <strong>{TYPE_LABEL[d.salary_type]}</strong> plans yet — pick one to pre-fill the amounts below, or type them in directly.
-                    Create reusable plans under <em>Salary Plans</em>.
-                  </div>
-                )}
 
                 {/* Salary Details — editable ₹ fields, pre-filled from the plan, overridable per worker */}
                 {d.salary_type !== 'per_job' && (
