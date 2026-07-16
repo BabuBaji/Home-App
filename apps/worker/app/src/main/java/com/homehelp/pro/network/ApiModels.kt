@@ -550,6 +550,57 @@ data class SkillsResponse(
 data class ServicesResponse(val ok: Boolean = true, val services: List<String> = emptyList(), val levels: List<String> = emptyList())
 data class SkillsBody(val skills: Map<String, SkillClaim> = emptyMap())
 data class SkillClaim(val level: String = "", val years: String = "")
+/* ---------- Phase 7: training & assessment ----------
+ * Only PUBLISHED modules ever reach the app — a module the admin hasn't written yet simply isn't
+ * in the list. The quiz paper carries no answer key; it's scored on the server.
+ */
+data class TrainingModuleDto(
+    val id: Int = 0,
+    val key: String = "",
+    val title: String = "",
+    val body: String = "",
+    val sort: Int = 0,
+    val completed: Boolean = false,
+    val completedAt: String? = null,
+)
+data class TrainingProgress(val completed: Int = 0, val total: Int = 0)
+data class QuizAttemptDto(val id: Int = 0, val score: Int = 0, val total: Int = 0, val pct: Int = 0, val passed: Boolean = false, val created: String = "")
+data class QuizState(
+    val size: Int = 20,
+    val passPct: Int = 80,
+    val bank: Int = 0,
+    val passed: Boolean = false,
+    val passedAt: String? = null,
+    val bestPct: Int? = null,
+    val attempts: Int = 0,
+    /** Each reason the quiz can't be sat right now, so the app can say which, not just grey out. */
+    val modulesDone: Boolean = false,
+    val ready: Boolean = false,
+    val onCooldown: Boolean = false,
+    val cooldownUntil: String? = null,
+    val history: List<QuizAttemptDto> = emptyList(),
+)
+data class TrainingResponse(
+    val ok: Boolean = true,
+    val modules: List<TrainingModuleDto> = emptyList(),
+    val progress: TrainingProgress = TrainingProgress(),
+    val quiz: QuizState = QuizState(),
+)
+/** No correctIndex — that never leaves the server. */
+data class QuizQuestionDto(val id: Int = 0, val question: String = "", val options: List<String> = emptyList())
+data class QuizPaperResponse(val ok: Boolean = true, val passPct: Int = 80, val questions: List<QuizQuestionDto> = emptyList())
+data class QuizSubmitBody(val answers: Map<String, Int> = emptyMap())
+data class QuizResultResponse(
+    val ok: Boolean = true,
+    val score: Int = 0,
+    val total: Int = 0,
+    val pct: Int = 0,
+    val passed: Boolean = false,
+    val passPct: Int = 80,
+    val progress: TrainingProgress = TrainingProgress(),
+    val quiz: QuizState = QuizState(),
+)
+
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
 data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)

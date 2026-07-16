@@ -125,6 +125,37 @@ export interface WorkerDetail extends Worker {
   jobsPerformance?: JobsPerformance
 }
 
+/* Training & assessment (Phase 7). Content is admin-authored: a module starts as an empty
+   unpublished draft and is invisible to workers until someone writes and publishes it. */
+export interface TrainingModule {
+  id: number; key: string; title: string; body: string; sort: number
+  published: boolean; questions?: number; updated?: string
+}
+/** correctIndex is admin-only — the worker's paper is served without it and scored server-side. */
+export interface TrainingQuestion {
+  id: number; moduleId: number | null; question: string; options: string[]
+  correctIndex: number; active: boolean
+}
+export interface TrainingAdminState {
+  ok: boolean; quizSize: number; passPct: number
+  /** Active questions whose module is published — the pool a paper is drawn from. */
+  bank: number
+  modules: TrainingModule[]; questions: TrainingQuestion[]
+}
+export interface QuizAttempt { id: number; score: number; total: number; pct: number; passed: boolean; created: string }
+export interface WorkerTrainingState {
+  ok: boolean
+  modules: { id: number; key: string; title: string; sort: number; completed: boolean; completedAt: string | null }[]
+  progress: { completed: number; total: number }
+  quiz: {
+    size: number; passPct: number; bank: number; passed: boolean; passedAt: string | null
+    bestPct: number | null; attempts: number
+    /** Each reason the quiz can't be sat right now, so the UI can explain rather than grey out. */
+    modulesDone: boolean; ready: boolean; onCooldown: boolean; cooldownUntil: string | null
+    history: QuizAttempt[]
+  }
+}
+
 export interface AdminBooking {
   id: number; ref: string; customer: string; service: string; pro: string
   date?: string; time?: string; type: string; total: number

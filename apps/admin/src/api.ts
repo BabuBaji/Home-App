@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
-  Complaint, Ticket, Settings,
+  Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -127,6 +127,19 @@ export const reviewWorkerSkill = (id: number, service: string, approve: boolean,
 export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)
 export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, reason?: string) =>
   req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))
+/* training & assessment (Phase 7). Modules ship as empty unpublished drafts — the content is the
+   company's own policy, so an admin writes it here. A module can't be published until it has a
+   body, and the quiz needs `quizSize` active questions in the bank before a worker can sit it. */
+export const fetchTraining = () => req<TrainingAdminState>('/training')
+export const createTrainingModule = (title: string, body = '') => req<{ ok: boolean; module: TrainingModule }>('/training/modules', post('', { title, body }))
+export const updateTrainingModule = (id: number, body: Partial<TrainingModule>) => req<{ ok: boolean; module: TrainingModule }>(`/training/modules/${id}`, patch(body))
+export const deleteTrainingModule = (id: number) => req<{ ok: boolean }>(`/training/modules/${id}`, { method: 'DELETE' })
+export const createTrainingQuestion = (body: Partial<TrainingQuestion>) => req<{ ok: boolean; question: TrainingQuestion }>('/training/questions', post('', body))
+export const updateTrainingQuestion = (id: number, body: Partial<TrainingQuestion>) => req<{ ok: boolean; question: TrainingQuestion }>(`/training/questions/${id}`, patch(body))
+export const deleteTrainingQuestion = (id: number) => req<{ ok: boolean }>(`/training/questions/${id}`, { method: 'DELETE' })
+/** One worker's progress — for the detail screen and Phase 12's checklist. */
+export const fetchWorkerTraining = (id: number) => req<WorkerTrainingState>(`/workers/${id}/training`)
+
 export async function downloadWalletReport() {
   const res = await fetch(API_BASE + '/api/admin/wallet/report.csv', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
   if (!res.ok) throw new Error('Could not export report')

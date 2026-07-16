@@ -96,7 +96,7 @@ import com.homehelp.pro.network.SkillClaim
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
+internal fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(title, onBack = { nav.popBackStack() })
         Column(
@@ -246,7 +246,7 @@ private fun BankPickerField(selected: String, onSelect: (BankOption) -> Unit) {
 
 /** Tinted rounded icon chip used as the leading element of list/toggle/nav rows. */
 @Composable
-private fun IconChip(icon: ImageVector, tint: Color, bg: Color, size: Int = 38) {
+internal fun IconChip(icon: ImageVector, tint: Color, bg: Color, size: Int = 38) {
     Box(
         Modifier.size(size.dp).clip(RoundedCornerShape(Radius.field)).background(bg),
         contentAlignment = Alignment.Center,

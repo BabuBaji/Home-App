@@ -63,6 +63,12 @@ import com.homehelp.pro.network.WalletSummaryDto
 import com.homehelp.pro.network.SkillDto
 import com.homehelp.pro.network.SkillClaim
 import com.homehelp.pro.network.SkillsBody
+import com.homehelp.pro.network.TrainingModuleDto
+import com.homehelp.pro.network.TrainingProgress
+import com.homehelp.pro.network.QuizState
+import com.homehelp.pro.network.QuizQuestionDto
+import com.homehelp.pro.network.QuizSubmitBody
+import com.homehelp.pro.network.QuizResultResponse
 import com.homehelp.pro.network.WorkerDto
 import com.homehelp.pro.network.WithdrawBody
 import com.homehelp.pro.network.WithdrawalEntry
@@ -1129,6 +1135,82 @@ class AppViewModel : ViewModel() {
             } catch (e: retrofit2.HttpException) { skillsError = httpErrorMessage(e) }
             catch (e: Exception) { skillsError = e.message ?: "Upload failed." }
             finally { savingSkills = false }
+        }
+    }
+
+    /* ---- Phase 7: training & assessment ----
+     * Modules are written by the admin; unpublished ones simply aren't in the list, so an empty
+     * list means "nothing published yet", not an error. The paper carries no answer key and the
+     * score comes back from the server — there is nothing to check locally.
+     */
+    val trainingModules = mutableStateListOf<TrainingModuleDto>()
+    var trainingProgress by mutableStateOf(TrainingProgress())
+        private set
+    var quizState by mutableStateOf(QuizState())
+        private set
+    var quizPaper by mutableStateOf<List<QuizQuestionDto>>(emptyList())
+        private set
+    var quizResult by mutableStateOf<QuizResultResponse?>(null)
+    var loadingQuiz by mutableStateOf(false)
+        private set
+    var trainingError by mutableStateOf<String?>(null)
+    fun clearTrainingError() { trainingError = null }
+
+    private fun applyTraining(modules: List<TrainingModuleDto>, progress: TrainingProgress, quiz: QuizState) {
+        trainingModules.clear(); trainingModules.addAll(modules)
+        trainingProgress = progress
+        quizState = quiz
+    }
+
+    fun loadTraining() = sync {
+        val t = api.getTraining()
+        applyTraining(t.modules, t.progress, t.quiz)
+    }
+
+    fun completeModule(id: Int) {
+        trainingError = null
+        viewModelScope.launch {
+            try {
+                val t = withContext(Dispatchers.IO) { api.completeModule(id) }
+                applyTraining(t.modules, t.progress, t.quiz)
+                backendConnected = true
+            } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
+            catch (e: Exception) { trainingError = "Could not save your progress. Check your connection." }
+        }
+    }
+
+    /** Fetch a paper. The server refuses with a clear reason (modules unread, cooldown, bank too
+     *  small) — show that rather than a generic failure. */
+    fun startQuiz(onReady: () -> Unit = {}) {
+        trainingError = null
+        loadingQuiz = true
+        quizResult = null
+        viewModelScope.launch {
+            try {
+                val p = withContext(Dispatchers.IO) { api.getQuizPaper() }
+                quizPaper = p.questions
+                backendConnected = true
+                onReady()
+            } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
+            catch (e: Exception) { trainingError = "Could not load the assessment. Check your connection." }
+            finally { loadingQuiz = false }
+        }
+    }
+
+    fun submitQuiz(answers: Map<Int, Int>, onDone: () -> Unit = {}) {
+        trainingError = null
+        loadingQuiz = true
+        viewModelScope.launch {
+            try {
+                val r = withContext(Dispatchers.IO) { api.submitQuiz(QuizSubmitBody(answers.mapKeys { it.key.toString() })) }
+                quizResult = r
+                trainingProgress = r.progress
+                quizState = r.quiz
+                quizPaper = emptyList()
+                onDone()
+            } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
+            catch (e: Exception) { trainingError = "Could not submit. Check your connection and try again." }
+            finally { loadingQuiz = false }
         }
     }
 

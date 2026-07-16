@@ -111,6 +111,19 @@ interface ApiService {
     @POST("api/worker/skills/certificate")
     suspend fun uploadSkillCertificate(@Part("service") service: RequestBody, @Part file: MultipartBody.Part): SkillsResponse
 
+    /* Phase 7 — training & assessment */
+    @GET("api/worker/training")
+    suspend fun getTraining(): TrainingResponse
+
+    @POST("api/worker/training/{id}/complete")
+    suspend fun completeModule(@Path("id") id: Int): TrainingResponse
+
+    @GET("api/worker/training/quiz")
+    suspend fun getQuizPaper(): QuizPaperResponse
+
+    @POST("api/worker/training/quiz")
+    suspend fun submitQuiz(@Body body: QuizSubmitBody): QuizResultResponse
+
     // Profile photo. Public bucket (customers see it), so the DTO carries a stable URL.
     @Multipart
     @POST("api/worker/profile/photo")

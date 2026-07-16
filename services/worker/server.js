@@ -139,6 +139,35 @@ async function init() {
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reject_reason TEXT`,
+    /* ---- Phase 7: training + assessment ----
+     * Content is AUTHORED BY THE ADMIN, not seeded with invented policy. The 9 modules below are
+     * created as empty, UNPUBLISHED drafts: titles only. A module is invisible to workers until
+     * someone writes it and publishes it — quizzing a worker on rules we made up, and gating their
+     * activation on the score, would be worse than having no training at all.
+     */
+    `CREATE TABLE IF NOT EXISTS training_modules (
+      id SERIAL PRIMARY KEY, key TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '', sort INTEGER NOT NULL DEFAULT 0,
+      published BOOLEAN NOT NULL DEFAULT false,
+      created TIMESTAMPTZ NOT NULL DEFAULT now(), updated TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    // correct_index NEVER leaves the server: the worker's paper is served without answers and
+    // scored here, so the quiz can't be passed by reading the response.
+    `CREATE TABLE IF NOT EXISTS training_questions (
+      id SERIAL PRIMARY KEY, module_id INTEGER REFERENCES training_modules(id) ON DELETE CASCADE,
+      question TEXT NOT NULL, options JSONB NOT NULL DEFAULT '[]'::jsonb,
+      correct_index INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS worker_training (
+      worker_id INTEGER NOT NULL, module_id INTEGER NOT NULL, completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (worker_id, module_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS quiz_attempts (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, score INTEGER NOT NULL, total INTEGER NOT NULL,
+      passed BOOLEAN NOT NULL DEFAULT false, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_quiz_attempts_worker ON quiz_attempts(worker_id, created DESC)`,
     // Login OTPs. Stored HASHED with an expiry and an attempt counter — the code itself never
     // rests in the database, and one row per phone means a new request invalidates the previous
     // code. Rows are disposable: deleted on success, and expired ones are swept on each request.
@@ -168,6 +197,22 @@ async function init() {
     )`,
     // (Demo/QA worker seed disabled — real workers are managed in Admin → Workers.)
   ])
+
+  /* Phase 7 module list. TITLES ONLY, unpublished, with an empty body — these are the company's own
+   * policies (grooming standards, the cleaning SOP, incentive rules), and inventing them here would
+   * put words in the company's mouth and then quiz workers on them. An admin writes each one and
+   * publishes it; until then workers see nothing. ON CONFLICT DO NOTHING so re-running never
+   * overwrites content someone has since authored. */
+  for (const [i, title] of [
+    'Company Introduction', 'Cleaning SOP', 'Customer Behaviour', 'Grooming', 'Safety',
+    'Equipment Usage', 'Mobile App Usage', 'Attendance Policy', 'Incentive Rules',
+  ].entries()) {
+    await pool.query(
+      `INSERT INTO training_modules (key, title, sort) VALUES ($1, $2, $3) ON CONFLICT (key) DO NOTHING`,
+      [title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), title, i + 1],
+    )
+  }
+
   const seeded = (await pool.query('SELECT COUNT(*)::int n FROM workers')).rows[0].n
   if (!seeded) {
     // Every ACTIVE pro is qualified for the full Cleaning catalogue so any booked service matches
@@ -1252,6 +1297,235 @@ app.post('/api/worker/skills/certificate', auth, upload.single('file'), async (r
   await mergeProfile(req.worker.id, { skills })
   if (old) await deleteObject(old).catch(() => {})
   res.json({ ok: true, skills })
+})
+
+/* ---------- Phase 7: training & assessment ----------
+ * Modules are admin-authored; a worker only ever sees published ones. The quiz draws a random
+ * paper from the bank so a retake isn't the same paper, and is scored HERE — the paper is served
+ * without correct_index, so it can't be passed by reading the response.
+ *
+ * Passing gates nothing on its own. It's recorded and surfaced on the admin's checklist, and
+ * Phase 12's final approval is the single place activation is decided.
+ */
+const QUIZ_SIZE = Number(process.env.QUIZ_SIZE || 20)
+const QUIZ_PASS_PCT = Number(process.env.QUIZ_PASS_PCT || 80)
+const QUIZ_COOLDOWN_MIN = Number(process.env.QUIZ_COOLDOWN_MIN || 30)
+
+/** Askable = active, and either general or belonging to a published module. */
+const BANK_WHERE = `q.active AND (q.module_id IS NULL OR m.published)`
+
+async function trainingState(workerId) {
+  const [mods, done, attempts, bank] = await Promise.all([
+    pool.query('SELECT id, key, title, body, sort FROM training_modules WHERE published = true ORDER BY sort, id'),
+    pool.query('SELECT module_id, completed_at FROM worker_training WHERE worker_id = $1', [workerId]),
+    pool.query('SELECT id, score, total, passed, created FROM quiz_attempts WHERE worker_id = $1 ORDER BY created DESC LIMIT 20', [workerId]),
+    pool.query(`SELECT COUNT(*)::int n FROM training_questions q LEFT JOIN training_modules m ON m.id = q.module_id WHERE ${BANK_WHERE}`),
+  ])
+  const doneAt = new Map(done.rows.map((r) => [r.module_id, r.completed_at]))
+  const modules = mods.rows.map((m) => ({
+    id: m.id, key: m.key, title: m.title, body: m.body, sort: m.sort,
+    completed: doneAt.has(m.id), completedAt: doneAt.get(m.id) || null,
+  }))
+  const completed = modules.filter((m) => m.completed).length
+  const passedRow = attempts.rows.find((a) => a.passed)
+  const lastFail = attempts.rows.find((a) => !a.passed)
+  const cooldownUntil = !passedRow && lastFail
+    ? new Date(new Date(lastFail.created).getTime() + QUIZ_COOLDOWN_MIN * 60_000)
+    : null
+  const onCooldown = !!cooldownUntil && cooldownUntil > new Date()
+  const best = attempts.rows.reduce((m, a) => Math.max(m, a.total ? Math.round((a.score / a.total) * 100) : 0), 0)
+  return {
+    modules,
+    progress: { completed, total: modules.length },
+    quiz: {
+      size: QUIZ_SIZE, passPct: QUIZ_PASS_PCT, bank: bank.rows[0].n,
+      passed: !!passedRow, passedAt: passedRow?.created || null,
+      bestPct: attempts.rows.length ? best : null,
+      attempts: attempts.rows.length,
+      // Every reason the quiz can't be taken right now, so the app explains rather than greys out.
+      modulesDone: modules.length > 0 && completed === modules.length,
+      ready: bank.rows[0].n >= QUIZ_SIZE,
+      onCooldown, cooldownUntil: onCooldown ? cooldownUntil.toISOString() : null,
+      history: attempts.rows.slice(0, 5).map((a) => ({
+        id: a.id, score: a.score, total: a.total,
+        pct: a.total ? Math.round((a.score / a.total) * 100) : 0,
+        passed: a.passed, created: a.created,
+      })),
+    },
+  }
+}
+
+app.get('/api/worker/training', auth, async (req, res) => {
+  res.json({ ok: true, ...(await trainingState(req.worker.id)) })
+})
+
+app.post('/api/worker/training/:id/complete', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  // Only published modules count — otherwise a draft id could be marked done and inflate progress.
+  const m = (await pool.query('SELECT id FROM training_modules WHERE id = $1 AND published = true', [id])).rows[0]
+  if (!m) return res.status(404).json({ ok: false, error: 'Module not found' })
+  await pool.query('INSERT INTO worker_training (worker_id, module_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.worker.id, id])
+  res.json({ ok: true, ...(await trainingState(req.worker.id)) })
+})
+
+/** The paper: a random QUIZ_SIZE from the bank, WITHOUT the answers. */
+app.get('/api/worker/training/quiz', auth, async (req, res) => {
+  const st = await trainingState(req.worker.id)
+  if (!st.quiz.ready) return res.status(503).json({ ok: false, error: 'The assessment is not ready yet — ask the admin to finish setting it up' })
+  if (!st.quiz.modulesDone) return res.status(400).json({ ok: false, error: 'Finish all the training modules first' })
+  if (st.quiz.onCooldown) return res.status(429).json({ ok: false, error: `Please wait until ${new Date(st.quiz.cooldownUntil).toLocaleTimeString()} before trying again`, cooldownUntil: st.quiz.cooldownUntil })
+
+  const q = await pool.query(
+    `SELECT q.id, q.question, q.options FROM training_questions q
+     LEFT JOIN training_modules m ON m.id = q.module_id
+     WHERE ${BANK_WHERE} ORDER BY random() LIMIT $1`, [QUIZ_SIZE])
+  res.json({
+    ok: true, passPct: QUIZ_PASS_PCT,
+    questions: q.rows.map((r) => ({ id: r.id, question: r.question, options: r.options || [] })),
+  })
+})
+
+/**
+ * Submit. Body: { answers: { "<questionId>": <optionIndex> } }
+ * Always scored out of QUIZ_SIZE, never out of what was answered — otherwise a worker could send
+ * only the three they're sure of and score 100%.
+ */
+app.post('/api/worker/training/quiz', auth, async (req, res) => {
+  const answers = req.body?.answers
+  if (!answers || typeof answers !== 'object') return res.status(400).json({ ok: false, error: 'No answers supplied' })
+  const st = await trainingState(req.worker.id)
+  if (!st.quiz.ready) return res.status(503).json({ ok: false, error: 'The assessment is not ready yet' })
+  if (!st.quiz.modulesDone) return res.status(400).json({ ok: false, error: 'Finish all the training modules first' })
+  if (st.quiz.onCooldown) return res.status(429).json({ ok: false, error: 'Too soon — this attempt is on cooldown', cooldownUntil: st.quiz.cooldownUntil })
+
+  const ids = [...new Set(Object.keys(answers).map(Number).filter(Number.isInteger))].slice(0, QUIZ_SIZE)
+  const rows = ids.length
+    ? (await pool.query(
+        `SELECT q.id, q.correct_index FROM training_questions q
+         LEFT JOIN training_modules m ON m.id = q.module_id
+         WHERE ${BANK_WHERE} AND q.id = ANY($1::int[])`, [ids])).rows
+    : []
+  const score = rows.filter((r) => Number(answers[r.id]) === r.correct_index).length
+  const pct = Math.round((score / QUIZ_SIZE) * 100)
+  const passed = pct >= QUIZ_PASS_PCT
+
+  await pool.query('INSERT INTO quiz_attempts (worker_id, score, total, passed) VALUES ($1, $2, $3, $4)', [req.worker.id, score, QUIZ_SIZE, passed])
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'training.quiz',
+    entityType: 'worker', entityId: req.worker.id,
+    detail: `${passed ? 'Passed' : 'Failed'} the assessment — ${score}/${QUIZ_SIZE} (${pct}%)`,
+  })
+  // Only the result, never which ones were wrong: the bank is small and a wrong-answer key would
+  // let a worker map it out over a few deliberate failures.
+  res.json({ ok: true, score, total: QUIZ_SIZE, pct, passed, passPct: QUIZ_PASS_PCT, ...(await trainingState(req.worker.id)) })
+})
+
+/* ---------- admin: authoring ---------- */
+const qDto = (q) => ({ id: q.id, moduleId: q.module_id, question: q.question, options: q.options || [], correctIndex: q.correct_index, active: q.active })
+
+app.get('/api/admin/training', adminAuth, async (_q, res) => {
+  const [mods, qs] = await Promise.all([
+    pool.query(`SELECT m.*, (SELECT COUNT(*)::int FROM training_questions q WHERE q.module_id = m.id AND q.active) questions
+                FROM training_modules m ORDER BY m.sort, m.id`),
+    pool.query('SELECT * FROM training_questions ORDER BY id'),
+  ])
+  const bank = (await pool.query(`SELECT COUNT(*)::int n FROM training_questions q LEFT JOIN training_modules m ON m.id = q.module_id WHERE ${BANK_WHERE}`)).rows[0].n
+  res.json({
+    ok: true, quizSize: QUIZ_SIZE, passPct: QUIZ_PASS_PCT, bank,
+    modules: mods.rows.map((m) => ({ id: m.id, key: m.key, title: m.title, body: m.body, sort: m.sort, published: m.published, questions: m.questions, updated: m.updated })),
+    questions: qs.rows.map(qDto),
+  })
+})
+
+app.post('/api/admin/training/modules', adminAuth, async (req, res) => {
+  const title = String(req.body?.title || '').trim()
+  if (!title) return res.status(400).json({ error: 'Title required' })
+  const key = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)
+  const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM training_modules')).rows[0].n
+  try {
+    const r = await pool.query('INSERT INTO training_modules (key, title, body, sort) VALUES ($1, $2, $3, $4) RETURNING *', [key, title, String(req.body?.body || ''), sort])
+    res.json({ ok: true, module: r.rows[0] })
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A module with that name already exists' })
+    throw e
+  }
+})
+
+app.patch('/api/admin/training/modules/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const cur = (await pool.query('SELECT * FROM training_modules WHERE id = $1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Module not found' })
+  const b = req.body || {}
+  const title = b.title !== undefined ? String(b.title).trim() : cur.title
+  const body = b.body !== undefined ? String(b.body) : cur.body
+  const sort = b.sort !== undefined ? Number(b.sort) : cur.sort
+  const published = b.published !== undefined ? !!b.published : cur.published
+  if (!title) return res.status(400).json({ error: 'Title required' })
+  // An empty published module is a worker staring at a blank page and ticking "I've read it".
+  if (published && !body.trim()) return res.status(400).json({ error: 'Write the module content before publishing it' })
+  const r = await pool.query('UPDATE training_modules SET title=$1, body=$2, sort=$3, published=$4, updated=now() WHERE id=$5 RETURNING *', [title, body, sort, published, id])
+  if (published && !cur.published) {
+    const who = req.admin?.name || req.admin?.email || 'Admin'
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'training.publish', entityType: 'training', entityId: id, detail: `Published training module: ${title}` })
+  }
+  res.json({ ok: true, module: r.rows[0] })
+})
+
+app.delete('/api/admin/training/modules/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  // Progress rows would otherwise point at a module that no longer exists and skew "3 of 9".
+  await pool.query('DELETE FROM worker_training WHERE module_id = $1', [id])
+  await pool.query('DELETE FROM training_modules WHERE id = $1', [id]) // questions cascade
+  res.json({ ok: true })
+})
+
+function readQuestion(b) {
+  const question = String(b?.question || '').trim()
+  const options = Array.isArray(b?.options) ? b.options.map((o) => String(o || '').trim()).filter(Boolean) : []
+  const correctIndex = Number(b?.correctIndex)
+  if (!question) return { error: 'Question text required' }
+  if (options.length < 2) return { error: 'At least two options are required' }
+  if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= options.length) return { error: 'Mark which option is correct' }
+  return { question, options, correctIndex }
+}
+
+app.post('/api/admin/training/questions', adminAuth, async (req, res) => {
+  const v = readQuestion(req.body)
+  if (v.error) return res.status(400).json({ error: v.error })
+  const moduleId = req.body?.moduleId ? Number(req.body.moduleId) : null
+  const r = await pool.query(
+    'INSERT INTO training_questions (module_id, question, options, correct_index) VALUES ($1, $2, $3::jsonb, $4) RETURNING *',
+    [moduleId, v.question, JSON.stringify(v.options), v.correctIndex])
+  res.json({ ok: true, question: qDto(r.rows[0]) })
+})
+
+app.patch('/api/admin/training/questions/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const cur = (await pool.query('SELECT * FROM training_questions WHERE id = $1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Question not found' })
+  if (req.body?.active !== undefined && Object.keys(req.body).length === 1) {
+    const r = await pool.query('UPDATE training_questions SET active = $1 WHERE id = $2 RETURNING *', [!!req.body.active, id])
+    return res.json({ ok: true, question: qDto(r.rows[0]) })
+  }
+  const v = readQuestion(req.body)
+  if (v.error) return res.status(400).json({ error: v.error })
+  const moduleId = req.body?.moduleId !== undefined ? (req.body.moduleId ? Number(req.body.moduleId) : null) : cur.module_id
+  const active = req.body?.active !== undefined ? !!req.body.active : cur.active
+  const r = await pool.query(
+    'UPDATE training_questions SET module_id=$1, question=$2, options=$3::jsonb, correct_index=$4, active=$5 WHERE id=$6 RETURNING *',
+    [moduleId, v.question, JSON.stringify(v.options), v.correctIndex, active, id])
+  res.json({ ok: true, question: qDto(r.rows[0]) })
+})
+
+app.delete('/api/admin/training/questions/:id', adminAuth, async (req, res) => {
+  await pool.query('DELETE FROM training_questions WHERE id = $1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
+
+/** One worker's training state, for the detail screen and Phase 12's checklist. */
+app.get('/api/admin/workers/:id/training', adminAuth, async (req, res) => {
+  const st = await trainingState(Number(req.params.id))
+  res.json({ ok: true, ...st, modules: st.modules.map(({ body, ...m }) => m) }) // titles + progress; the admin doesn't need the text echoed back
 })
 
 app.get('/api/worker/documents/types', auth, (_q, res) => res.json({ ok: true, types: DOC_TYPES }))
