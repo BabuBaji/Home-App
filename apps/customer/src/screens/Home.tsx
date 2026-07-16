@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MapPin, ChevronDown, Bell, Search, CalendarPlus, Tag, Sparkles, ClipboardList, User } from 'lucide-react'
+import { MapPin, ChevronDown, Bell, Search, CalendarPlus, Tag, Sparkles, ClipboardList, User, Wallet as WalletIcon, Headset, Crown } from 'lucide-react'
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
-import { fetchServices, fetchBookings, fetchMe, fetchNotifications } from '../api'
+import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet } from '../api'
 import type { Service, Booking, Address } from '../types'
 
 // Module 2 · #7 — Home Dashboard. UI redesigned to the mock; all booking data/flow
@@ -24,11 +24,13 @@ export default function Home() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [addr, setAddr] = useState<Address | null>(null)
   const [notifCount, setNotifCount] = useState(0)
+  const [walletBal, setWalletBal] = useState<number | null>(null)
 
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
     fetchNotifications().then((n) => setNotifCount(n.length)).catch(() => {})
+    fetchWallet().then((w) => setWalletBal(w.available)).catch(() => {})
   }, [])
   useEffect(() => {
     fetchServices(pincode || undefined).then((c) => setServices(c.services)).catch(() => {})
@@ -48,9 +50,11 @@ export default function Home() {
 
   const QUICK = [
     { key: 'book', label: 'Book Now', Icon: CalendarPlus, on: bookNow },
-    { key: 'offers', label: 'Offers', Icon: Tag, on: () => nav('/profile') },
-    { key: 'ai', label: 'AI Insights', Icon: Sparkles, on: () => toast('AI Insights — coming soon') },
+    { key: 'offers', label: 'Offers', Icon: Tag, on: () => nav('/offers') },
+    { key: 'ai', label: 'AI Insights', Icon: Sparkles, on: () => nav('/ai-home') },
+    { key: 'membership', label: 'Membership', Icon: Crown, on: () => nav('/membership') },
     { key: 'mybk', label: 'My Bookings', Icon: ClipboardList, on: () => nav('/bookings') },
+    { key: 'help', label: 'Help', Icon: Headset, on: () => nav('/support') },
   ]
 
   return (
@@ -61,6 +65,11 @@ export default function Home() {
           <MapPin size={16} /> <b>{cityLabel}</b> <ChevronDown size={15} />
         </button>
         <div className="hd-top-r">
+          {/* wallet with the live available balance shown inline, like the notification count */}
+          <button className="hd-wallet" onClick={() => nav('/wallet')} aria-label="Wallet">
+            <WalletIcon size={18} />
+            {walletBal !== null && <span className="hd-wallet-bal">₹{walletBal.toLocaleString('en-IN')}</span>}
+          </button>
           <button className="hd-bell" onClick={() => nav('/notifications')} aria-label="Notifications">
             <Bell size={20} />
             {notifCount > 0 && <span className="hd-badge">{notifCount > 9 ? '9+' : notifCount}</span>}
@@ -90,7 +99,7 @@ export default function Home() {
           </button>
 
           {/* quick actions */}
-          <div className="hd-sec-head"><h3>Quick Actions</h3><button className="hd-seeall" onClick={() => nav('/bookings')}>See All</button></div>
+          <div className="hd-sec-head"><h3>Quick Actions</h3><button className="hd-seeall" onClick={() => nav('/quick-actions')}>See All</button></div>
           <div className="hd-quick">
             {QUICK.map((q) => (
               <button key={q.key} className="hd-qa" onClick={q.on}>

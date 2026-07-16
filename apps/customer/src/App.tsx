@@ -38,8 +38,53 @@ import Cancel from './screens/Cancel'
 import Bookings from './screens/Bookings'
 import History from './screens/History'
 import BookingDetail from './screens/BookingDetail'
+import OrdersList from './screens/OrdersList'
+import ActiveBooking from './screens/ActiveBooking'
+import Invoice from './screens/Invoice'
+import Receipt from './screens/Receipt'
 import Wallet from './screens/Wallet'
+import WalletTransactions from './screens/wallet/WalletTransactions'
+import AddMoney from './screens/wallet/AddMoney'
+import Cashback from './screens/wallet/Cashback'
+import ReferralEarnings from './screens/wallet/ReferralEarnings'
+import GiftCards from './screens/wallet/GiftCards'
+import RefundHistory from './screens/wallet/RefundHistory'
+import WalletSettings from './screens/wallet/WalletSettings'
 import Profile from './screens/Profile'
+import MyProfile from './screens/profile/MyProfile'
+import FamilyMembers from './screens/profile/FamilyMembers'
+import PaymentMethods from './screens/profile/PaymentMethods'
+import NotificationSettings from './screens/profile/NotificationSettings'
+import Language from './screens/profile/Language'
+import Privacy from './screens/profile/Privacy'
+import About from './screens/profile/About'
+import Help from './screens/profile/Help'
+import Logout from './screens/profile/Logout'
+import HelpCenter from './screens/support/HelpCenter'
+import RaiseTicket from './screens/support/RaiseTicket'
+import LiveChat from './screens/support/LiveChat'
+import EmergencySupport from './screens/support/EmergencySupport'
+import RefundStatus from './screens/support/RefundStatus'
+import Cancellation from './screens/support/Cancellation'
+import Escalation from './screens/support/Escalation'
+import FAQs from './screens/support/FAQs'
+import HomeHealthScore from './screens/ai/HomeHealthScore'
+import AIRecommendations from './screens/ai/AIRecommendations'
+import RecurringPlanner from './screens/ai/RecurringPlanner'
+import MaintenanceCalendar from './screens/ai/MaintenanceCalendar'
+import FestivalCleaning from './screens/ai/FestivalCleaning'
+import AIBudgetPlanner from './screens/ai/AIBudgetPlanner'
+import HomeTimeline from './screens/ai/HomeTimeline'
+import { WaterCanReminder, GarbageReminder, PestControlReminder } from './screens/ai/reminders'
+import AllQuickActions from './screens/AllQuickActions'
+import MembershipPlans from './screens/membership/MembershipPlans'
+import ComparePlans from './screens/membership/ComparePlans'
+import Subscribe from './screens/membership/Subscribe'
+import ActivePlan from './screens/membership/ActivePlan'
+import MembershipUsage from './screens/membership/MembershipUsage'
+import Renewal from './screens/membership/Renewal'
+import CancelMembership from './screens/membership/CancelMembership'
+import Benefits from './screens/membership/Benefits'
 import Support from './screens/Support'
 import Addresses from './screens/Addresses'
 import AddAddress from './screens/address/AddAddress'
@@ -65,7 +110,12 @@ import UploadPhotos from './screens/rate/UploadPhotos'
 import Complaint from './screens/rate/Complaint'
 import TipWorker from './screens/rate/TipWorker'
 import Rebook from './screens/rate/Rebook'
-import ReferFriend from './screens/rate/ReferFriend'
+import Coupons from './screens/offers/Coupons'
+import AutoOffers from './screens/offers/AutoOffers'
+import Referral from './screens/offers/Referral'
+import ZoneOffers from './screens/offers/ZoneOffers'
+import ScratchCards from './screens/offers/ScratchCards'
+import Loyalty from './screens/offers/Loyalty'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
@@ -171,13 +221,78 @@ export default function App() {
               <Route path="/complaint/:id" element={<Complaint />} />
               <Route path="/tip/:id" element={<TipWorker />} />
               <Route path="/rebook/:id" element={<Rebook />} />
-              <Route path="/refer" element={<ReferFriend />} />
+              {/* Module 11 — Offers (82-87) */}
+              <Route path="/offers" element={<Coupons />} />
+              <Route path="/offers/applied" element={<AutoOffers />} />
+              <Route path="/offers/zone" element={<ZoneOffers />} />
+              <Route path="/offers/scratch" element={<ScratchCards />} />
+              <Route path="/offers/loyalty" element={<Loyalty />} />
+              <Route path="/refer" element={<Referral />} />
+              {/* Module 8 — Orders (58-65) */}
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/bookings/active" element={<ActiveBooking />} />
+              <Route path="/bookings/:status" element={<OrdersList />} />
+              <Route path="/booking-details/:id" element={<BookingDetail />} />
+              <Route path="/invoice/:id" element={<Invoice />} />
+              <Route path="/receipt/:id" element={<Receipt />} />
               <Route path="/history" element={<History />} />
               <Route path="/booking/:id" element={<BookingDetail />} />
+              {/* Module 9 — Wallet (66-73) */}
               <Route path="/wallet" element={<Wallet />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/support" element={<Support />} />
+              <Route path="/wallet/transactions" element={<WalletTransactions />} />
+              <Route path="/wallet/add" element={<AddMoney />} />
+              <Route path="/wallet/cashback" element={<Cashback />} />
+              <Route path="/wallet/referrals" element={<ReferralEarnings />} />
+              <Route path="/wallet/gift-cards" element={<GiftCards />} />
+              <Route path="/wallet/refunds" element={<RefundHistory />} />
+              <Route path="/wallet/settings" element={<WalletSettings />} />
+              {/* Module 12 — Profile (88-96) */}
+              <Route path="/profile" element={<MyProfile />} />
+              <Route path="/profile/family" element={<FamilyMembers />} />
+              <Route path="/profile/payment-methods" element={<PaymentMethods />} />
+              <Route path="/profile/notifications" element={<NotificationSettings />} />
+              <Route path="/profile/language" element={<Language />} />
+              <Route path="/profile/privacy" element={<Privacy />} />
+              <Route path="/profile/about" element={<About />} />
+              <Route path="/profile/help" element={<Help />} />
+              <Route path="/profile/logout" element={<Logout />} />
+              <Route path="/profile/legacy" element={<Profile />} />
+              <Route path="/quick-actions" element={<AllQuickActions />} />
+
+              {/* Module 10 — Subscription (74-81) */}
+              <Route path="/membership" element={<MembershipPlans />} />
+              <Route path="/membership/compare" element={<ComparePlans />} />
+              <Route path="/membership/subscribe" element={<Subscribe />} />
+              <Route path="/membership/active" element={<ActivePlan />} />
+              <Route path="/membership/manage" element={<ActivePlan />} />
+              <Route path="/membership/usage" element={<MembershipUsage />} />
+              <Route path="/membership/renewal" element={<Renewal />} />
+              <Route path="/membership/cancel" element={<CancelMembership />} />
+              <Route path="/membership/benefits" element={<Benefits />} />
+
+              {/* Module 13 — AI Home (97-106) */}
+              <Route path="/ai-home" element={<HomeHealthScore />} />
+              <Route path="/ai/recommendations" element={<AIRecommendations />} />
+              <Route path="/ai/planner" element={<RecurringPlanner />} />
+              <Route path="/ai/calendar" element={<MaintenanceCalendar />} />
+              <Route path="/ai/water" element={<WaterCanReminder />} />
+              <Route path="/ai/garbage" element={<GarbageReminder />} />
+              <Route path="/ai/pest" element={<PestControlReminder />} />
+              <Route path="/ai/festival" element={<FestivalCleaning />} />
+              <Route path="/ai/budget" element={<AIBudgetPlanner />} />
+              <Route path="/ai/timeline" element={<HomeTimeline />} />
+
+              {/* Module 14 — Support (107-114) */}
+              <Route path="/support" element={<HelpCenter />} />
+              <Route path="/support/ticket" element={<RaiseTicket />} />
+              <Route path="/support/chat" element={<LiveChat />} />
+              <Route path="/support/emergency" element={<EmergencySupport />} />
+              <Route path="/support/refund-status" element={<RefundStatus />} />
+              <Route path="/support/refund-status/:id" element={<RefundStatus />} />
+              <Route path="/support/cancellation" element={<Cancellation />} />
+              <Route path="/support/escalation" element={<Escalation />} />
+              <Route path="/support/faqs" element={<FAQs />} />
+              <Route path="/support/legacy" element={<Support />} />
               <Route path="/addresses" element={<Addresses />} />
               <Route path="/addresses/add" element={<AddAddress />} />
               <Route path="/addresses/saved" element={<SavedAddresses />} />

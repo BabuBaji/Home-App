@@ -12,7 +12,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, publishEvent, smsConfigured, sendOtpSms } from '@homehelp/shared'
+import { makePool, migrate, nowIso, internalOnly, publishEvent, smsConfigured, sendOtpSms, getSetting } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('auth') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -95,11 +95,109 @@ async function init() {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS dob DATE`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_users_refcode ON users(referral_code)`,
     `UPDATE users SET referral_code='HH'||upper(substr(md5(random()::text||id::text),1,6)) WHERE referral_code IS NULL`,
+    // Wallet preferences (Wallet Settings screen). Defaults match the previous implicit behaviour:
+    // alerts and the low-balance reminder on, balance visible, no auto top-up.
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_txn BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_low_balance BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_balance BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_topup BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_topup_amount INTEGER NOT NULL DEFAULT 500`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_topup_threshold INTEGER NOT NULL DEFAULT 100`,
+    // Gift cards: a redeemed card credits Promo and is kept here so the customer can see what is
+    // still on it and when it lapses. `code` is unique per user (a card cannot be redeemed twice).
+    `CREATE TABLE IF NOT EXISTS gift_cards (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, code TEXT NOT NULL,
+      label TEXT, amount INTEGER NOT NULL, balance INTEGER NOT NULL,
+      expires DATE, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_giftcard_user_code ON gift_cards(user_id, upper(code))`,
+    `CREATE INDEX IF NOT EXISTS ix_giftcard_user ON gift_cards(user_id)`,
+    // --- Module 12 (Profile) ---
+    // Language preference + granular notification toggles (default everything on, matching prior behaviour).
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en'`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_all BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_booking_confirm BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_booking_reminder BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_service_updates BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_offers BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_payments BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_marketing BOOLEAN NOT NULL DEFAULT false`,
+    // Family members (name + relation + phone). No account link — just the customer's own list.
+    `CREATE TABLE IF NOT EXISTS family_members (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, name TEXT NOT NULL, relation TEXT,
+      phone TEXT, is_primary BOOLEAN NOT NULL DEFAULT false, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_family_user ON family_members(user_id)`,
+    // Saved payment methods — DISPLAY DATA ONLY (kind + label + masked detail). Never store full
+    // card numbers/CVV; a real gateway (Razorpay) tokenises those. Safe to keep here.
+    `CREATE TABLE IF NOT EXISTS payment_methods (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL,
+      detail TEXT, is_primary BOOLEAN NOT NULL DEFAULT false, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_paymethod_user ON payment_methods(user_id)`,
+    // --- Module 13 (AI Home) ---
+    // Home reminders: water can / garbage / pest control. `config` holds the per-kind fields
+    // (address, canType, pickupType, serviceType…). One row per kind per user.
+    `CREATE TABLE IF NOT EXISTS home_reminders (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL,
+      next_date DATE, frequency_days INTEGER, enabled BOOLEAN NOT NULL DEFAULT true,
+      config JSONB NOT NULL DEFAULT '{}', created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_reminder_user_kind ON home_reminders(user_id, kind)`,
+    // Recurring cleaning plans (the planner). service_id references a catalog service.
+    `CREATE TABLE IF NOT EXISTS cleaning_plans (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, service_id TEXT NOT NULL, name TEXT NOT NULL,
+      frequency TEXT NOT NULL, next_date DATE, active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_plan_user ON cleaning_plans(user_id)`,
+    // Backfill `kind` on rows written before the ledger was typed. These three titles are the exact
+    // strings this service and the booking/payment services write, so the match is precise rather
+    // than a guess at free text — without it, refunds are invisible to the Refund filter.
+    `UPDATE transactions SET kind='REFUND' WHERE kind IS NULL AND title LIKE 'Refund %'`,
+    `UPDATE transactions SET kind='ADD_MONEY' WHERE kind IS NULL AND title='Added to wallet'`,
+    `UPDATE transactions SET kind='WELCOME_BONUS' WHERE kind IS NULL AND title='Welcome bonus'`,
   ])
   console.log('[auth] Postgres ready (users, addresses, transactions, auth_identities)')
 }
 
 const REFERRAL_REWARD = 150
+
+/**
+ * Gift-card catalog: code -> { label, amount, days }. Comes only from the admin `gift_cards`
+ * setting (a JSON map). There is deliberately NO built-in list: a hardcoded code would be a real
+ * code that mints real balance, so the cards that exist are exactly the ones someone configured.
+ * Unset ⇒ no code redeems.
+ *
+ * Example value:  {"WELCOME100": {"label": "Welcome", "amount": 100, "days": 30}}
+ */
+async function giftCardCatalog() {
+  const raw = await getSetting(ADMIN_URL, 'gift_cards', '')
+  if (!raw) return {}
+  try {
+    const j = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!j || typeof j !== 'object') return {}
+    // Keep only well-formed entries — a malformed row must not mint an arbitrary balance.
+    const out = {}
+    for (const [code, c] of Object.entries(j)) {
+      const amount = Math.round(Number(c?.amount) || 0)
+      if (!amount || amount <= 0) continue
+      out[String(code).toUpperCase()] = { label: String(c.label || code), amount, days: Number(c?.days) || 0 }
+    }
+    return out
+  } catch { return {} }
+}
+
+/**
+ * The amount chips on Add Money, from the admin `wallet_topup_presets` setting (CSV, e.g.
+ * "500,1000,2000,5000"). Unset ⇒ no chips; the customer just types an amount.
+ */
+async function topupPresets() {
+  const raw = String((await getSetting(ADMIN_URL, 'wallet_topup_presets', '')) || '')
+  return raw.split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .slice(0, 6)
+}
 
 /* ---------- data helpers ---------- */
 const publicUser = (u) => u && ({
@@ -129,8 +227,8 @@ async function ensureReferralCode(uid) {
 async function provisionExtras(uid) {
   await ensureReferralCode(uid)
   await pool.query(
-    'INSERT INTO transactions (user_id,type,title,amount,balance,created) VALUES ($1,$2,$3,$4,$5,$6)',
-    [uid, 'credit', 'Welcome bonus', WELCOME_BONUS, WELCOME_BONUS, nowIso()])
+    'INSERT INTO transactions (user_id,type,title,amount,balance,created,kind) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [uid, 'credit', 'Welcome bonus', WELCOME_BONUS, WELCOME_BONUS, nowIso(), 'WELCOME_BONUS'])
 }
 
 async function findOrCreateUser(phone) {
@@ -416,17 +514,257 @@ app.delete('/api/addresses/:id', auth, async (req, res) => {
 
 /* ---------- wallet ---------- */
 app.get('/api/wallet', auth, async (req, res) => {
-  const u = await getUser(req.user.id)
-  const { rows } = await pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC', [req.user.id])
+  const [u, { rows }, presets] = await Promise.all([
+    getUser(req.user.id),
+    pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC', [req.user.id]),
+    topupPresets(),
+  ])
   const cash = u.wallet || 0, promo = u.promo_balance || 0, points = u.reward_points || 0
   res.json({
     balance: cash, cash, promo, points, total: cash + promo,
     status: u.wallet_status || 'active', cashback: promo, transactions: rows,
+    // Cash is spendable anywhere (incl. withdrawal); Promo is locked to bookings — that IS the
+    // available/locked split the wallet screen shows. Not a separate stored balance.
+    available: cash, locked: promo,
+    hideBalance: !!u.hide_balance,
+    topupPresets: presets,
   })
 })
 app.post('/api/wallet/add', auth, async (req, res) => {
-  const bal = await addTransaction(req.user.id, 'credit', 'Added to wallet', Math.max(1, Number(req.body?.amount) || 0))
+  const bal = await addTransaction(req.user.id, 'credit', 'Added to wallet', Math.max(1, Number(req.body?.amount) || 0), null, 'ADD_MONEY')
   res.json({ balance: bal })
+})
+
+/* ---------- wallet: cashback, referrals, gift cards, settings ---------- */
+
+// Promo balance IS the cashback purse: credits are earned, debits are spent on bookings.
+app.get('/api/wallet/cashback', auth, async (req, res) => {
+  const u = await getUser(req.user.id)
+  const { rows } = await pool.query(
+    `SELECT id, type, title, amount, kind, ref, created FROM transactions
+     WHERE user_id=$1 AND balance_type='promo' ORDER BY id DESC`, [req.user.id])
+  const history = rows.map((r) => ({
+    id: r.id, title: r.title, amount: r.amount, created: r.created, kind: r.kind,
+    state: r.type === 'credit' ? 'earned' : 'used',
+  }))
+  const lifetime = rows.filter((r) => r.type === 'credit').reduce((s, r) => s + r.amount, 0)
+  // No expiry is modelled on promo credits, so nothing can be reported as expired.
+  res.json({ lifetime, usable: u.promo_balance || 0, expired: 0, history })
+})
+
+app.get('/api/wallet/referrals', auth, async (req, res) => {
+  const u = await getUser(req.user.id)
+  const [{ rows: refs }, { rows: txns }] = await Promise.all([
+    pool.query('SELECT id, name, referral_rewarded, created FROM users WHERE referred_by=$1 ORDER BY id DESC', [req.user.id]),
+    pool.query(`SELECT id, title, amount, ref, created FROM transactions
+                WHERE user_id=$1 AND kind='REFERRAL_BONUS' ORDER BY id DESC`, [req.user.id]),
+  ])
+  res.json({
+    code: u.referral_code, reward: REFERRAL_REWARD,
+    total: refs.length,
+    successful: refs.filter((r) => r.referral_rewarded).length,
+    earned: txns.reduce((s, t) => s + t.amount, 0),
+    history: txns.map((t) => ({ id: t.id, title: t.title, amount: t.amount, created: t.created, ref: t.ref })),
+  })
+})
+
+app.get('/api/wallet/gift-cards', auth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, code, label, amount, balance, expires, created FROM gift_cards
+     WHERE user_id=$1 ORDER BY id DESC`, [req.user.id])
+  const active = rows.filter((c) => c.balance > 0 && (!c.expires || new Date(c.expires) >= new Date()))
+  res.json({ balance: active.reduce((s, c) => s + c.balance, 0), active: active.length, cards: rows })
+})
+
+// Redeem a gift card. The value lands in Promo (the same purse cashback uses), so it spends through
+// the existing booking flow with no payment-path change.
+app.post('/api/wallet/gift-cards', auth, async (req, res) => {
+  const code = String(req.body?.code || '').trim().toUpperCase()
+  if (!/^[A-Z0-9]{4,20}$/.test(code)) return res.status(400).json({ error: 'Enter a valid gift card code' })
+  const card = (await giftCardCatalog())[code]
+  if (!card) return res.status(404).json({ error: 'That gift card code is not valid' })
+  const dup = await pool.query('SELECT id FROM gift_cards WHERE user_id=$1 AND upper(code)=$2', [req.user.id, code])
+  if (dup.rowCount) return res.status(409).json({ error: 'This gift card has already been added' })
+  const expires = card.days ? new Date(Date.now() + card.days * 86400000).toISOString().slice(0, 10) : null
+  const { rows } = await pool.query(
+    `INSERT INTO gift_cards (user_id, code, label, amount, balance, expires) VALUES ($1,$2,$3,$4,$4,$5) RETURNING *`,
+    [req.user.id, code, card.label, card.amount, expires])
+  await walletMutate(req.user.id, { balanceType: 'promo', type: 'credit', kind: 'GIFT_CARD', title: `Gift card ${code}`, amount: card.amount, ref: code })
+  res.json({ ok: true, card: rows[0] })
+})
+
+app.get('/api/wallet/settings', auth, async (req, res) => {
+  const u = await getUser(req.user.id)
+  res.json({
+    autoTopup: !!u.auto_topup, autoTopupAmount: u.auto_topup_amount ?? 500, autoTopupThreshold: u.auto_topup_threshold ?? 100,
+    notifyTxn: !!u.notify_txn, notifyLowBalance: !!u.notify_low_balance, hideBalance: !!u.hide_balance,
+  })
+})
+
+app.patch('/api/wallet/settings', auth, async (req, res) => {
+  const map = {
+    autoTopup: 'auto_topup', notifyTxn: 'notify_txn', notifyLowBalance: 'notify_low_balance', hideBalance: 'hide_balance',
+    autoTopupAmount: 'auto_topup_amount', autoTopupThreshold: 'auto_topup_threshold',
+  }
+  const sets = [], vals = []
+  for (const [k, col] of Object.entries(map)) {
+    if (req.body?.[k] === undefined) continue
+    const v = col.startsWith('auto_topup_') ? Math.max(0, Math.round(Number(req.body[k]) || 0)) : !!req.body[k]
+    sets.push(`${col}=$${sets.length + 1}`); vals.push(v)
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' })
+  vals.push(req.user.id)
+  await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals)
+  const u = await getUser(req.user.id)
+  res.json({
+    autoTopup: !!u.auto_topup, autoTopupAmount: u.auto_topup_amount ?? 500, autoTopupThreshold: u.auto_topup_threshold ?? 100,
+    notifyTxn: !!u.notify_txn, notifyLowBalance: !!u.notify_low_balance, hideBalance: !!u.hide_balance,
+  })
+})
+
+/* ---------- profile: notifications, language, family, payment methods (Module 12) ---------- */
+
+const NOTIF = {
+  all: 'notify_all', bookingConfirm: 'notify_booking_confirm', bookingReminder: 'notify_booking_reminder',
+  serviceUpdates: 'notify_service_updates', offers: 'notify_offers', walletTxn: 'notify_txn',
+  payments: 'notify_payments', marketing: 'notify_marketing',
+}
+const notifOut = (u) => Object.fromEntries(Object.entries(NOTIF).map(([k, col]) => [k, !!u[col]]))
+
+app.get('/api/profile/notifications', auth, async (req, res) => res.json(notifOut(await getUser(req.user.id))))
+app.patch('/api/profile/notifications', auth, async (req, res) => {
+  const sets = [], vals = []
+  for (const [k, col] of Object.entries(NOTIF)) {
+    if (req.body?.[k] === undefined) continue
+    sets.push(`${col}=$${sets.length + 1}`); vals.push(!!req.body[k])
+  }
+  if (sets.length) { vals.push(req.user.id); await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals) }
+  res.json(notifOut(await getUser(req.user.id)))
+})
+
+app.get('/api/profile/language', auth, async (req, res) => res.json({ language: (await getUser(req.user.id)).language || 'en' }))
+app.patch('/api/profile/language', auth, async (req, res) => {
+  const lang = String(req.body?.language || '').slice(0, 8) || 'en'
+  await pool.query('UPDATE users SET language=$1 WHERE id=$2', [lang, req.user.id])
+  res.json({ language: lang })
+})
+
+// Family members -------------------------------------------------------------
+app.get('/api/family', auth, async (req, res) => {
+  const { rows } = await pool.query('SELECT id,name,relation,phone,is_primary FROM family_members WHERE user_id=$1 ORDER BY is_primary DESC, id', [req.user.id])
+  res.json(rows)
+})
+app.post('/api/family', auth, async (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Name is required' })
+  const primary = !!req.body?.is_primary
+  if (primary) await pool.query('UPDATE family_members SET is_primary=false WHERE user_id=$1', [req.user.id])
+  const { rows } = await pool.query(
+    'INSERT INTO family_members (user_id,name,relation,phone,is_primary) VALUES ($1,$2,$3,$4,$5) RETURNING id,name,relation,phone,is_primary',
+    [req.user.id, name, String(req.body?.relation || '').trim() || null, String(req.body?.phone || '').trim() || null, primary])
+  res.json(rows[0])
+})
+app.patch('/api/family/:id', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const own = await pool.query('SELECT id FROM family_members WHERE id=$1 AND user_id=$2', [id, req.user.id])
+  if (!own.rowCount) return res.status(404).json({ error: 'Not found' })
+  if (req.body?.is_primary) await pool.query('UPDATE family_members SET is_primary=false WHERE user_id=$1', [req.user.id])
+  const cols = { name: req.body?.name, relation: req.body?.relation, phone: req.body?.phone, is_primary: req.body?.is_primary }
+  const sets = [], vals = []
+  for (const [c, v] of Object.entries(cols)) { if (v === undefined) continue; sets.push(`${c}=$${sets.length + 1}`); vals.push(c === 'is_primary' ? !!v : v) }
+  if (sets.length) { vals.push(id); await pool.query(`UPDATE family_members SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals) }
+  const { rows } = await pool.query('SELECT id,name,relation,phone,is_primary FROM family_members WHERE id=$1', [id])
+  res.json(rows[0])
+})
+app.delete('/api/family/:id', auth, async (req, res) => {
+  await pool.query('DELETE FROM family_members WHERE id=$1 AND user_id=$2', [Number(req.params.id), req.user.id])
+  res.json({ ok: true })
+})
+
+// Saved payment methods (display data only) -----------------------------------
+app.get('/api/payment-methods', auth, async (req, res) => {
+  const { rows } = await pool.query('SELECT id,kind,label,detail,is_primary FROM payment_methods WHERE user_id=$1 ORDER BY is_primary DESC, id', [req.user.id])
+  res.json(rows)
+})
+app.post('/api/payment-methods', auth, async (req, res) => {
+  const kind = String(req.body?.kind || '').trim(), label = String(req.body?.label || '').trim()
+  if (!kind || !label) return res.status(400).json({ error: 'kind and label are required' })
+  // Guard against anyone trying to persist a full card number here — only masked detail is allowed.
+  const detail = String(req.body?.detail || '').trim().slice(0, 40)
+  if (/\d{12,}/.test(detail)) return res.status(400).json({ error: 'Do not send full card numbers' })
+  const primary = !!req.body?.is_primary
+  if (primary) await pool.query('UPDATE payment_methods SET is_primary=false WHERE user_id=$1', [req.user.id])
+  const { rows } = await pool.query(
+    'INSERT INTO payment_methods (user_id,kind,label,detail,is_primary) VALUES ($1,$2,$3,$4,$5) RETURNING id,kind,label,detail,is_primary',
+    [req.user.id, kind, label, detail || null, primary])
+  res.json(rows[0])
+})
+app.patch('/api/payment-methods/:id', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const own = await pool.query('SELECT id FROM payment_methods WHERE id=$1 AND user_id=$2', [id, req.user.id])
+  if (!own.rowCount) return res.status(404).json({ error: 'Not found' })
+  if (req.body?.is_primary) await pool.query('UPDATE payment_methods SET is_primary=false WHERE user_id=$1', [req.user.id])
+  if (req.body?.is_primary !== undefined) await pool.query('UPDATE payment_methods SET is_primary=$1 WHERE id=$2', [!!req.body.is_primary, id])
+  const { rows } = await pool.query('SELECT id,kind,label,detail,is_primary FROM payment_methods WHERE id=$1', [id])
+  res.json(rows[0])
+})
+app.delete('/api/payment-methods/:id', auth, async (req, res) => {
+  await pool.query('DELETE FROM payment_methods WHERE id=$1 AND user_id=$2', [Number(req.params.id), req.user.id])
+  res.json({ ok: true })
+})
+
+// Delete account (Privacy screen) — removes the user's own rows, then the account.
+app.delete('/api/me', auth, async (req, res) => {
+  const id = req.user.id
+  for (const t of ['family_members', 'payment_methods', 'gift_cards', 'transactions', 'addresses']) {
+    await pool.query(`DELETE FROM ${t} WHERE user_id=$1`, [id]).catch(() => {})
+  }
+  await pool.query('DELETE FROM users WHERE id=$1', [id])
+  res.json({ ok: true })
+})
+
+/* ---------- AI Home: reminders + cleaning plans (Module 13) ---------- */
+
+// Home reminders (water can / garbage / pest control). One row per kind; upsert on save.
+app.get('/api/reminders', auth, async (req, res) => {
+  const { rows } = await pool.query('SELECT id,kind,next_date,frequency_days,enabled,config FROM home_reminders WHERE user_id=$1', [req.user.id])
+  res.json(rows)
+})
+app.put('/api/reminders/:kind', auth, async (req, res) => {
+  const kind = String(req.params.kind).slice(0, 32)
+  const { next_date = null, frequency_days = null, enabled = true, config = {} } = req.body || {}
+  const { rows } = await pool.query(
+    `INSERT INTO home_reminders (user_id,kind,next_date,frequency_days,enabled,config) VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (user_id,kind) DO UPDATE SET next_date=EXCLUDED.next_date, frequency_days=EXCLUDED.frequency_days, enabled=EXCLUDED.enabled, config=EXCLUDED.config
+     RETURNING id,kind,next_date,frequency_days,enabled,config`,
+    [req.user.id, kind, next_date, frequency_days, !!enabled, JSON.stringify(config || {})])
+  res.json(rows[0])
+})
+
+// Cleaning plans (recurring planner).
+app.get('/api/plans', auth, async (req, res) => {
+  const { rows } = await pool.query('SELECT id,service_id,name,frequency,next_date,active FROM cleaning_plans WHERE user_id=$1 ORDER BY active DESC, id', [req.user.id])
+  res.json(rows)
+})
+app.post('/api/plans', auth, async (req, res) => {
+  const { service_id, name, frequency, next_date = null } = req.body || {}
+  if (!service_id || !name || !frequency) return res.status(400).json({ error: 'service_id, name and frequency are required' })
+  const { rows } = await pool.query(
+    'INSERT INTO cleaning_plans (user_id,service_id,name,frequency,next_date) VALUES ($1,$2,$3,$4,$5) RETURNING id,service_id,name,frequency,next_date,active',
+    [req.user.id, service_id, name, frequency, next_date])
+  res.json(rows[0])
+})
+app.patch('/api/plans/:id', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const own = await pool.query('SELECT id FROM cleaning_plans WHERE id=$1 AND user_id=$2', [id, req.user.id])
+  if (!own.rowCount) return res.status(404).json({ error: 'Not found' })
+  if (req.body?.active !== undefined) await pool.query('UPDATE cleaning_plans SET active=$1 WHERE id=$2', [!!req.body.active, id])
+  const { rows } = await pool.query('SELECT id,service_id,name,frequency,next_date,active FROM cleaning_plans WHERE id=$1', [id])
+  res.json(rows[0])
+})
+app.delete('/api/plans/:id', auth, async (req, res) => {
+  await pool.query('DELETE FROM cleaning_plans WHERE id=$1 AND user_id=$2', [Number(req.params.id), req.user.id])
+  res.json({ ok: true })
 })
 
 /* ---------- internal (service-to-service) ---------- */

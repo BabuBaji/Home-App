@@ -10,9 +10,14 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import {
-  makePool, migrate, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, internalOnly, subscribeEvents, invalidateSettings,
   publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('payment') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4008)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5438/payment'
@@ -322,7 +327,7 @@ app.post('/api/payment/wallet/topup', auth, async (req, res) => {
   if (dup.rowCount) return res.json({ ok: true, duplicate: true })
   let balance = null
   try {
-    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: 'Added to wallet', amount, ref: paymentId })
+    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'ADD_MONEY', title: 'Added to wallet', amount, ref: paymentId })
     balance = credited?.balance ?? null
   } catch { return res.status(502).json({ error: 'Could not credit wallet' }) }
   await pool.query("INSERT INTO payments (customer_id,amount,mode,gateway,payment_id,status) VALUES ($1,$2,'wallet_topup','razorpay',$3,'SUCCESS')", [req.user.id, amount, paymentId])

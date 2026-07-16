@@ -169,6 +169,11 @@ export interface Transaction {
   balance: number
   ref?: string
   created: string
+  // Typed reason (ADD_MONEY, BOOKING_PAYMENT, CASHBACK, REFUND, REFERRAL_BONUS, GIFT_CARD…).
+  // Null on rows written before the ledger was typed.
+  kind?: string | null
+  // Which purse the row touched: 'cash' (spendable) or 'promo' (locked to bookings).
+  balance_type?: 'cash' | 'promo' | 'points'
 }
 
-export interface Ticket { id: number; category: string; message: string; status: string; ref: string; created: string }
+export interface Ticket { id: number; category: string; subcategory?: string | null; subject?: string | null; message: string; status: string; ref: string; created: string; escalated?: boolean; escalate_reason?: string | null }
