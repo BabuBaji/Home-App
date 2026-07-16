@@ -204,12 +204,38 @@ async function matchingBookings(w) {
     const r = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?zoneId=${zid}`, null)
     const cap = r?.capacity || null; capCache.set(zid, cap); return cap
   }
+  /* Coverage. When a worker is RESTRICTED (allowOutsideRadius === false) their zone stops being a
+   * preference and becomes a filter, and their job radius is measured from their assigned store —
+   * which is what makes the admin screen's "only jobs within the assigned zone" true rather than a
+   * hopeful label. Left open (the default), the old soft-preference behaviour stands and nobody in
+   * a quiet zone sits idle next to work they could do.
+   */
+  const wz = w.zone_id ?? null
+  const restricted = w.allowOutsideRadius === false && wz != null
+  const radiusKm = Number(w.jobRadiusKm) || 0
+  // The store's location, fetched at most once per call — the radius is measured from it, not from
+  // the worker's live GPS, because that is what the admin drew a circle around.
+  let store = null
+  if (restricted && radiusKm > 0 && w.storeId) {
+    const r = await tryGet(CATALOG_URL, `/api/internal/stores/${w.storeId}`, null)
+    if (r && r.lat != null && r.lng != null) store = { lat: Number(r.lat), lng: Number(r.lng) }
+    else console.error(`[dispatch] worker ${w.id} has a ${radiusKm}km radius but store ${w.storeId} has no location — radius not applied`)
+  }
+
   for (const b of pool_) {
     if (skip.has(b.id)) continue
     const names = (b.items || []).map((i) => String(i.name || '').toLowerCase().trim())
     if (!names.some((n) => svc.has(n))) continue
+    // Restricted: own zone only.
+    if (restricted && b.zone_id !== wz) continue
+    // Restricted: within their radius of their store. Only when we actually know where the store
+    // is — a radius we cannot measure must not silently drop every job.
+    if (restricted && store && radiusKm > 0) {
+      if (distanceKm(store.lat, store.lng, b.cust_lat, b.cust_lng) > radiusKm) continue
+    }
     const dist = w.last ? distanceKm(w.last.lat, w.last.lng, b.cust_lat, b.cust_lng) : null
     // Max Travel Distance: don't offer a job to a worker farther than the job's zone allows.
+    // Independent of the per-worker radius — whichever is tighter wins.
     if (dist != null) {
       const maxKm = Number((await capFor(b.zone_id))?.maxTravelKm) || 0
       if (maxKm > 0 && dist > maxKm) continue
@@ -217,8 +243,8 @@ async function matchingBookings(w) {
     cands.push({ b, dist })
   }
   // Zone-first: a worker's own-zone jobs rank ahead of out-of-zone ones; then nearest by GPS.
-  // (Soft preference — out-of-zone jobs are still offered if no in-zone work, to avoid starvation.)
-  const wz = w.zone_id ?? null
+  // (For an unrestricted worker this stays a soft preference — out-of-zone jobs are still offered
+  // if there is no in-zone work, to avoid starvation.)
   cands.sort((a, c) => {
     const az = wz != null && a.b.zone_id === wz ? 0 : 1
     const cz = wz != null && c.b.zone_id === wz ? 0 : 1

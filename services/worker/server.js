@@ -201,6 +201,17 @@ async function init() {
     // admin list rather than this service keeping a copy that goes stale on a rename.
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS reporting_manager_id INTEGER`,
 
+    /* Job radius & coverage. UNLIKE cluster/store/manager, these two DO change what dispatch offers.
+     *
+     * allow_outside_radius defaults TRUE, which is today's behaviour: zone is a soft preference and
+     * out-of-zone work is still offered when a worker's own zone is quiet, so nobody starves. Set it
+     * false and the assignment becomes a real restriction — own zone only, and within job_radius_km
+     * of their store. Defaulting it false instead would have silently cut every existing worker off
+     * from work the moment this shipped.
+     */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS job_radius_km INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS allow_outside_radius BOOLEAN NOT NULL DEFAULT true`,
+
     /* ---- Phase 8: background verification ----
      * ONLY the two checks that have nowhere else to live. Aadhaar, PAN, Police, Medical and Address
      * are already Phase 4 documents an admin reviews, so Phase 8 READS those rather than storing a
@@ -2182,6 +2193,54 @@ app.post('/api/worker/onboarding/submit', auth, async (req, res) => {
   res.json({ ok: true, ...(await onboardingState(req.worker.id)) })
 })
 
+/* ---------- Job radius & coverage ----------
+ * The two settings on this screen that actually change what dispatch offers.
+ *
+ * allowOutsideRadius=true (the default, and today's behaviour): zone ranks own-zone work first but
+ * still offers other work when the zone is quiet — nobody sits idle next to a job they could do.
+ * false: the assignment becomes a restriction — own zone only, and within jobRadiusKm of the store.
+ */
+app.get('/api/admin/workers/:id/coverage', adminAuth, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  res.json({
+    ok: true,
+    zoneId: w.zone_id ?? null,
+    storeId: w.store_id ?? null,
+    jobRadiusKm: w.job_radius_km ?? null,
+    allowOutsideRadius: w.allow_outside_radius !== false,
+  })
+})
+
+app.patch('/api/admin/workers/:id/coverage', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const b = req.body || {}
+  let radius = w.job_radius_km
+  if (b.jobRadiusKm !== undefined) {
+    if (b.jobRadiusKm === null || b.jobRadiusKm === '') radius = null
+    else {
+      radius = Number(b.jobRadiusKm)
+      if (!Number.isInteger(radius) || radius < 1 || radius > 100) return res.status(400).json({ error: 'Job radius must be between 1 and 100 km (leave blank for no limit)' })
+    }
+  }
+  const allow = b.allowOutsideRadius !== undefined ? !!b.allowOutsideRadius : w.allow_outside_radius !== false
+  // Restricting someone with no zone would leave them matching nothing at all, silently.
+  if (!allow && !w.zone_id) return res.status(400).json({ error: 'Assign a zone before restricting this worker to it — otherwise they would match no jobs at all' })
+
+  await pool.query('UPDATE workers SET job_radius_km=$1, allow_outside_radius=$2 WHERE id=$3', [radius, allow, id])
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  if (allow !== (w.allow_outside_radius !== false) || radius !== w.job_radius_km) {
+    publishEvent(REDIS_URL, 'activity', {
+      actorType: 'admin', actorName: who, action: 'worker.coverage', entityType: 'worker', entityId: id,
+      detail: `${w.name}: ${allow ? 'can take jobs outside their zone/radius' : `restricted to their zone${radius ? ` and ${radius} km of their store` : ''}`}`,
+    })
+  }
+  const after = await getWorker(id)
+  res.json({ ok: true, zoneId: after.zone_id ?? null, storeId: after.store_id ?? null, jobRadiusKm: after.job_radius_km ?? null, allowOutsideRadius: after.allow_outside_radius !== false })
+})
+
 /* ---------- Phase 11: admin reviews availability ----------
  * The one place a preference becomes an assignment. Approving adopts what the worker asked for;
  * modifying assigns something else and must say why — a worker whose requested shift is silently
@@ -2556,15 +2615,18 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const { rows } = await pool.query(
     `INSERT INTO workers (name,first_name,last_name,phone,alternate_mobile,email,city,services,status,verified,rating,zone_id,designation,
                           worker_category,employment_type,joining_date,recruiter,referral_source,
-                          cluster_id,store_id,reporting_manager_id,salary_plan_id,shift_def_id,wallet_enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
+                          cluster_id,store_id,reporting_manager_id,salary_plan_id,shift_def_id,wallet_enabled,
+                          job_radius_km,allow_outside_radius)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
     [name, b.first_name || null, b.last_name || null, b.phone ? String(b.phone).trim() : null, b.alternate_mobile || null,
       b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5,
       b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker',
       b.worker_category || null, b.employment_type || null, b.joining_date || null, b.recruiter || null, b.referral_source || null,
       b.cluster_id ? Number(b.cluster_id) : null, b.store_id ? Number(b.store_id) : null,
       b.reporting_manager_id ? Number(b.reporting_manager_id) : null, planId,
-      b.shift_def_id ? Number(b.shift_def_id) : null, b.wallet_enabled === undefined ? true : !!b.wallet_enabled])
+      b.shift_def_id ? Number(b.shift_def_id) : null, b.wallet_enabled === undefined ? true : !!b.wallet_enabled,
+      b.job_radius_km ? Number(b.job_radius_km) : null,
+      b.allow_outside_radius === undefined ? true : !!b.allow_outside_radius])
   // Badge number is derived from the id, so it needs the row to exist first.
   const id = rows[0].id
   await pool.query(`UPDATE workers SET employee_id = 'WKR' || (1000 + $1) WHERE id=$1 AND employee_id IS NULL`, [id])
@@ -3037,6 +3099,11 @@ app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
     // Phase 11: the worker's own weekly hours cap. Dispatch already calls this on every request,
     // so the limit rides along rather than costing another round trip.
     workLimit: w ? await workLimit(w) : { maxWeeklyHours: null, hoursThisWeek: null, capped: false },
+    // Coverage. When allowOutsideRadius is false these become a real filter in dispatch, which is
+    // what makes "only jobs in your zone" true rather than a hopeful label on a screen.
+    storeId: w?.store_id ?? null,
+    jobRadiusKm: w?.job_radius_km ?? null,
+    allowOutsideRadius: w?.allow_outside_radius !== false,
   })
 })
 app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => {

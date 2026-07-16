@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
-  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -167,6 +167,12 @@ export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; i
 export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
 export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; salaryPlanId?: number | null; walletEnabled?: boolean }) =>
   req<WorkerPay>(`/workers/${id}/pay`, patch(body))
+
+/* job radius & coverage. Restricting a worker makes their zone a filter in dispatch rather than a
+   ranking preference — this is the setting that makes "only jobs in your zone" actually true. */
+export const fetchWorkerCoverage = (id: number) => req<WorkerCoverage>(`/workers/${id}/coverage`)
+export const updateWorkerCoverage = (id: number, body: { jobRadiusKm?: number | null; allowOutsideRadius?: boolean }) =>
+  req<WorkerCoverage>(`/workers/${id}/coverage`, patch(body))
 
 /* salary plans. Assigning one to a worker sets what the wallet actually pays them — a plan and a
    hand-typed rate are mutually exclusive server-side, so setting either clears the other. */

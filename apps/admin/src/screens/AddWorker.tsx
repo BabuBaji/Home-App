@@ -42,6 +42,7 @@ type Draft = {
   city: string; zone_id: string; cluster_id: string; store_id: string
   reporting_manager_id: string; shift_def_id: string; weekly_off: string[]
   services: string[]; salary_plan_id: string; wallet_enabled: boolean
+  job_radius_km: string; allow_outside_radius: boolean
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -52,6 +53,7 @@ const empty: Draft = {
   city: '', zone_id: '', cluster_id: '', store_id: '',
   reporting_manager_id: '', shift_def_id: '', weekly_off: [],
   services: [], salary_plan_id: '', wallet_enabled: true,
+  job_radius_km: '', allow_outside_radius: true,
 }
 
 export default function AddWorker() {
@@ -113,6 +115,8 @@ export default function AddWorker() {
     services: d.services,
     salary_plan_id: d.salary_plan_id ? Number(d.salary_plan_id) : null,
     wallet_enabled: d.wallet_enabled,
+    job_radius_km: d.job_radius_km ? Number(d.job_radius_km) : null,
+    allow_outside_radius: d.allow_outside_radius,
     status: 'pending',
   })
 
@@ -249,10 +253,21 @@ export default function AddWorker() {
                   </div>
                 </div>
               </div>
-              {/* Cluster, store and manager are organisational. Saying so beats an admin assuming
-                  a store assignment changes which jobs they get. */}
+              {/* This box used to promise "jobs only within the assigned zone(s)" — which dispatch
+                  did not do: zone ranked jobs, it never filtered them. Rather than leave a false
+                  promise on screen, it now states the actual rule and points at the toggle that
+                  changes it. */}
+              <div style={{ display: 'flex', gap: 8, fontSize: 12, background: d.allow_outside_radius ? '#f0fdf4' : '#eef2ff', color: d.allow_outside_radius ? '#166534' : '#3730a3', padding: 10, borderRadius: 10, marginTop: 6 }}>
+                <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  {d.allow_outside_radius
+                    ? 'Jobs in this zone are offered first, but the worker can still be offered nearby jobs elsewhere when their zone is quiet. Restrict this under Job Radius & Coverage below.'
+                    : 'This worker will only be offered jobs inside this zone.'}
+                </span>
+              </div>
               <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
-                Jobs are matched on <strong>zone</strong>. Cluster, store and reporting manager are recorded for your own operations.
+                Cluster, store and reporting manager are recorded for your own operations — jobs are matched on <strong>zone</strong>.
+                A job radius is measured from the assigned store.
               </div>
             </Card>
 
@@ -274,6 +289,41 @@ export default function AddWorker() {
               <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
                 This is what dispatch matches jobs against. Anything the worker later claims in the app still needs your approval.
               </div>
+            </Card>
+
+            <Card>
+              <SectionHead icon={<MapPin size={16} />} title="Job Radius & Coverage" sub="How far from their store this worker is offered jobs." n={3} />
+              <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16, alignItems: 'start' }}>
+                <Field label="Job Radius (from store)">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input value={d.job_radius_km} onChange={(e) => set('job_radius_km', e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="No limit" style={{ flex: 1 }} />
+                    <span className="muted" style={{ fontSize: 12.5 }}>KM</span>
+                  </div>
+                </Field>
+                <Field label="Allow jobs outside the zone / radius">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 6 }}>
+                    <input type="checkbox" checked={d.allow_outside_radius} onChange={(e) => set('allow_outside_radius', e.target.checked)} />
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{d.allow_outside_radius ? 'Yes' : 'No'}</span>
+                  </div>
+                </Field>
+              </div>
+              {/* Both states are real and both have a cost. Say which is which. */}
+              <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 4 }}>
+                <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  {d.allow_outside_radius
+                    ? 'Yes — their zone and radius rank jobs but do not restrict them. When their zone is quiet they can still be offered nearby work, so they are not left idle.'
+                    : d.job_radius_km
+                      ? `No — they are offered jobs only inside their zone AND within ${d.job_radius_km} km of their store. They will be offered nothing when their zone is quiet.`
+                      : 'No — they are offered jobs only inside their zone. Set a radius to also limit the distance from their store.'}
+                </span>
+              </div>
+              {!d.allow_outside_radius && d.job_radius_km && !d.store_id && (
+                <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#fffbeb', color: '#92400e', padding: 10, borderRadius: 10, marginTop: 8 }}>
+                  <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>The radius is measured from the assigned store, and no store is selected — pick one above or the radius will not apply.</span>
+                </div>
+              )}
             </Card>
           </>
         )}
@@ -341,6 +391,7 @@ export default function AddWorker() {
               <Review label="Shift" value={shifts.find((s) => String(s.id) === d.shift_def_id)?.name || 'No shift (flexible)'} icon={<Building2 size={14} />} />
               <Review label="Weekly Off" value={d.weekly_off.length ? d.weekly_off.join(', ') : 'Not set'} icon={<Building2 size={14} />} />
               <Review label="Services" value={d.services.length ? d.services.join(', ') : 'None yet'} icon={<BadgeCheck size={14} />} />
+              <Review label="Coverage" value={d.allow_outside_radius ? 'Zone preferred; nearby jobs allowed' : `Restricted to zone${d.job_radius_km ? ` + ${d.job_radius_km} km of store` : ''}`} icon={<MapPin size={14} />} />
               <Review label="Salary Plan" value={planObj ? `${planObj.name} — worker keeps ${planObj.workerKeeps}%` : `Platform default (${platformPct}% commission)`} icon={<IndianRupee size={14} />} />
               <Review label="Wallet" value={d.wallet_enabled ? 'Enabled' : 'Disabled'} icon={<IndianRupee size={14} />} />
             </div>
@@ -380,6 +431,10 @@ export default function AddWorker() {
             <Summary label="Zone" value={zoneName === '--' ? '' : zoneName} />
             <Summary label="Worker Category" value={d.worker_category} />
             <Summary label="Employment Type" value={d.employment_type} />
+            <Summary label="Store" value={stores.find((x) => String(x.id) === d.store_id)?.name} />
+            <Summary label="Initial Shift" value={shifts.find((x) => String(x.id) === d.shift_def_id)?.name} />
+            <Summary label="Weekly Off" value={d.weekly_off.join(', ')} />
+            <Summary label="Job Radius" value={d.job_radius_km ? `${d.job_radius_km} KM` : (d.allow_outside_radius ? 'No limit' : 'Zone only')} />
             <Summary label="Salary Plan" value={planObj?.name} />
             <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="muted" style={{ fontSize: 12.5 }}>Status</span>

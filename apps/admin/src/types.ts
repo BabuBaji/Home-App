@@ -37,6 +37,8 @@ export interface Worker {
   last_lat?: number | null; last_lng?: number | null; shift_def_id?: number | null; site_id?: number | null
   // Organisational assignment. Recorded facts; dispatch matches on zone and does not read these.
   cluster_id?: number | null; store_id?: number | null; reporting_manager_id?: number | null
+  // Coverage. These two DO change what dispatch offers (unlike cluster/store/manager).
+  job_radius_km?: number | null; allow_outside_radius?: boolean
   salary_plan_id?: number | null; commission_percent?: number | null; wallet_enabled?: boolean
   profile?: {
     bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string; bankAccountType?: string }
@@ -183,6 +185,17 @@ export interface WorkerPay {
   commissionSource: 'plan' | 'manual' | 'platform'
   walletEnabled: boolean
   plans?: SalaryPlan[]
+}
+
+/* Job radius & coverage. allowOutsideRadius=true (the default and today's behaviour) leaves zone a
+   soft preference so nobody in a quiet zone starves; false makes the zone a real filter and applies
+   jobRadiusKm measured from the worker's assigned store. */
+export interface WorkerCoverage {
+  ok: boolean
+  zoneId: number | null
+  storeId: number | null
+  jobRadiusKm: number | null
+  allowOutsideRadius: boolean
 }
 
 /* Salary plans — a named commission rate an admin defines once and assigns, instead of typing a
