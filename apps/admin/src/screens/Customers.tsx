@@ -90,8 +90,8 @@ export default function Customers() {
     if (!amt || isNaN(amt)) { toast('Enter a valid amount', 'err'); return }
     setBusy(true)
     try {
-      await adjustWallet(funds.id, amt, fundNote)
-      toast('Wallet updated')
+      const res = await adjustWallet(funds.id, amt, fundNote)
+      toast(res.pending ? 'Sent for approval — a second admin must sign off' : 'Wallet updated')
       setFunds(null); setFundAmount(''); setFundNote(''); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
@@ -114,8 +114,8 @@ export default function Customers() {
     if (!id || !amt || isNaN(amt) || amt <= 0) { toast('Enter a valid amount', 'err'); return }
     setBusy(true)
     try {
-      await adjustWallet(id, sign * amt, wNote || (sign > 0 ? 'Admin credit' : 'Admin debit'), wBal)
-      toast(`${sign > 0 ? 'Credited' : 'Debited'} ${wBal === 'points' ? amt + ' pts' : money(amt)} · ${wBal}`)
+      const res = await adjustWallet(id, sign * amt, wNote || (sign > 0 ? 'Admin credit' : 'Admin debit'), wBal)
+      toast(res.pending ? 'Sent for approval — a second admin must sign off' : `${sign > 0 ? 'Credited' : 'Debited'} ${wBal === 'points' ? amt + ' pts' : money(amt)} · ${wBal}`)
       setWAmt(''); setWNote(''); await refreshWallet(id); load()
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }

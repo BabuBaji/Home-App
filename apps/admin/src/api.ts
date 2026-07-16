@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -101,7 +101,8 @@ export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/cust
 export const fetchCustomer = (id: number) => req<any>(`/customers/${id}`)
 export const createCustomer = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/customers', post('', body))
 export const updateCustomer = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/customers/${id}`, patch(body))
-export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<{ balance: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
+// May execute immediately or be queued for approval — returns { executed | pending, ... } (+ balance when executed).
+export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<ActionResult & { balance?: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
 export const setWalletStatus = (id: number, status: 'active' | 'frozen' | 'blocked' | 'inactive') => req<{ ok: boolean; status: string }>(`/customers/${id}/wallet/status`, post('', { status }))
 
 /* workers */
@@ -340,7 +341,15 @@ export const campaignUsage = (id: number) => req<{ total: number; customers: num
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')
 export const fetchRefunds = () => req<any[]>('/refunds')
-export const issueRefund = (id: number, amount?: number) => req<{ ok: boolean; amount: number }>(`/refunds/${id}`, post('', { amount }))
+// Routed through the approval matrix (id is the booking id). May execute now or queue for sign-off.
+export const issueRefund = (bookingId: number) => req<ActionResult>('/actions/refund', post('', { bookingId }))
+
+/* approvals (maker-checker) */
+export const fetchApprovals = (status: 'pending' | 'all' = 'pending') => req<{ ok: boolean; requests: ApprovalRequest[]; meId: number }>(`/approvals?status=${status}`)
+export const approveRequest = (id: number) => req<{ ok: boolean; request?: ApprovalRequest }>(`/approvals/${id}/approve`, post(''))
+export const rejectRequest = (id: number, reason: string) => req<{ ok: boolean }>(`/approvals/${id}/reject`, post('', { reason }))
+export const fetchApprovalRules = () => req<{ ok: boolean; actions: ApprovalRuleRow[]; reviewerPerms: string[] }>('/approval-rules')
+export const updateApprovalRule = (action: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/approval-rules/${action}`, patch(body))
 
 /* complaints */
 export const fetchComplaints = (status = 'all', priority = 'all') => req<Complaint[]>(`/complaints?status=${status}&priority=${priority}`)

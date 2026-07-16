@@ -335,6 +335,18 @@ export interface RuleVersion {
   stack: string; stackGroup: string; budgetMonth: number; notes: string; createdBy: string; created: string
 }
 export interface RulePayout { id: number; workerId: number; amount: number; month: string; ref: string; detail: string; versionId: number; created: string }
+
+/* Approval matrix (maker-checker). A sensitive action can require a second admin's sign-off. */
+export interface ApprovalRequest {
+  id: number; action: string; label: string; summary: string; amount: number | null
+  status: 'pending' | 'approved' | 'rejected' | 'executed' | 'failed'
+  requestedBy: string; requestedById: number
+  approvals: { by: string; byId: number; at: string }[]
+  minApprovers: number; reviewerPerm: string
+  decidedBy: string; decidedAt: string | null; reason: string; error: string; created: string
+}
+export interface ApprovalRuleRow { action: string; label: string; enabled: boolean; threshold: number; reviewerPerm: string; minApprovers: number }
+export interface ActionResult { ok: boolean; executed?: boolean; pending?: boolean; request?: ApprovalRequest; result?: unknown }
 export interface IncentiveRule {
   id: number; code: string; name: string; description: string; category: string
   priority: number; active: boolean; created: string

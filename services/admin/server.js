@@ -105,6 +105,27 @@ async function init() {
     // scope_values are zone ids. Resolved into req.admin.scope and enforced on the list endpoints.
     `ALTER TABLE admins ADD COLUMN IF NOT EXISTS scope_type TEXT NOT NULL DEFAULT 'all'`,
     `ALTER TABLE admins ADD COLUMN IF NOT EXISTS scope_values JSONB NOT NULL DEFAULT '[]'::jsonb`,
+    // Approval matrix. One rule per registered action: whether it needs approval, above what ₹
+    // threshold, who may approve (reviewer_perm) and how many approvers. Disabled by default, so
+    // nothing changes until an admin turns a rule on.
+    `CREATE TABLE IF NOT EXISTS approval_rules (
+      action TEXT PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT false,
+      threshold INTEGER NOT NULL DEFAULT 0, reviewer_perm TEXT NOT NULL DEFAULT '',
+      min_approvers INTEGER NOT NULL DEFAULT 1,
+      updated_by TEXT NOT NULL DEFAULT '', updated TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    // A queued action awaiting sign-off. params is everything needed to replay it; approvals holds
+    // the checkers who have signed (for min_approvers). status: pending|approved|rejected|executed|failed.
+    `CREATE TABLE IF NOT EXISTS approval_requests (
+      id SERIAL PRIMARY KEY, action TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+      params JSONB NOT NULL DEFAULT '{}'::jsonb, amount INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_by TEXT NOT NULL DEFAULT '', requested_by_id INTEGER,
+      approvals JSONB NOT NULL DEFAULT '[]'::jsonb,
+      decided_by TEXT NOT NULL DEFAULT '', decided_at TIMESTAMPTZ, reason TEXT NOT NULL DEFAULT '',
+      result JSONB, error TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
   ])
   // Seed / re-sync the four system roles. Their permission bundle is reset to canonical every boot,
   // so a new permission added to the catalog reaches them and no drift can strip their access.
@@ -119,6 +140,10 @@ async function init() {
       await pool.query('INSERT INTO role_permissions (role_key,perm) VALUES ($1,$2) ON CONFLICT DO NOTHING', [r.key, p])
   }
   invalidatePerms()
+  // Seed one approval rule per registered action, disabled — nothing needs sign-off until an admin
+  // turns a rule on. ACTIONS is defined later in the module but evaluated before init() is called.
+  for (const a of ACTION_KEYS)
+    await pool.query('INSERT INTO approval_rules (action, reviewer_perm) VALUES ($1,$2) ON CONFLICT (action) DO NOTHING', [a, DEFAULT_REVIEWER_PERM])
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS))
     await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [k, v])
   // Operator-provided integration keys from the environment override the (empty) defaults, so
@@ -423,6 +448,157 @@ app.get('/api/admin/audit', admin, async (req, res) => {
   res.json(rows)
 })
 
+/* ================= Approval matrix (maker-checker) =================
+ * Sensitive actions can require a second admin's sign-off. Each registered action carries an
+ * executor that PERFORMS it by replaying the same internal call the direct route would. submitAction
+ * consults the matrix: rule off, or amount below threshold → execute now; otherwise queue a request.
+ * A checker holding the reviewer permission (and who is NOT the requester) approves it, which runs
+ * the executor. min_approvers lets an action need more than one sign-off.
+ */
+const ACTIONS = {
+  'customer.wallet_adjust': {
+    label: 'Customer wallet adjustment',
+    perm: 'customers.edit', // the maker must be allowed to do this at all
+    amountOf: (p) => Math.abs(Number(p.amount) || 0),
+    summarize: (p, amt) => `${Number(p.amount) >= 0 ? 'Credit' : 'Debit'} ₹${amt} ${Number(p.amount) >= 0 ? 'to' : 'from'} customer #${p.userId} (${p.balance})`,
+    execute: async (p) => {
+      const amt = Number(p.amount) || 0
+      const type = amt >= 0 ? 'credit' : 'debit'
+      return internalPost(U.auth, `/api/internal/users/${p.userId}/wallet`, {
+        type, balance: p.balance, admin: true, kind: type === 'credit' ? 'ADMIN_CREDIT' : 'ADMIN_DEBIT',
+        title: p.title, amount: Math.abs(amt),
+      })
+    },
+  },
+  'refund.issue': {
+    label: 'Issue refund',
+    perm: 'refunds.approve',
+    amountOf: async (p) => { const b = await tryGet(U.booking, `/api/internal/bookings/${p.bookingId}`, null); return b ? (b.refund ?? b.total ?? 0) : 0 },
+    summarize: (p, amt) => `Refund booking #${p.bookingId} — ₹${amt}`,
+    execute: async (p) => { await internalPost(U.booking, `/api/internal/bookings/${p.bookingId}/refund`, {}); return { ok: true } },
+  },
+}
+const ACTION_KEYS = Object.keys(ACTIONS)
+const DEFAULT_REVIEWER_PERM = 'approvals.review'
+
+async function ruleFor(action) {
+  const r = (await pool.query('SELECT * FROM approval_rules WHERE action=$1', [action])).rows[0]
+  return r || { action, enabled: false, threshold: 0, reviewer_perm: DEFAULT_REVIEWER_PERM, min_approvers: 1 }
+}
+const reviewerPermOf = (rule) => rule.reviewer_perm || DEFAULT_REVIEWER_PERM
+const holdsPerm = (a, perm) => a?.role === 'super' || (a?.permissions || []).includes(perm)
+const requestDto = (r, rule) => ({
+  id: r.id, action: r.action, label: ACTIONS[r.action]?.label || r.action, summary: r.summary,
+  amount: r.amount, status: r.status, requestedBy: r.requested_by, requestedById: r.requested_by_id,
+  approvals: r.approvals || [], minApprovers: rule ? rule.min_approvers : 1, reviewerPerm: rule ? reviewerPermOf(rule) : DEFAULT_REVIEWER_PERM,
+  decidedBy: r.decided_by, decidedAt: r.decided_at, reason: r.reason, error: r.error, created: r.created,
+})
+
+/** Run an approvable action: execute now, or queue for sign-off. Responds directly. */
+async function submitAction(action, params, req, res) {
+  const spec = ACTIONS[action]
+  if (!spec) return res.status(400).json({ error: `Unknown action ${action}` })
+  if (spec.perm && !holdsPerm(req.admin, spec.perm)) return res.status(403).json({ error: 'Insufficient permissions' })
+  const amount = Math.round(Number(await spec.amountOf(params)) || 0)
+  const rule = await ruleFor(action)
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  if (!(rule.enabled && amount >= (rule.threshold || 0))) {
+    try {
+      const result = await spec.execute(params)
+      await logAudit(req.admin.email, action, spec.summarize(params, amount))
+      return res.json({ ok: true, executed: true, result })
+    } catch (e) { return res.status(e.status || 502).json({ error: e.error || e.message || 'Action failed' }) }
+  }
+  const summary = spec.summarize(params, amount)
+  const r = (await pool.query(
+    `INSERT INTO approval_requests (action, summary, params, amount, requested_by, requested_by_id)
+     VALUES ($1,$2,$3::jsonb,$4,$5,$6) RETURNING *`,
+    [action, summary, JSON.stringify(params), amount, who, req.admin.id])).rows[0]
+  await logAudit(req.admin.email, 'approval.request', summary)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'approval.request', entityType: 'approval', entityId: r.id, detail: `Requested approval: ${summary}` })
+  return res.status(202).json({ ok: true, pending: true, request: requestDto(r, rule) })
+}
+
+// The matrix: every approvable action + its current rule.
+app.get('/api/admin/approval-rules', admin, requirePerm('approvals.manage'), async (_q, res) => {
+  const out = []
+  for (const a of ACTION_KEYS) {
+    const rule = await ruleFor(a)
+    out.push({ action: a, label: ACTIONS[a].label, enabled: !!rule.enabled, threshold: rule.threshold || 0, reviewerPerm: reviewerPermOf(rule), minApprovers: rule.min_approvers || 1 })
+  }
+  res.json({ ok: true, actions: out, reviewerPerms: ['approvals.review', 'admins.edit', 'settings.edit'] })
+})
+app.patch('/api/admin/approval-rules/:action', admin, requirePerm('approvals.manage'), async (req, res) => {
+  const action = req.params.action
+  if (!ACTIONS[action]) return res.status(404).json({ error: 'Unknown action' })
+  const b = req.body || {}
+  const enabled = !!b.enabled
+  const threshold = Math.max(0, Math.round(Number(b.threshold) || 0))
+  const minApprovers = Math.max(1, Math.min(5, Math.round(Number(b.minApprovers) || 1)))
+  const reviewerPerm = String(b.reviewerPerm || DEFAULT_REVIEWER_PERM)
+  await pool.query(
+    `INSERT INTO approval_rules (action, enabled, threshold, reviewer_perm, min_approvers, updated_by, updated)
+     VALUES ($1,$2,$3,$4,$5,$6,now())
+     ON CONFLICT (action) DO UPDATE SET enabled=$2, threshold=$3, reviewer_perm=$4, min_approvers=$5, updated_by=$6, updated=now()`,
+    [action, enabled, threshold, reviewerPerm, minApprovers, req.admin.email])
+  await logAudit(req.admin.email, 'approval.rule', `${action} ${enabled ? `on ≥₹${threshold}, ${minApprovers} approver(s)` : 'off'}`)
+  res.json({ ok: true })
+})
+
+// The inbox — pending first, or full history with ?status=all.
+app.get('/api/admin/approvals', admin, requirePerm('approvals.review'), async (req, res) => {
+  const rows = String(req.query.status) === 'all'
+    ? (await pool.query(`SELECT * FROM approval_requests ORDER BY (status='pending') DESC, id DESC LIMIT 100`)).rows
+    : (await pool.query(`SELECT * FROM approval_requests WHERE status='pending' ORDER BY id DESC LIMIT 100`)).rows
+  const out = []
+  for (const r of rows) out.push(requestDto(r, await ruleFor(r.action)))
+  res.json({ ok: true, requests: out, meId: req.admin.id })
+})
+app.post('/api/admin/approvals/:id/approve', admin, requirePerm('approvals.review'), async (req, res) => {
+  const r = (await pool.query('SELECT * FROM approval_requests WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Request not found' })
+  if (r.status !== 'pending') return res.status(409).json({ error: `Already ${r.status}` })
+  if (r.requested_by_id === req.admin.id) return res.status(403).json({ error: 'You cannot approve your own request' })
+  const spec = ACTIONS[r.action]; const rule = await ruleFor(r.action)
+  if (!holdsPerm(req.admin, reviewerPermOf(rule))) return res.status(403).json({ error: 'You are not an approver for this action' })
+  const approvals = Array.isArray(r.approvals) ? r.approvals : []
+  if (approvals.some((a) => a.byId === req.admin.id)) return res.status(409).json({ error: 'You already approved this' })
+  approvals.push({ by: req.admin.name || req.admin.email, byId: req.admin.id, at: nowIso() })
+  const who = req.admin.name || req.admin.email
+  if (approvals.length < (rule.min_approvers || 1)) { // needs more sign-offs
+    await pool.query('UPDATE approval_requests SET approvals=$1::jsonb WHERE id=$2', [JSON.stringify(approvals), r.id])
+    return res.json({ ok: true, request: requestDto({ ...r, approvals }, rule) })
+  }
+  try {
+    const result = await spec.execute(r.params)
+    await pool.query("UPDATE approval_requests SET status='executed', approvals=$1::jsonb, decided_by=$2, decided_at=now(), result=$3::jsonb WHERE id=$4",
+      [JSON.stringify(approvals), who, JSON.stringify(result || {}), r.id])
+    await logAudit(req.admin.email, 'approval.execute', r.summary)
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'approval.approve', entityType: 'approval', entityId: r.id, detail: `Approved & executed: ${r.summary}` })
+    res.json({ ok: true, request: requestDto((await pool.query('SELECT * FROM approval_requests WHERE id=$1', [r.id])).rows[0], rule) })
+  } catch (e) {
+    await pool.query("UPDATE approval_requests SET status='failed', approvals=$1::jsonb, decided_by=$2, decided_at=now(), error=$3 WHERE id=$4",
+      [JSON.stringify(approvals), who, String(e.error || e.message || 'failed'), r.id])
+    res.status(502).json({ error: `Approved, but execution failed: ${e.error || e.message}` })
+  }
+})
+app.post('/api/admin/approvals/:id/reject', admin, requirePerm('approvals.review'), async (req, res) => {
+  const r = (await pool.query('SELECT * FROM approval_requests WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Request not found' })
+  if (r.status !== 'pending') return res.status(409).json({ error: `Already ${r.status}` })
+  if (r.requested_by_id === req.admin.id) return res.status(403).json({ error: 'You cannot reject your own request' })
+  const rule = await ruleFor(r.action)
+  if (!holdsPerm(req.admin, reviewerPermOf(rule))) return res.status(403).json({ error: 'You are not an approver for this action' })
+  await pool.query("UPDATE approval_requests SET status='rejected', decided_by=$1, decided_at=now(), reason=$2 WHERE id=$3",
+    [req.admin.name || req.admin.email, String(req.body?.reason || ''), r.id])
+  await logAudit(req.admin.email, 'approval.reject', r.summary)
+  res.json({ ok: true })
+})
+
+// Refund entry point routed through the matrix (frontend calls this instead of the payment route).
+app.post('/api/admin/actions/refund', admin, async (req, res) =>
+  submitAction('refund.issue', { bookingId: Number(req.body?.bookingId) }, req, res))
+
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
 // Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).
 app.get('/api/admin/live-ops', admin, async (req, res) => {
@@ -683,16 +859,13 @@ app.patch('/api/admin/customers/:id', admin, async (req, res) => {
   try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 // Admin wallet adjustment — credit/debit any balance (cash/promo/points), bypasses wallet status.
+// Routed through the approval matrix: executes immediately unless a rule requires sign-off, and now
+// requires customers.edit (was ungated). Amount is signed (+credit / -debit).
 app.post('/api/admin/customers/:id/wallet', admin, async (req, res) => {
   const amt = Number(req.body?.amount) || 0
-  const type = amt >= 0 ? 'credit' : 'debit'
   const balance = ['cash', 'promo', 'points'].includes(req.body?.balance) ? req.body.balance : 'cash'
-  try {
-    res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet`, {
-      type, balance, admin: true, kind: type === 'credit' ? 'ADMIN_CREDIT' : 'ADMIN_DEBIT',
-      title: req.body?.title || (type === 'credit' ? 'Admin credit' : 'Admin debit'), amount: Math.abs(amt),
-    }))
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+  const title = req.body?.title || req.body?.note || (amt >= 0 ? 'Admin credit' : 'Admin debit')
+  return submitAction('customer.wallet_adjust', { userId: Number(req.params.id), amount: amt, balance, title }, req, res)
 })
 // Admin sets wallet status: active / frozen / blocked / inactive.
 app.post('/api/admin/customers/:id/wallet/status', admin, async (req, res) => {

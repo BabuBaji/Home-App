@@ -151,6 +151,10 @@ export const PERMISSION_CATALOG = [
     { key: 'roles.view', label: 'View roles' },
     { key: 'roles.manage', label: 'Create / edit / delete roles' },
   ] },
+  { module: 'approvals', label: 'Approvals', perms: [
+    { key: 'approvals.review', label: 'Review & approve/reject requests' },
+    { key: 'approvals.manage', label: 'Configure the approval matrix' },
+  ] },
 ]
 
 /** Every permission key, flat. Super holds all of these. */
@@ -215,6 +219,7 @@ const ADMIN = dedupe([
   'settings.edit',
   'admins.view',
   'roles.view',
+  'approvals.review', 'approvals.manage',
 ])
 
 // super — everything, including admin-user management, role authoring, and super-only overrides.
