@@ -221,6 +221,7 @@ services:
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
       WALLET_URL: http://wallet:4009
+      CATALOG_URL: http://catalog:4001
       WORKER_DEV_OTP: ${WORKER_DEV_OTP}
       # KYC document storage. Point these at real S3 in production; the code is S3-compatible.
       # S3_ENDPOINT is where this service writes; S3_PUBLIC_ENDPOINT is what signed URLs must say,

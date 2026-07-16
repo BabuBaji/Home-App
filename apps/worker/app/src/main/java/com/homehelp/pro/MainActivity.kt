@@ -82,6 +82,7 @@ object Routes {
     const val P_PERSONAL = "profile_personal"
     const val P_DOCUMENTS = "profile_documents"
     const val P_BANK = "profile_bank"
+    const val P_SKILLS = "profile_skills"
     const val P_AVAILABILITY = "profile_availability"
     const val P_PREFERENCES = "profile_preferences"
     const val P_NOTIFICATIONS = "profile_notifications"
@@ -217,6 +218,7 @@ fun AppRoot() {
             composable(Routes.CUSTOMER_SIGN) { CustomerSignScreen(vm, nav) }
             composable(Routes.P_PERSONAL) { PersonalInfoScreen(vm, nav) }
             composable(Routes.P_DOCUMENTS) { DocumentsScreen(vm, nav) }
+            composable(Routes.P_SKILLS) { SkillsScreen(vm, nav) }
             composable(Routes.P_BANK) { BankDetailsScreen(vm, nav) }
             composable(Routes.P_AVAILABILITY) { AvailabilityScreen(vm, nav) }
             composable(Routes.P_PREFERENCES) { PreferencesScreen(vm, nav) }

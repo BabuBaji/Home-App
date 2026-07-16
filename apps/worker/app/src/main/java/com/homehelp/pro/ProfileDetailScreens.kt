@@ -72,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.homehelp.pro.network.SkillClaim
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared scaffolding & small building blocks for the profile detail screens.
@@ -448,6 +450,117 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
             // Only claim it saved once the server says so — the old code toasted immediately and
             // fired the request into the background.
             vm.saveProfile { toast(ctx, "Profile updated") }
+        }
+    }
+}
+
+/**
+ * Phase 6 — the worker picks the services they can do, at what level, with how much experience.
+ *
+ * A claim is NOT a capability: only an admin approval puts a service into the set dispatch matches
+ * on. The screen says so plainly, because "I ticked Deep Cleaning and got no deep-cleaning jobs"
+ * is otherwise an invisible rule.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SkillsScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    var certFor by remember { mutableStateOf<String?>(null) }
+    val certPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val svc = certFor
+        if (uri != null && svc != null) vm.uploadSkillCertificate(ctx, svc, uri)
+        certFor = null
+    }
+    LaunchedEffect(Unit) { vm.loadSkills() }
+    LaunchedEffect(vm.skillsError) { vm.skillsError?.let { toast(ctx, it); vm.clearSkillsError() } }
+
+    // Local edits; only sent on Save.
+    val claims = remember { mutableStateMapOf<String, SkillClaim>() }
+    LaunchedEffect(vm.skills.size) {
+        claims.clear()
+        vm.skills.forEach { (svc, s) -> claims[svc] = SkillClaim(s.level, s.years) }
+    }
+
+    DetailScaffold("Skills & Services", nav) {
+        Card(padding = Dp16.S) {
+            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                IconChip(Icons.Filled.Info, Purple, PurpleLight)
+                Spacer(Modifier.width(Space.m))
+                Text(
+                    "Pick the services you can do and your level. An admin reviews each one — you'll only be sent jobs for skills they approve.",
+                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                )
+            }
+        }
+
+        vm.serviceCatalogue.forEach { svc ->
+            val claim = claims[svc]
+            val saved = vm.skills[svc]
+            val picked = claim != null
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = picked, onCheckedChange = { on ->
+                        if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
+                        else claims.remove(svc)
+                    })
+                    Text(svc, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    // The status of the CLAIM — what the admin decided, not what the worker typed.
+                    when (saved?.status) {
+                        "Approved" -> StatusPill("Approved", GreenLight, GreenSuccess)
+                        "Rejected" -> StatusPill("Rejected", RedLight, RedCancel)
+                        "Pending" -> StatusPill("In review", GoldLight, Amber)
+                        else -> {}
+                    }
+                }
+                if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
+                    Spacer(Modifier.height(Space.xs))
+                    Text("Not approved: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
+                }
+                if (picked) {
+                    Spacer(Modifier.height(Space.s))
+                    HairlineDivider()
+                    Spacer(Modifier.height(Space.s))
+                    Text("Your level", fontSize = 12.sp, color = TextGray)
+                    Spacer(Modifier.height(Space.xs))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        vm.skillLevels.forEach { lvl ->
+                            val on = claim?.level == lvl
+                            Text(
+                                lvl, fontSize = 12.5.sp,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (on) Purple else TextGray,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(Radius.field))
+                                    .background(if (on) PurpleLight else FieldFill)
+                                    .clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }
+                                    .padding(horizontal = Space.m, vertical = Space.s),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Space.m))
+                    Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
+                        claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
+                    }
+                    Spacer(Modifier.height(Space.s))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
+                            .clickable { certFor = svc; certPicker.launch("*/*") }.padding(Space.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.CheckCircle, null, tint = if (saved?.certificate != null) GreenSuccess else TextMuted, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(Space.s))
+                        Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 13.sp, color = TextDark)
+                    }
+                    if (saved?.status == "Approved") {
+                        Spacer(Modifier.height(Space.xs))
+                        Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                    }
+                }
+            }
+        }
+
+        PrimaryButton("Save Skills", enabled = !vm.savingSkills, loading = vm.savingSkills) {
+            vm.saveSkills(claims.toMap()) { toast(ctx, "Skills sent for review") }
         }
     }
 }

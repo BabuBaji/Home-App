@@ -5,7 +5,7 @@ import {
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -210,6 +210,7 @@ export default function WorkerDetail() {
   const [incView, setIncView] = useState<WalletTxn | null>(null)
   const [payView, setPayView] = useState<WalletWithdrawal | null>(null)
   const [docBusy, setDocBusy] = useState<number | null>(null)
+  const [skillBusy, setSkillBusy] = useState<string | null>(null)
   // Advanced filters, behind the "Filters" toggle.
   const [showFilters, setShowFilters] = useState(false)
   const [earnMin, setEarnMin] = useState('')
@@ -254,6 +255,27 @@ export default function WorkerDetail() {
     try { const r = await workerDocUrl(w.id, docId); window.open(r.url, '_blank', 'noopener,noreferrer') }
     catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
   }
+  /* Approving a skill is what makes the worker dispatchable for it — the claim alone never does.
+     `level` lets the admin approve at a different level than claimed; that's the point of a review. */
+  const reviewSkill = async (service: string, approve: boolean, level?: string) => {
+    let lvl = level
+    let reason = ''
+    if (approve && !lvl) {
+      lvl = (window.prompt(`Approve "${service}" at which level?\nBeginner / Intermediate / Advanced / Expert`, claimed[service]?.level || 'Beginner') || '').trim()
+      if (!lvl) return
+    }
+    if (!approve) {
+      reason = (window.prompt(`Why is "${service}" not approved? The worker sees this.`) || '').trim()
+      if (!reason) return
+    }
+    setSkillBusy(service)
+    try {
+      await reviewWorkerSkill(w.id, service, approve, lvl, reason)
+      toast(approve ? `${service} approved — they can now be assigned this work` : `${service} removed`)
+      load()
+    } catch (e) { toast((e as Error).message) } finally { setSkillBusy(null) }
+  }
+
   const reviewDoc = async (docId: number, approve: boolean) => {
     // The server rejects a reasonless rejection, so ask for one here rather than round-trip to fail.
     let reason = ''
@@ -547,21 +569,58 @@ export default function WorkerDetail() {
       ))}
     </Panel>
   )
+  /* Skills the worker CLAIMED (profile.skills) vs services they're actually approved for
+     (w.services — what dispatch matches on). Approving is what promotes one into the other, so the
+     panel is built from the claims, not from the live set. Legacy skillLevels rows have no claim. */
+  const claimed = (w.profile?.skills || {}) as Record<string, { level?: string; years?: string; status?: string; reason?: string; certificate?: { fileName?: string } | null }>
+  const claimNames = Object.keys(claimed)
+  const liveServices = w.services || []
+  const skillRows = [...new Set([...claimNames, ...liveServices])]
+  const pendingSkills = claimNames.filter((s) => claimed[s]?.status === 'Pending').length
+  const lvlTone = (l?: string) => l === 'Expert' ? 'green' : l === 'Advanced' ? 'blue' : l === 'Intermediate' ? 'amber' : 'gray'
+
   const skillsPanel = (
-    <Panel title={`Skills & Services (${w.services?.length ?? 0})`}>
-      {(w.services && w.services.length > 0) ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '6px 20px' }}>
-          {w.services.map((s) => {
-            const lvl = w.profile?.skillLevels?.[s]
-            return (
-              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--line,#f1f2f6)' }}>
-                <span style={{ fontSize: 13 }}>{s}</span>
-                {lvl && <Badge tone={lvl === 'Expert' ? 'green' : lvl === 'Advanced' ? 'blue' : lvl === 'Intermediate' ? 'amber' : 'gray'} dot={false}>{lvl}</Badge>}
+    <Panel
+      title={`Skills & Services (${liveServices.length} approved)`}
+      action={pendingSkills > 0 ? <Badge tone="amber" dot={false}>{pendingSkills} to review</Badge> : undefined}
+    >
+      {skillRows.length > 0 ? skillRows.map((s) => {
+        const c = claimed[s]
+        const live = liveServices.includes(s)
+        const lvl = c?.level || w.profile?.skillLevels?.[s]
+        return (
+          <div key={s} style={{ padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{s}</div>
+                <div className="muted" style={{ fontSize: 11.5 }}>
+                  {c ? `Claims ${c.level}${c.years ? ` · ${c.years} yr${c.years === '1' ? '' : 's'}` : ''}${c.certificate?.fileName ? ' · certificate attached' : ''}` : 'Assigned by admin'}
+                </div>
+              </span>
+              <span className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                {lvl && <Badge tone={lvlTone(lvl)} dot={false}>{lvl}</Badge>}
+                {/* "Live" = dispatch can actually send them this work. That's the fact that matters. */}
+                <Badge tone={live ? 'green' : c?.status === 'Rejected' ? 'red' : 'gray'} dot={false}>
+                  {live ? 'Live' : c?.status === 'Rejected' ? 'Rejected' : c?.status === 'Pending' ? 'In review' : 'Not live'}
+                </Badge>
+              </span>
+            </div>
+            {c?.status === 'Rejected' && c.reason && <div style={{ fontSize: 11.5, color: '#dc2626', marginTop: 2 }}>Rejected: {c.reason}</div>}
+            {c && c.status !== 'Approved' && (
+              <div className="row" style={{ gap: 8, marginTop: 6, alignItems: 'center' }}>
+                <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} disabled={skillBusy === s} onClick={() => reviewSkill(s, true, c.level)}>Approve as {c.level}</button>
+                <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} disabled={skillBusy === s} onClick={() => reviewSkill(s, true)}>Approve at…</button>
+                <button className="btn line" style={{ padding: '4px 10px', fontSize: 12, color: '#dc2626' }} disabled={skillBusy === s} onClick={() => reviewSkill(s, false)}>Reject</button>
               </div>
-            )
-          })}
-        </div>
-      ) : <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
+            )}
+            {c?.status === 'Approved' && live && (
+              <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                <button className="btn line" style={{ padding: '4px 10px', fontSize: 12, color: '#dc2626' }} disabled={skillBusy === s} onClick={() => reviewSkill(s, false)}>Revoke</button>
+              </div>
+            )}
+          </div>
+        )
+      }) : <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
     </Panel>
   )
   const recentJobsPanel = (

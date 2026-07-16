@@ -60,6 +60,9 @@ import com.homehelp.pro.network.SettlementDto
 import com.homehelp.pro.network.TrendPoint
 import com.homehelp.pro.network.WalletStateResponse
 import com.homehelp.pro.network.WalletSummaryDto
+import com.homehelp.pro.network.SkillDto
+import com.homehelp.pro.network.SkillClaim
+import com.homehelp.pro.network.SkillsBody
 import com.homehelp.pro.network.WorkerDto
 import com.homehelp.pro.network.WithdrawBody
 import com.homehelp.pro.network.WithdrawalEntry
@@ -1066,6 +1069,67 @@ class AppViewModel : ViewModel() {
         notifPayments = w.notifPayments
         notifPromotions = w.notifPromotions
         notifRatings = w.notifRatings
+    }
+
+    /* ---- Phase 6: service skills ----
+     * `skills` is what the worker CLAIMS; `approvedServices` is what an admin has granted and what
+     * actually brings work. They are separate on purpose — claiming a skill does not make you
+     * dispatchable for it, and the screen says so rather than implying otherwise.
+     */
+    val serviceCatalogue = mutableStateListOf<String>()
+    val skillLevels = mutableStateListOf<String>()
+    val skills = mutableStateMapOf<String, SkillDto>()
+    val approvedServices = mutableStateListOf<String>()
+    var savingSkills by mutableStateOf(false)
+        private set
+    var skillsError by mutableStateOf<String?>(null)
+    fun clearSkillsError() { skillsError = null }
+
+    fun loadSkills() = sync {
+        val cat = api.serviceCatalogue()
+        serviceCatalogue.clear(); serviceCatalogue.addAll(cat.services)
+        skillLevels.clear(); skillLevels.addAll(cat.levels)
+        val s = api.getSkills()
+        skills.clear(); skills.putAll(s.skills)
+        approvedServices.clear(); approvedServices.addAll(s.approved)
+    }
+
+    /** Claim/withdraw skills. Any edit to an approved skill sends it back for review — the server
+     *  enforces that; this just reflects whatever comes back. */
+    fun saveSkills(claims: Map<String, SkillClaim>, onDone: () -> Unit = {}) {
+        skillsError = null
+        savingSkills = true
+        viewModelScope.launch {
+            try {
+                val r = withContext(Dispatchers.IO) { api.saveSkills(SkillsBody(claims)) }
+                skills.clear(); skills.putAll(r.skills)
+                approvedServices.clear(); approvedServices.addAll(r.approved)
+                backendConnected = true
+                onDone()
+            } catch (e: retrofit2.HttpException) { skillsError = httpErrorMessage(e) }
+            catch (e: Exception) { skillsError = "Could not save. Check your connection and try again." }
+            finally { savingSkills = false }
+        }
+    }
+
+    fun uploadSkillCertificate(ctx: android.content.Context, service: String, uri: android.net.Uri) {
+        skillsError = null
+        savingSkills = true
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+                    ?: throw IllegalStateException("Could not read that file")
+                if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("File is too large (max 8 MB)")
+                val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                val part = MultipartBody.Part.createFormData("file", "certificate", bytes.toRequestBody(mime.toMediaTypeOrNull()))
+                val r = withContext(Dispatchers.IO) {
+                    api.uploadSkillCertificate(service.toRequestBody("text/plain".toMediaTypeOrNull()), part)
+                }
+                skills.clear(); skills.putAll(r.skills)
+            } catch (e: retrofit2.HttpException) { skillsError = httpErrorMessage(e) }
+            catch (e: Exception) { skillsError = e.message ?: "Upload failed." }
+            finally { savingSkills = false }
+        }
     }
 
     /* ---- Phase 2/3: the worker's own profile ----

@@ -527,6 +527,29 @@ data class SignedUrlResponse(val ok: Boolean = true, val url: String = "")
 /** Phase 4: the canonical KYC document set, owned by the server (it validates uploads against it). */
 data class DocTypeDto(val name: String = "", val required: Boolean = true, val hint: String = "")
 data class DocTypesResponse(val ok: Boolean = true, val types: List<DocTypeDto> = emptyList())
+
+/* ---------- Phase 6: service skills ----------
+ * A CLAIM, not a capability. `status` is Pending/Approved/Rejected; only an admin approval puts
+ * the service into the worker's live set (what dispatch matches on).
+ */
+data class SkillCert(val key: String = "", val fileName: String = "")
+data class SkillDto(
+    val level: String = "",
+    val years: String = "",
+    val status: String = "Pending",
+    val reason: String = "",
+    val certificate: SkillCert? = null,
+)
+data class SkillsResponse(
+    val ok: Boolean = true,
+    val skills: Map<String, SkillDto> = emptyMap(),
+    val levels: List<String> = emptyList(),
+    /** Services an admin has actually approved — these are the ones that bring work. */
+    val approved: List<String> = emptyList(),
+)
+data class ServicesResponse(val ok: Boolean = true, val services: List<String> = emptyList(), val levels: List<String> = emptyList())
+data class SkillsBody(val skills: Map<String, SkillClaim> = emptyMap())
+data class SkillClaim(val level: String = "", val years: String = "")
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
 data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)

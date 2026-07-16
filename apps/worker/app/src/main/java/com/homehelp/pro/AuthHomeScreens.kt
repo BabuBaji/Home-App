@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.foundation.layout.offset
@@ -807,6 +808,7 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerSection("Account")
             DrawerRow(Icons.Filled.Person, "My Profile", Purple) { go(Routes.PROFILE) }
             DrawerRow(Icons.Filled.Description, "Documents", Color(0xFF0EA5E9)) { go(Routes.P_DOCUMENTS) }
+            DrawerRow(Icons.Filled.WorkspacePremium, "Skills & Services", Color(0xFF7C3AED)) { go(Routes.P_SKILLS) }
             DrawerRow(Icons.Filled.AccountBalance, "Bank Details", Color(0xFF14B8A6)) { go(Routes.P_BANK) }
             DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
             DrawerRow(Icons.Filled.Notifications, "Notifications", PurpleMid) { go(Routes.P_NOTIFICATIONS) }

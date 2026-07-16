@@ -40,6 +40,9 @@ export interface Worker {
     bankVerification?: { status?: string; registeredName?: string; nameMatch?: boolean | null; reason?: string }
     personal?: { gender?: string; dob?: string; fatherName?: string; address?: string; aadhaar?: string; pan?: string; whatsapp?: string; emergencyName?: string; emergencyPhone?: string; languages?: string }
     skillLevels?: Record<string, string>
+    // Phase 6: what the worker CLAIMS. Distinct from Worker.services, which is what dispatch
+    // matches on — only an admin approval promotes a claim into that live set.
+    skills?: Record<string, { level?: string; years?: string; status?: string; reason?: string; certificate?: { fileName?: string } | null }>
     availability?: { availableDays?: Record<string, boolean>; shiftStart?: string; shiftEnd?: string }
   }
 }

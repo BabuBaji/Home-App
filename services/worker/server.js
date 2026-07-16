@@ -25,6 +25,7 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
+const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '') // the service list a worker picks skills from
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WALLET_URL = (process.env.WALLET_URL || 'http://localhost:4009').replace(/\/$/, '')
 const NOTIFICATION_URL = (process.env.NOTIFICATION_URL || 'http://localhost:4003').replace(/\/$/, '')
@@ -1157,6 +1158,102 @@ async function replaceDocument(wid, name, { key, mime, size, sum, fileName }) {
   for (const o of old) if (o.storage_key) await deleteObject(o.storage_key).catch(() => {})
 }
 
+/* ---------- Phase 6: service skills ----------
+ * The worker CLAIMS a skill (service + level + years + optional certificate). That claim is NOT
+ * the same thing as being able to do the work:
+ *
+ *   profile.skills   what the worker says they can do, each with a review status
+ *   workers.services what DISPATCH matches jobs against
+ *
+ * They are kept apart on purpose. `services` is the live capability set — dispatch reads it via
+ * /internal/workers/:id/service-set — so if a self-selected skill landed there, a worker could tick
+ * "Deep Cleaning" and start being sent deep-cleaning jobs before anyone verified they can do one.
+ * Only an admin approval promotes a claimed skill into `services`.
+ */
+const SKILL_LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'Expert']
+
+/** Catalog answers { categories, services: [...] } — not a bare array. */
+async function catalogServiceNames() {
+  const r = await tryGet(CATALOG_URL, '/api/services', null)
+  const list = Array.isArray(r) ? r : (r?.services || [])
+  return [...new Set(list.map((s) => String(s?.name || '').trim()).filter(Boolean))]
+}
+
+/** The catalogue a worker picks from. Proxied so the app needs one backend, not two. */
+app.get('/api/worker/services', auth, async (_q, res) => {
+  res.json({ ok: true, services: await catalogServiceNames(), levels: SKILL_LEVELS })
+})
+
+app.get('/api/worker/skills', auth, async (req, res) => {
+  const w = await getWorker(req.worker.id)
+  res.json({ ok: true, skills: w?.profile?.skills || {}, levels: SKILL_LEVELS, approved: w?.services || [] })
+})
+
+/**
+ * Claim/update skills. Body: { skills: { "Kitchen Cleaning": { level, years } } }
+ * Re-claiming an already-approved skill at a DIFFERENT level sends it back for review — otherwise
+ * a worker could self-promote from Beginner to Expert after approval.
+ */
+app.put('/api/worker/skills', auth, async (req, res) => {
+  const incoming = req.body?.skills
+  if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok: false, error: 'No skills supplied' })
+  const w = await getWorker(req.worker.id)
+  const cur = w?.profile?.skills || {}
+  const known = new Set(await catalogServiceNames())
+  // If the catalogue is unreachable, reject rather than silently accept unvalidated skills.
+  if (!known.size) return res.status(502).json({ ok: false, error: 'Service list unavailable — please try again' })
+
+  const next = {}
+  for (const [service, v] of Object.entries(incoming)) {
+    if (!known.has(service)) return res.status(400).json({ ok: false, error: `Unknown service: ${service}` })
+    const level = String(v?.level || '')
+    if (!SKILL_LEVELS.includes(level)) return res.status(400).json({ ok: false, error: `Invalid level for ${service}` })
+    const years = String(v?.years ?? '').replace(/\D/g, '').slice(0, 2)
+    const prev = cur[service]
+    // Keep an approval only when nothing material changed; any edit needs re-review.
+    const unchanged = prev && prev.status === 'Approved' && prev.level === level && String(prev.years ?? '') === years
+    next[service] = {
+      level, years,
+      status: unchanged ? 'Approved' : 'Pending',
+      reason: unchanged ? (prev.reason || '') : '',
+      certificate: prev?.certificate || null,
+      claimedAt: new Date().toISOString(),
+    }
+  }
+  // Dropping a claim must also withdraw the live capability, or dispatch keeps sending that work.
+  const dropped = Object.keys(cur).filter((s) => !next[s])
+  if (dropped.length) {
+    const keep = (w.services || []).filter((s) => !dropped.includes(s))
+    await pool.query('UPDATE workers SET services=$1::jsonb WHERE id=$2', [JSON.stringify(keep), req.worker.id])
+  }
+  await mergeProfile(req.worker.id, { skills: next })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'skills.claim', entityType: 'worker', entityId: req.worker.id, detail: `Updated skills (${Object.keys(next).length})` })
+  const after = await getWorker(req.worker.id)
+  res.json({ ok: true, skills: after?.profile?.skills || {}, approved: after?.services || [] })
+})
+
+/** Certificate for one skill. Private bucket — it's a personal document, like KYC. */
+app.post('/api/worker/skills/certificate', auth, upload.single('file'), async (req, res) => {
+  const service = String(req.body?.service || '').trim()
+  if (!service) return res.status(400).json({ ok: false, error: 'Service required' })
+  if (!storageConfigured()) return res.status(503).json({ ok: false, error: 'Storage is not configured' })
+  if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: 'Attach the certificate' })
+  const w = await getWorker(req.worker.id)
+  const skills = w?.profile?.skills || {}
+  if (!skills[service]) return res.status(400).json({ ok: false, error: 'Claim this skill before adding a certificate' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind) return res.status(415).json({ ok: false, error: 'Only JPG, PNG, WebP or PDF files are accepted' })
+  const key = storageKey(`workers/${req.worker.id}/certs`, kind.ext)
+  try { await putObject(key, req.file.buffer, kind.mime) }
+  catch (e) { console.error('[worker] certificate upload failed:', e.message); return res.status(502).json({ ok: false, error: 'Could not store the certificate' }) }
+  const old = skills[service].certificate?.key
+  // A new certificate is new evidence, so the claim goes back for review.
+  skills[service] = { ...skills[service], certificate: { key, fileName: req.file.originalname || `certificate.${kind.ext}` }, status: 'Pending', reason: '' }
+  await mergeProfile(req.worker.id, { skills })
+  if (old) await deleteObject(old).catch(() => {})
+  res.json({ ok: true, skills })
+})
+
 app.get('/api/worker/documents/types', auth, (_q, res) => res.json({ ok: true, types: DOC_TYPES }))
 
 app.post('/api/worker/documents/upload', auth, upload.single('file'), async (req, res) => {
@@ -1705,6 +1802,50 @@ app.post('/internal/workers/:id/balance', internalOnly, async (req, res) => {
 })
 
 // Admin bank approve/reject (routes via gateway /api/admin/workers/:id/bank/*).
+/* ---------- admin skill review (Phase 6 claim -> Phase 9 approval) ----------
+ * Approving is what actually GRANTS the capability: it adds the service to workers.services, which
+ * is what dispatch matches on. Rejecting removes it. The worker's claim alone never does either.
+ * The admin can also approve at a DIFFERENT level than claimed — that's the point of a review.
+ */
+app.post('/api/admin/workers/:id/skills/review', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const service = String(req.body?.service || '').trim()
+  const approve = !!req.body?.approve
+  const reason = String(req.body?.reason || '').trim()
+  const level = String(req.body?.level || '').trim()
+  if (!approve && !reason) return res.status(400).json({ error: 'A rejection reason is required' })
+  if (level && !SKILL_LEVELS.includes(level)) return res.status(400).json({ error: 'Invalid level' })
+
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const skills = w.profile?.skills || {}
+  if (!skills[service]) return res.status(404).json({ error: 'That skill was not claimed' })
+
+  skills[service] = {
+    ...skills[service],
+    ...(level ? { level } : {}),
+    status: approve ? 'Approved' : 'Rejected',
+    reason: approve ? '' : reason,
+    reviewedBy: req.admin?.name || req.admin?.email || 'Admin',
+    reviewedAt: new Date().toISOString(),
+  }
+  await mergeProfile(id, { skills })
+
+  // The live capability set follows the decision — this is the only thing dispatch sees.
+  const set = new Set(w.services || [])
+  if (approve) set.add(service); else set.delete(service)
+  await pool.query('UPDATE workers SET services=$1::jsonb WHERE id=$2', [JSON.stringify([...set]), id])
+
+  publishEvent(REDIS_URL, 'worker.notify', {
+    workerId: id,
+    title: approve ? 'Skill approved' : 'Skill not approved',
+    body: approve ? `You can now be assigned ${service} jobs (${skills[service].level}).` : `${service} was not approved: ${reason}`,
+  })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'skills.review', entityType: 'worker', entityId: id, detail: `${approve ? 'Approved' : 'Rejected'} ${service} for ${w.name}${approve ? ` (${skills[service].level})` : ` — ${reason}`}` })
+  res.json({ ok: true, ...rowToWorker(await getWorker(id)) })
+})
+
 /* ---------- admin KYC document review ----------
  * The counterpart to bank/approve|reject below. Until now nothing anywhere wrote
  * worker_documents.status, so the admin panel's Verified/Rejected badges were unreachable and a
