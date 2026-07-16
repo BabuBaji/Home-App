@@ -112,6 +112,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@auth-db:5432/auth
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       CATALOG_URL: http://catalog:4001
       DEV_OTP: ${DEV_OTP}
     ports: ["4002:4002"]
@@ -212,6 +213,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@worker-db:5432/worker
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
@@ -254,6 +256,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@admin-db:5432/admin
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       AUTH_URL: http://auth:4002
       CATALOG_URL: http://catalog:4001
       BOOKING_URL: http://booking:4006

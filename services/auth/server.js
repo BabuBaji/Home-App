@@ -13,16 +13,34 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, publishEvent } from '@homehelp/shared'
+import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('auth') // refuse to boot without a signing secret rather than issue forgeable sessions
 
 const PORT = Number(process.env.PORT || 4002)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5433/auth'
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '')
-const DEV_OTP = process.env.DEV_OTP || '4321'
+/* DEV_OTP pins the code to a known value AND returns it in the response, so demos work with no SMS
+ * provider wired up. It is the ONLY way a code is ever disclosed and must be set explicitly —
+ * unset means a random code that is never disclosed. It used to default to '4321', i.e. disclosure
+ * was ON by default: two requests against any phone number minted a session for it, and
+ * findOrCreateUser would create the account. Leave UNSET in production. */
+const DEV_OTP = process.env.DEV_OTP || ''
 const WELCOME_BONUS = 1240
+const OTP_TTL_MS = 5 * 60 * 1000
+const OTP_MAX_ATTEMPTS = 5
+const OTP_MAX_PER_HOUR = 5
+const OTP_RESEND_WAIT_MS = 30 * 1000
 
 const pool = makePool(DATABASE_URL)
-const otpStore = new Map() // phone -> otp (in-memory; fine for OTP's short TTL)
+/* phone -> { hash, expires, attempts, sent, windowStarted }. In-memory is fine for a code that
+ * lives 5 minutes; it just means a restart invalidates outstanding codes. The value is HASHED so
+ * a heap dump / log of this map isn't a list of live credentials. */
+const otpStore = new Map()
+const OTP_PEPPER = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex')
+const hashOtp = (phone, code) => crypto.createHash('sha256').update(`${phone}:${code}:${OTP_PEPPER}`).digest('hex')
+const newOtp = () => DEV_OTP || String(crypto.randomInt(1000, 10000))
 
 async function init() {
   await migrate(pool, [
@@ -247,9 +265,10 @@ app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'auth', ok: true }))
 
 /* ---------- customer token auth (local) ---------- */
+// Verifies a SIGNED token. Previously this parsed the id out of the string, so `Bearer demo-1`
+// was a full session for customer 1 — no OTP, no login, any account.
 async function auth(req, res, next) {
-  const t = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = t.startsWith('demo-') ? Number(t.slice(5)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'customer')
   const u = Number.isFinite(id) ? await getUser(id) : null
   if (!u) return res.status(401).json({ error: 'Not authenticated' })
   req.user = u
@@ -260,17 +279,42 @@ async function auth(req, res, next) {
 app.post('/api/auth/request-otp', (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   if (phone.length < 6) return res.status(400).json({ error: 'Enter a valid mobile number' })
-  otpStore.set(phone, DEV_OTP)
-  res.json({ ok: true, devOtp: DEV_OTP })
+  const prev = otpStore.get(phone)
+  const now = Date.now()
+  if (prev) {
+    if (now - prev.sentAt < OTP_RESEND_WAIT_MS) {
+      return res.status(429).json({ error: `Please wait ${Math.ceil((OTP_RESEND_WAIT_MS - (now - prev.sentAt)) / 1000)}s before requesting another code.` })
+    }
+    if (now - prev.windowStarted < 3600_000 && prev.sent >= OTP_MAX_PER_HOUR) {
+      return res.status(429).json({ error: 'Too many codes requested. Try again in an hour.' })
+    }
+  }
+  const fresh = !prev || now - prev.windowStarted >= 3600_000
+  const code = newOtp()
+  otpStore.set(phone, {
+    hash: hashOtp(phone, code), expires: now + OTP_TTL_MS, attempts: 0,
+    sent: fresh ? 1 : prev.sent + 1, windowStarted: fresh ? now : prev.windowStarted, sentAt: now,
+  })
+  // TODO: deliver by SMS once a provider is wired up (settings.msg91_key). Until then a code is
+  // only usable when DEV_OTP is set — otherwise it's generated, stored, and undeliverable.
+  const exposed = !!DEV_OTP
+  if (!exposed) console.log(`[auth] OTP issued for ${phone} — no SMS provider configured, so it cannot be delivered.`)
+  res.json({ ok: true, ...(exposed ? { devOtp: code } : {}) })
 })
 app.post('/api/auth/verify-otp', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
-  if (String(req.body?.otp || '') !== otpStore.get(phone)) return res.status(401).json({ error: 'Invalid OTP' })
-  otpStore.delete(phone)
+  const otp = String(req.body?.otp || '').trim()
+  const rec = otpStore.get(phone)
+  if (!rec) return res.status(401).json({ error: 'Request a code first' })
+  if (Date.now() > rec.expires) { otpStore.delete(phone); return res.status(401).json({ error: 'That code has expired. Request a new one.' }) }
+  if (rec.attempts >= OTP_MAX_ATTEMPTS) { otpStore.delete(phone); return res.status(429).json({ error: 'Too many wrong attempts. Request a new code.' }) }
+  const ok = otp.length === 4 && crypto.timingSafeEqual(Buffer.from(hashOtp(phone, otp), 'hex'), Buffer.from(rec.hash, 'hex'))
+  if (!ok) { rec.attempts += 1; return res.status(401).json({ error: 'Invalid OTP' }) }
+  otpStore.delete(phone) // single use
   const u = await findOrCreateUser(phone)
   await recordIdentity(u, 'phone')
   publishEvent(REDIS_URL, 'customer.login', { userId: u.id, name: u.name, detail: `Signed in (${phone})` })
-  res.json({ token: 'demo-' + u.id, user: publicUser(u) })
+  res.json({ token: signToken('customer', u.id), user: publicUser(u) })
 })
 app.post('/api/auth/google', async (req, res) => {
   let p = null
@@ -284,7 +328,7 @@ app.post('/api/auth/google', async (req, res) => {
   const u = await findOrCreateGoogleUser(p)
   await recordIdentity(u, 'google')
   publishEvent(REDIS_URL, 'customer.login', { userId: u.id, name: u.name, detail: `Signed in with Google (${u.email || ''})` })
-  res.json({ token: 'demo-' + u.id, user: publicUser(u) })
+  res.json({ token: signToken('customer', u.id), user: publicUser(u) })
 })
 
 /* ---------- me / profile ---------- */

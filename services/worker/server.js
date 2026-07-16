@@ -13,9 +13,12 @@ import {
   makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
   getSettingInt,
 } from '@homehelp/shared'
-// Imported directly, not via the shared index: it pulls in the AWS SDK, and only services that
-// actually store files should carry that dependency.
+// Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
+// that only the services actually using them install.
 import { ensureBucket, storageConfigured, sniffType, checksum, storageKey, putObject, signedGetUrl, deleteObject } from '@homehelp/shared/storage.js'
+import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('worker') // refuse to boot without a signing secret rather than issue forgeable sessions
 
 const PORT = Number(process.env.PORT || 4004)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5435/worker'
@@ -611,9 +614,10 @@ app.use(express.json({ limit: '6mb' }))
 app.get('/health', (_q, res) => res.json({ service: 'worker', ok: true }))
 
 /* ---------- worker-app auth ---------- */
+// Verifies a SIGNED token. Previously this parsed the id out of the string, so `Bearer worker-6`
+// was a full session for worker 6 — which meant the login OTP protected nothing at all.
 function auth(req, res, next) {
-  const token = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = token.startsWith('worker-') ? Number(token.slice(7)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'worker')
   if (!Number.isFinite(id)) return res.status(401).json({ ok: false, error: 'Not authenticated' })
   getWorker(id).then((w) => { if (!w) return res.status(401).json({ ok: false, error: 'Not authenticated' }); req.worker = w; next() })
 }
@@ -705,7 +709,7 @@ app.post('/api/worker/auth/verify', async (req, res) => {
   if (w.status !== 'active') return res.status(403).json({ ok: false, error: `Your account is ${w.status}. Please ask the admin to activate it.` })
   await pool.query('DELETE FROM worker_login_otps WHERE phone=$1', [phone]) // single use
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: w.id, actorName: w.name, action: 'worker.login', entityType: 'worker', entityId: w.id, detail: `Worker signed in (${phone || ''})` })
-  res.json({ ok: true, token: 'worker-' + w.id, ...(await bootstrap(w.id)) })
+  res.json({ ok: true, token: signToken('worker', w.id), ...(await bootstrap(w.id)) })
 })
 app.get('/api/worker/bootstrap', auth, async (req, res) => res.json(await bootstrap(req.worker.id)))
 

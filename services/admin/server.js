@@ -12,6 +12,9 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, requireRole, publishEvent, tryGet, internalPost, internalPatch } from '@homehelp/shared'
+import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('admin') // refuse to boot without a signing secret rather than issue forgeable sessions
 
 const PORT = Number(process.env.PORT || 4010)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5440/admin'
@@ -135,9 +138,11 @@ app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'admin', ok: true }))
 
 /* ---------- admin identity ---------- */
+// Verifies a SIGNED token. Previously this parsed the id straight out of the string, so
+// `Authorization: Bearer admin-1` was a full Super Admin session with no password — the scrypt
+// login below was decorative, because its token could be typed by hand.
 async function admin(req, res, next) {
-  const token = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = token.startsWith('admin-') ? Number(token.slice(6)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'admin')
   const a = Number.isFinite(id) ? await getAdmin(id) : null
   if (!a || a.status !== 'active') return res.status(401).json({ error: 'Not authenticated' })
   req.admin = a
@@ -150,7 +155,7 @@ app.post('/api/admin/login', async (req, res) => {
   if (a.status !== 'active') return res.status(403).json({ error: 'Account disabled' })
   await pool.query('UPDATE admins SET last_login=now() WHERE id=$1', [a.id])
   await logAudit(a.email, 'login')
-  res.json({ token: 'admin-' + a.id, admin: publicAdmin(a) })
+  res.json({ token: signToken('admin', a.id, { role: a.role }), admin: publicAdmin(a) })
 })
 app.get('/api/admin/me', admin, (req, res) => res.json({ admin: publicAdmin(req.admin) }))
 
