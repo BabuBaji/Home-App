@@ -206,6 +206,8 @@ export interface WorkerPay {
   pfApplicable: boolean; esiApplicable: boolean; tdsApplicable: boolean
   salaryPaymentMode: 'bank' | 'upi'
   statutory: { pfPercent: number; pfWageCeiling: number; esiPercent: number; esiWageCeiling: number; tdsPercent: number }
+  /** Set by the server when the caller lacks workers.pay_view — every amount above is withheld. */
+  masked?: boolean
 }
 
 /* Job radius & coverage. allowOutsideRadius=true (the default and today's behaviour) leaves zone a

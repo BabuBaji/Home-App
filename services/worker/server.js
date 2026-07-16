@@ -47,6 +47,19 @@ async function scopeWorker(req, res, next) {
   next()
 }
 
+// Field-level masking: pay/salary values are only for admins holding workers.pay_view (super always).
+// Everyone else sees the worker but with the money withheld — the record is visible, the figures are
+// not. Masking is server-side, so the values never reach the client to be read off the network.
+const canViewPay = (req) => req.admin?.role === 'super' || (req.admin?.permissions || []).includes('workers.pay_view')
+const PAY_ROW_FIELDS = ['salary_basic', 'salary_attendance', 'salary_allowance', 'commission_percent']
+const maskPayRow = (w, can) => {
+  if (can || !w) return w
+  const out = { ...w }
+  for (const f of PAY_ROW_FIELDS) if (f in out) out[f] = null
+  out.payMasked = true
+  return out
+}
+
 async function init() {
   await migrate(pool, [
     `CREATE TABLE IF NOT EXISTS workers (
@@ -2987,6 +3000,8 @@ app.patch('/api/admin/incentive-rules/:id', adminAuth, requirePerm('comp_rules.e
 app.get('/api/admin/workers/:id/pay', adminAuth, scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
+  // Field masking: without workers.pay_view, withhold every amount. Non-sensitive settings only.
+  if (!canViewPay(req)) return res.json({ ok: true, masked: true, walletEnabled: w.wallet_enabled !== false, salaryPaymentMode: w.salary_payment_mode || 'bank' })
   const { pct, source, plan, platform } = await resolveCommission(w)
   const plans = (await pool.query('SELECT * FROM salary_plans WHERE active=true ORDER BY sort, id')).rows
   const incPlans = (await pool.query('SELECT * FROM incentive_plans WHERE active=true ORDER BY sort, id')).rows
@@ -3756,7 +3771,11 @@ app.get('/api/worker/documents/:id/url', auth, async (req, res) => {
 })
 
 /* ---------- admin worker management ---------- */
-app.get('/api/admin/workers', adminAuth, async (req, res) => res.json({ stats: await workerStats(req.admin?.scope), workers: await listWorkers(req.query, req.admin?.scope) }))
+app.get('/api/admin/workers', adminAuth, async (req, res) => {
+  const can = canViewPay(req)
+  const workers = (await listWorkers(req.query, req.admin?.scope)).map((w) => maskPayRow(w, can))
+  res.json({ stats: await workerStats(req.admin?.scope), workers })
+})
 // `name` is what bookings/dispatch/both apps read, so it stays authoritative and is derived from
 // first+last when those are supplied. A caller sending only `name` (the old shape) still works.
 const fullName = (b) => [b.first_name, b.last_name].filter(Boolean).join(' ').trim() || String(b.name || '').trim()

@@ -7,6 +7,7 @@ import {
 } from '../api'
 import type { GoLiveChecklist, WorkerPay, WorkerEquipmentState, CheckState, BackgroundState, BackgroundItem, BgStatus } from '../types'
 import { Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast, useConfirm, shortDate } from '../components/UI'
+import { useStore, has } from '../store'
 
 /* Phase 12 — final approval, plus the Phase 9/10 setup it depends on.
  *
@@ -29,6 +30,8 @@ const ICON: Record<CheckState, JSX.Element> = {
 export default function WorkerApproval({ workerId, onChanged }: { workerId: number; onChanged?: () => void }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const { admin } = useStore()
+  const canEditPay = has(admin, 'workers.pay_edit')
   const [c, setC] = useState<GoLiveChecklist | null>(null)
   const [pay, setPay] = useState<WorkerPay | null>(null)
   const [eq, setEq] = useState<WorkerEquipmentState | null>(null)
@@ -48,7 +51,7 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
     Promise.all([fetchChecklist(workerId), fetchWorkerPay(workerId), fetchWorkerEquipment(workerId), fetchBackground(workerId)])
       .then(([a, b, d, g]) => {
         setC(a); setPay(b); setEq(d); setBg(g)
-        setCommission(b.commissionPercent === null ? '' : String(b.commissionPercent))
+        setCommission(b.commissionPercent == null ? '' : String(b.commissionPercent))
       })
       .catch((e: Error) => setErr(e.message))
   }
@@ -205,22 +208,31 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <Field label={`Commission % (blank = platform default, ${pay.platformCommissionPercent}%)`}>
-            <input value={commission} onChange={(e) => setCommission(e.target.value)} placeholder={String(pay.platformCommissionPercent)} style={{ width: 120 }} />
-          </Field>
-          <button className="btn line" onClick={saveCommission}>Save</button>
-          <div style={{ fontSize: 12.5, paddingBottom: 8 }}>
-            The worker keeps <strong>{100 - pay.effectiveCommissionPercent}%</strong> of each job
-            {pay.commissionPercent === null && <span className="muted"> (inherited)</span>}
+        {pay.masked ? (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+            <span style={{ fontFamily: 'monospace', letterSpacing: 2, fontSize: 16 }}>••••••</span>
+            <span className="muted">Pay figures are hidden — your role doesn't include the “View pay &amp; salary” permission.</span>
           </div>
-        </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, cursor: 'pointer' }}>
-          <input type="checkbox" checked={pay.walletEnabled} onChange={(e) => savePay({ walletEnabled: e.target.checked })} />
-          <span style={{ fontSize: 13 }}>
-            Wallet enabled — <span className="muted">when off, withdrawals are blocked. Earnings still accrue; it holds money in, it doesn't take it away.</span>
-          </span>
-        </label>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <Field label={`Commission % (blank = platform default, ${pay.platformCommissionPercent}%)`}>
+                <input value={commission} onChange={(e) => setCommission(e.target.value)} placeholder={String(pay.platformCommissionPercent)} style={{ width: 120 }} disabled={!canEditPay} />
+              </Field>
+              {canEditPay && <button className="btn line" onClick={saveCommission}>Save</button>}
+              <div style={{ fontSize: 12.5, paddingBottom: 8 }}>
+                The worker keeps <strong>{100 - pay.effectiveCommissionPercent}%</strong> of each job
+                {pay.commissionPercent === null && <span className="muted"> (inherited)</span>}
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, cursor: canEditPay ? 'pointer' : 'default' }}>
+              <input type="checkbox" checked={pay.walletEnabled} disabled={!canEditPay} onChange={(e) => savePay({ walletEnabled: e.target.checked })} />
+              <span style={{ fontSize: 13 }}>
+                Wallet enabled — <span className="muted">when off, withdrawals are blocked. Earnings still accrue; it holds money in, it doesn't take it away.</span>
+              </span>
+            </label>
+          </>
+        )}
       </Card>
 
       <Card>
