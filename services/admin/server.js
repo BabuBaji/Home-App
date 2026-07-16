@@ -531,6 +531,15 @@ const ACTIONS = {
     summarize: (p, amt) => `Refund booking #${p.bookingId} — ₹${amt}`,
     execute: async (p) => { await internalPost(U.booking, `/api/internal/bookings/${p.bookingId}/refund`, {}); return { ok: true } },
   },
+  'worker.pay_change': {
+    label: 'Worker pay change',
+    perm: 'workers.pay_edit',
+    // Threshold on the fixed salary being set; a commission/plan/wallet-only change has amount 0
+    // (so it needs approval only when the threshold is 0 = "approve all pay changes").
+    amountOf: (p) => (Number(p.body?.salaryBasic) || 0) + (Number(p.body?.salaryAttendance) || 0) + (Number(p.body?.salaryAllowance) || 0),
+    summarize: (p, amt) => `Change pay for worker #${p.workerId}${amt ? ` — salary ₹${amt}/mo` : ''}`,
+    execute: (p) => internalPost(U.worker, `/internal/workers/${p.workerId}/pay`, { ...(p.body || {}), _actor: p.actor }),
+  },
 }
 const ACTION_KEYS = Object.keys(ACTIONS)
 const DEFAULT_REVIEWER_PERM = 'approvals.review'
@@ -652,6 +661,9 @@ app.post('/api/admin/approvals/:id/reject', admin, requirePerm('approvals.review
 // Refund entry point routed through the matrix (frontend calls this instead of the payment route).
 app.post('/api/admin/actions/refund', admin, async (req, res) =>
   submitAction('refund.issue', { bookingId: Number(req.body?.bookingId) }, req, res))
+// Worker pay change routed through the matrix (the worker service's PATCH /pay forwards here).
+app.post('/api/admin/actions/worker-pay', admin, async (req, res) =>
+  submitAction('worker.pay_change', { workerId: Number(req.body?.workerId), body: req.body?.body || {}, actor: req.admin?.name || req.admin?.email }, req, res))
 
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
 // Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).

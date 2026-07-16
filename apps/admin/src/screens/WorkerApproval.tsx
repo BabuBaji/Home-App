@@ -71,8 +71,11 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
   }
 
   const savePay = async (body: { commissionPercent?: number | null; walletEnabled?: boolean }) => {
-    try { const p = await updateWorkerPay(workerId, body); setPay(p); setCommission(p.commissionPercent === null ? '' : String(p.commissionPercent)); load(); toast('Saved') }
-    catch (e) { toast((e as Error).message, 'err') }
+    try {
+      const res = await updateWorkerPay(workerId, body)
+      toast(res.pending ? 'Sent for approval — a second admin must sign off' : 'Saved')
+      load() // refresh pay + commission from the server (covers both executed and pending)
+    } catch (e) { toast((e as Error).message, 'err') }
   }
 
   const saveCommission = () => {

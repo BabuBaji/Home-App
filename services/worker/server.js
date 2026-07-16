@@ -3041,23 +3041,24 @@ app.get('/api/admin/workers/:id/pay', adminAuth, scopeWorker, async (req, res) =
   })
 })
 
-app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit'), scopeWorker, async (req, res) => {
-  const id = Number(req.params.id)
+// Validate + apply a worker pay change. Shared by the admin PATCH (which routes the change through
+// the approval matrix) and the internal sink the matrix executor calls. `_actor` (a display name,
+// not a pay field) attributes the activity event. validateOnly runs the checks without writing —
+// the maker route uses it for immediate feedback even when the change will be queued for sign-off.
+// Returns { error, status } on a bad request, { ok } (validateOnly), or { ok, dto } on success.
+async function applyPayChange(id, b = {}, { validateOnly = false } = {}) {
   const w = await getWorker(id)
-  if (!w) return res.status(404).json({ error: 'Worker not found' })
-  const b = req.body || {}
+  if (!w) return { error: 'Worker not found', status: 404 }
   const before = (await resolveCommission(w)).pct
   let pct = w.commission_percent
   let planId = w.salary_plan_id ?? null
-
-  // A plan and a manual rate are mutually exclusive: setting either clears the other, so there is
-  // never a worker carrying two different answers to "what is your commission?".
+  // A plan and a manual rate are mutually exclusive: setting either clears the other.
   if (b.salaryPlanId !== undefined) {
     planId = b.salaryPlanId === null || b.salaryPlanId === '' ? null : Number(b.salaryPlanId)
     if (planId !== null) {
       const plan = (await pool.query('SELECT * FROM salary_plans WHERE id=$1', [planId])).rows[0]
-      if (!plan) return res.status(400).json({ error: 'Unknown salary plan' })
-      if (!plan.active) return res.status(400).json({ error: 'That plan is retired — pick an active one' })
+      if (!plan) return { error: 'Unknown salary plan', status: 400 }
+      if (!plan.active) return { error: 'That plan is retired — pick an active one', status: 400 }
       pct = null
     }
   }
@@ -3065,29 +3066,27 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit
     if (b.commissionPercent === null || b.commissionPercent === '') pct = null
     else {
       pct = Number(b.commissionPercent)
-      if (!Number.isInteger(pct) || pct < 0 || pct > 100) return res.status(400).json({ error: 'Commission must be a whole number between 0 and 100' })
-      planId = null // a hand-typed rate takes this worker off their plan, deliberately
+      if (!Number.isInteger(pct) || pct < 0 || pct > 100) return { error: 'Commission must be a whole number between 0 and 100', status: 400 }
+      planId = null
     }
   }
   const walletEnabled = b.walletEnabled !== undefined ? !!b.walletEnabled : w.wallet_enabled !== false
-
   let incId = w.incentive_plan_id ?? null
   if (b.incentivePlanId !== undefined) {
     incId = b.incentivePlanId === null || b.incentivePlanId === '' ? null : Number(b.incentivePlanId)
     if (incId !== null) {
       const ip = (await pool.query('SELECT id, active FROM incentive_plans WHERE id=$1', [incId])).rows[0]
-      if (!ip) return res.status(400).json({ error: 'Unknown incentive plan' })
-      if (!ip.active) return res.status(400).json({ error: 'That incentive plan is retired — pick an active one' })
+      if (!ip) return { error: 'Unknown incentive plan', status: 400 }
+      if (!ip.active) return { error: 'That incentive plan is retired — pick an active one', status: 400 }
     }
   }
   let effFrom = w.salary_effective_from
   if (b.salaryEffectiveFrom !== undefined) {
     effFrom = b.salaryEffectiveFrom || null
-    if (effFrom && Number.isNaN(new Date(effFrom).getTime())) return res.status(400).json({ error: 'Effective from must be a valid date' })
+    if (effFrom && Number.isNaN(new Date(effFrom).getTime())) return { error: 'Effective from must be a valid date', status: 400 }
   }
   const mode = b.salaryPaymentMode !== undefined ? String(b.salaryPaymentMode) : (w.salary_payment_mode || 'bank')
-  if (!['bank', 'upi'].includes(mode)) return res.status(400).json({ error: 'Payment mode must be bank or upi' })
-  // Per-worker salary amounts. '' / null clears the override (back to the plan); a number sets it.
+  if (!['bank', 'upi'].includes(mode)) return { error: 'Payment mode must be bank or upi', status: 400 }
   const amount = (v, cur) => {
     if (v === undefined) return cur
     if (v === null || v === '') return null
@@ -3098,11 +3097,12 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit
   const sBasic = amount(b.salaryBasic, w.salary_basic)
   const sAtt = amount(b.salaryAttendance, w.salary_attendance)
   const sAllow = amount(b.salaryAllowance, w.salary_allowance)
-  if ([sBasic, sAtt, sAllow].some(Number.isNaN)) return res.status(400).json({ error: 'Salary amounts must be whole rupee values' })
+  if ([sBasic, sAtt, sAllow].some(Number.isNaN)) return { error: 'Salary amounts must be whole rupee values', status: 400 }
   const flag = (k, col) => (b[k] !== undefined ? !!b[k] : !!w[col])
   const pf = flag('pfApplicable', 'pf_applicable')
   const esi = flag('esiApplicable', 'esi_applicable')
   const tds = flag('tdsApplicable', 'tds_applicable')
+  if (validateOnly) return { ok: true }
 
   await pool.query(
     `UPDATE workers SET commission_percent=$1, salary_plan_id=$2, wallet_enabled=$3, incentive_plan_id=$4,
@@ -3111,7 +3111,7 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit
      WHERE id=$13`,
     [pct, planId, walletEnabled, incId, effFrom, pf, esi, tds, mode, sBasic, sAtt, sAllow, id])
 
-  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const who = b._actor || 'Admin'
   const after = await resolveCommission(await getWorker(id))
   const platform = after.platform
   const bits = []
@@ -3119,17 +3119,11 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit
   if (b.commissionPercent !== undefined) bits.push(pct === null ? `commission back to the platform default (${platform}%)` : `commission ${pct}%`)
   if (b.walletEnabled !== undefined && walletEnabled !== (w.wallet_enabled !== false)) bits.push(walletEnabled ? 'wallet enabled' : 'wallet disabled')
   if (bits.length) publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'worker.pay', entityType: 'worker', entityId: id, detail: `${w.name}: ${bits.join(', ')}` })
-
-  // Compare the RESOLVED rates, not the raw columns: moving someone onto a plan leaves
-  // commission_percent NULL, so a column comparison would miss a real change to their take-home.
-  if (after.pct !== before) {
-    publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Your earnings rate changed', body: `You now keep ${100 - after.pct}% of each job.` })
-  }
-  if (b.walletEnabled !== undefined && !walletEnabled && w.wallet_enabled !== false) {
-    publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Withdrawals paused', body: 'Your wallet has been put on hold. Please contact the admin.' })
-  }
+  // Compare the RESOLVED rates, not raw columns: moving onto a plan leaves commission_percent NULL.
+  if (after.pct !== before) publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Your earnings rate changed', body: `You now keep ${100 - after.pct}% of each job.` })
+  if (b.walletEnabled !== undefined && !walletEnabled && w.wallet_enabled !== false) publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Withdrawals paused', body: 'Your wallet has been put on hold. Please contact the admin.' })
   const fresh = await getWorker(id)
-  res.json({
+  return { ok: true, dto: {
     ok: true,
     commissionPercent: fresh.commission_percent,
     salaryPlanId: fresh.salary_plan_id ?? null,
@@ -3138,7 +3132,30 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit
     effectiveCommissionPercent: after.pct,
     commissionSource: after.source,
     walletEnabled: fresh.wallet_enabled !== false,
-  })
+  } }
+}
+
+// Maker route: validate up front (immediate feedback), then route the change through the approval
+// matrix in the admin service — which executes it now or queues it for a second admin's sign-off.
+app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit'), scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const pre = await applyPayChange(id, req.body || {}, { validateOnly: true })
+  if (pre.error) return res.status(pre.status || 400).json({ error: pre.error })
+  try {
+    const r = await fetch(`${ADMIN_URL}/api/admin/actions/worker-pay`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: req.headers.authorization || '' },
+      body: JSON.stringify({ workerId: id, body: req.body || {} }),
+    })
+    res.status(r.status).json(await r.json().catch(() => ({})))
+  } catch { res.status(502).json({ error: 'Approval service unavailable' }) }
+})
+
+// Internal sink the approval-matrix executor calls to actually apply the change (post-decision).
+app.post('/internal/workers/:id/pay', internalOnly, async (req, res) => {
+  const r = await applyPayChange(Number(req.params.id), req.body || {})
+  if (r.error) return res.status(r.status || 400).json({ error: r.error })
+  res.json(r.dto)
 })
 
 /** How the wallet settles this worker. The commission lives here because the worker service owns

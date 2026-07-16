@@ -167,8 +167,9 @@ export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; i
 /* per-worker pay (Phase 10). The wallet reads commissionPercent when it settles a job — changing
    it changes what the worker is actually paid, so it isn't a display setting. */
 export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
+// Routed through the approval matrix — executes now or is queued for a second admin's sign-off.
 export const updateWorkerPay = (id: number, body: Record<string, unknown>) =>
-  req<WorkerPay>(`/workers/${id}/pay`, patch(body))
+  req<ActionResult>(`/workers/${id}/pay`, patch(body))
 
 /* job radius & coverage. Restricting a worker makes their zone a filter in dispatch rather than a
    ranking preference — this is the setting that makes "only jobs in your zone" actually true. */
