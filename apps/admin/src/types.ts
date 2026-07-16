@@ -4,9 +4,12 @@ export interface Admin {
   // authoritative list the whole UI gates on; `role` is kept for display + the super fast-path.
   role: string
   permissions?: string[]
-  // Data scope — 'all' (unrestricted), or 'city'/'zone' with scopeValues = city names / zone ids.
-  scopeType?: 'all' | 'city' | 'zone'
+  // Data scope — 'all' (unrestricted), 'city'/'zone' with scopeValues, or 'team' (roll-up from reports).
+  scopeType?: 'all' | 'city' | 'zone' | 'team'
   scopeValues?: (string | number)[]
+  // Org hierarchy: who this admin reports to, and their EFFECTIVE scope (own + rolled-up reports).
+  reportsTo?: number | null
+  effectiveScope?: { type: string; zoneIds: number[] | null; cities: string[] | null }
   status: string; avatar?: string | null; last_login?: string | null; created: string
 }
 

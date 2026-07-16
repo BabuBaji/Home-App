@@ -105,6 +105,9 @@ async function init() {
     // scope_values are zone ids. Resolved into req.admin.scope and enforced on the list endpoints.
     `ALTER TABLE admins ADD COLUMN IF NOT EXISTS scope_type TEXT NOT NULL DEFAULT 'all'`,
     `ALTER TABLE admins ADD COLUMN IF NOT EXISTS scope_values JSONB NOT NULL DEFAULT '[]'::jsonb`,
+    // Org hierarchy: who this admin reports to. A manager's effective scope rolls up the union of
+    // their (transitive) reports' scopes, so a regional manager auto-sees their team's territory.
+    `ALTER TABLE admins ADD COLUMN IF NOT EXISTS reports_to INTEGER`,
     // Approval matrix. One rule per registered action: whether it needs approval, above what ₹
     // threshold, who may approve (reviewer_perm) and how many approvers. Disabled by default, so
     // nothing changes until an admin turns a rule on.
@@ -179,7 +182,7 @@ async function init() {
 }
 
 /* ---------- data helpers ---------- */
-const publicAdmin = (a) => a && ({ id: a.id, name: a.name, email: a.email, phone: a.phone, role: a.role, status: a.status, avatar: a.avatar, last_login: a.last_login, created: a.created, scopeType: a.scope_type || 'all', scopeValues: a.scope_values || [] })
+const publicAdmin = (a) => a && ({ id: a.id, name: a.name, email: a.email, phone: a.phone, role: a.role, status: a.status, avatar: a.avatar, last_login: a.last_login, created: a.created, scopeType: a.scope_type || 'all', scopeValues: a.scope_values || [], reportsTo: a.reports_to ?? null })
 
 // Zones snapshot (id → city), cached briefly, used only to resolve a scoped admin's scope. A city
 // contains zones (zones.city is a string), so this maps between the two geographic keys.
@@ -190,20 +193,38 @@ async function getZonesSnapshot() {
   if (Array.isArray(list) && list.length) zonesSnap = { at: Date.now(), list }
   return zonesSnap.list
 }
-/** Resolve an admin's stored scope into { type, zoneIds, cities } — both keys populated so every
- *  service can filter whatever geographic column its rows carry. Empty scope → unrestricted. */
-async function resolveScope(a) {
+/** Resolve an admin's EFFECTIVE scope into { type, zoneIds, cities } — both keys populated so every
+ *  service can filter whatever geographic column its rows carry. 'all' → unrestricted. Otherwise it
+ *  rolls up: this admin's own territory PLUS the union of everyone reporting to them (transitively),
+ *  so a manager automatically sees their whole team's scope. 'team' = pure roll-up (no own turf).
+ *  Cycle-safe. `roster` (all admin rows) can be passed to avoid re-querying (used by the list). */
+async function resolveScope(a, roster) {
   const type = a.scope_type || 'all'
-  const values = Array.isArray(a.scope_values) ? a.scope_values : []
-  if (type === 'all' || !values.length) return { type: 'all', zoneIds: null, cities: null }
-  const zones = await getZonesSnapshot()
-  if (type === 'city') {
-    const cities = values.map(String)
-    return { type: 'city', cities, zoneIds: zones.filter((z) => cities.includes(z.city)).map((z) => z.id) }
+  if (type === 'all') return { type: 'all', zoneIds: null, cities: null }
+  const all = roster || (await pool.query('SELECT id, reports_to, scope_type, scope_values FROM admins')).rows
+  const byId = new Map(all.map((r) => [r.id, r]))
+  const children = new Map()
+  for (const r of all) if (r.reports_to != null) { if (!children.has(r.reports_to)) children.set(r.reports_to, []); children.get(r.reports_to).push(r.id) }
+  const cities = new Set(), zoneIds = new Set(), seen = new Set()
+  const stack = [a.id]
+  while (stack.length) {
+    const id = stack.pop()
+    if (seen.has(id)) continue
+    seen.add(id)
+    const node = id === a.id ? a : byId.get(id)
+    if (node) {
+      const st = node.scope_type || 'all'
+      const vals = Array.isArray(node.scope_values) ? node.scope_values : []
+      if (st === 'city') vals.forEach((c) => cities.add(String(c)))
+      else if (st === 'zone') vals.forEach((z) => zoneIds.add(Number(z))) // 'all'/'team' add no turf of their own
+    }
+    for (const c of (children.get(id) || [])) stack.push(c)
   }
-  const zoneIds = values.map(Number)
-  const cities = [...new Set(zones.filter((z) => zoneIds.includes(z.id)).map((z) => z.city).filter(Boolean))]
-  return { type: 'zone', zoneIds, cities }
+  if (!cities.size && !zoneIds.size) return { type, zoneIds: [], cities: [] } // e.g. a team lead with no scoped reports → sees nothing
+  const zones = await getZonesSnapshot()
+  for (const z of zones) if (cities.has(z.city)) zoneIds.add(z.id)        // cities → their zones
+  for (const z of zones) if (zoneIds.has(z.id) && z.city) cities.add(z.city) // zones → their cities
+  return { type, zoneIds: [...zoneIds], cities: [...cities] }
 }
 
 // Resolved permission keys per role, cached in-process. This is the ONE place authorization is
@@ -297,21 +318,45 @@ app.patch('/api/admin/settings', admin, requirePerm('settings.edit'), async (req
 
 /* ---------- admins management ---------- */
 app.get('/api/admin/admins', admin, requirePerm('admins.view'), async (_q, res) => {
-  const { rows } = await pool.query('SELECT id,name,email,phone,role,status,avatar,last_login,created, scope_type AS "scopeType", scope_values AS "scopeValues" FROM admins ORDER BY id')
-  res.json(rows)
+  const roster = (await pool.query('SELECT * FROM admins ORDER BY id')).rows
+  const out = []
+  for (const a of roster) out.push({ ...publicAdmin(a), effectiveScope: await resolveScope(a, roster) })
+  res.json(out)
 })
 // Validate a scope payload from the admin form. Returns { scopeType, scopeValues } or { error }.
+// 'team' = no own territory; the effective scope rolls up from this admin's reports.
 function readScope(b, fallback = { scope_type: 'all', scope_values: [] }) {
   if (b.scopeType === undefined && b.scopeValues === undefined) return { scopeType: fallback.scope_type, scopeValues: fallback.scope_values }
   const scopeType = String(b.scopeType || 'all')
-  if (!['all', 'city', 'zone'].includes(scopeType)) return { error: 'Scope must be all, city or zone' }
+  if (!['all', 'city', 'zone', 'team'].includes(scopeType)) return { error: 'Scope must be all, city, zone or team' }
   let scopeValues = Array.isArray(b.scopeValues) ? b.scopeValues : []
-  if (scopeType === 'all') scopeValues = []
+  if (scopeType === 'all' || scopeType === 'team') scopeValues = []
   else {
     scopeValues = scopeType === 'zone' ? scopeValues.map(Number).filter((n) => Number.isFinite(n)) : scopeValues.map(String).filter(Boolean)
     if (!scopeValues.length) return { error: `Pick at least one ${scopeType} for the scope` }
   }
   return { scopeType, scopeValues }
+}
+// Prevent reporting cycles: walking up from the proposed manager must never reach the admin itself.
+async function reportsToCycles(adminId, managerId) {
+  if (!managerId) return false
+  if (Number(managerId) === Number(adminId)) return true
+  let cur = Number(managerId), guard = 0
+  while (cur != null && guard++ < 200) {
+    if (Number(cur) === Number(adminId)) return true
+    cur = (await pool.query('SELECT reports_to FROM admins WHERE id=$1', [cur])).rows[0]?.reports_to
+  }
+  return false
+}
+// Validate an optional reports_to on create/update. Returns { reportsTo } or { error }.
+async function readReportsTo(b, adminId) {
+  if (b.reportsTo === undefined) return { skip: true }
+  if (b.reportsTo === null || b.reportsTo === '') return { reportsTo: null }
+  const mgr = Number(b.reportsTo)
+  if (!Number.isFinite(mgr)) return { error: 'Invalid manager' }
+  if (!(await getAdmin(mgr))) return { error: 'That manager does not exist' }
+  if (adminId && await reportsToCycles(adminId, mgr)) return { error: 'That would create a reporting cycle' }
+  return { reportsTo: mgr }
 }
 // A new/edited admin must land on a role that actually exists and is active — otherwise they'd
 // authenticate with an empty permission set and every screen would 403 with no explanation.
@@ -329,10 +374,12 @@ app.post('/api/admin/admins', admin, requirePerm('admins.create'), async (req, r
   if (roleErr) return res.status(400).json({ error: roleErr })
   const scope = readScope(b)
   if (scope.error) return res.status(400).json({ error: scope.error })
+  const rt = await readReportsTo(b, null)
+  if (rt.error) return res.status(400).json({ error: rt.error })
   try {
     const { rows } = await pool.query(
-      'INSERT INTO admins (name,email,phone,pass_hash,role,status,scope_type,scope_values) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *',
-      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), roleKey, b.status || 'active', scope.scopeType, JSON.stringify(scope.scopeValues)])
+      'INSERT INTO admins (name,email,phone,pass_hash,role,status,scope_type,scope_values,reports_to) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) RETURNING *',
+      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), roleKey, b.status || 'active', scope.scopeType, JSON.stringify(scope.scopeValues), rt.skip ? null : rt.reportsTo])
     await logAudit(req.admin.email, 'admin.create', b.email)
     res.status(201).json(publicAdmin(rows[0]))
   } catch { res.status(409).json({ error: 'Email already exists' }) }
@@ -346,14 +393,21 @@ app.patch('/api/admin/admins/:id', admin, requirePerm('admins.edit'), async (req
   }
   const scope = readScope(b, a)
   if (scope.error) return res.status(400).json({ error: scope.error })
-  await pool.query('UPDATE admins SET name=$1,phone=$2,role=$3,status=$4,scope_type=$5,scope_values=$6::jsonb WHERE id=$7',
-    [b.name ?? a.name, b.phone ?? a.phone, b.role ?? a.role, b.status ?? a.status, scope.scopeType, JSON.stringify(scope.scopeValues), a.id])
+  const rt = await readReportsTo(b, a.id)
+  if (rt.error) return res.status(400).json({ error: rt.error })
+  const reportsTo = rt.skip ? a.reports_to : rt.reportsTo
+  await pool.query('UPDATE admins SET name=$1,phone=$2,role=$3,status=$4,scope_type=$5,scope_values=$6::jsonb,reports_to=$7 WHERE id=$8',
+    [b.name ?? a.name, b.phone ?? a.phone, b.role ?? a.role, b.status ?? a.status, scope.scopeType, JSON.stringify(scope.scopeValues), reportsTo, a.id])
   if (b.password) await pool.query('UPDATE admins SET pass_hash=$1 WHERE id=$2', [hashPw(b.password), a.id])
   await logAudit(req.admin.email, 'admin.update', a.email)
   res.json(publicAdmin(await getAdmin(a.id)))
 })
 app.delete('/api/admin/admins/:id', admin, requirePerm('admins.delete'), async (req, res) => {
-  await pool.query('DELETE FROM admins WHERE id=$1', [Number(req.params.id)])
+  const id = Number(req.params.id)
+  // Re-parent this admin's reports up to the deleted admin's own manager, so the tree stays intact.
+  const gone = await getAdmin(id)
+  await pool.query('UPDATE admins SET reports_to=$1 WHERE reports_to=$2', [gone?.reports_to ?? null, id])
+  await pool.query('DELETE FROM admins WHERE id=$1', [id])
   await logAudit(req.admin.email, 'admin.delete', req.params.id)
   res.json({ ok: true })
 })

@@ -26,8 +26,8 @@ const ACTIVITY_ICON = (action: string) => {
   return UserPlus
 }
 
-type ScopeType = 'all' | 'city' | 'zone'
-const blank = { name: '', email: '', phone: '', role: 'support', status: 'active', password: '', scopeType: 'all' as ScopeType, scopeValues: [] as (string | number)[] }
+type ScopeType = 'all' | 'city' | 'zone' | 'team'
+const blank = { name: '', email: '', phone: '', role: 'support', status: 'active', password: '', scopeType: 'all' as ScopeType, scopeValues: [] as (string | number)[], reportsTo: '' }
 
 export default function Admins() {
   const toast = useToast()
@@ -65,12 +65,16 @@ export default function Admins() {
   const assignableRoles = roles.filter((r) => r.active)
   const cityOptions = [...new Set(zones.map((z) => z.city).filter(Boolean))].sort()
   const zoneName = (id: number | string) => zones.find((z) => z.id === Number(id))?.name || `Zone ${id}`
-  const scopeSummary = (a: Admin) => {
-    if (!a.scopeType || a.scopeType === 'all') return 'All'
-    const vals = a.scopeValues || []
-    if (!vals.length) return 'All'
-    const labels = a.scopeType === 'zone' ? vals.map(zoneName) : vals.map(String)
-    return labels.length <= 2 ? labels.join(', ') : `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`
+  const adminName = (id: number) => (rows || []).find((a) => a.id === id)?.name || `#${id}`
+  const compact = (labels: string[]) => (labels.length <= 2 ? labels.join(', ') : `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`)
+  // Effective scope = own turf + everything rolled up from this admin's reports.
+  const effLabel = (a: Admin) => {
+    const e = a.effectiveScope
+    if (!e || e.type === 'all') return 'All'
+    const cities = e.cities || []
+    const zids = e.zoneIds || []
+    if (!cities.length && !zids.length) return 'None'
+    return compact(cities.length ? cities : zids.map(zoneName))
   }
 
   const set = (k: keyof typeof blank, v: string) => setForm((p) => ({ ...p, [k]: v }))
@@ -80,7 +84,7 @@ export default function Admins() {
   async function submitAdd() {
     setBusy(true)
     try {
-      await createAdminUser({ name: form.name, email: form.email, phone: form.phone, role: form.role, password: form.password, scopeType: form.scopeType, scopeValues: form.scopeValues })
+      await createAdminUser({ name: form.name, email: form.email, phone: form.phone, role: form.role, password: form.password, scopeType: form.scopeType, scopeValues: form.scopeValues, reportsTo: form.reportsTo ? Number(form.reportsTo) : null })
       toast('Admin user created'); setAdding(false); load()
     } catch (e: any) { toast(e.message, 'err') } finally { setBusy(false) }
   }
@@ -88,7 +92,7 @@ export default function Admins() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateAdminUser(editing.id, { name: form.name, phone: form.phone, role: form.role, status: form.status, scopeType: form.scopeType, scopeValues: form.scopeValues })
+      await updateAdminUser(editing.id, { name: form.name, phone: form.phone, role: form.role, status: form.status, scopeType: form.scopeType, scopeValues: form.scopeValues, reportsTo: form.reportsTo ? Number(form.reportsTo) : null })
       toast('Admin user updated'); setEditing(null); load()
     } catch (e: any) { toast(e.message, 'err') } finally { setBusy(false) }
   }
@@ -105,7 +109,7 @@ export default function Admins() {
     try { await deleteAdminUser(a.id); toast('Admin user deleted'); load() } catch (e: any) { toast(e.message, 'err') }
   }
 
-  const openEdit = (a: Admin) => { setForm({ name: a.name, email: a.email, phone: a.phone || '', role: a.role, status: a.status || 'active', password: '', scopeType: a.scopeType || 'all', scopeValues: a.scopeValues || [] }); setEditing(a) }
+  const openEdit = (a: Admin) => { setForm({ name: a.name, email: a.email, phone: a.phone || '', role: a.role, status: a.status || 'active', password: '', scopeType: a.scopeType || 'all', scopeValues: a.scopeValues || [], reportsTo: a.reportsTo ? String(a.reportsTo) : '' }); setEditing(a) }
 
   // hooks must run before any early return
   const filtered = useMemo(() => {
@@ -185,9 +189,13 @@ export default function Admins() {
                     <td><Badge tone={roleTone(r.role)} dot={false}>{roleLabel(r.role)}</Badge></td>
                     <td className="muted">{r.email}</td>
                     <td className="muted">{r.phone || '—'}</td>
-                    <td>{(!r.scopeType || r.scopeType === 'all')
-                      ? <span className="muted">All</span>
-                      : <Badge tone="blue" dot={false}>{r.scopeType === 'city' ? 'City' : 'Zone'}: {scopeSummary(r)}</Badge>}</td>
+                    <td>
+                      {(!r.scopeType || r.scopeType === 'all')
+                        ? <span className="muted">All</span>
+                        : <Badge tone="blue" dot={false}>{effLabel(r)}</Badge>}
+                      {r.scopeType === 'team' && <div className="muted" style={{ fontSize: 11 }}>rolled up from reports</div>}
+                      {r.reportsTo ? <div className="muted" style={{ fontSize: 11 }}>↳ reports to {adminName(r.reportsTo)}</div> : null}
+                    </td>
                     <td><Badge tone={active ? 'green' : 'red'}>{active ? 'Active' : 'Inactive'}</Badge></td>
                     <td className="muted">{r.last_login ? shortDate(r.last_login) : '—'}</td>
                     <td><div className="actions" style={{ position: 'relative' }}>
@@ -212,6 +220,12 @@ export default function Admins() {
         </Card>
 
         <div className="col-rail">
+          <Card title="Organization">
+            {rows.length === 0
+              ? <div className="muted" style={{ fontSize: 12.5 }}>No admins yet.</div>
+              : <OrgTree admins={rows} roleLabel={roleLabel} />}
+            <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>A manager sees the combined data scope of everyone below them.</div>
+          </Card>
           <Card title="User Summary">
             <Donut data={[
               { label: 'Active', value: activeCount, color: '#16a34a' },
@@ -265,6 +279,12 @@ export default function Admins() {
               </select>
             </Field>
             <Field label="Password"><input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} /></Field>
+            <Field label="Reports to (manager)">
+              <select value={form.reportsTo} onChange={(e) => set('reportsTo', e.target.value)}>
+                <option value="">— None (top level) —</option>
+                {(rows || []).filter((a) => !editing || a.id !== editing.id).map((a) => <option key={a.id} value={a.id}>{a.name} · {roleLabel(a.role)}</option>)}
+              </select>
+            </Field>
             <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} onType={setScopeType} onToggle={toggleScopeValue} />
           </div>
         </Modal>
@@ -292,6 +312,12 @@ export default function Admins() {
                 <option value="inactive">Inactive</option>
               </select>
             </Field>
+            <Field label="Reports to (manager)">
+              <select value={form.reportsTo} onChange={(e) => set('reportsTo', e.target.value)}>
+                <option value="">— None (top level) —</option>
+                {(rows || []).filter((a) => !editing || a.id !== editing.id).map((a) => <option key={a.id} value={a.id}>{a.name} · {roleLabel(a.role)}</option>)}
+              </select>
+            </Field>
             <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} onType={setScopeType} onToggle={toggleScopeValue} />
           </div>
         </Modal>
@@ -306,6 +332,24 @@ const menuItemStyle: React.CSSProperties = {
   fontSize: 13, fontWeight: 600, color: 'var(--ink-2)',
 }
 
+function OrgTree({ admins, roleLabel }: { admins: Admin[]; roleLabel: (k: string) => string }) {
+  const childrenOf = (pid: number | null) => admins.filter((a) => (a.reportsTo ?? null) === pid).sort((a, b) => a.name.localeCompare(b.name))
+  const renderNode = (a: Admin, depth: number): React.ReactNode => (
+    <div key={a.id}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', paddingLeft: depth * 14, fontSize: 12.5 }}>
+        {depth > 0 && <span className="muted">↳</span>}
+        <strong>{a.name}</strong>
+        <span className="muted" style={{ fontSize: 11 }}>· {roleLabel(a.role)}</span>
+      </div>
+      {childrenOf(a.id).map((c) => renderNode(c, depth + 1))}
+    </div>
+  )
+  // Roots = admins with no manager (or whose manager isn't in the list).
+  const ids = new Set(admins.map((a) => a.id))
+  const roots = admins.filter((a) => !a.reportsTo || !ids.has(a.reportsTo)).sort((a, b) => a.name.localeCompare(b.name))
+  return <div>{roots.map((r) => renderNode(r, 0))}</div>
+}
+
 function ScopePicker({ scopeType, scopeValues, cities, zones, onType, onToggle }:
   { scopeType: ScopeType; scopeValues: (string | number)[]; cities: string[]; zones: Zone[]; onType: (t: ScopeType) => void; onToggle: (v: string | number) => void }) {
   const opts = scopeType === 'city' ? cities.map((c) => ({ v: c as string | number, label: c })) : zones.map((z) => ({ v: z.id as string | number, label: `${z.name} · ${z.city || '—'}` }))
@@ -315,8 +359,9 @@ function ScopePicker({ scopeType, scopeValues, cities, zones, onType, onToggle }
         <option value="all">Entire company — all data</option>
         <option value="city">Specific cities</option>
         <option value="zone">Specific zones</option>
+        <option value="team">Team — roll up from reports</option>
       </select>
-      {scopeType !== 'all' && (
+      {(scopeType === 'city' || scopeType === 'zone') && (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {opts.length === 0 && <span className="muted" style={{ fontSize: 12 }}>No {scopeType === 'city' ? 'cities' : 'zones'} defined yet.</span>}
@@ -331,9 +376,14 @@ function ScopePicker({ scopeType, scopeValues, cities, zones, onType, onToggle }
             })}
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
-            Sees only workers, bookings, live-ops and customers within the selected {scopeType === 'city' ? 'cities' : 'zones'}. Permissions still control what they can do.
+            Own turf: the selected {scopeType === 'city' ? 'cities' : 'zones'}, plus anything rolled up from their reports. Permissions still control what they can do.
           </div>
         </>
+      )}
+      {scopeType === 'team' && (
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+          No territory of their own — this admin automatically sees the combined scope of everyone reporting to them. Set “Reports to” on those admins to build the team.
+        </div>
       )}
     </Field>
   )

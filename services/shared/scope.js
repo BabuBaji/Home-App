@@ -14,7 +14,9 @@ export function inScope(scope, { zoneId = null, city = null } = {}) {
   const zids = scope.zoneIds, cities = scope.cities
   const hasZ = Array.isArray(zids) && zids.length > 0
   const hasC = Array.isArray(cities) && cities.length > 0
-  if (!hasZ && !hasC) return true // misconfigured/empty scope → don't blank the whole panel
+  // A scoped admin whose effective scope is empty (e.g. a team lead with no scoped reports) sees
+  // nothing — 'all' is the only unrestricted type, and it already returned above.
+  if (!hasZ && !hasC) return false
   if (zoneId != null && hasZ) return zids.includes(Number(zoneId))
   if (city && hasC) return cities.includes(city)
   return false
