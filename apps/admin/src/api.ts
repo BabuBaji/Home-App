@@ -114,6 +114,11 @@ export const rejectAdvance = (id: number, adv: number, reason: string) => req<an
 export const generateWorkerPayslip = (id: number, month?: string) => req<any>(`/workers/${id}/wallet/payslip`, post('', { month }))
 export const approveWorkerBank = (id: number) => req<any>(`/workers/${id}/bank/approve`, post(''))
 export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/workers/${id}/bank/reject`, post('', { reason }))
+/* KYC documents. The URL is short-lived and signed — fetch it when the admin clicks View, never
+   store it. A rejection must carry a reason: the worker is told why so they can re-upload. */
+export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)
+export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, reason?: string) =>
+  req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))
 export async function downloadWalletReport() {
   const res = await fetch(API_BASE + '/api/admin/wallet/report.csv', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
   if (!res.ok) throw new Error('Could not export report')

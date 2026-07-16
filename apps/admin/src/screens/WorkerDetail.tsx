@@ -5,7 +5,7 @@ import {
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -209,6 +209,7 @@ export default function WorkerDetail() {
   const [earnQuery, setEarnQuery] = useState('')
   const [incView, setIncView] = useState<WalletTxn | null>(null)
   const [payView, setPayView] = useState<WalletWithdrawal | null>(null)
+  const [docBusy, setDocBusy] = useState<number | null>(null)
   // Advanced filters, behind the "Filters" toggle.
   const [showFilters, setShowFilters] = useState(false)
   const [earnMin, setEarnMin] = useState('')
@@ -244,6 +245,26 @@ export default function WorkerDetail() {
     ...(w.services || []).slice(0, 1),
   ]
   const act = async (patch: Record<string, unknown>, msg: string) => { try { await updateWorker(w.id, patch); toast(msg); load() } catch (e) { toast((e as Error).message) } }
+
+  /* ---- KYC document review ---- */
+  // The signed URL is short-lived, so fetch it on click and open immediately — never hold it in
+  // state, or a stale tab would hand out an expired (or long-lived) link to an identity document.
+  const openDoc = async (docId: number) => {
+    setDocBusy(docId)
+    try { const r = await workerDocUrl(w.id, docId); window.open(r.url, '_blank', 'noopener,noreferrer') }
+    catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
+  }
+  const reviewDoc = async (docId: number, approve: boolean) => {
+    // The server rejects a reasonless rejection, so ask for one here rather than round-trip to fail.
+    let reason = ''
+    if (!approve) {
+      reason = (window.prompt('Why is this document being rejected? The worker sees this message.') || '').trim()
+      if (!reason) return
+    }
+    setDocBusy(docId)
+    try { await reviewWorkerDoc(w.id, docId, approve, reason); toast(approve ? 'Document verified' : 'Document rejected'); load() }
+    catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
+  }
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }
   const softBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card,#fff)', border: '1px solid var(--line,#e4e7ec)', color: 'var(--violet,#5b51e8)', padding: '9px 15px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }
   const dateInput: CSSProperties = { border: '1px solid var(--line,#e4e7ec)', background: 'var(--card,#fff)', borderRadius: 9, padding: '8px 10px', fontSize: 12.5, color: 'var(--ink,#101828)', fontFamily: 'inherit', cursor: 'pointer' }
@@ -472,9 +493,35 @@ export default function WorkerDetail() {
   const documentsPanel = (
     <Panel title={`Documents (${w.documents?.length ?? 0})`}>
       {(w.documents && w.documents.length > 0) ? w.documents.map((d) => (
-        <div key={d.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '5px 0' }}>
-          <span style={{ fontSize: 13 }}>{d.name}</span>
-          <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' || d.status === 'Expired' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
+        <div key={d.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</div>
+              {d.fileName && <div className="muted" style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.fileName}{d.sizeBytes ? ` · ${Math.max(1, Math.round(d.sizeBytes / 1024))} KB` : ''}</div>}
+            </span>
+            <span className="row" style={{ gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {/* Only offer View when a file actually exists — rows written before the storage
+                  pipeline have no object behind them, and a preview that 404s is worse than none. */}
+              {d.hasFile && (
+                <button onClick={() => openDoc(d.id)} disabled={docBusy === d.id} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--violet,#5b51e8)', fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Eye size={13} /> View
+                </button>
+              )}
+              <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' || d.status === 'Expired' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
+            </span>
+          </div>
+          {d.status === 'Rejected' && d.rejectReason && (
+            <div style={{ fontSize: 11.5, color: '#dc2626', marginTop: 2 }}>Rejected: {d.rejectReason}</div>
+          )}
+          {d.status === 'Verified' && d.reviewedBy && (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>Verified by {d.reviewedBy}{d.reviewedAt ? ` · ${shortDate(String(d.reviewedAt).slice(0, 10))}` : ''}</div>
+          )}
+          {d.hasFile && d.status !== 'Verified' && (
+            <div className="row" style={{ gap: 8, marginTop: 6 }}>
+              <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} disabled={docBusy === d.id} onClick={() => reviewDoc(d.id, true)}>Approve</button>
+              <button className="btn line" style={{ padding: '4px 10px', fontSize: 12, color: '#dc2626' }} disabled={docBusy === d.id} onClick={() => reviewDoc(d.id, false)}>Reject</button>
+            </div>
+          )}
         </div>
       )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No documents uploaded.</div>}
     </Panel>

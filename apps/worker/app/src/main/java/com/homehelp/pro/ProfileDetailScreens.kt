@@ -63,6 +63,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -358,14 +359,17 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         val docName = pendingDoc
         if (uri != null && docName != null) {
-            val fileName = pickedFileName(ctx, uri)
-            vm.uploadDocument(docName, fileName)
-            toast(ctx, "$docName uploaded: $fileName")
+            // Hand the Uri over so the BYTES get uploaded. Previously only the display name was
+            // taken and the Uri discarded, so nothing was ever actually sent — and it toasted
+            // "uploaded" before the request had even been made.
+            vm.uploadDocument(ctx, docName, pickedFileName(ctx, uri), uri)
         } else if (docName != null) {
             toast(ctx, "Upload cancelled")
         }
         pendingDoc = null
     }
+    // Report the real outcome (wrong file type, too large, storage unreachable).
+    LaunchedEffect(vm.uploadError) { vm.uploadError?.let { toast(ctx, it); vm.clearUploadError() } }
 
     DetailScaffold("Documents", nav) {
         Card(padding = Dp16.S) {

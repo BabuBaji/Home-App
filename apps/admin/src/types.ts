@@ -39,7 +39,12 @@ export interface Worker {
   }
 }
 
-export interface WorkerDoc { id: number; name: string; fileName?: string; status?: string; created?: string }
+export interface WorkerDoc {
+  id: number; name: string; fileName?: string; status?: string; created?: string
+  // hasFile is false for rows predating the storage pipeline — they have no object to preview.
+  hasFile?: boolean; mime?: string; sizeBytes?: number
+  reviewedBy?: string; reviewedAt?: string | null; rejectReason?: string
+}
 export interface WorkerJob { id: number; ref: string; service: string; status: string; total: number; date?: string; time?: string }
 export interface WorkerMetrics {
   totalJobs: number; completed: number; cancelled: number; todayJobs: number; weekJobs: number

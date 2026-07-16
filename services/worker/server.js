@@ -8,10 +8,14 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import crypto from 'node:crypto'
 import express from 'express'
+import multer from 'multer'
 import {
   makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
   getSettingInt,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: it pulls in the AWS SDK, and only services that
+// actually store files should carry that dependency.
+import { ensureBucket, storageConfigured, sniffType, checksum, storageKey, putObject, signedGetUrl, deleteObject } from '@homehelp/shared/storage.js'
 
 const PORT = Number(process.env.PORT || 4004)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5435/worker'
@@ -102,6 +106,16 @@ async function init() {
       lat REAL NOT NULL, lng REAL NOT NULL, radius INTEGER NOT NULL DEFAULT 300,
       active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ DEFAULT now()
     )`,
+    // KYC document storage. `file_name` stays the worker's display label; `storage_key` is the
+    // real object in S3/MinIO. Review columns give the admin an actual approve/reject trail —
+    // before this, `status` was written only by its DEFAULT and could never leave 'Pending'.
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS storage_key TEXT`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS mime TEXT`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS size_bytes INTEGER`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS checksum TEXT`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reject_reason TEXT`,
     // Login OTPs. Stored HASHED with an expiry and an attempt counter — the code itself never
     // rests in the database, and one row per phone means a new request invalidates the previous
     // code. Rows are disposable: deleted on success, and expired ones are swept on each request.
@@ -991,12 +1005,59 @@ const settleShaftiSafe = (y, m) => settleShaktiForMonth(y, m).catch((e) => { con
 app.put('/api/worker/preferences', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { preferences: req.body || {} }))))
 app.put('/api/worker/notifications', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { notifications: req.body || {} }))))
 app.get('/api/worker/documents', auth, async (req, res) => res.json(await documents(req.worker.id)))
-app.post('/api/worker/documents/upload', auth, async (req, res) => {
-  const { name, fileName } = req.body || {}
+
+/* ---------- KYC documents ----------
+ * Real multipart upload into private object storage. Previously this endpoint took {name, fileName}
+ * as JSON and stored two strings — the app never read a byte of the file, and the admin "reviewed"
+ * documents that did not exist.
+ *
+ * Documents are NOT served statically and NOT inlined as data URIs (the pattern the job-photo
+ * endpoints use): an identity document must not be readable by anyone who can fetch the JSON.
+ * Reads go through a short-lived signed URL, issued only after checking who is asking.
+ */
+const MAX_DOC_BYTES = 8 * 1024 * 1024
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOC_BYTES, files: 1 } })
+
+// Re-uploading a document supersedes the previous one: a rejected Aadhaar must be replaceable, and
+// keeping both would leave the admin guessing which is current.
+async function replaceDocument(wid, name, { key, mime, size, sum, fileName }) {
+  const old = (await pool.query('SELECT storage_key FROM worker_documents WHERE worker_id=$1 AND name=$2', [wid, name])).rows
+  await pool.query('DELETE FROM worker_documents WHERE worker_id=$1 AND name=$2', [wid, name])
+  await pool.query(
+    `INSERT INTO worker_documents (worker_id,name,file_name,status,storage_key,mime,size_bytes,checksum)
+     VALUES ($1,$2,$3,'Pending',$4,$5,$6,$7)`,
+    [wid, name, fileName, key, mime, size, sum])
+  // Best-effort: a leftover object is waste, not a correctness problem, so never fail the upload on it.
+  for (const o of old) if (o.storage_key) await deleteObject(o.storage_key).catch(() => {})
+}
+
+app.post('/api/worker/documents/upload', auth, upload.single('file'), async (req, res) => {
+  const name = String(req.body?.name || '').trim()
   if (!name) return res.status(400).json({ ok: false, error: 'Document name required' })
-  await pool.query('INSERT INTO worker_documents (worker_id,name,file_name) VALUES ($1,$2,$3)', [req.worker.id, name, fileName || null])
+  if (!storageConfigured()) return res.status(503).json({ ok: false, error: 'Document storage is not configured. Contact support.' })
+  if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: 'Attach a photo or PDF of the document' })
+
+  // Trust the bytes, not the client's Content-Type — this is where a renamed file would get in.
+  const kind = sniffType(req.file.buffer)
+  if (!kind) return res.status(415).json({ ok: false, error: 'Only JPG, PNG, WebP or PDF files are accepted' })
+
+  const key = storageKey(`workers/${req.worker.id}/kyc`, kind.ext)
+  try { await putObject(key, req.file.buffer, kind.mime) }
+  catch (e) { console.error('[worker] document upload failed:', e.message); return res.status(502).json({ ok: false, error: 'Could not store the document. Please try again.' }) }
+
+  await replaceDocument(req.worker.id, name, {
+    key, mime: kind.mime, size: req.file.size, sum: checksum(req.file.buffer),
+    fileName: String(req.body?.fileName || req.file.originalname || `${name}.${kind.ext}`).slice(0, 180),
+  })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.document', entityType: 'worker', entityId: req.worker.id, detail: `Uploaded document: ${name}` })
   res.json({ ok: true, documents: await documents(req.worker.id) })
+})
+
+// The worker viewing their own document. Ownership is enforced by the worker_id filter.
+app.get('/api/worker/documents/:id/url', auth, async (req, res) => {
+  const d = (await pool.query('SELECT storage_key FROM worker_documents WHERE id=$1 AND worker_id=$2', [Number(req.params.id), req.worker.id])).rows[0]
+  if (!d?.storage_key) return res.status(404).json({ ok: false, error: 'No file for this document' })
+  res.json({ ok: true, url: await signedGetUrl(d.storage_key) })
 })
 
 /* ---------- admin worker management ---------- */
@@ -1035,7 +1096,13 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     id: b.id, ref: b.ref || `BK${b.id}`, service: svcOf(b),
     status: b.status || '', total: b.total || 0, date: b.date || '', time: b.time || '',
   }))
-  const documentsOut = (docs || []).map((d) => ({ id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created }))
+  // hasFile drives the admin's View link — rows predating the storage pipeline have no object
+  // behind them, and offering a preview that 404s is worse than offering none.
+  const documentsOut = (docs || []).map((d) => ({
+    id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created,
+    hasFile: !!d.storage_key, mime: d.mime || '', sizeBytes: d.size_bytes || 0,
+    reviewedBy: d.reviewed_by || '', reviewedAt: d.reviewed_at || null, rejectReason: d.reject_reason || '',
+  }))
 
   // KPIs computed from the worker's bookings.
   const now = new Date(); const dayMs = 86400000
@@ -1432,6 +1499,39 @@ app.post('/internal/workers/:id/balance', internalOnly, async (req, res) => {
 })
 
 // Admin bank approve/reject (routes via gateway /api/admin/workers/:id/bank/*).
+/* ---------- admin KYC document review ----------
+ * The counterpart to bank/approve|reject below. Until now nothing anywhere wrote
+ * worker_documents.status, so the admin panel's Verified/Rejected badges were unreachable and a
+ * document sat on 'Pending' forever.
+ */
+app.get('/api/admin/workers/:id/documents/:docId/url', adminAuth, async (req, res) => {
+  const d = (await pool.query('SELECT storage_key FROM worker_documents WHERE id=$1 AND worker_id=$2', [Number(req.params.docId), Number(req.params.id)])).rows[0]
+  if (!d?.storage_key) return res.status(404).json({ ok: false, error: 'No file for this document' })
+  res.json({ ok: true, url: await signedGetUrl(d.storage_key) })
+})
+app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, async (req, res) => {
+  const wid = Number(req.params.id), docId = Number(req.params.docId)
+  const approve = !!req.body?.approve
+  const reason = String(req.body?.reason || '').trim()
+  if (!approve && !reason) return res.status(400).json({ ok: false, error: 'A rejection reason is required' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const { rows } = await pool.query(
+    `UPDATE worker_documents SET status=$3, reviewed_by=$4, reviewed_at=now(), reject_reason=$5
+     WHERE id=$1 AND worker_id=$2 RETURNING name`,
+    [docId, wid, approve ? 'Verified' : 'Rejected', who, approve ? null : reason])
+  if (!rows.length) return res.status(404).json({ ok: false, error: 'Document not found' })
+  const w = await getWorker(wid)
+  // worker_notifications lives in the wallet service's DB, so this goes over the bus rather than
+  // reaching across databases. A rejection MUST tell the worker why, or they can't fix it.
+  publishEvent(REDIS_URL, 'worker.notify', {
+    workerId: wid,
+    title: approve ? 'Document verified' : 'Document rejected',
+    body: approve ? `Your ${rows[0].name} has been verified.` : `Your ${rows[0].name} was rejected: ${reason}`,
+  })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.review', entityType: 'worker', entityId: wid, detail: `${approve ? 'Verified' : 'Rejected'} ${rows[0].name} for ${w?.name || `worker ${wid}`}${approve ? '' : ` — ${reason}`}` })
+  res.json({ ok: true, documents: (await documents(wid)).map((d) => ({ id: d.id, name: d.name, status: d.status })) })
+})
+
 app.post('/api/admin/workers/:id/bank/approve', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 
@@ -1496,7 +1596,10 @@ function scheduleMetricSnapshots() {
 }
 
 init()
-  .then(() => {
+  .then(async () => {
+    // Create the KYC bucket if it isn't there. Non-fatal: the service still serves everything
+    // else, and the upload endpoint returns a clear 503 rather than accepting files it can't store.
+    await ensureBucket().catch((e) => console.error('[worker] storage init failed:', e.message))
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
     scheduleShaktiSettlement()
     scheduleMetricSnapshots()

@@ -602,6 +602,10 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   } else if (type === 'payout.processing' && data.withdrawalId) {
     // In-flight at the gateway: record the reference now, leave the status for the webhook to finalize.
     await setPayoutReference(data.withdrawalId, data.reference, data.utr)
+  } else if (type === 'worker.notify' && data.workerId && data.title) {
+    // This service owns worker_notifications, so other services ask over the bus rather than
+    // reaching into its database (e.g. the worker service on a KYC document approve/reject).
+    await notify(data.workerId, data.title, data.body || '')
   } else if (type === 'shift.late') await applyShiftLatePenalty(data)
   else if (type === 'shift.settle') await settleMinGuarantee(data)
   else if (type === 'geofence.breach') await notifyGeofenceBreach(data)

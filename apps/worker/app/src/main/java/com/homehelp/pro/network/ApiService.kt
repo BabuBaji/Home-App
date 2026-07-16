@@ -1,9 +1,13 @@
 package com.homehelp.pro.network
 
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 
 interface ApiService {
@@ -77,8 +81,18 @@ interface ApiService {
     @GET("api/worker/documents")
     suspend fun getDocuments(): List<DocumentDto>
 
+    // Multipart: the file's actual BYTES go up, not just its name. `name` identifies which KYC
+    // document this is (Aadhaar Card, PAN Card…); `fileName` is only a display label.
+    @Multipart
     @POST("api/worker/documents/upload")
-    suspend fun uploadDocument(@Body body: UploadDocBody): DocumentsResponse
+    suspend fun uploadDocument(
+        @Part("name") name: RequestBody,
+        @Part("fileName") fileName: RequestBody,
+        @Part file: MultipartBody.Part,
+    ): DocumentsResponse
+
+    @GET("api/worker/documents/{id}/url")
+    suspend fun documentUrl(@Path("id") id: Int): SignedUrlResponse
 
     // ---- job lifecycle ----
     @GET("api/worker/jobs/available")

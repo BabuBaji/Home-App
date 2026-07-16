@@ -51,7 +51,9 @@ import com.homehelp.pro.network.PreferencesBody
 import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
-import com.homehelp.pro.network.UploadDocBody
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import com.homehelp.pro.network.LeaderboardDto
 import com.homehelp.pro.network.ServiceWiseDto
 import com.homehelp.pro.network.SettlementDto
@@ -1158,15 +1160,49 @@ class AppViewModel : ViewModel() {
     }
 
     /** Record a picked document: flip to "Under Review" locally, then persist to the backend. */
-    fun uploadDocument(name: String, fileName: String) {
-        val i = documents.indexOfFirst { it.name == name }
-        if (i >= 0) documents[i] = documents[i].copy(status = "Under Review", fileName = fileName)
-        sync {
-            val r = api.uploadDocument(UploadDocBody(name, fileName))
-            if (r.documents.isNotEmpty()) {
-                documents.clear()
-                documents.addAll(r.documents.map { DocItem(it.name, it.status, it.fileName) })
-            }
+    /** Set while a document is uploading, so the row can show progress instead of lying about status. */
+    var uploadingDoc by mutableStateOf<String?>(null)
+        private set
+    var uploadError by mutableStateOf<String?>(null)
+        private set
+    fun clearUploadError() { uploadError = null }
+
+    /**
+     * Upload a KYC document's actual BYTES. Reads the picked content Uri and posts it as multipart.
+     *
+     * This previously sent only {name, fileName} — two strings — and flipped the row to
+     * "Under Review" locally, which was a lie the next refresh silently overwrote. The status
+     * shown now is whatever the server says.
+     */
+    fun uploadDocument(ctx: android.content.Context, name: String, fileName: String, uri: android.net.Uri) {
+        uploadError = null
+        uploadingDoc = name
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } ?: throw IllegalStateException("Could not read that file")
+                // 8 MB is the server's limit — fail here with a clear message rather than upload
+                // for 30s and have it rejected.
+                if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("File is too large (max 8 MB)")
+                val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                val part = MultipartBody.Part.createFormData(
+                    "file", fileName, bytes.toRequestBody(mime.toMediaTypeOrNull()),
+                )
+                val plain = "text/plain".toMediaTypeOrNull()
+                val r = withContext(Dispatchers.IO) {
+                    api.uploadDocument(name.toRequestBody(plain), fileName.toRequestBody(plain), part)
+                }
+                backendConnected = true
+                if (r.documents.isNotEmpty()) {
+                    documents.clear()
+                    documents.addAll(r.documents.map { DocItem(it.name, it.status, it.fileName) })
+                }
+            } catch (e: retrofit2.HttpException) {
+                uploadError = httpErrorMessage(e)   // e.g. wrong file type, too large, storage down
+            } catch (e: Exception) {
+                uploadError = e.message ?: "Upload failed. Please try again."
+            } finally { uploadingDoc = null }
         }
     }
 

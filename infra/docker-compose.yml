@@ -20,6 +20,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # Object storage for KYC documents (Aadhaar/PAN/police verification). S3-compatible, so
+  # production swaps to real AWS S3 by pointing S3_ENDPOINT/keys elsewhere — no code change.
+  # Deliberately NOT a public bucket: documents are read through short-lived signed URLs the
+  # worker service issues after checking who is asking. :9001 is the MinIO admin console.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-homehelp}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-change-me-minio}
+    # 9010/9011 rather than MinIO's default 9000/9001, which commonly clash with another local
+    # MinIO. Bound to 127.0.0.1: KYC storage must not be reachable from the LAN.
+    ports: ["127.0.0.1:${S3_PORT:-9010}:9000", "127.0.0.1:${S3_CONSOLE_PORT:-9011}:9001"]
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # ============================ databases (one per service) ============================
   catalog-db:
     image: postgres:16-alpine
@@ -197,9 +217,19 @@ services:
       BOOKING_URL: http://booking:4006
       WALLET_URL: http://wallet:4009
       WORKER_DEV_OTP: ${WORKER_DEV_OTP}
+      # KYC document storage. Point these at real S3 in production; the code is S3-compatible.
+      # S3_ENDPOINT is where this service writes; S3_PUBLIC_ENDPOINT is what signed URLs must say,
+      # because a browser opens them and cannot resolve the "minio" hostname.
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9010}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-homehelp}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-minio}
+      S3_BUCKET: ${S3_BUCKET:-homehelp-kyc}
     ports: ["4004:4004"]
     depends_on:
       worker-db: { condition: service_healthy }
+      minio: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   notification:
@@ -276,6 +306,7 @@ services:
       - redis
 
 volumes:
+  minio-data:
   catalog-pgdata:
   auth-pgdata:
   notification-pgdata:
