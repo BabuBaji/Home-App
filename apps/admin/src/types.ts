@@ -176,6 +176,21 @@ export interface WorkerPay {
   walletEnabled: boolean
 }
 
+/* Phase 8 — background verification.
+   source 'document' items are DERIVED from the Phase 4 document review — there is no second tick
+   for them, because two sources of truth for "Aadhaar verified" would drift. Only 'check' items
+   (previous employer, criminal) are recorded here; neither exists anywhere else. */
+export type BgStatus = 'pending' | 'clear' | 'flagged' | 'unreachable' | 'not_applicable'
+export interface BackgroundItem {
+  key: string; label: string; source: 'document' | 'check'; ok: boolean
+  status: BgStatus; detail: string
+  outcomes?: BgStatus[]; reference?: string; notes?: string
+  checkedBy?: string; checkedAt?: string | null
+  /** The worker's own claim, so whoever calls knows who to call. Not evidence of anything. */
+  claim?: string
+}
+export interface BackgroundState { ok: boolean; worker: { id: number; name: string }; items: BackgroundItem[]; verified: boolean }
+
 /* Phase 12 — final approval. Every item is computed from real state; none is a stored tick an
    admin can set directly. 'na' means there is nothing to satisfy (no training published, no
    equipment marked required, no email provider) — those never block. */

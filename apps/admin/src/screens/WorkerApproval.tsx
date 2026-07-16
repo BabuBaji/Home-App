@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, XCircle, MinusCircle, Rocket, Package, Wallet, Undo2 } from 'lucide-react'
+import { CheckCircle2, XCircle, MinusCircle, Rocket, Package, Wallet, Undo2, ShieldQuestion as ShieldSearch } from 'lucide-react'
 import {
   fetchChecklist, goLiveWorker, fetchWorkerPay, updateWorkerPay,
   fetchWorkerEquipment, issueEquipment, returnEquipment,
+  fetchBackground, recordBackgroundCheck,
 } from '../api'
-import type { GoLiveChecklist, WorkerPay, WorkerEquipmentState, CheckState } from '../types'
+import type { GoLiveChecklist, WorkerPay, WorkerEquipmentState, CheckState, BackgroundState, BackgroundItem, BgStatus } from '../types'
 import { Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast, useConfirm, shortDate } from '../components/UI'
 
 /* Phase 12 — final approval, plus the Phase 9/10 setup it depends on.
@@ -14,6 +15,10 @@ import { Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast, use
  * no equipment required, no email provider) and never blocks — requiring someone to pass an exam
  * that doesn't exist would wedge Go Live shut for a reason nobody chose.
  */
+
+const BG_OUTCOME_LABEL: Record<string, string> = {
+  clear: 'Clear', flagged: 'Flagged', unreachable: 'Could not reach them', not_applicable: 'Not applicable (no previous employer)',
+}
 
 const ICON: Record<CheckState, JSX.Element> = {
   ok: <CheckCircle2 size={17} color="#16a34a" />,
@@ -27,6 +32,9 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
   const [c, setC] = useState<GoLiveChecklist | null>(null)
   const [pay, setPay] = useState<WorkerPay | null>(null)
   const [eq, setEq] = useState<WorkerEquipmentState | null>(null)
+  const [bg, setBg] = useState<BackgroundState | null>(null)
+  const [bgFor, setBgFor] = useState<BackgroundItem | null>(null)
+  const [bgDraft, setBgDraft] = useState({ status: '', reference: '', notes: '' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [overrideOpen, setOverrideOpen] = useState(false)
@@ -37,9 +45,9 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
 
   const load = () => {
     setErr('')
-    Promise.all([fetchChecklist(workerId), fetchWorkerPay(workerId), fetchWorkerEquipment(workerId)])
-      .then(([a, b, d]) => {
-        setC(a); setPay(b); setEq(d)
+    Promise.all([fetchChecklist(workerId), fetchWorkerPay(workerId), fetchWorkerEquipment(workerId), fetchBackground(workerId)])
+      .then(([a, b, d, g]) => {
+        setC(a); setPay(b); setEq(d); setBg(g)
         setCommission(b.commissionPercent === null ? '' : String(b.commissionPercent))
       })
       .catch((e: Error) => setErr(e.message))
@@ -83,6 +91,16 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
   const doReturn = async (eid: number, name: string) => {
     if (!(await confirm({ title: `Mark ${name} returned?`, message: 'It stays on the record as returned rather than disappearing.', confirmLabel: 'Mark returned' }))) return
     try { await returnEquipment(workerId, eid); toast('Marked returned'); load() } catch (e) { toast((e as Error).message, 'err') }
+  }
+
+  const saveBg = async () => {
+    if (!bgFor || !bgDraft.status) return
+    try {
+      await recordBackgroundCheck(workerId, bgFor.key, {
+        status: bgDraft.status as BgStatus, reference: bgDraft.reference, notes: bgDraft.notes,
+      })
+      toast('Recorded'); setBgFor(null); load()
+    } catch (e) { toast((e as Error).message, 'err') }
   }
 
   const held = eq.issued.filter((e) => e.status === 'issued')
@@ -131,6 +149,47 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
                 {h.overridden.length > 0
                   ? <div style={{ color: '#b45309' }}>Overrode {h.overridden.length} check{h.overridden.length === 1 ? '' : 's'}: {h.reason}</div>
                   : <div className="muted">Approved with every check satisfied</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div>
+            <strong style={{ fontSize: 14 }}><ShieldSearch size={15} style={{ verticalAlign: -2 }} /> Background verification</strong>
+            <div className="muted" style={{ fontSize: 12.5 }}>
+              The first five follow the Documents tab — verify a document there and it lands here.
+              The last two are checks someone performs and records.
+            </div>
+          </div>
+          {/* A count, not a verdict. Go Live gates on the two recorded checks here; the five
+              document points have their own lines on the checklist above, so a bare "Incomplete"
+              badge beside a green "Background Verified" would read as a contradiction. */}
+          {bg && <Badge tone={bg.verified ? 'green' : 'gray'} dot={false}>{bg.items.filter((i) => i.ok).length} of {bg.items.length} clear</Badge>}
+        </div>
+        {!bg ? <div className="muted" style={{ fontSize: 13 }}>Loading…</div> : (
+          <div style={{ display: 'grid', gap: 2 }}>
+            {bg.items.map((i) => (
+              <div key={i.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '7px 0', borderTop: '1px solid var(--line,#eef0f4)' }}>
+                <span style={{ marginTop: 1 }}>{i.ok ? ICON.ok : i.status === 'flagged' ? ICON.no : ICON.na}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 500 }}>
+                    {i.label}
+                    {i.source === 'document' && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>from document</span>}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, color: i.status === 'flagged' ? '#b91c1c' : undefined }}>{i.detail}</div>
+                  {i.notes && i.source === 'check' && <div className="muted" style={{ fontSize: 12 }}>{i.notes}</div>}
+                  {i.reference && <div className="muted" style={{ fontSize: 11.5 }}>Ref {i.reference}</div>}
+                  {/* The worker's own claim — who to call, not proof of anything. */}
+                  {i.claim && <div className="muted" style={{ fontSize: 11.5 }}>Worker states: {i.claim}</div>}
+                </div>
+                {i.source === 'check'
+                  ? <button className="btn line" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => { setBgFor(i); setBgDraft({ status: i.status === 'pending' ? '' : i.status, reference: i.reference || '', notes: i.notes || '' }) }}>
+                      {i.status === 'pending' ? 'Record' : 'Update'}
+                    </button>
+                  : <span className="muted" style={{ fontSize: 11 }}>Documents tab</span>}
               </div>
             ))}
           </div>
@@ -209,6 +268,43 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
             <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="e.g. Police verification delayed at the station; regional manager approved a provisional start" />
           </Field>
+        </Modal>
+      )}
+
+      {bgFor && (
+        <Modal title={`${bgFor.label} — record the outcome`} onClose={() => setBgFor(null)}
+          footer={<>
+            <button className="btn line" onClick={() => setBgFor(null)}>Cancel</button>
+            <button className="btn" disabled={!bgDraft.status} onClick={saveBg}>Save</button>
+          </>}>
+          {bgFor.claim && (
+            <p style={{ fontSize: 13, marginTop: 0 }} className="muted">
+              The worker states their previous employer was <strong>{bgFor.claim}</strong>. That's their
+              claim — this record is whether anyone confirmed it.
+            </p>
+          )}
+          <Field label="Outcome">
+            <Dropdown value={bgDraft.status} width="100%" placeholder="Select an outcome"
+              options={(bgFor.outcomes || []).map((o) => ({ value: o, label: BG_OUTCOME_LABEL[o] || o }))}
+              onChange={(v) => setBgDraft({ ...bgDraft, status: v })} />
+          </Field>
+          <Field label="Reference / case number (optional)">
+            <input value={bgDraft.reference} onChange={(e) => setBgDraft({ ...bgDraft, reference: e.target.value })} placeholder="e.g. PCC-2026-88213" />
+          </Field>
+          <Field label={bgDraft.status === 'flagged' ? 'What was found? (required to flag)' : 'Notes'}>
+            <textarea rows={3} value={bgDraft.notes} onChange={(e) => setBgDraft({ ...bgDraft, notes: e.target.value })}
+              placeholder={bgDraft.status === 'flagged' ? 'An unexplained flag is unactionable — whoever decides whether to override it needs to know why.' : 'Who you spoke to, what they said…'} />
+          </Field>
+          {bgDraft.status === 'flagged' && (
+            <p style={{ fontSize: 12.5, color: '#b45309' }}>
+              A flag blocks Go Live. It can still be overridden with a reason — a flag isn't automatically disqualifying.
+            </p>
+          )}
+          {bgDraft.status === 'unreachable' && (
+            <p style={{ fontSize: 12.5, color: '#b45309' }}>
+              This does not satisfy the check: if nobody answered, the check didn't happen. Go Live will need an override.
+            </p>
+          )}
         </Modal>
       )}
 

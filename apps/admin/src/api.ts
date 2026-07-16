@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
-  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -156,6 +156,13 @@ export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; i
 export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
 export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; walletEnabled?: boolean }) =>
   req<WorkerPay>(`/workers/${id}/pay`, patch(body))
+
+/* background verification (Phase 8). The five document-backed points are DERIVED from the document
+   review — verify a document once, on the Documents tab, and this follows. Only the previous
+   employer and criminal check are recorded here; a flag must carry findings. */
+export const fetchBackground = (id: number) => req<BackgroundState>(`/workers/${id}/background`)
+export const recordBackgroundCheck = (id: number, key: string, body: { status: BgStatus; reference?: string; notes?: string }) =>
+  req<BackgroundState>(`/workers/${id}/background/${key}`, post('', body))
 
 /* final approval (Phase 12). goLiveWorker without a reason fails while checks are outstanding and
    returns needsOverride; pass a reason to waive them — it's recorded against the admin. */
