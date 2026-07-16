@@ -192,8 +192,8 @@ export default function CompensationRules() {
           {rules.length === 0
             ? <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>No rules yet. Create one — e.g. “Deep Cleaning on weekends → ₹50 per job”.</div>
             : (
-              <div className="table-wrap">
-                <table className="table">
+              <div className="tablewrap">
+                <table className="tbl">
                   <thead><tr><th>Rule</th><th>Trigger</th><th>Scope</th><th>Pays</th><th>This month</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
                   <tbody>
                     {rules.map((r) => (
@@ -238,8 +238,8 @@ export default function CompensationRules() {
         </Card>
 
         <Card title="Versions">
-          <div className="table-wrap">
-            <table className="table">
+          <div className="tablewrap">
+            <table className="tbl">
               <thead><tr><th>Version</th><th>Trigger</th><th>Pays</th><th>By</th><th>When</th><th></th></tr></thead>
               <tbody>
                 {(detail.versions || []).map((v) => (
@@ -261,8 +261,8 @@ export default function CompensationRules() {
           {(detail.payouts || []).length === 0
             ? <div className="muted" style={{ fontSize: 13 }}>No payouts yet.</div>
             : (
-              <div className="table-wrap">
-                <table className="table">
+              <div className="tablewrap">
+                <table className="tbl">
                   <thead><tr><th>Worker</th><th>Amount</th><th>Month</th><th>Ref</th><th>Version</th><th>When</th></tr></thead>
                   <tbody>
                     {detail.payouts!.map((p) => (

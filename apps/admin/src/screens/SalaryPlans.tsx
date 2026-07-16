@@ -92,8 +92,8 @@ export default function SalaryPlans() {
       )}
 
       <Card title="Salary plans" right={<button className="btn" onClick={() => open()}><Plus size={16} /> Add plan</button>}>
-        <div className="table-wrap">
-          <table className="table">
+        <div className="tablewrap">
+          <table className="tbl">
             <thead><tr><th>Plan</th><th>Type</th><th>Monthly</th><th>Per job</th><th>Workers</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
             <tbody>
               {d.plans.map((p) => (

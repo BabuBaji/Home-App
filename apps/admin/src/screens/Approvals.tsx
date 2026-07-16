@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ShieldCheck, Check, X, Clock, Info, SlidersHorizontal, Inbox } from 'lucide-react'
-import { Card, StatCard, Badge, Loading, ErrorState, Field, Modal, Dropdown, useToast, shortDate } from '../components/UI'
+import { Card, StatCard, Badge, Loading, ErrorState, Field, Modal, Dropdown, useToast } from '../components/UI'
 import { fetchApprovals, approveRequest, rejectRequest, fetchApprovalRules, updateApprovalRule } from '../api'
 import type { ApprovalRequest, ApprovalRuleRow } from '../types'
 import { useStore, has } from '../store'
@@ -14,6 +14,8 @@ import { useStore, has } from '../store'
  */
 
 const rupee = (n: number | null) => (n == null ? '—' : '₹' + (n || 0).toLocaleString('en-IN'))
+// Date + time — approvals need the moment, not just the day, for the audit trail.
+const dateTime = (s?: string | null) => (s ? new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
 const PERM_LABEL: Record<string, string> = { 'approvals.review': 'Approver (approvals.review)', 'admins.edit': 'Admin manager (admins.edit)', 'settings.edit': 'Settings editor (settings.edit)' }
 const STATUS_TONE: Record<string, 'amber' | 'green' | 'red' | 'gray'> = { pending: 'amber', executed: 'green', approved: 'green', rejected: 'red', failed: 'red' }
 
@@ -79,7 +81,8 @@ export default function Approvals() {
     <div className="grid" style={{ gap: 18 }}>
       <div className="stat-row">
         <StatCard icon={<Clock size={20} />} tint="#fff4e5" label="Pending" value={pendingCount} sub="awaiting sign-off" />
-        <StatCard icon={<SlidersHorizontal size={20} />} tint="#eef0ff" label="Rules on" value={(rules || []).filter((r) => r.enabled).length} sub={`of ${(rules || []).length} actions`} />
+        {/* Rule config is only visible with approvals.manage, so this count is only meaningful then. */}
+        {canManage && <StatCard icon={<SlidersHorizontal size={20} />} tint="#eef0ff" label="Rules on" value={(rules || []).filter((r) => r.enabled).length} sub={`of ${(rules || []).length} actions`} />}
       </div>
 
       <div className="tabs">
@@ -94,36 +97,50 @@ export default function Approvals() {
           {!requests ? <Loading /> : requests.length === 0
             ? <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>Nothing waiting. Requests appear here when a sensitive action crosses its approval threshold.</div>
             : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead><tr><th>Request</th><th>Amount</th><th>Requested by</th><th>Sign-offs</th><th>Status</th><th style={{ textAlign: 'right' }}>Action</th></tr></thead>
+              <div className="tablewrap">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '40%' }}>Request</th>
+                      <th style={{ textAlign: 'right', width: '13%' }}>Amount</th>
+                      <th style={{ textAlign: 'center', width: '20%' }}>Status</th>
+                      <th style={{ textAlign: 'right', width: '27%' }}>Action</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {requests.map((r) => (
-                      <tr key={r.id}>
-                        <td><strong>{r.summary}</strong><div className="muted" style={{ fontSize: 11.5 }}>{r.label} · {shortDate(r.created)}</div></td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>{rupee(r.amount)}</td>
-                        <td className="muted" style={{ fontSize: 12.5 }}>{r.requestedBy}</td>
-                        <td>
-                          <span style={{ fontSize: 12.5 }}>{r.approvals.length}/{r.minApprovers}</span>
-                          {r.approvals.length > 0 && <div className="muted" style={{ fontSize: 11 }}>{r.approvals.map((a) => a.by).join(', ')}</div>}
-                        </td>
-                        <td>
-                          <Badge tone={STATUS_TONE[r.status] || 'gray'}>{r.status}</Badge>
-                          {r.status === 'rejected' && r.reason && <div className="muted" style={{ fontSize: 11 }}>{r.reason}</div>}
-                          {r.status === 'failed' && r.error && <div style={{ fontSize: 11, color: 'var(--red)' }}>{r.error}</div>}
-                        </td>
-                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {canActOn(r) ? (
-                            <>
-                              <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} disabled={busy === r.id} onClick={() => doApprove(r)}><Check size={14} /> Approve</button>{' '}
-                              <button className="btn line" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--red)' }} disabled={busy === r.id} onClick={() => { setRejectFor(r); setReason('') }}><X size={14} /> Reject</button>
-                            </>
-                          ) : r.status === 'pending'
-                            ? <span className="muted" style={{ fontSize: 11.5 }}>{r.requestedById === meId ? 'Your request' : r.approvals.some((a) => a.byId === meId) ? 'You signed' : 'Not an approver'}</span>
-                            : <span className="muted" style={{ fontSize: 11.5 }}>{r.decidedBy ? `by ${r.decidedBy}` : '—'}</span>}
-                        </td>
-                      </tr>
-                    ))}
+                    {requests.map((r) => {
+                      const actable = canActOn(r)
+                      return (
+                        <tr key={r.id}>
+                          <td>
+                            <strong style={{ fontSize: 13.5 }}>{r.summary}</strong>
+                            <div className="muted" style={{ fontSize: 11.5 }}>{r.label} · by {r.requestedBy} · {dateTime(r.created)}</div>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.amount != null ? rupee(r.amount) : '—'}</td>
+                          <td style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                            <Badge tone={STATUS_TONE[r.status] || 'gray'}>{r.status}</Badge>
+                            {r.minApprovers > 1 && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{r.approvals.length}/{r.minApprovers} signed</div>}
+                            {r.status === 'rejected' && r.reason && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{r.reason}</div>}
+                            {r.status === 'failed' && r.error && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>{r.error}</div>}
+                          </td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            {actable ? (
+                              <div style={{ display: 'inline-flex', gap: 8 }}>
+                                <button className="btn sm" disabled={busy === r.id} onClick={() => doApprove(r)}><Check size={14} /> Approve</button>
+                                <button className="btn line sm" style={{ color: 'var(--red)' }} disabled={busy === r.id} onClick={() => { setRejectFor(r); setReason('') }}><X size={14} /> Reject</button>
+                              </div>
+                            ) : r.status === 'pending'
+                              ? <span className="muted" style={{ fontSize: 12 }}>{r.requestedById === meId ? 'Your request' : r.approvals.some((a) => a.byId === meId) ? 'You signed' : 'Not an approver'}</span>
+                              : (
+                                <div className="muted" style={{ fontSize: 11.5, textAlign: 'right', lineHeight: 1.5 }}>
+                                  <div>{r.status === 'rejected' ? 'Rejected' : r.status === 'failed' ? 'Failed' : 'Approved'}{r.decidedBy ? ` by ${r.decidedBy}` : ''}</div>
+                                  {r.decidedAt && <div>{dateTime(r.decidedAt)}</div>}
+                                </div>
+                              )}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -138,8 +155,8 @@ export default function Approvals() {
             <span>When a rule is on, that action requires sign-off once its amount reaches the threshold (₹0 = always). The maker can't approve their own request, and an approver must hold the chosen permission.</span>
           </div>
           {!rules ? <Loading /> : (
-            <div className="table-wrap">
-              <table className="table">
+            <div className="tablewrap">
+              <table className="tbl">
                 <thead><tr><th>Action</th><th>Requires approval</th><th>Threshold (₹)</th><th>Approvers</th><th>Approver permission</th></tr></thead>
                 <tbody>
                   {rules.map((r) => (

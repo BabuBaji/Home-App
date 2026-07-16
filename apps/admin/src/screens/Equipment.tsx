@@ -61,8 +61,8 @@ export default function Equipment() {
       )}
 
       <Card title="Equipment catalogue" right={<button className="btn" onClick={() => setAdding(true)}><Plus size={16} /> Add item</button>}>
-        <div className="table-wrap">
-          <table className="table">
+        <div className="tablewrap">
+          <table className="tbl">
             <thead><tr><th>Item</th><th>Required to go live</th><th>Issued now</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
             <tbody>
               {types.map((t) => (

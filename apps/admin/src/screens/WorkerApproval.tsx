@@ -246,7 +246,7 @@ export default function WorkerApproval({ workerId, onChanged }: { workerId: numb
         {eq.issued.length === 0
           ? <div className="muted" style={{ fontSize: 13 }}>Nothing issued yet.</div>
           : (
-            <table className="table">
+            <table className="tbl">
               <thead><tr><th>Item</th><th>Serial</th><th>Issued</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {eq.issued.map((e) => (

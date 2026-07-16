@@ -125,8 +125,8 @@ export default function Training() {
 
       {tab === 'modules' && (
         <Card title="Training modules" right={<button className="btn" onClick={addModule}><Plus size={16} /> Add module</button>}>
-          <div className="table-wrap">
-            <table className="table">
+          <div className="tablewrap">
+            <table className="tbl">
               <thead><tr><th>#</th><th>Module</th><th>Content</th><th>Questions</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {data.modules.map((m) => (
@@ -158,8 +158,8 @@ export default function Training() {
           {data.questions.length === 0
             ? <Empty msg="No questions yet. A paper is drawn at random from this bank." />
             : (
-              <div className="table-wrap">
-                <table className="table">
+              <div className="tablewrap">
+                <table className="tbl">
                   <thead><tr><th>Question</th><th>Module</th><th>Correct answer</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
                   <tbody>
                     {data.questions.map((q) => (

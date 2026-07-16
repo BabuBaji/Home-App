@@ -99,8 +99,8 @@ export default function Payroll() {
             </div>
           )}
 
-          <div className="table-wrap">
-            <table className="table">
+          <div className="tablewrap">
+            <table className="tbl">
               <thead><tr><th>Worker</th><th>Basic</th><th>Allowance</th><th>Incentives</th><th>Deductions</th><th style={{ textAlign: 'right' }}>Net</th></tr></thead>
               <tbody>
                 {(open.lines || []).map((l) => (
@@ -147,8 +147,8 @@ export default function Payroll() {
 
       {runs.length > 0 && (
         <Card title="Recent runs">
-          <div className="table-wrap">
-            <table className="table">
+          <div className="tablewrap">
+            <table className="tbl">
               <thead><tr><th>Month</th><th>Workers</th><th>Net</th><th>Status</th><th>By</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {runs.map((r) => (
