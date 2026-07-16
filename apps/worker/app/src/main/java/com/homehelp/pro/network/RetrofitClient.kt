@@ -20,10 +20,11 @@ import java.util.concurrent.TimeUnit
  * same-Wi-Fi testing).
  */
 object RetrofitClient {
-    // Only used when app-config.json can't be fetched — which usually means no internet, and a
-    // public tunnel is no help there. The LAN IP still works on the same Wi-Fi. The live tunnel
-    // lives in app-config.json and is picked up at runtime without rebuilding.
-    private const val FALLBACK_URL = "http://192.168.0.112:8080/"
+    // Last resort ONLY — used when app-config.json can't be fetched, which usually means no
+    // internet, where a public tunnel would be no help either. The live URL lives in
+    // app-config.json (see refreshBaseUrl) and is picked up at runtime without rebuilding, so
+    // this value should never need editing. It is a same-Wi-Fi convenience, not the real config.
+    private const val FALLBACK_URL = "http://192.168.29.249:8080/"
     private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
 
     /** Current backend base URL — updated by [refreshBaseUrl]. */
@@ -42,9 +43,6 @@ object RetrofitClient {
 
     /** Pull the live backend URL from the public config. Blocking — call off the main thread. */
     fun refreshBaseUrl() {
-        // Local testing: pin to FALLBACK_URL (the Cloudflare tunnel) and skip the remote config
-        // so the stale GitHub apiBase can't repoint the app at an unreachable host.
-        if (true) return
         if (refreshed) return
         try {
             val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()
