@@ -8,7 +8,10 @@ export default function Login() {
   const { signIn } = useStore()
   const nav = useNavigate()
   const [email, setEmail] = useState('admin@homehelp.in')
-  const [password, setPassword] = useState('admin123')
+  // Never pre-fill a password. This used to seed 'admin123' — the code's fallback default, not the
+  // real one (ADMIN_SEED_PASSWORD), so Sign in failed on a value that looked deliberate and the
+  // 401 read as a broken backend rather than a wrong password.
+  const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 

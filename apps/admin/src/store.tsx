@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Admin } from './types'
 import { clearToken, setToken, saveAdmin, loadAdmin, clearAdmin } from './api'
 
@@ -16,6 +16,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback((t: string, a: Admin) => { setToken(t); saveAdmin(a); setAdminState(a) }, [])
   const signOut = useCallback(() => { clearToken(); clearAdmin(); setAdminState(null) }, [])
   const setAdmin = useCallback((a: Admin) => { saveAdmin(a); setAdminState(a) }, [])
+
+  // Any request rejecting our session drops us to the login screen. Without this the token is
+  // cleared but `admin` stays set, so the guard keeps us on a page where every call 401s.
+  useEffect(() => {
+    const onUnauthorized = () => setAdminState(null)
+    window.addEventListener('hha:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('hha:unauthorized', onUnauthorized)
+  }, [])
+
   return <Ctx.Provider value={{ admin, signIn, signOut, setAdmin }}>{children}</Ctx.Provider>
 }
 

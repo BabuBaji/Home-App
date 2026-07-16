@@ -41,7 +41,18 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     ...opts,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
   })
-  if (res.status === 401) { clearToken(); clearAdmin() }
+  // A 401 means the session is gone (expired, or the signing secret rotated). Clearing the token
+  // isn't enough: the route guard reads `admin` from the store, so without telling it, the panel
+  // keeps rendering a logged-in shell while every request 401s — which looks like the app is broken
+  // rather than like you need to sign in again.
+  // A window event rather than an import: store.tsx already imports this module.
+  if (res.status === 401) {
+    const hadSession = !!token
+    clearToken(); clearAdmin()
+    // Only when we actually had a session — a 401 from the login form is a wrong password,
+    // not an expiry, and shouldn't be reported as one.
+    if (hadSession) window.dispatchEvent(new Event('hha:unauthorized'))
+  }
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Request failed (${res.status})`) }
   return res.json()
 }
