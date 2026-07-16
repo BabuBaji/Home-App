@@ -540,6 +540,14 @@ const ACTIONS = {
     summarize: (p, amt) => `Change pay for worker #${p.workerId}${amt ? ` — salary ₹${amt}/mo` : ''}`,
     execute: (p) => internalPost(U.worker, `/internal/workers/${p.workerId}/pay`, { ...(p.body || {}), _actor: p.actor }),
   },
+  'payroll.approve': {
+    label: 'Payroll approval',
+    perm: 'payroll.approve',
+    // The run's total net (server-computed by the worker route). Threshold on the whole payout.
+    amountOf: (p) => Number(p.total) || 0,
+    summarize: (p, amt) => `Approve ${p.month || ''} payroll — ₹${amt} to ${p.workers || 0} worker(s)`,
+    execute: (p) => internalPost(U.worker, `/internal/payroll/${p.runId}/approve`, { _actor: p.actor }),
+  },
 }
 const ACTION_KEYS = Object.keys(ACTIONS)
 const DEFAULT_REVIEWER_PERM = 'approvals.review'
@@ -664,6 +672,9 @@ app.post('/api/admin/actions/refund', admin, async (req, res) =>
 // Worker pay change routed through the matrix (the worker service's PATCH /pay forwards here).
 app.post('/api/admin/actions/worker-pay', admin, async (req, res) =>
   submitAction('worker.pay_change', { workerId: Number(req.body?.workerId), body: req.body?.body || {}, actor: req.admin?.name || req.admin?.email }, req, res))
+// Payroll approval routed through the matrix (the worker service's /payroll/:id/approve forwards here).
+app.post('/api/admin/actions/payroll-approve', admin, async (req, res) =>
+  submitAction('payroll.approve', { runId: Number(req.body?.runId), total: req.body?.total, month: req.body?.month, workers: req.body?.workers, actor: req.admin?.name || req.admin?.email }, req, res))
 
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
 // Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).

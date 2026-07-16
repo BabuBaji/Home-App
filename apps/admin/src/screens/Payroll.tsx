@@ -55,8 +55,12 @@ export default function Payroll() {
       confirmLabel: 'Approve & pay',
     }))) return
     setBusy(true)
-    try { const r = await approvePayroll(run.id); setOpen(r.run); load(); toast(`${run.month} approved — ${rupees(net)} paid`) }
-    catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
+    try {
+      const r = await approvePayroll(run.id)
+      if (r.pending) { toast('Sent for approval — a second admin must sign off'); setOpen(null) }
+      else { if (r.run) setOpen(r.run); toast(`${run.month} approved — ${rupees(net)} paid`) }
+      load()
+    } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
 
   // Detail view of one run.

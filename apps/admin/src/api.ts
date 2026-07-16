@@ -204,7 +204,8 @@ export const patchIncentiveRule = (id: number, body: Record<string, unknown>) =>
 export const fetchPayrollRuns = () => req<{ ok: boolean; workersOnMonthlySalary: number; runs: PayrollRun[] }>('/payroll')
 export const fetchPayrollRun = (id: number) => req<{ ok: boolean; run: PayrollRun }>(`/payroll/${id}`)
 export const buildPayroll = (month: string) => req<{ ok: boolean; run: PayrollRun }>('/payroll', post('', { month }))
-export const approvePayroll = (id: number) => req<{ ok: boolean; run: PayrollRun }>(`/payroll/${id}/approve`, post(''))
+// Routed through the approval matrix — approves now, or queues for a second admin's sign-off.
+export const approvePayroll = (id: number) => req<ActionResult & { run?: PayrollRun }>(`/payroll/${id}/approve`, post(''))
 
 /* availability (Phase 11). The worker states a preference; this is where it becomes an assignment.
    Approving adopts what they asked for; modifying assigns something else and requires a reason —

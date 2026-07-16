@@ -2760,15 +2760,20 @@ app.post('/api/admin/payroll', adminAuth, requirePerm('payroll.run'), async (req
  * Each line credits once, keyed on payroll-<runId>-<workerId>, so a double-approve or a retry
  * cannot pay anyone twice.
  */
-app.post('/api/admin/payroll/:id/approve', adminAuth, requirePerm('payroll.approve'), async (req, res) => {
-  const id = Number(req.params.id)
+// Approve a payroll run (pays everyone). Shared by the admin route — which routes it through the
+// approval matrix — and the internal sink the matrix executor calls. Idempotent: a re-approval hits
+// the 409 below and every credit de-dupes downstream, so a replay never double-pays. validateOnly
+// runs the checks (and returns the run total) without moving money.
+async function approvePayrollRun(id, actor, { validateOnly = false } = {}) {
   const run = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [id])).rows[0]
-  if (!run) return res.status(404).json({ error: 'Run not found' })
-  if (run.status === 'approved') return res.status(409).json({ error: 'This run has already been approved' })
+  if (!run) return { error: 'Run not found', status: 404 }
+  if (run.status === 'approved') return { error: 'This run has already been approved', status: 409 }
   const lines = (await pool.query('SELECT * FROM payroll_lines WHERE run_id=$1', [id])).rows
-  if (!lines.length) return res.status(400).json({ error: 'Nothing to approve — this run has no lines' })
+  if (!lines.length) return { error: 'Nothing to approve — this run has no lines', status: 400 }
+  const total = lines.reduce((n, l) => n + l.net, 0)
+  if (validateOnly) return { ok: true, total, workers: lines.length, month: run.month }
 
-  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const who = actor || 'Admin'
   await pool.query("UPDATE payroll_runs SET status='approved', approved_by=$1, approved_at=now() WHERE id=$2", [who, id])
   for (const l of lines) {
     // Engine payouts on this line reach the ledger now, when the money actually moves — keyed on
@@ -2793,12 +2798,33 @@ app.post('/api/admin/payroll/:id/approve', adminAuth, requirePerm('payroll.appro
   }
   publishEvent(REDIS_URL, 'activity', {
     actorType: 'admin', actorName: who, action: 'payroll.approve', entityType: 'payroll', entityId: id,
-    detail: `Approved the ${run.month} payroll — ₹${lines.reduce((n, l) => n + l.net, 0)} to ${lines.length} worker(s)`,
-    meta: { amount: lines.reduce((n, l) => n + l.net, 0) },
+    detail: `Approved the ${run.month} payroll — ₹${total} to ${lines.length} worker(s)`,
+    meta: { amount: total },
   })
   const fresh = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [id])).rows[0]
   const full = (await pool.query(`SELECT l.*, w.name FROM payroll_lines l JOIN workers w ON w.id=l.worker_id WHERE l.run_id=$1 ORDER BY w.name`, [id])).rows
-  res.json({ ok: true, run: runDto(fresh, full.map(lineDto)) })
+  return { ok: true, dto: { ok: true, run: runDto(fresh, full.map(lineDto)) } }
+}
+
+// Maker route: validate up front, then route approval through the matrix (execute now or queue).
+app.post('/api/admin/payroll/:id/approve', adminAuth, requirePerm('payroll.approve'), async (req, res) => {
+  const id = Number(req.params.id)
+  const pre = await approvePayrollRun(id, null, { validateOnly: true })
+  if (pre.error) return res.status(pre.status || 400).json({ error: pre.error })
+  try {
+    const r = await fetch(`${ADMIN_URL}/api/admin/actions/payroll-approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: req.headers.authorization || '' },
+      body: JSON.stringify({ runId: id, total: pre.total, month: pre.month, workers: pre.workers }),
+    })
+    res.status(r.status).json(await r.json().catch(() => ({})))
+  } catch { res.status(502).json({ error: 'Approval service unavailable' }) }
+})
+// Internal sink the approval-matrix executor calls to actually approve the run (post-decision).
+app.post('/internal/payroll/:id/approve', internalOnly, async (req, res) => {
+  const r = await approvePayrollRun(Number(req.params.id), req.body?._actor)
+  if (r.error) return res.status(r.status || 400).json({ error: r.error })
+  res.json(r.dto)
 })
 
 /* ================= Compensation Rule Engine — admin API =================
