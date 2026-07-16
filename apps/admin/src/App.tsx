@@ -42,6 +42,7 @@ import SettingsScreen from './screens/Settings'
 import Admins from './screens/Admins'
 import Roles from './screens/Roles'
 import Approvals from './screens/Approvals'
+import OrgHierarchy from './screens/OrgHierarchy'
 
 export default function App() {
   const { admin, signIn, setAdmin } = useStore()
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="/admins" element={<Page perm="admins.view"><Admins /></Page>} />
           <Route path="/roles" element={<Page perm="roles.view"><Roles /></Page>} />
           <Route path="/approvals" element={<Page perm="approvals.review"><Approvals /></Page>} />
+          <Route path="/organization" element={<Page perm="admins.view"><OrgHierarchy /></Page>} />
         </Route>
         <Route path="*" element={<Navigate to={admin ? '/dashboard' : '/login'} replace />} />
       </Routes>
