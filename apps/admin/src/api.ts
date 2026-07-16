@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
-  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -165,8 +165,16 @@ export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; i
 /* per-worker pay (Phase 10). The wallet reads commissionPercent when it settles a job — changing
    it changes what the worker is actually paid, so it isn't a display setting. */
 export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
-export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; walletEnabled?: boolean }) =>
+export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; salaryPlanId?: number | null; walletEnabled?: boolean }) =>
   req<WorkerPay>(`/workers/${id}/pay`, patch(body))
+
+/* salary plans. Assigning one to a worker sets what the wallet actually pays them — a plan and a
+   hand-typed rate are mutually exclusive server-side, so setting either clears the other. */
+export const fetchSalaryPlans = () => req<SalaryPlansState>('/salary-plans')
+export const createSalaryPlan = (body: { name: string; commissionPercent: number; notes?: string }) =>
+  req<{ ok: boolean; plan: SalaryPlan }>('/salary-plans', post('', body))
+export const updateSalaryPlan = (id: number, body: Partial<SalaryPlan>) => req<{ ok: boolean; plan: SalaryPlan }>(`/salary-plans/${id}`, patch(body))
+export const deleteSalaryPlan = (id: number) => req<{ ok: boolean }>(`/salary-plans/${id}`, { method: 'DELETE' })
 
 /* availability (Phase 11). The worker states a preference; this is where it becomes an assignment.
    Approving adopts what they asked for; modifying assigns something else and requires a reason —

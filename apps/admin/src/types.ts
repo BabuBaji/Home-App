@@ -35,6 +35,9 @@ export interface Worker {
   recruiter?: string; referral_source?: string; invited_at?: string | null
   balance?: number; withdrawn?: number; hold?: number; pending?: number; advance_outstanding?: number
   last_lat?: number | null; last_lng?: number | null; shift_def_id?: number | null; site_id?: number | null
+  // Organisational assignment. Recorded facts; dispatch matches on zone and does not read these.
+  cluster_id?: number | null; store_id?: number | null; reporting_manager_id?: number | null
+  salary_plan_id?: number | null; commission_percent?: number | null; wallet_enabled?: boolean
   profile?: {
     bank?: { bankName?: string; bankAccount?: string; bankIfsc?: string; bankUpi?: string; bankHolder?: string; bankAccountType?: string }
     bankVerification?: { status?: string; registeredName?: string; nameMatch?: boolean | null; reason?: string }
@@ -170,11 +173,29 @@ export interface WorkerEquipmentState { ok: boolean; types: EquipmentType[]; iss
    every existing worker. The wallet reads this when it settles a job, so it moves real money. */
 export interface WorkerPay {
   ok: boolean
+  /** A hand-typed rate. Null when the worker is on a plan — the two are mutually exclusive. */
   commissionPercent: number | null
+  salaryPlanId: number | null
+  salaryPlan: SalaryPlan | null
   platformCommissionPercent: number
   effectiveCommissionPercent: number
+  /** Where the effective rate came from, so the panel never implies a source it doesn't have. */
+  commissionSource: 'plan' | 'manual' | 'platform'
   walletEnabled: boolean
+  plans?: SalaryPlan[]
 }
+
+/* Salary plans — a named commission rate an admin defines once and assigns, instead of typing a
+   percentage per worker. NOT seeded: "Worker Level 1 = 20%" is the company's payroll policy.
+   per_job only; fixed/hybrid need a monthly payroll run that doesn't exist. */
+export interface SalaryPlan {
+  id: number; name: string; salaryType: 'per_job'; commissionPercent: number
+  notes: string; active: boolean; sort: number
+  /** 100 - commission. The number the worker actually cares about. */
+  workerKeeps: number
+  workers?: number
+}
+export interface SalaryPlansState { ok: boolean; platformCommissionPercent: number; plans: SalaryPlan[] }
 
 /* Phase 11 — availability. A PREFERENCE (what the worker asked for) is distinct from the
    ASSIGNMENT (workers.shift_def_id / zone_id), which only an admin writes. weeklyOff is derived

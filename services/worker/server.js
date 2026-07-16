@@ -171,6 +171,36 @@ async function init() {
     // Proven by a successful OTP login — the code was texted to that number and came back.
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`,
 
+    /* ---- Salary plans ----
+     * A named rate an admin defines once and assigns, instead of typing a percentage per worker.
+     *
+     * NOT seeded: "Worker Level 1 = 20%" is this company's payroll, and inventing it here would put
+     * a rate nobody chose in front of every new hire. An admin writes the plans; until then the
+     * wizard says so and workers fall back to the platform commission.
+     *
+     * salary_type is per_job only. Fixed and Hybrid need a monthly payroll run — offering them
+     * without one would silently pay a per-job worker nothing.
+     */
+    `CREATE TABLE IF NOT EXISTS salary_plans (
+      id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL,
+      salary_type TEXT NOT NULL DEFAULT 'per_job',
+      commission_percent INTEGER NOT NULL,
+      notes TEXT NOT NULL DEFAULT '', active BOOLEAN NOT NULL DEFAULT true,
+      sort INTEGER NOT NULL DEFAULT 0, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    /* A worker has EITHER a plan OR a manual commission_percent — never both. Two ways to set one
+     * number is two sources of truth, and the one people read is whichever the UI happens to show.
+     * Assigning a plan clears the manual rate and vice versa; see resolveCommission(). */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_plan_id INTEGER REFERENCES salary_plans(id) ON DELETE SET NULL`,
+
+    /* Organisational assignment. Recorded facts an admin asserts — dispatch does NOT read these
+     * (it matches on zone), so they inform people, not routing. */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS cluster_id INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS store_id INTEGER`,
+    // The admin they report to. Stored as the admin's id; the panel resolves the name from its own
+    // admin list rather than this service keeping a copy that goes stale on a rename.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS reporting_manager_id INTEGER`,
+
     /* ---- Phase 8: background verification ----
      * ONLY the two checks that have nowhere else to live. Aadhaar, PAN, Police, Medical and Address
      * are already Phase 4 documents an admin reviews, so Phase 8 READS those rather than storing a
@@ -1749,16 +1779,116 @@ app.get('/api/worker/equipment', auth, async (req, res) => {
  * one would silently pay a worker nothing per job), the named bonuses (each needs a real trigger),
  * and TDS/ESI/PF (statutory rates aren't ours to invent). Better absent than decorative.
  */
+/**
+ * The ONE place a worker's commission is decided: plan → manual override → platform default.
+ * The wallet reads this (via /internal/workers/:id/pay-config) and so does the admin panel, so
+ * neither can show a rate the other wouldn't pay.
+ */
+async function resolveCommission(w) {
+  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  if (w?.salary_plan_id) {
+    const plan = (await pool.query('SELECT * FROM salary_plans WHERE id=$1', [w.salary_plan_id])).rows[0]
+    // A retired plan keeps paying whoever is on it — silently reverting them to the platform rate
+    // because someone archived a plan would change real pay without anyone deciding to.
+    if (plan) return { pct: plan.commission_percent, source: 'plan', plan, platform }
+  }
+  if (Number.isInteger(w?.commission_percent)) return { pct: w.commission_percent, source: 'manual', plan: null, platform }
+  return { pct: platform, source: 'platform', plan: null, platform }
+}
+
+const planDto = (p) => p && ({
+  id: p.id, name: p.name, salaryType: p.salary_type, commissionPercent: p.commission_percent,
+  notes: p.notes || '', active: p.active, sort: p.sort,
+  workerKeeps: 100 - p.commission_percent,
+})
+
+app.get('/api/admin/salary-plans', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT p.*, (SELECT COUNT(*)::int FROM workers w WHERE w.salary_plan_id = p.id) workers
+     FROM salary_plans p ORDER BY p.sort, p.id`)
+  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  res.json({ ok: true, platformCommissionPercent: platform, plans: rows.map((p) => ({ ...planDto(p), workers: p.workers })) })
+})
+
+function readPlan(b) {
+  const name = String(b?.name || '').trim()
+  if (!name) return { error: 'Name required' }
+  const pct = Number(b?.commissionPercent)
+  if (!Number.isInteger(pct) || pct < 0 || pct > 100) return { error: 'Commission must be a whole number between 0 and 100' }
+  // Fixed/Hybrid would need a monthly payroll run; without one a per-job worker on them earns
+  // nothing per job and never gets a salary either.
+  const salaryType = String(b?.salaryType || 'per_job')
+  if (salaryType !== 'per_job') return { error: 'Only per-job plans are supported — fixed and hybrid salaries need a payroll run that does not exist yet' }
+  return { name, commissionPercent: pct, salaryType, notes: String(b?.notes || '').trim().slice(0, 200) }
+}
+
+app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
+  const v = readPlan(req.body)
+  if (v.error) return res.status(400).json({ error: v.error })
+  const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM salary_plans')).rows[0].n
+  try {
+    const r = await pool.query(
+      'INSERT INTO salary_plans (name, salary_type, commission_percent, notes, sort) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [v.name, v.salaryType, v.commissionPercent, v.notes, sort])
+    const who = req.admin?.name || req.admin?.email || 'Admin'
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'salaryplan.create', entityType: 'salary_plan', entityId: r.rows[0].id, detail: `Created salary plan ${v.name} (${v.commissionPercent}% commission)` })
+    res.status(201).json({ ok: true, plan: planDto(r.rows[0]) })
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A plan with that name already exists' })
+    throw e
+  }
+})
+
+app.patch('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const cur = (await pool.query('SELECT * FROM salary_plans WHERE id=$1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Plan not found' })
+  if (req.body?.active !== undefined && Object.keys(req.body).length === 1) {
+    const r = await pool.query('UPDATE salary_plans SET active=$1 WHERE id=$2 RETURNING *', [!!req.body.active, id])
+    return res.json({ ok: true, plan: planDto(r.rows[0]) })
+  }
+  const v = readPlan({ ...cur, name: req.body?.name ?? cur.name, commissionPercent: req.body?.commissionPercent ?? cur.commission_percent, salaryType: req.body?.salaryType ?? cur.salary_type, notes: req.body?.notes ?? cur.notes })
+  if (v.error) return res.status(400).json({ error: v.error })
+  const r = await pool.query('UPDATE salary_plans SET name=$1, commission_percent=$2, notes=$3, active=$4 WHERE id=$5 RETURNING *',
+    [v.name, v.commissionPercent, v.notes, req.body?.active !== undefined ? !!req.body.active : cur.active, id])
+
+  // Changing a plan's rate changes what everyone on it takes home. Say so out loud, and tell them.
+  if (v.commissionPercent !== cur.commission_percent) {
+    const on = (await pool.query('SELECT id FROM workers WHERE salary_plan_id=$1', [id])).rows
+    const who = req.admin?.name || req.admin?.email || 'Admin'
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'salaryplan.rate', entityType: 'salary_plan', entityId: id, detail: `${v.name}: commission ${cur.commission_percent}% → ${v.commissionPercent}% — affects ${on.length} worker(s)` })
+    for (const w of on) {
+      publishEvent(REDIS_URL, 'worker.notify', { workerId: w.id, title: 'Your earnings rate changed', body: `You now keep ${100 - v.commissionPercent}% of each job.` })
+    }
+  }
+  res.json({ ok: true, plan: planDto(r.rows[0]) })
+})
+
+app.delete('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const n = (await pool.query('SELECT COUNT(*)::int n FROM workers WHERE salary_plan_id=$1', [id])).rows[0].n
+  // Deleting would drop those workers to the platform rate without anyone deciding to.
+  if (n) return res.status(409).json({ error: `${n} worker(s) are on this plan — move them off it first, or retire it instead` })
+  await pool.query('DELETE FROM salary_plans WHERE id=$1', [id])
+  res.json({ ok: true })
+})
+
 app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
-  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  const { pct, source, plan, platform } = await resolveCommission(w)
+  const plans = (await pool.query('SELECT * FROM salary_plans WHERE active=true ORDER BY sort, id')).rows
   res.json({
     ok: true,
-    commissionPercent: w.commission_percent, // null = inherit
+    commissionPercent: w.commission_percent, // null unless a manual rate was set
+    salaryPlanId: w.salary_plan_id ?? null,
+    salaryPlan: planDto(plan),
     platformCommissionPercent: platform,
-    effectiveCommissionPercent: w.commission_percent ?? platform,
+    effectiveCommissionPercent: pct,
+    /** 'plan' | 'manual' | 'platform' — where the effective rate came from. */
+    commissionSource: source,
     walletEnabled: w.wallet_enabled !== false,
+    plans: plans.map(planDto),
   })
 })
 
@@ -1767,32 +1897,60 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const b = req.body || {}
+  const before = (await resolveCommission(w)).pct
   let pct = w.commission_percent
+  let planId = w.salary_plan_id ?? null
+
+  // A plan and a manual rate are mutually exclusive: setting either clears the other, so there is
+  // never a worker carrying two different answers to "what is your commission?".
+  if (b.salaryPlanId !== undefined) {
+    planId = b.salaryPlanId === null || b.salaryPlanId === '' ? null : Number(b.salaryPlanId)
+    if (planId !== null) {
+      const plan = (await pool.query('SELECT * FROM salary_plans WHERE id=$1', [planId])).rows[0]
+      if (!plan) return res.status(400).json({ error: 'Unknown salary plan' })
+      if (!plan.active) return res.status(400).json({ error: 'That plan is retired — pick an active one' })
+      pct = null
+    }
+  }
   if (b.commissionPercent !== undefined) {
     if (b.commissionPercent === null || b.commissionPercent === '') pct = null
     else {
       pct = Number(b.commissionPercent)
       if (!Number.isInteger(pct) || pct < 0 || pct > 100) return res.status(400).json({ error: 'Commission must be a whole number between 0 and 100' })
+      planId = null // a hand-typed rate takes this worker off their plan, deliberately
     }
   }
   const walletEnabled = b.walletEnabled !== undefined ? !!b.walletEnabled : w.wallet_enabled !== false
-  await pool.query('UPDATE workers SET commission_percent=$1, wallet_enabled=$2 WHERE id=$3', [pct, walletEnabled, id])
+  await pool.query('UPDATE workers SET commission_percent=$1, salary_plan_id=$2, wallet_enabled=$3 WHERE id=$4', [pct, planId, walletEnabled, id])
 
   const who = req.admin?.name || req.admin?.email || 'Admin'
-  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  const after = await resolveCommission(await getWorker(id))
+  const platform = after.platform
   const bits = []
+  if (b.salaryPlanId !== undefined) bits.push(after.plan ? `salary plan ${after.plan.name} (${after.pct}%)` : 'taken off their salary plan')
   if (b.commissionPercent !== undefined) bits.push(pct === null ? `commission back to the platform default (${platform}%)` : `commission ${pct}%`)
   if (b.walletEnabled !== undefined && walletEnabled !== (w.wallet_enabled !== false)) bits.push(walletEnabled ? 'wallet enabled' : 'wallet disabled')
   if (bits.length) publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'worker.pay', entityType: 'worker', entityId: id, detail: `${w.name}: ${bits.join(', ')}` })
-  // Tell the worker their take-home changed — this is their money, not a silent setting.
-  if (b.commissionPercent !== undefined && (w.commission_percent ?? platform) !== (pct ?? platform)) {
-    publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Your earnings rate changed', body: `You now keep ${100 - (pct ?? platform)}% of each job.` })
+
+  // Compare the RESOLVED rates, not the raw columns: moving someone onto a plan leaves
+  // commission_percent NULL, so a column comparison would miss a real change to their take-home.
+  if (after.pct !== before) {
+    publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Your earnings rate changed', body: `You now keep ${100 - after.pct}% of each job.` })
   }
   if (b.walletEnabled !== undefined && !walletEnabled && w.wallet_enabled !== false) {
     publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Withdrawals paused', body: 'Your wallet has been put on hold. Please contact the admin.' })
   }
-  const after = await getWorker(id)
-  res.json({ ok: true, commissionPercent: after.commission_percent, platformCommissionPercent: platform, effectiveCommissionPercent: after.commission_percent ?? platform, walletEnabled: after.wallet_enabled !== false })
+  const fresh = await getWorker(id)
+  res.json({
+    ok: true,
+    commissionPercent: fresh.commission_percent,
+    salaryPlanId: fresh.salary_plan_id ?? null,
+    salaryPlan: planDto(after.plan),
+    platformCommissionPercent: platform,
+    effectiveCommissionPercent: after.pct,
+    commissionSource: after.source,
+    walletEnabled: fresh.wallet_enabled !== false,
+  })
 })
 
 /** How the wallet settles this worker. The commission lives here because the worker service owns
@@ -1800,8 +1958,13 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
 app.get('/api/internal/workers/:id/pay-config', internalOnly, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
+  // Resolved here, not in the wallet: a salary plan has to reach settleBooking or assigning one
+  // changes nothing about what the worker is actually paid.
+  const { pct, source } = await resolveCommission(w)
   res.json({
-    commissionPercent: w.commission_percent, // null = caller falls back to the platform setting
+    commissionPercent: pct,
+    /** 'plan' | 'manual' | 'platform' — for the wallet's logs when something looks wrong. */
+    commissionSource: source,
     walletEnabled: w.wallet_enabled !== false,
   })
 })
@@ -2197,12 +2360,13 @@ app.post('/api/admin/workers/:id/background/:key', adminAuth, async (req, res) =
 async function goLiveChecklist(workerId) {
   const w = await getWorker(workerId)
   if (!w) return null
-  const [docs, training, eqTypes, eqIssued, background] = await Promise.all([
+  const [docs, training, eqTypes, eqIssued, background, pay] = await Promise.all([
     pool.query('SELECT name, status FROM worker_documents WHERE worker_id=$1', [workerId]).then((r) => r.rows),
     trainingState(workerId),
     pool.query('SELECT id, name FROM equipment_types WHERE active = true AND required = true').then((r) => r.rows),
     pool.query("SELECT type_id FROM worker_equipment WHERE worker_id=$1 AND status='issued'", [workerId]).then((r) => r.rows),
     backgroundState(workerId),
+    resolveCommission(w),
   ])
   const heldTypes = new Set(eqIssued.map((e) => e.type_id))
   const missingKit = eqTypes.filter((t) => !heldTypes.has(t.id))
@@ -2258,10 +2422,18 @@ async function goLiveChecklist(workerId) {
       ? item('equipment_issued', 'Equipment Issued', 'na', 'No equipment is marked as required — this check is not enforced')
       : item('equipment_issued', 'Equipment Issued', yn(missingKit.length === 0),
         missingKit.length ? `Still to issue: ${missingKit.map((t) => t.name).join(', ')}` : `All ${eqTypes.length} required items issued`),
-    item('salary_configured', 'Salary Configured', yn(w.commission_percent !== null && w.commission_percent !== undefined),
-      w.commission_percent === null || w.commission_percent === undefined
-        ? `No per-worker rate set — they would earn on the platform default (${platform}% commission)`
-        : `Commission ${w.commission_percent}% — the worker keeps ${100 - w.commission_percent}%`),
+    // Resolved, not read off the column: a worker on a salary plan has commission_percent NULL, so
+    // reading the column would call them unconfigured while the wallet happily pays them the plan's
+    // rate.
+    (() => {
+      const c = pay // resolveCommission(), fetched with the rest above
+      return item('salary_configured', 'Salary Configured', yn(c.source !== 'platform'),
+        c.source === 'platform'
+          ? `No plan or rate set — they would earn on the platform default (${platform}% commission)`
+          : c.source === 'plan'
+            ? `${c.plan.name} — ${c.pct}% commission, the worker keeps ${100 - c.pct}%`
+            : `Commission ${c.pct}% (set by hand) — the worker keeps ${100 - c.pct}%`)
+    })(),
     item('wallet_enabled', 'Wallet Enabled', yn(w.wallet_enabled !== false), w.wallet_enabled !== false ? '' : 'Withdrawals are on hold'),
   ]
   const blocking = items.filter((i) => i.state === 'no')
@@ -2372,21 +2544,50 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
     const dup = await pool.query('SELECT id, name FROM workers WHERE phone=$1', [String(b.phone).trim()])
     if (dup.rows.length) return res.status(409).json({ error: `That mobile number already belongs to ${dup.rows[0].name}` })
   }
+  // A plan and a hand-typed rate are mutually exclusive here too (see PATCH /pay).
+  let planId = b.salary_plan_id ? Number(b.salary_plan_id) : null
+  if (planId) {
+    const plan = (await pool.query('SELECT id, active FROM salary_plans WHERE id=$1', [planId])).rows[0]
+    if (!plan) return res.status(400).json({ error: 'Unknown salary plan' })
+    if (!plan.active) return res.status(400).json({ error: 'That salary plan is retired' })
+  }
+  if (b.shift_def_id && !(await getShiftDef(Number(b.shift_def_id)))) return res.status(400).json({ error: 'Unknown shift' })
+
   const { rows } = await pool.query(
     `INSERT INTO workers (name,first_name,last_name,phone,alternate_mobile,email,city,services,status,verified,rating,zone_id,designation,
-                          worker_category,employment_type,joining_date,recruiter,referral_source)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+                          worker_category,employment_type,joining_date,recruiter,referral_source,
+                          cluster_id,store_id,reporting_manager_id,salary_plan_id,shift_def_id,wallet_enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
     [name, b.first_name || null, b.last_name || null, b.phone ? String(b.phone).trim() : null, b.alternate_mobile || null,
       b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5,
       b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker',
-      b.worker_category || null, b.employment_type || null, b.joining_date || null, b.recruiter || null, b.referral_source || null])
+      b.worker_category || null, b.employment_type || null, b.joining_date || null, b.recruiter || null, b.referral_source || null,
+      b.cluster_id ? Number(b.cluster_id) : null, b.store_id ? Number(b.store_id) : null,
+      b.reporting_manager_id ? Number(b.reporting_manager_id) : null, planId,
+      b.shift_def_id ? Number(b.shift_def_id) : null, b.wallet_enabled === undefined ? true : !!b.wallet_enabled])
   // Badge number is derived from the id, so it needs the row to exist first.
   const id = rows[0].id
   await pool.query(`UPDATE workers SET employee_id = 'WKR' || (1000 + $1) WHERE id=$1 AND employee_id IS NULL`, [id])
   const profPatch = {}
   if (b.personal && typeof b.personal === 'object') profPatch.personal = b.personal
   if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = b.skillLevels
+  // Weekly off, if the admin set a starting pattern. Marked Approved because an admin chose it —
+  // the worker can change it from the app afterwards, which sends it back for review (Phase 11).
+  if (Array.isArray(b.weekly_off)) {
+    const off = new Set(b.weekly_off)
+    const days = {}
+    for (const d of DAY_KEYS) days[d] = !off.has(d)
+    profPatch.availability = {
+      availableDays: days,
+      preferredShiftId: b.shift_def_id ? Number(b.shift_def_id) : null,
+      status: 'Approved',
+      reviewedBy: req.admin?.name || req.admin?.email || 'Admin',
+      reviewedAt: new Date().toISOString(),
+    }
+  }
   if (Object.keys(profPatch).length) await mergeProfile(id, profPatch)
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'worker.create', entityType: 'worker', entityId: id, detail: `Created worker ${name}${b.phone ? ` (${b.phone})` : ''}` })
   res.status(201).json(rowToWorker(await getWorker(id)))
 })
 

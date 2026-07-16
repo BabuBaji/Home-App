@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
-import { fetchWorkers, createWorker, updateWorker, deleteWorker, inviteWorker, fetchServices, fetchZones, type Zone } from '../api'
+import { fetchWorkers, updateWorker, deleteWorker, inviteWorker, fetchServices, fetchZones, type Zone } from '../api'
 import type { Worker } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
 import { useStore, can } from '../store'
@@ -43,8 +43,6 @@ export default function Workers() {
   const pageSize = 10
 
   const [menuId, setMenuId] = useState<number | null>(null)
-  const [addOpen, setAddOpen] = useState(false)
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<Worker | null>(null)
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
   const nav = useNavigate()
@@ -76,15 +74,6 @@ export default function Workers() {
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
   const rated = data.workers.filter((w) => w.rating > 0)
   const avgRating = rated.length ? (rated.reduce((a, w) => a + w.rating, 0) / rated.length).toFixed(1) : '—'
-
-  const addWorker = async () => {
-    setBusy(true)
-    try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation, personal: draft.personal, skillLevels: draft.skillLevels })
-      toast('Worker added')
-      setAddOpen(false); setDraft(EMPTY_DRAFT); load()
-    } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
-  }
 
   const saveEdit = async () => {
     if (!editing) return
@@ -165,7 +154,9 @@ export default function Workers() {
             {allServices.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <button className="btn line"><Funnel size={16} /> Filters</button>
-          <button className="btn" onClick={() => { setDraft(EMPTY_DRAFT); setAddOpen(true) }}><Plus size={17} /> Add Worker</button>
+          {/* The wizard, not the old modal: it captures category, employment type, joining date,
+              zone, shift and salary plan — the fields the go-live checklist actually gates on. */}
+          <button className="btn" onClick={() => nav('/workers/new')}><Plus size={17} /> Add Worker</button>
         </div>
 
         <div className="tablewrap">
@@ -249,17 +240,6 @@ export default function Workers() {
 
         <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="workers" onPage={setPage} />
       </Card>
-
-      {addOpen && (
-        <Modal title="Add Worker" onClose={() => setAddOpen(false)} footer={
-          <>
-            <button className="btn line" onClick={() => setAddOpen(false)}>Cancel</button>
-            <button className="btn" disabled={busy || !draft.name.trim()} onClick={addWorker}>Add Worker</button>
-          </>
-        }>
-          <WorkerForm draft={draft} onChange={setDraft} services={allServices} zones={zones} />
-        </Modal>
-      )}
 
       {editing && (
         <Modal title="Edit Worker" onClose={() => setEditing(null)} footer={
