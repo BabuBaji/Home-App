@@ -12,6 +12,10 @@ import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
   makeAdminAuth, getSetting, getSettingInt,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: it carries the jsonwebtoken dep.
+import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('wallet') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4009)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5439/wallet'
@@ -442,9 +446,10 @@ const app = express()
 app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'wallet', ok: true }))
 
+// Verifies the SIGNED token. This used to parse the id out of `worker-<id>`, so `Bearer worker-6`
+// handed over another worker's entire earnings ledger — the same hole the other services had.
 function auth(req, res, next) {
-  const t = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = t.startsWith('worker-') ? Number(t.slice(7)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'worker')
   if (!Number.isFinite(id)) return res.status(401).json({ ok: false, error: 'Not authenticated' })
   req.wid = id
   next()

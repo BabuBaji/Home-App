@@ -162,6 +162,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@dispatch-db:5432/dispatch
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       WORKER_URL: http://worker:4004
       BOOKING_URL: http://booking:4006
       CATALOG_URL: http://catalog:4001
@@ -197,6 +198,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@wallet-db:5432/wallet
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
       WORKER_URL: http://worker:4004
       PAYMENT_URL: http://payment:4008

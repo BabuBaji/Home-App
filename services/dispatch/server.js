@@ -11,6 +11,10 @@ import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, tryGet, publishEvent, getSettingInt,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: it carries the jsonwebtoken dep.
+import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('dispatch') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4007)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5437/dispatch'
@@ -234,10 +238,11 @@ const app = express()
 app.use(express.json({ limit: '6mb' }))
 app.get('/health', (_q, res) => res.json({ service: 'dispatch', ok: true }))
 
-// Worker auth: decode worker-<id>, load the worker's service-set/location from the worker svc.
+// Worker auth: verify the SIGNED token, then load the worker's service-set/location from the
+// worker svc. This used to parse the id straight out of `worker-<id>`, so `Bearer worker-6`
+// exposed another worker's job offers — the same hole the worker/auth/admin services had.
 async function auth(req, res, next) {
-  const token = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = token.startsWith('worker-') ? Number(token.slice(7)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'worker')
   if (!Number.isFinite(id)) return res.status(401).json({ ok: false, error: 'Not authenticated' })
   const w = await tryGet(WORKER_URL, `/internal/workers/${id}/service-set`, null)
   if (!w || w.status !== 'active') return res.status(401).json({ ok: false, error: 'Not authenticated' })
