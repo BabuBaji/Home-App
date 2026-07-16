@@ -28,6 +28,18 @@ const OP_LABEL: Record<string, string> = {
   eq: 'equals', neq: 'is not', in: 'is one of', between: 'is between',
 }
 const CALC_LABEL: Record<string, string> = { fixed: 'Fixed amount', per_job: 'Per completed job', slab: 'Slab by a number', percentage: '% of job value' }
+const STACK_LABEL: Record<string, string> = {
+  allow: 'Stacks — pays on top of others',
+  highest_wins: 'Highest in its group wins',
+  lowest_wins: 'Lowest in its group wins',
+  exclusive: 'Only one in its group pays',
+}
+const STACK_HINT: Record<string, string> = {
+  allow: 'Always pays, even when other rules also match the same job or month.',
+  highest_wins: 'When several rules in this group match, only the one paying the most pays.',
+  lowest_wins: 'When several rules in this group match, only the one paying the least pays.',
+  exclusive: 'When several rules in this group match, only the highest-priority one pays (lowest priority number wins).',
+}
 const CATEGORIES = ['Regular', 'Premium', 'Expert', 'Senior']
 const EMPLOYMENT = ['Full Time', 'Part Time', 'Contract', 'Freelance']
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -41,6 +53,7 @@ type Draft = {
   calcType: string
   amount: string; percent: string; perUnit: string; maxUnits: string
   slabMetric: string; slabs: RuleSlab[]
+  stack: string; stackGroup: string
   budgetMonth: string
 }
 const emptyDraft = (meta: RuleMeta): Draft => ({
@@ -51,6 +64,7 @@ const emptyDraft = (meta: RuleMeta): Draft => ({
   calcType: 'fixed',
   amount: '', percent: '', perUnit: '', maxUnits: '',
   slabMetric: meta.fields.find((f) => f.type === 'number' && f.triggers.includes('monthly_close'))?.key || 'completed_jobs', slabs: [],
+  stack: 'allow', stackGroup: '',
   budgetMonth: '',
 })
 
@@ -119,6 +133,7 @@ export default function CompensationRules() {
       maxUnits: v.calc.maxUnits ? String(v.calc.maxUnits) : '',
       slabMetric: v.calc.slabMetric || 'completed_jobs',
       slabs: v.calc.slabs || [],
+      stack: v.stack || 'allow', stackGroup: v.stackGroup || '',
       budgetMonth: v.budgetMonth ? String(v.budgetMonth) : '',
     })
     setView('build')
@@ -146,6 +161,7 @@ export default function CompensationRules() {
       trigger: draft.trigger, effectiveFrom: draft.effectiveFrom || null, effectiveTo: draft.effectiveTo || null,
       scopeType: draft.scopeType, scopeValues: draft.scopeType === 'company' ? [] : draft.scopeValues,
       matchMode: draft.matchMode, conditions: draft.conditions, calcType: draft.calcType, calc,
+      stack: draft.stack, stackGroup: draft.stack === 'allow' ? '' : draft.stackGroup.trim(),
       budgetMonth: num(draft.budgetMonth),
     }
     setSaving(true)
@@ -413,9 +429,31 @@ export default function CompensationRules() {
             </div>
           </Card>
 
+          {/* STACKING */}
+          <Card title="Stacking — when more than one rule matches">
+            <div style={grid2}>
+              <Field label="How it combines">
+                <Dropdown value={d.stack} width="100%" options={meta.stackModes.map((m) => ({ value: m, label: STACK_LABEL[m] || m }))} onChange={(v) => setD({ stack: v, stackGroup: v === 'allow' ? '' : d.stackGroup })} />
+              </Field>
+              <Field label="Stack group">
+                <input value={d.stackGroup} disabled={d.stack === 'allow'} onChange={(e) => setD({ stackGroup: e.target.value.slice(0, 60) })}
+                  placeholder={d.stack === 'allow' ? 'Not needed when stacking' : 'e.g. surge'} style={d.stack === 'allow' ? { ...inpStyle, background: '#f3f4f6', color: '#9ca3af' } : inpStyle} />
+              </Field>
+            </div>
+            <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 4 }}>
+              <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>
+                {STACK_HINT[d.stack] || ''}{' '}
+                {d.stack !== 'allow' && (d.stackGroup.trim()
+                  ? <>Only rules sharing the group “<strong>{d.stackGroup.trim()}</strong>” compete — give the rules you want to trade off the same group name.</>
+                  : <span style={{ color: '#b45309' }}>Pick a stack group — a policy does nothing until two rules share a group.</span>)}
+              </span>
+            </div>
+          </Card>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <button className="btn line" onClick={() => setView('list')}>Cancel</button>
-            <button className="btn" disabled={saving || !d.name.trim()} onClick={save}>{saving ? 'Saving…' : editing ? 'Save new version' : 'Create rule'}</button>
+            <button className="btn" disabled={saving || !d.name.trim() || (d.stack !== 'allow' && !d.stackGroup.trim())} onClick={save}>{saving ? 'Saving…' : editing ? 'Save new version' : 'Create rule'}</button>
           </div>
         </div>
 
@@ -474,6 +512,7 @@ function RuleReadout({ v, zones }: { v: RuleVersion; zones: Zone[] }) {
       <div><span className="muted">Applies to:</span> {SCOPE_LABEL[v.scopeType]}{scopeVals.length ? `: ${scopeVals.join(', ')}` : ''}</div>
       {v.conditions.length > 0 && <div><span className="muted">Qualifies when {v.matchMode.toUpperCase()}:</span> {v.conditions.map((c) => `${c.field} ${OP_LABEL[c.op] || c.op} ${c.value}`).join(v.matchMode === 'all' ? ' AND ' : ' OR ')}</div>}
       <div><span className="muted">Pays:</span> {calcSummary(v)}</div>
+      {v.stack && v.stack !== 'allow' && <div><span className="muted">Stacking:</span> {STACK_LABEL[v.stack] || v.stack}{v.stackGroup ? ` (group “${v.stackGroup}”)` : ''}</div>}
       {v.budgetMonth > 0 && <div><span className="muted">Budget:</span> {rupee(v.budgetMonth)}/month</div>}
     </div>
   )
@@ -490,5 +529,8 @@ function plainEnglish(d: Draft, _meta: RuleMeta): string {
       : d.calcType === 'per_job' ? `${rupee(Number(d.perUnit) || 0)} per job${d.maxUnits ? ` up to ${d.maxUnits} jobs` : ''}`
         : `a slab amount by ${d.slabMetric}`
   const budget = Number(d.budgetMonth) > 0 ? `, capped at ${rupee(Number(d.budgetMonth))}/month` : ''
-  return `Pay ${scope}${conds}, ${when}: ${pays}${budget}.`
+  const stack = d.stack !== 'allow' && d.stackGroup.trim()
+    ? ` Within the “${d.stackGroup.trim()}” group, ${d.stack === 'exclusive' ? 'only the highest-priority rule pays' : d.stack === 'lowest_wins' ? 'only the lowest-paying rule pays' : 'only the highest-paying rule pays'}.`
+    : ''
+  return `Pay ${scope}${conds}, ${when}: ${pays}${budget}.${stack}`
 }

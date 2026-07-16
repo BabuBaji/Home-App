@@ -290,7 +290,11 @@ async function init() {
       conditions JSONB NOT NULL DEFAULT '[]'::jsonb,     -- [{ field, op, value }]
       calc_type TEXT NOT NULL DEFAULT 'fixed',           -- fixed | per_job | slab | percentage
       calc JSONB NOT NULL DEFAULT '{}'::jsonb,           -- { amount, perUnit, maxUnits, percent, base, slabMetric, slabs:[{from,to,amount}] }
-      stack TEXT NOT NULL DEFAULT 'allow',               -- allow | highest_wins | exclusive (phase 2)
+      -- Stacking: rules sharing a stack_group are resolved together by the stack mode when they match
+      -- the same event. Empty group = always stacks independently. allow | highest_wins | lowest_wins
+      -- | exclusive (exclusive keeps the highest-priority rule; the others keep the winning amount).
+      stack TEXT NOT NULL DEFAULT 'allow',
+      stack_group TEXT NOT NULL DEFAULT '',
       budget_month INTEGER NOT NULL DEFAULT 0,           -- 0 = uncapped; else a hard ₹ ceiling per calendar month
       notes TEXT NOT NULL DEFAULT '',
       created_by TEXT NOT NULL DEFAULT '', created TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -314,6 +318,8 @@ async function init() {
       id SERIAL PRIMARY KEY, rule_id INTEGER NOT NULL, action TEXT NOT NULL,
       detail TEXT NOT NULL DEFAULT '', changed_by TEXT NOT NULL DEFAULT '', created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Stacking (added after the versions table shipped) — resolves overlapping rules per group.
+    `ALTER TABLE incentive_rule_versions ADD COLUMN IF NOT EXISTS stack_group TEXT NOT NULL DEFAULT ''`,
 
     /* ---- Payroll runs ----
      * A run is a DRAFT until an admin approves it. Nothing reaches a wallet before that: this
@@ -2433,6 +2439,9 @@ const RULE_FIELDS = {
 const RULE_TRIGGERS = ['job_completed', 'monthly_close']
 const SCOPE_TYPES = ['company', 'city', 'zone', 'service', 'worker_category', 'employment_type', 'specific_workers']
 const CALC_TYPES = ['fixed', 'per_job', 'slab', 'percentage']
+// Stacking: how a rule combines with others that match the same worker/event. Only rules sharing a
+// non-empty stack_group compete; the group collapses per the strictest mode any member declares.
+const STACK_MODES = ['allow', 'highest_wins', 'lowest_wins', 'exclusive']
 
 const RULE_OPS = {
   gte: (a, b) => Number(a) >= Number(b),
@@ -2541,12 +2550,48 @@ async function ruleSpent(ruleId, month) {
 async function activeRuleVersions(trigger, on = new Date()) {
   const day = on.toISOString().slice(0, 10)
   const { rows } = await pool.query(
-    `SELECT v.*, r.name AS rule_name FROM incentive_rule_versions v JOIN incentive_rules r ON r.id = v.rule_id
+    `SELECT v.*, r.name AS rule_name, r.priority AS rule_priority FROM incentive_rule_versions v JOIN incentive_rules r ON r.id = v.rule_id
      WHERE v.is_current = true AND r.active = true AND v.trigger = $1
        AND (v.effective_from IS NULL OR v.effective_from <= $2)
        AND (v.effective_to IS NULL OR v.effective_to >= $2)
      ORDER BY r.priority ASC, r.id ASC`, [trigger, day])
   return rows
+}
+
+/**
+ * Stacking resolution. Rules with no stack group always pay (independent). Rules sharing a non-empty
+ * group compete: the group's effective policy is the strictest mode any member declares
+ * (exclusive > highest_wins/lowest_wins > allow), and collapses the group to a single winner —
+ *   • highest_wins — the largest computed amount (priority breaks ties)
+ *   • lowest_wins  — the smallest computed amount
+ *   • exclusive    — the highest-priority rule (lowest priority number), amount as a tiebreak
+ * `matches` is [{ v, amount, priority }]; returns the survivors in the original order.
+ */
+function resolveStacking(matches) {
+  const groups = new Map()
+  const survivors = []
+  for (const m of matches) {
+    const g = (m.v.stack_group || '').trim()
+    if (!g) { survivors.push(m); continue }
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g).push(m)
+  }
+  for (const ms of groups.values()) {
+    if (ms.length === 1) { survivors.push(ms[0]); continue }
+    const modes = ms.map((m) => m.v.stack)
+    let policy = 'allow'
+    if (modes.includes('exclusive')) policy = 'exclusive'
+    else if (modes.includes('highest_wins')) policy = 'highest_wins'
+    else if (modes.includes('lowest_wins')) policy = 'lowest_wins'
+    if (policy === 'allow') { survivors.push(...ms); continue }
+    let winner
+    if (policy === 'exclusive') winner = ms.slice().sort((a, b) => a.priority - b.priority || b.amount - a.amount)[0]
+    else if (policy === 'highest_wins') winner = ms.slice().sort((a, b) => b.amount - a.amount || a.priority - b.priority)[0]
+    else winner = ms.slice().sort((a, b) => a.amount - b.amount || a.priority - b.priority)[0]
+    survivors.push(winner)
+  }
+  const order = new Map(matches.map((m, i) => [m, i]))
+  return survivors.sort((a, b) => order.get(a) - order.get(b))
 }
 
 /**
@@ -2561,12 +2606,20 @@ async function evaluateJobRules(booking) {
   const at = booking.completed_at ? new Date(booking.completed_at) : new Date()
   const month = monthKey(at)
   const ref = String(booking.id)
+  // Fields are all derived from this worker + this booking, so the context is the same for every
+  // rule — compute it once.
+  const ctx = await ruleContext(w, 'job_completed', booking, month)
+  // Pass 1 — collect every eligible rule and what it would pay.
+  const matches = []
   for (const v of await activeRuleVersions('job_completed', at)) {
     if (!matchesScope(v, w, booking)) continue
-    const ctx = await ruleContext(w, 'job_completed', booking, month)
     if (!evalConditions(v.conditions, v.match_mode, ctx)) continue
     const amount = computeCalc(v, ctx)
     if (amount <= 0) continue
+    matches.push({ v, amount, priority: v.rule_priority })
+  }
+  // Pass 2 — stacking collapses same-group rules to a winner; then budget + pay the survivors.
+  for (const { v, amount } of resolveStacking(matches)) {
     // Hard budget: once a rule's monthly ceiling is reached it stops paying, rather than overshoot.
     if (v.budget_month > 0 && (await ruleSpent(v.rule_id, month)) + amount > v.budget_month) {
       publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Incentive Engine', action: 'incentive.budget', entityType: 'incentive', entityId: v.rule_id, detail: `${v.rule_name}: monthly budget ₹${v.budget_month} reached for ${month} — paused` })
@@ -2590,13 +2643,19 @@ async function evaluateJobRules(booking) {
  * per worker. The engine ledger row is written at APPROVAL (when the money actually moves).
  */
 async function evaluateMonthlyRules(w, month, tally) {
-  const out = []
+  const ctx = await ruleContext(w, 'monthly_close', null, month)
+  // Pass 1 — collect eligible rules for this worker.
+  const matches = []
   for (const v of await activeRuleVersions('monthly_close', new Date(`${month}-01T00:00:00`))) {
     if (!matchesScope(v, w, null)) continue
-    const ctx = await ruleContext(w, 'monthly_close', null, month)
     if (!evalConditions(v.conditions, v.match_mode, ctx)) continue
     const amount = computeCalc(v, ctx)
     if (amount <= 0) continue
+    matches.push({ v, amount, priority: v.rule_priority })
+  }
+  // Pass 2 — stacking, then budget the survivors.
+  const out = []
+  for (const { v, amount } of resolveStacking(matches)) {
     if (v.budget_month > 0) {
       const projected = (await ruleSpent(v.rule_id, month)) + (tally.get(v.rule_id) || 0) + amount
       if (projected > v.budget_month) continue // over the cap — skip this worker for this rule
@@ -2726,7 +2785,7 @@ const versionDto = (v) => v && ({
   effectiveFrom: v.effective_from, effectiveTo: v.effective_to,
   scopeType: v.scope_type, scopeValues: v.scope_values || [],
   matchMode: v.match_mode, conditions: v.conditions || [], calcType: v.calc_type, calc: v.calc || {},
-  stack: v.stack, budgetMonth: v.budget_month, notes: v.notes || '',
+  stack: v.stack, stackGroup: v.stack_group || '', budgetMonth: v.budget_month, notes: v.notes || '',
   createdBy: v.created_by, created: v.created,
 })
 const ruleDto = (r, v, extra = {}) => ({
@@ -2789,9 +2848,16 @@ function readRuleVersion(b) {
   const dateOk = (x) => !x || !Number.isNaN(new Date(x).getTime())
   if (!dateOk(b?.effectiveFrom) || !dateOk(b?.effectiveTo)) return { error: 'Effective dates must be valid' }
 
+  const stack = String(b?.stack || 'allow')
+  if (!STACK_MODES.includes(stack)) return { error: `Stacking must be one of: ${STACK_MODES.join(', ')}` }
+  const stackGroup = String(b?.stackGroup || '').trim().slice(0, 60)
+  // A stacking policy only bites when the rule shares a group with another; without a group it does
+  // nothing, so guard against the silent-no-op of picking "highest wins" but leaving group blank.
+  if (stack !== 'allow' && !stackGroup) return { error: 'A stacking policy needs a stack group — rules in the same group compete' }
+
   return {
     trigger, scopeType, scopeValues, matchMode, conditions, calcType, calc,
-    budgetMonth, stack: 'allow',
+    budgetMonth, stack, stackGroup,
     effectiveFrom: b?.effectiveFrom || null, effectiveTo: b?.effectiveTo || null,
     notes: String(b?.notes || '').slice(0, 500),
   }
@@ -2807,6 +2873,7 @@ app.get('/api/admin/incentive-rules/meta', adminAuth, async (_q, res) => {
     triggers: RULE_TRIGGERS,
     scopeTypes: SCOPE_TYPES,
     calcTypes: CALC_TYPES,
+    stackModes: STACK_MODES,
     operators: Object.keys(RULE_OPS),
     fields: Object.entries(RULE_FIELDS).map(([key, f]) => ({ key, label: f.label, type: f.type, triggers: f.triggers })),
     categories: ['Attendance', 'Peak Hour', 'Referral', 'Festival', 'Target', 'Quality', 'Zone', 'Weekend', 'Night Shift', 'Retention', 'Joining Bonus', 'Campaign', 'Manual', 'Other'],
@@ -2856,9 +2923,9 @@ app.post('/api/admin/incentive-rules', adminAuth, async (req, res) => {
       'INSERT INTO incentive_rules (code, name, description, category, priority, active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [code, name, String(req.body?.description || ''), String(req.body?.category || 'Other'), Number(req.body?.priority) || 100, req.body?.active !== false])).rows[0]
     const ver = (await pool.query(
-      `INSERT INTO incentive_rule_versions (rule_id, version, is_current, trigger, effective_from, effective_to, scope_type, scope_values, match_mode, conditions, calc_type, calc, stack, budget_month, notes, created_by)
-       VALUES ($1,1,true,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10::jsonb,$11,$12,$13,$14) RETURNING *`,
-      [r.id, v.trigger, v.effectiveFrom, v.effectiveTo, v.scopeType, JSON.stringify(v.scopeValues), v.matchMode, JSON.stringify(v.conditions), v.calcType, JSON.stringify(v.calc), v.stack, v.budgetMonth, v.notes, who])).rows[0]
+      `INSERT INTO incentive_rule_versions (rule_id, version, is_current, trigger, effective_from, effective_to, scope_type, scope_values, match_mode, conditions, calc_type, calc, stack, stack_group, budget_month, notes, created_by)
+       VALUES ($1,1,true,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10::jsonb,$11,$12,$13,$14,$15) RETURNING *`,
+      [r.id, v.trigger, v.effectiveFrom, v.effectiveTo, v.scopeType, JSON.stringify(v.scopeValues), v.matchMode, JSON.stringify(v.conditions), v.calcType, JSON.stringify(v.calc), v.stack, v.stackGroup, v.budgetMonth, v.notes, who])).rows[0]
     await auditRule(r.id, 'created', `${name} (v1)`, who)
     res.status(201).json({ ok: true, rule: ruleDto(r, ver) })
   } catch (e) {
@@ -2878,9 +2945,9 @@ app.post('/api/admin/incentive-rules/:id/version', adminAuth, async (req, res) =
   const nextVer = (await pool.query('SELECT COALESCE(MAX(version),0)+1 n FROM incentive_rule_versions WHERE rule_id=$1', [id])).rows[0].n
   await pool.query('UPDATE incentive_rule_versions SET is_current=false WHERE rule_id=$1', [id])
   const ver = (await pool.query(
-    `INSERT INTO incentive_rule_versions (rule_id, version, is_current, trigger, effective_from, effective_to, scope_type, scope_values, match_mode, conditions, calc_type, calc, stack, budget_month, notes, created_by)
-     VALUES ($1,$2,true,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15) RETURNING *`,
-    [id, nextVer, v.trigger, v.effectiveFrom, v.effectiveTo, v.scopeType, JSON.stringify(v.scopeValues), v.matchMode, JSON.stringify(v.conditions), v.calcType, JSON.stringify(v.calc), v.stack, v.budgetMonth, v.notes, who])).rows[0]
+    `INSERT INTO incentive_rule_versions (rule_id, version, is_current, trigger, effective_from, effective_to, scope_type, scope_values, match_mode, conditions, calc_type, calc, stack, stack_group, budget_month, notes, created_by)
+     VALUES ($1,$2,true,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15,$16) RETURNING *`,
+    [id, nextVer, v.trigger, v.effectiveFrom, v.effectiveTo, v.scopeType, JSON.stringify(v.scopeValues), v.matchMode, JSON.stringify(v.conditions), v.calcType, JSON.stringify(v.calc), v.stack, v.stackGroup, v.budgetMonth, v.notes, who])).rows[0]
   // Name / description / category / priority live on the rule, not the version.
   if (req.body?.name || req.body?.description !== undefined || req.body?.category || req.body?.priority !== undefined) {
     await pool.query('UPDATE incentive_rules SET name=$1, description=$2, category=$3, priority=$4 WHERE id=$5',
