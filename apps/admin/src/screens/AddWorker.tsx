@@ -514,11 +514,7 @@ export default function AddWorker() {
                 </div>
                 <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 4 }}>
                   <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  <span>
-                    Deductions apply the rates you set in Settings when payroll runs — and only for fixed/hybrid workers,
-                    since per-job earnings aren't a monthly salary. TDS here is a flat configured percentage, not a
-                    progressive slab calculation.
-                  </span>
+                  <span>Deductions will be applied as per company policy and applicable laws.</span>
                 </div>
               </Card>
             </>
