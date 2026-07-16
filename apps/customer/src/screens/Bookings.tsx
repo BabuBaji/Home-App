@@ -1,76 +1,76 @@
+// 58 · My Bookings — the Orders hub: filter chips + a short preview of each group.
+// Tapping a chip (or "View All") opens the dedicated list screen for that group.
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Headset } from 'lucide-react'
+import { Bell, Headset } from 'lucide-react'
 import { BottomNav, Loading } from '../components/UI'
-import SupportChat from '../components/SupportChat'
-import { ServiceThumb } from '../serviceArt'
+import OrderCard from '../components/OrderCard'
 import { fetchBookings } from '../api'
+import { isActive, isUpcoming } from '../orders'
 import type { Booking } from '../types'
 
-type Tab = 'Upcoming' | 'Completed' | 'Cancelled'
-const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
-const LIVE_LABEL: Record<string, string> = { confirmed: 'Confirmed', worker_assigned: 'Assigned', on_the_way: 'On the Way', arrived: 'Arrived', in_progress: 'In Progress' }
+type Group = 'Upcoming' | 'Active' | 'Completed' | 'Cancelled'
+const GROUPS: Group[] = ['Upcoming', 'Active', 'Completed', 'Cancelled']
+const ROUTE: Record<Group, string> = {
+  Upcoming: '/bookings/upcoming', Active: '/bookings/active',
+  Completed: '/bookings/completed', Cancelled: '/bookings/cancelled',
+}
+const PREVIEW = 1   // rows per section on the hub; the full list lives behind "View All"
+
+const inGroup = (b: Booking, g: Group): boolean =>
+  g === 'Completed' ? b.status === 'completed'
+    : g === 'Cancelled' ? b.status === 'cancelled'
+      : g === 'Active' ? isActive(b.status)
+        : isUpcoming(b.status)
 
 export default function Bookings() {
   const nav = useNavigate()
-  const [tab, setTab] = useState<Tab>('Upcoming')
   const [items, setItems] = useState<Booking[] | null>(null)
-  const [showHelp, setShowHelp] = useState(false)
+
+  useEffect(() => { fetchBookings().then(setItems).catch(() => setItems([])) }, [])
 
   const head = (
-    <header className="appbar bk-appbar">
-      <span className="iconbtn ghost" />
+    <header className="appbar ord-appbar">
+      <button className="iconbtn" onClick={() => nav('/support')} aria-label="Help & Support"><Headset size={18} /></button>
       <div className="titles"><h1>My Bookings</h1></div>
-      <button className="help-btn" onClick={() => setShowHelp(true)} aria-label="Help"><Headset size={15} /> HELP</button>
+      <button className="iconbtn" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell size={18} /></button>
     </header>
   )
 
-  useEffect(() => { fetchBookings().then(setItems).catch(() => setItems([])) }, [])
-  if (!items) return <div className="screen has-nav">{head}<Loading /><BottomNav />{showHelp && <SupportChat onClose={() => setShowHelp(false)} />}</div>
+  if (!items) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
 
-  const list = items.filter((b) => tab === 'Upcoming' ? ACTIVE.includes(b.status) : tab === 'Cancelled' ? b.status === 'cancelled' : b.status === 'completed')
-
-  const chip = (b: Booking) => {
-    const cls = b.status === 'completed' ? 'completed' : b.status === 'cancelled' ? 'cancelled' : 'upcoming'
-    const label = b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : (LIVE_LABEL[b.status] || b.status)
-    return <span className={`status-chip ${cls}`}>{label}</span>
-  }
-  const dateLabel = (b: Booking) => b.type === 'instant' || !b.date
-    ? new Date(b.created).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-    : `${b.date}, ${b.time}`
+  const sections = GROUPS.map((g) => ({ g, list: items.filter((b) => inGroup(b, g)) })).filter((s) => s.list.length > 0)
 
   return (
     <div className="screen has-nav">
       {head}
       <div className="content">
-        <div className="tabs">{(['Upcoming', 'Completed', 'Cancelled'] as Tab[]).map((t) => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
-
-        {list.length === 0 && <div className="state"><div className="ico">🗓</div><h3>No {tab.toLowerCase()} bookings</h3><p>They'll show up here.</p></div>}
-
-        <div className="bkc-list">
-          {list.map((b) => {
-            const primary = b.items[0]
-            const extra = b.items.length - 1
-            const live = ACTIVE.includes(b.status)
-            return (
-              <button key={b.id} className="bkc" onClick={() => nav(`/booking/${b.id}`)}>
-                <span className="bkc-thumb"><ServiceThumb service={{ id: primary.id, name: primary.name, image: `/services/${primary.id}.jpg` }} medallion={38} /></span>
-                <span className="bkc-main">
-                  <span className="bkc-name">{primary.name}{extra > 0 ? ` +${extra}` : ''}</span>
-                  <span className="bkc-date">{dateLabel(b)}</span>
-                  <span className="bkc-meta">{b.status === 'cancelled' ? (b.cancel_reason || 'Cancelled') : (b.pro_name || 'Expert')} · ₹{b.total}</span>
-                </span>
-                <span className="bkc-right">
-                  {chip(b)}
-                  {b.rating ? <span className="bkc-rate">⭐ {b.rating}</span> : <span className="bkc-go">{live ? 'Track' : 'Details'} ›</span>}
-                </span>
-              </button>
-            )
-          })}
+        <div className="ord-chips">
+          <button className="ord-chip active">All</button>
+          {GROUPS.map((g) => (
+            <button key={g} className="ord-chip" onClick={() => nav(ROUTE[g])}>{g}</button>
+          ))}
         </div>
+
+        {sections.length === 0 && (
+          <div className="state"><div className="ico">🗓</div><h3>No bookings yet</h3><p>Your bookings will show up here.</p></div>
+        )}
+
+        {sections.map(({ g, list }) => (
+          <section key={g} className="ord-sec">
+            <div className="ord-sec-head">
+              <h2>{g}</h2>
+              <button className="ord-viewall" onClick={() => nav(ROUTE[g])}>View All</button>
+            </div>
+            <div className="ord-list">
+              {list.slice(0, PREVIEW).map((b) => (
+                <OrderCard key={b.id} b={b} onClick={() => nav(`/booking-details/${b.id}`)} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
       <BottomNav />
-      {showHelp && <SupportChat onClose={() => setShowHelp(false)} />}
     </div>
   )
 }

@@ -11,8 +11,15 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting, parseToken, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep. Catalog only reads
+// the id (browsing stays anonymous), but it must read it from a SIGNED token — otherwise anyone
+// could claim another customer's id and get their personalised pricing.
+import { parseToken } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('catalog') // refuse to boot without a signing secret rather than trust forgeable tokens
 import {
   CATEGORIES, SERVICES_SEED, SERVICE_IMAGES, descFor, durationMinFor, SERVICE_DURATION, detailsFor, durationsFor,
   REFERRAL, TRUST_BADGES, COUPONS, applyCoupon, priceBreakdown,

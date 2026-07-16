@@ -56,13 +56,17 @@ function pickTarget(url) {
   if (p('/api/worker')) return U.worker
 
   // ----- customer identity / profile / wallet -----
-  if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')) return U.auth
+  // /api/payment-methods must be listed here (before the /api/payment rule) so it reaches auth,
+  // which owns saved payment methods, rather than the payment service.
+  if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')
+    || p('/api/family') || p('/api/payment-methods') || p('/api/profile')
+    || p('/api/reminders') || p('/api/plans')) return U.auth
 
   // ----- catalogue / pricing / address search -----
   if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
-  if (p('/api/bookings') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
+  if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
 
   // ----- support tickets -----
   if (p('/api/tickets')) return U.notification

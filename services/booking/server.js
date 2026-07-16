@@ -9,10 +9,15 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly,
+  makePool, migrate, nowIso, makeAdminAuth, internalOnly,
   internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
 import { quoteCancellation, scheduledStartMs } from './cancellation.js'
+
+assertJwtSecret('booking') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4006)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5436/booking'
@@ -221,6 +226,27 @@ app.post('/api/support/chat', auth, async (req, res) => {
 app.get('/api/bookings', auth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM bookings WHERE user_id=$1 ORDER BY id DESC', [req.user.id])
   res.json(rows.map((r) => publicBooking(rowTo(r))))
+})
+
+// Refund history — every booking that produced a refund, newest first. The wallet ledger has the
+// money side (kind='REFUND'); this is the booking side, which is what the customer recognises.
+// status: 'completed' (credited) | 'failed' (credit did not go through) | 'pending' (owed, not yet run).
+app.get('/api/refunds', auth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, ref, items, refund, refund_status, cancel_time, cancel_reason, created
+     FROM bookings WHERE user_id=$1 AND coalesce(refund,0) > 0
+     ORDER BY coalesce(cancel_time, created) DESC`, [req.user.id])
+  res.json(rows.map((r) => {
+    const items = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : (r.items || [])
+    const st = r.refund_status === 'refunded' ? 'completed' : r.refund_status === 'failed' ? 'failed' : 'pending'
+    return {
+      id: r.id, ref: r.ref, amount: r.refund, status: st,
+      title: items.map((i) => i.name).join(', ') || 'Booking refund',
+      serviceId: items[0]?.id || null,
+      reason: r.cancel_reason || null,
+      created: r.cancel_time || r.created,
+    }
+  }))
 })
 
 // Public: real customer reviews for a service — pulled from completed/reviewed bookings that
@@ -479,7 +505,14 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
        payment_status=CASE WHEN $3 > 0 THEN 'refunded' ELSE payment_status END WHERE id=$7`,
     [req.body?.reason || 'Not specified', q.fee, refundable, nowIso(), q.workerComp, refundable > 0 ? 'refunded' : 'none', b.id])
   if (refundable > 0) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref }) } catch { /* refund best-effort */ }
+    // The credit is best-effort, so record what actually happened: claiming 'refunded' when the
+    // wallet call failed would tell the customer they were paid when they were not.
+    try {
+      await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref })
+    } catch (e) {
+      console.error('[booking] refund credit failed:', e?.message || e)
+      await pool.query("UPDATE bookings SET refund_status='failed' WHERE id=$1", [b.id])
+    }
   }
   await emitBookingUpdate(b.id)
   publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(b.id), quote: q })
@@ -753,7 +786,7 @@ async function sweepUnacceptedBookings() {
         ['No expert accepted the booking in time', nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
       if (!upd.rowCount) continue
       if (refund > 0) {
-        try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
+        try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
         catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
       }
       await emitBookingUpdate(r.id)
