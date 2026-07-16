@@ -351,6 +351,18 @@ export interface ApprovalRequest {
   decidedBy: string; decidedAt: string | null; reason: string; error: string; created: string
 }
 export interface ApprovalRuleRow { action: string; label: string; enabled: boolean; threshold: number; reviewerPerm: string; minApprovers: number }
+
+/* Operations Command Center — the live network operating picture. */
+export interface CommandCenter {
+  network: { onlineWorkers: number; activeWorkers: number; totalWorkers: number; openJobs: number; activeJobs: number; liveJobs: number; zonesLive: number; zonesCritical: number; zonesShort: number }
+  demandSupply: { id: number; name: string; city: string; status: string; online: number; assigned: number; open: number; active: number; demand: number; health: string }[]
+  sla: { total: number; breached: number; atRisk: number; onTime: number }
+  escalations: { id: number; ref: string; zone: string; status: string; ageMin: number; reason: string }[]
+  alerts: { level: 'critical' | 'warn' | 'info'; title: string; detail: string }[]
+  peakHours: number[]; peakHour: number
+  dailySummary: { orders: number; completed: number; cancelled: number; active: number; revenue: number; newWorkers: number }
+  generatedAt: string
+}
 export interface ActionResult { ok: boolean; executed?: boolean; pending?: boolean; request?: ApprovalRequest; result?: unknown }
 export interface IncentiveRule {
   id: number; code: string; name: string; description: string; category: string

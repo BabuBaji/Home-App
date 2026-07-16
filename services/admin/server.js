@@ -734,6 +734,103 @@ app.get('/api/admin/live-ops', admin, async (req, res) => {
   res.json({ zones: zoneRows, unzoned, totals })
 })
 
+/* ================= Operations Command Center — live "mission control" BFF =================
+ * The network's real-time operating picture, aggregated from REAL data (zones × workers × live jobs
+ * × bookings): demand vs supply per zone, SLA at-risk/breached, active alerts, the escalation queue
+ * (jobs stuck from their own timestamps — not a fabricated feed), peak-hour demand, and today's
+ * summary. Scope-aware, so a city/zone leader sees only their patch. */
+const CC_ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+const UNASSIGNED_SLA_MIN = 10   // a confirmed job unassigned longer than this is breaching dispatch SLA
+const ACTIVE_SLA_MIN = 60       // an accepted job running longer than this is flagged delayed
+const IST_MS = 5.5 * 3600000
+const ageMin = (created) => Math.max(0, Math.round((Date.now() - new Date(created).getTime()) / 60000))
+const istDay = (d) => { try { return new Date(new Date(d).getTime() + IST_MS).toISOString().slice(0, 10) } catch { return '' } }
+
+app.get('/api/admin/command-center', admin, async (req, res) => {
+  const [zonesAll, wres, opsAll, bookingsAll] = await Promise.all([
+    tryGet(U.catalog, '/api/internal/zones', []),
+    tryGet(U.worker, '/internal/workers', { workers: [] }),
+    tryGet(U.booking, '/api/internal/ops', []),        // live (active) jobs
+    tryGet(U.booking, '/api/internal/bookings', []),   // all bookings — for today + peak hours
+  ])
+  const scope = req.admin?.scope
+  const zones = (zonesAll || []).filter((z) => inScope(scope, { zoneId: z.id, city: z.city }))
+  const workers = (wres.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
+  const ops = (opsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const bookings = (bookingsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const zoneName = (id) => zones.find((z) => z.id === id)?.name || (id ? `Zone ${id}` : 'Unzoned')
+
+  // ---- demand vs supply per zone ----
+  const demandSupply = zones.map((z) => {
+    const zw = workers.filter((w) => w.zone_id === z.id)
+    const online = zw.filter((w) => w.status === 'active' && w.available).length
+    const zb = ops.filter((b) => b.zone_id === z.id)
+    const open = zb.filter((b) => b.status === 'confirmed' && !b.worker_id).length
+    const active = zb.filter((b) => CC_ACTIVE.includes(b.status)).length
+    const demand = open + active
+    const health = z.status !== 'live' ? 'off' : demand === 0 ? 'idle' : online === 0 ? 'critical' : demand > online ? 'short' : 'healthy'
+    return { id: z.id, name: z.name, city: z.city, status: z.status, online, assigned: zw.length, open, active, demand, health }
+  }).sort((a, b) => b.demand - a.demand)
+
+  const openJobs = ops.filter((b) => b.status === 'confirmed' && !b.worker_id).length
+  const activeJobs = ops.filter((b) => CC_ACTIVE.includes(b.status)).length
+  const network = {
+    onlineWorkers: workers.filter((w) => w.status === 'active' && w.available).length,
+    activeWorkers: workers.filter((w) => w.status === 'active').length,
+    totalWorkers: workers.length,
+    openJobs, activeJobs, liveJobs: openJobs + activeJobs,
+    zonesLive: zones.filter((z) => z.status === 'live').length,
+    zonesCritical: demandSupply.filter((z) => z.health === 'critical').length,
+    zonesShort: demandSupply.filter((z) => z.health === 'short').length,
+  }
+
+  // ---- SLA + escalation queue (jobs stuck by their own age) ----
+  let breached = 0, atRisk = 0
+  const escalations = []
+  for (const b of ops) {
+    const unassigned = b.status === 'confirmed' && !b.worker_id
+    if (!unassigned && !CC_ACTIVE.includes(b.status)) continue
+    const age = ageMin(b.created)
+    const limit = unassigned ? UNASSIGNED_SLA_MIN : ACTIVE_SLA_MIN
+    if (age >= limit) {
+      breached++
+      escalations.push({ id: b.id, ref: b.ref || `#${b.id}`, zone: zoneName(b.zone_id), status: unassigned ? 'unassigned' : b.status, ageMin: age,
+        reason: unassigned ? `Unassigned ${age}m — no pro accepted` : `Running ${age}m — over ${ACTIVE_SLA_MIN}m target` })
+    } else if (age >= limit * 0.7) atRisk++
+  }
+  escalations.sort((a, b) => b.ageMin - a.ageMin)
+  const sla = { total: network.liveJobs, breached, atRisk, onTime: Math.max(0, network.liveJobs - breached - atRisk) }
+
+  // ---- active alerts (all real, derived) ----
+  const alerts = []
+  for (const z of demandSupply) if (z.health === 'critical') alerts.push({ level: 'critical', title: `${z.name}: no pros online`, detail: `${z.demand} live job(s), 0 online` })
+  for (const z of demandSupply) if (z.health === 'short') alerts.push({ level: 'warn', title: `${z.name}: short on supply`, detail: `${z.demand} demand vs ${z.online} online` })
+  if (openJobs > 0) alerts.push({ level: openJobs > 5 ? 'critical' : 'warn', title: `${openJobs} job(s) awaiting dispatch`, detail: 'Unassigned confirmed bookings' })
+  if (breached > 0) alerts.push({ level: 'warn', title: `${breached} job(s) breaching SLA`, detail: 'In the escalation queue' })
+  const pendingWorkers = workers.filter((w) => w.status === 'pending').length
+  if (pendingWorkers > 0) alerts.push({ level: 'info', title: `${pendingWorkers} worker(s) awaiting verification`, detail: 'Pending onboarding approval' })
+
+  // ---- peak-hour demand (IST) from all bookings ----
+  const hourly = Array.from({ length: 24 }, () => 0)
+  for (const b of bookings) { if (!b.created) continue; hourly[new Date(new Date(b.created).getTime() + IST_MS).getUTCHours()]++ }
+  const peakHour = hourly.indexOf(Math.max(1, ...hourly))
+
+  // ---- today's ops summary (IST) ----
+  const today = istDay(Date.now())
+  const td = bookings.filter((b) => istDay(b.created) === today)
+  const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
+  const dailySummary = {
+    orders: td.length,
+    completed: td.filter((b) => b.status === 'completed').length,
+    cancelled: td.filter((b) => b.status === 'cancelled').length,
+    active: td.filter((b) => CC_ACTIVE.includes(b.status) || b.status === 'confirmed').length,
+    revenue: td.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0),
+    newWorkers: workers.filter((w) => istDay(w.created) === today).length,
+  }
+
+  res.json({ network, demandSupply, sla, escalations: escalations.slice(0, 25), alerts, peakHours: hourly, peakHour, dailySummary, generatedAt: nowIso() })
+})
+
 app.get('/api/admin/dashboard', admin, async (req, res) => {
   const [customersAll, bookingsAll, workersResp] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),

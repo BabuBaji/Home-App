@@ -43,6 +43,7 @@ import Admins from './screens/Admins'
 import Roles from './screens/Roles'
 import Approvals from './screens/Approvals'
 import OrgHierarchy from './screens/OrgHierarchy'
+import CommandCenter from './screens/CommandCenter'
 
 export default function App() {
   const { admin, signIn, setAdmin } = useStore()
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="/zones/pricing" element={<Page perm="pricing.view"><PricingPage /></Page>} />
           <Route path="/zones/coverage" element={<Page perm="zones.view"><ServiceCoveragePage /></Page>} />
           <Route path="/zones/inventory" element={<Page perm="zones.view"><InventoryPage /></Page>} />
+          <Route path="/command-center" element={<Page perm="liveops.view"><CommandCenter /></Page>} />
           <Route path="/live-ops" element={<Page perm="liveops.view"><LiveOps /></Page>} />
           <Route path="/roster" element={<Page perm="roster.view"><Roster /></Page>} />
           <Route path="/shift-plans" element={<Page perm="attendance.view"><Shifts /></Page>} />

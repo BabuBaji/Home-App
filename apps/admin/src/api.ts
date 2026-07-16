@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -345,6 +345,9 @@ export const fetchPayments = () => req<any>('/payments')
 export const fetchRefunds = () => req<any[]>('/refunds')
 // Routed through the approval matrix (id is the booking id). May execute now or queue for sign-off.
 export const issueRefund = (bookingId: number) => req<ActionResult>('/actions/refund', post('', { bookingId }))
+
+/* operations command center — live network operating picture */
+export const fetchCommandCenter = () => req<CommandCenter>('/command-center')
 
 /* approvals (maker-checker) */
 export const fetchApprovals = (status: 'pending' | 'all' = 'pending') => req<{ ok: boolean; requests: ApprovalRequest[]; meId: number }>(`/approvals?status=${status}`)
