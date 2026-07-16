@@ -11,7 +11,8 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, requireRole, publishEvent, tryGet, internalPost, internalPatch } from '@homehelp/shared'
+import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, publishEvent, tryGet, internalPost, internalPatch,
+  PERMISSION_CATALOG, ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, isSystemRole } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('admin') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -87,7 +88,33 @@ async function init() {
       id SERIAL PRIMARY KEY, admin TEXT NOT NULL, action TEXT NOT NULL, target TEXT,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // RBAC. A role is a named bundle of permission keys (from @homehelp/shared PERMISSION_CATALOG).
+    // The 4 system roles are seeded + reset to their canonical bundle on every boot (self-healing,
+    // read-only in the UI); custom roles are freely editable and never touched by the seed.
+    `CREATE TABLE IF NOT EXISTS roles (
+      id SERIAL PRIMARY KEY, key TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '', rank INTEGER NOT NULL DEFAULT 0,
+      is_system BOOLEAN NOT NULL DEFAULT false, active BOOLEAN NOT NULL DEFAULT true,
+      landing TEXT NOT NULL DEFAULT '/dashboard', created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS role_permissions (
+      role_key TEXT NOT NULL REFERENCES roles(key) ON DELETE CASCADE,
+      perm TEXT NOT NULL, PRIMARY KEY (role_key, perm)
+    )`,
   ])
+  // Seed / re-sync the four system roles. Their permission bundle is reset to canonical every boot,
+  // so a new permission added to the catalog reaches them and no drift can strip their access.
+  for (const r of SYSTEM_ROLES) {
+    await pool.query(
+      `INSERT INTO roles (key,name,description,rank,is_system,active,landing) VALUES ($1,$2,$3,$4,true,true,$5)
+       ON CONFLICT (key) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, rank=EXCLUDED.rank, is_system=true, landing=EXCLUDED.landing`,
+      [r.key, r.name, r.description, r.rank, r.landing])
+    await pool.query('DELETE FROM role_permissions WHERE role_key=$1', [r.key])
+    const perms = SYSTEM_ROLE_PERMISSIONS[r.key] || []
+    for (const p of perms)
+      await pool.query('INSERT INTO role_permissions (role_key,perm) VALUES ($1,$2) ON CONFLICT DO NOTHING', [r.key, p])
+  }
+  invalidatePerms()
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS))
     await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [k, v])
   // Operator-provided integration keys from the environment override the (empty) defaults, so
@@ -124,6 +151,26 @@ async function init() {
 
 /* ---------- data helpers ---------- */
 const publicAdmin = (a) => a && ({ id: a.id, name: a.name, email: a.email, phone: a.phone, role: a.role, status: a.status, avatar: a.avatar, last_login: a.last_login, created: a.created })
+
+// Resolved permission keys per role, cached in-process. This is the ONE place authorization is
+// computed; every service reads it through the /api/admin/me payload, so a role change here takes
+// effect platform-wide on the next request. super always resolves to every key (drift-proof).
+const permCache = new Map()
+const invalidatePerms = (roleKey) => { if (roleKey) permCache.delete(roleKey); else permCache.clear() }
+async function resolvePermissions(roleKey) {
+  if (roleKey === 'super') return [...ALL_PERMISSIONS]
+  if (permCache.has(roleKey)) return permCache.get(roleKey)
+  const { rows } = await pool.query('SELECT perm FROM role_permissions WHERE role_key=$1', [roleKey])
+  const perms = rows.map((r) => r.perm)
+  permCache.set(roleKey, perms)
+  return perms
+}
+/** publicAdmin + the resolved permission list — what /me and login return, and what every other
+ *  service receives as req.admin (so requirePerm works uniformly across the platform). */
+async function adminWithPerms(a) {
+  if (!a) return a
+  return { ...publicAdmin(a), permissions: await resolvePermissions(a.role) }
+}
 async function getAdmin(id) { const { rows } = await pool.query('SELECT * FROM admins WHERE id=$1', [id]); return rows[0] || null }
 async function getAdminByEmail(email) { const { rows } = await pool.query('SELECT * FROM admins WHERE email=$1', [String(email).toLowerCase()]); return rows[0] || null }
 async function getSettings() {
@@ -162,9 +209,9 @@ app.post('/api/admin/login', async (req, res) => {
   if (a.status !== 'active') return res.status(403).json({ error: 'Account disabled' })
   await pool.query('UPDATE admins SET last_login=now() WHERE id=$1', [a.id])
   await logAudit(a.email, 'login')
-  res.json({ token: signToken('admin', a.id, { role: a.role }), admin: publicAdmin(a) })
+  res.json({ token: signToken('admin', a.id, { role: a.role }), admin: await adminWithPerms(a) })
 })
-app.get('/api/admin/me', admin, (req, res) => res.json({ admin: publicAdmin(req.admin) }))
+app.get('/api/admin/me', admin, async (req, res) => res.json({ admin: await adminWithPerms(req.admin) }))
 
 // Run the month-end Shakti Bonus settlement (delegates to the worker service, which credits
 // each qualifying worker's tier bonus via the wallet — idempotent per worker/month).
@@ -178,7 +225,7 @@ app.post('/api/admin/shakti/settle', admin, async (req, res) => {
 
 /* ---------- settings (config) ---------- */
 app.get('/api/admin/settings', admin, async (_q, res) => res.json(await getPublicSettings()))
-app.patch('/api/admin/settings', admin, requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/settings', admin, requirePerm('settings.edit'), async (req, res) => {
   for (const [k, v] of Object.entries(req.body || {})) {
     if (k === '__seeded') continue
     if (SECRET_KEYS.includes(k) && String(v).startsWith('••••')) continue // ignore unchanged masked secrets
@@ -190,33 +237,132 @@ app.patch('/api/admin/settings', admin, requireRole('admin'), async (req, res) =
 })
 
 /* ---------- admins management ---------- */
-app.get('/api/admin/admins', admin, requireRole('admin'), async (_q, res) => {
+app.get('/api/admin/admins', admin, requirePerm('admins.view'), async (_q, res) => {
   const { rows } = await pool.query('SELECT id,name,email,phone,role,status,avatar,last_login,created FROM admins ORDER BY id')
   res.json(rows)
 })
-app.post('/api/admin/admins', admin, requireRole('super'), async (req, res) => {
+// A new/edited admin must land on a role that actually exists and is active — otherwise they'd
+// authenticate with an empty permission set and every screen would 403 with no explanation.
+async function assertAssignableRole(roleKey) {
+  const { rows } = await pool.query('SELECT active FROM roles WHERE key=$1', [roleKey])
+  if (!rows[0]) return `Unknown role "${roleKey}"`
+  if (!rows[0].active) return `Role "${roleKey}" is paused — pick an active role`
+  return null
+}
+app.post('/api/admin/admins', admin, requirePerm('admins.create'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !b.email) return res.status(400).json({ error: 'Name and email required' })
+  const roleKey = b.role || 'manager'
+  const roleErr = await assertAssignableRole(roleKey)
+  if (roleErr) return res.status(400).json({ error: roleErr })
   try {
     const { rows } = await pool.query(
       'INSERT INTO admins (name,email,phone,pass_hash,role,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), b.role || 'manager', b.status || 'active'])
+      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), roleKey, b.status || 'active'])
     await logAudit(req.admin.email, 'admin.create', b.email)
     res.status(201).json(publicAdmin(rows[0]))
   } catch { res.status(409).json({ error: 'Email already exists' }) }
 })
-app.patch('/api/admin/admins/:id', admin, requireRole('super'), async (req, res) => {
+app.patch('/api/admin/admins/:id', admin, requirePerm('admins.edit'), async (req, res) => {
   const a = await getAdmin(Number(req.params.id)); if (!a) return res.status(404).json({ error: 'Not found' })
   const b = req.body || {}
+  if (b.role !== undefined && b.role !== a.role) {
+    const roleErr = await assertAssignableRole(b.role)
+    if (roleErr) return res.status(400).json({ error: roleErr })
+  }
   await pool.query('UPDATE admins SET name=$1,phone=$2,role=$3,status=$4 WHERE id=$5',
     [b.name ?? a.name, b.phone ?? a.phone, b.role ?? a.role, b.status ?? a.status, a.id])
   if (b.password) await pool.query('UPDATE admins SET pass_hash=$1 WHERE id=$2', [hashPw(b.password), a.id])
   await logAudit(req.admin.email, 'admin.update', a.email)
   res.json(publicAdmin(await getAdmin(a.id)))
 })
-app.delete('/api/admin/admins/:id', admin, requireRole('super'), async (req, res) => {
+app.delete('/api/admin/admins/:id', admin, requirePerm('admins.delete'), async (req, res) => {
   await pool.query('DELETE FROM admins WHERE id=$1', [Number(req.params.id)])
   await logAudit(req.admin.email, 'admin.delete', req.params.id)
+  res.json({ ok: true })
+})
+
+/* ---------- roles & permissions (RBAC) ---------- */
+const slugRole = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)
+const cleanPerms = (list) => [...new Set((Array.isArray(list) ? list : []).map(String))].filter((p) => ALL_PERMISSIONS.includes(p))
+
+async function roleDto(r, counts) {
+  const perms = r.key === 'super' ? [...ALL_PERMISSIONS] : (await pool.query('SELECT perm FROM role_permissions WHERE role_key=$1', [r.key])).rows.map((x) => x.perm)
+  return {
+    id: r.id, key: r.key, name: r.name, description: r.description || '', rank: r.rank,
+    isSystem: r.is_system, active: r.active, landing: r.landing || '/dashboard',
+    permissions: perms, users: counts[r.key] || 0, created: r.created,
+  }
+}
+async function roleUserCounts() {
+  const { rows } = await pool.query('SELECT role, COUNT(*)::int n FROM admins GROUP BY role')
+  const out = {}; for (const r of rows) out[r.role] = r.n; return out
+}
+
+// The permission vocabulary that drives the matrix editor.
+app.get('/api/admin/permissions', admin, requirePerm('roles.view'), (_q, res) => {
+  res.json({ ok: true, catalog: PERMISSION_CATALOG })
+})
+
+app.get('/api/admin/roles', admin, requirePerm('roles.view'), async (_q, res) => {
+  const counts = await roleUserCounts()
+  const { rows } = await pool.query('SELECT * FROM roles ORDER BY rank DESC, name')
+  res.json({ ok: true, roles: await Promise.all(rows.map((r) => roleDto(r, counts))) })
+})
+
+app.post('/api/admin/roles', admin, requirePerm('roles.manage'), async (req, res) => {
+  const b = req.body || {}
+  const name = String(b.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Role name required' })
+  const key = b.key ? slugRole(b.key) : slugRole(name)
+  if (!key) return res.status(400).json({ error: 'Could not derive a role key from the name' })
+  if (isSystemRole(key)) return res.status(409).json({ error: 'That key is reserved by a system role' })
+  const perms = cleanPerms(b.permissions)
+  try {
+    const r = (await pool.query(
+      'INSERT INTO roles (key,name,description,rank,is_system,active,landing) VALUES ($1,$2,$3,0,false,$4,$5) RETURNING *',
+      [key, name, String(b.description || ''), b.active !== false, String(b.landing || '/dashboard')])).rows[0]
+    for (const p of perms) await pool.query('INSERT INTO role_permissions (role_key,perm) VALUES ($1,$2)', [key, p])
+    invalidatePerms(key)
+    await logAudit(req.admin.email, 'role.create', `${name} (${perms.length} perms)`)
+    res.status(201).json({ ok: true, role: await roleDto(r, await roleUserCounts()) })
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A role with that key already exists' })
+    throw e
+  }
+})
+
+app.patch('/api/admin/roles/:key', admin, requirePerm('roles.manage'), async (req, res) => {
+  const key = String(req.params.key)
+  const r = (await pool.query('SELECT * FROM roles WHERE key=$1', [key])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Role not found' })
+  const b = req.body || {}
+  // System roles are canonical baselines — reset to their bundle on every boot — so their name and
+  // permission set are read-only. Only their `active` flag would be meaningful, and even that is
+  // refused here to avoid an org locking itself out of the default roles.
+  if (r.is_system) return res.status(400).json({ error: 'System roles cannot be edited — clone this into a custom role instead' })
+  await pool.query('UPDATE roles SET name=$1, description=$2, active=$3, landing=$4 WHERE key=$5',
+    [String(b.name || r.name).trim(), String(b.description ?? r.description), b.active !== undefined ? !!b.active : r.active, String(b.landing || r.landing), key])
+  if (b.permissions !== undefined) {
+    const perms = cleanPerms(b.permissions)
+    await pool.query('DELETE FROM role_permissions WHERE role_key=$1', [key])
+    for (const p of perms) await pool.query('INSERT INTO role_permissions (role_key,perm) VALUES ($1,$2)', [key, p])
+  }
+  invalidatePerms(key)
+  await logAudit(req.admin.email, 'role.update', r.name)
+  res.json({ ok: true, role: await roleDto((await pool.query('SELECT * FROM roles WHERE key=$1', [key])).rows[0], await roleUserCounts()) })
+})
+
+app.delete('/api/admin/roles/:key', admin, requirePerm('roles.manage'), async (req, res) => {
+  const key = String(req.params.key)
+  const r = (await pool.query('SELECT * FROM roles WHERE key=$1', [key])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Role not found' })
+  if (r.is_system) return res.status(400).json({ error: 'System roles cannot be deleted' })
+  const n = (await pool.query('SELECT COUNT(*)::int n FROM admins WHERE role=$1', [key])).rows[0].n
+  if (n > 0) return res.status(409).json({ error: `${n} admin user(s) still have this role — reassign them first` })
+  await pool.query('DELETE FROM roles WHERE key=$1', [key]) // role_permissions cascade
+  invalidatePerms(key)
+  await logAudit(req.admin.email, 'role.delete', r.name)
   res.json({ ok: true })
 })
 

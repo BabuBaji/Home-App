@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requireRole, requirePerm, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep. Catalog only reads
 // the id (browsing stays anonymous), but it must read it from a SIGNED token — otherwise anyone
@@ -820,7 +820,7 @@ app.get('/api/admin/services', adminAuth, async (_q, res) => {
   const [rows, counts] = await Promise.all([allServices(), bookingCounts()])
   res.json(rows.map((s) => ({ ...s, bookings: counts[s.id] || 0 })))
 })
-app.post('/api/admin/services', adminAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/admin/services', adminAuth, requirePerm('services.create'), async (req, res) => {
   const b = req.body || {}
   const id = String(b.id || b.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24)
   if (!id || !b.name) return res.status(400).json({ error: 'Name is required' })
@@ -832,7 +832,7 @@ app.post('/api/admin/services', adminAuth, requireRole('manager'), async (req, r
   await broadcastServices()
   res.status(201).json({ ok: true, id })
 })
-app.patch('/api/admin/services/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/admin/services/:id', adminAuth, requirePerm('services.edit'), async (req, res) => {
   const b = req.body || {}
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Not found' })
@@ -844,7 +844,7 @@ app.patch('/api/admin/services/:id', adminAuth, requireRole('manager'), async (r
   await broadcastServices()
   res.json({ ok: true })
 })
-app.delete('/api/admin/services/:id', adminAuth, requireRole('admin'), async (req, res) => {
+app.delete('/api/admin/services/:id', adminAuth, requirePerm('services.delete'), async (req, res) => {
   await pool.query('DELETE FROM services WHERE id=$1', [req.params.id])
   await broadcastServices()
   res.json({ ok: true })
@@ -855,7 +855,7 @@ app.get('/api/admin/zones', adminAuth, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
   res.json(rows.map(zoneOut))
 })
-app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) => {
+app.post('/api/admin/zones', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
   const status = ['planned', 'live', 'paused'].includes(b.status) ? b.status : 'planned'
@@ -866,7 +866,7 @@ app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) =
   await syncZonePricing(rows[0].id, b.config || {})
   res.status(201).json(zoneOut(rows[0]))
 })
-app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/zones/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Zone not found' })
   const z = cur.rows[0], b = req.body || {}
@@ -880,7 +880,7 @@ app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, r
   await syncZonePricing(Number(req.params.id), b.config !== undefined ? b.config : (z.config || {}))
   res.json(zoneOut((await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])).rows[0]))
 })
-app.delete('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
+app.delete('/api/admin/zones/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   await pool.query('DELETE FROM zones WHERE id=$1', [req.params.id])
   res.json({ ok: true })
 })
@@ -932,7 +932,7 @@ app.get('/api/admin/campaigns', adminAuth, async (_q, res) => {
   const uBy = Object.fromEntries(usage.rows.map((u) => [u.campaign_id, u.n]))
   res.json(rows.map((m) => ({ ...m, zoneIds: zBy[m.campaign_id] || [], rule: rBy[m.campaign_id] || null, coupon: cBy[m.campaign_id] || null, usedCount: uBy[m.campaign_id] || 0 })))
 })
-app.post('/api/admin/campaigns', adminAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/admin/campaigns', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
   const b = req.body || {}
   if (!b.campaign_name || !String(b.campaign_name).trim()) return res.status(400).json({ error: 'Campaign name is required' })
   if (!['zone', 'customer', 'coupon'].includes(b.campaign_type)) return res.status(400).json({ error: 'Invalid campaign type' })
@@ -943,7 +943,7 @@ app.post('/api/admin/campaigns', adminAuth, requireRole('manager'), async (req, 
   await syncCampaignChildren(id, b)
   res.status(201).json({ ok: true, campaign_id: id })
 })
-app.patch('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
   const id = Number(req.params.id), b = req.body || {}
   const cur = (await pool.query('SELECT 1 FROM campaign_master WHERE campaign_id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Campaign not found' })
@@ -955,7 +955,7 @@ app.patch('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async (
   await syncCampaignChildren(id, b)
   res.json({ ok: true })
 })
-app.delete('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
   const id = Number(req.params.id)
   await pool.query('DELETE FROM campaign_zone WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM campaign_customer_rule WHERE campaign_id=$1', [id])
@@ -1025,20 +1025,23 @@ app.get('/api/admin/stores', adminAuth, async (req, res) => {
   res.json(rows)
 })
 // Coverage/overlap preview for a candidate centre — the wizard calls this before creating.
+// Overriding a store-coverage overlap is a privileged action — super, or any role granted the
+// explicit zones.stores_override permission.
+const canOverrideStore = (req) => req.admin?.role === 'super' || (req.admin?.permissions || []).includes('zones.stores_override')
 app.get('/api/admin/stores/check', adminAuth, async (req, res) => {
   const lat = Number(req.query.lat), lng = Number(req.query.lng), radiusKm = Number(req.query.radiusKm) || 0
   if (!isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'lat/lng required' })
   const a = await analyseStore(lat, lng, radiusKm, req.query.exclude_id)
-  res.json({ ...a, covered: a.coveredBy.length > 0, overlapping: a.overlaps.length > 0, canOverride: req.admin?.role === 'super' })
+  res.json({ ...a, covered: a.coveredBy.length > 0, overlapping: a.overlaps.length > 0, canOverride: canOverrideStore(req) })
 })
-app.post('/api/admin/stores', adminAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/admin/stores', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Store name is required' })
   const lat = Number(b.lat), lng = Number(b.lng), radiusKm = Number(b.radius_km) || 3
   if (!isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'A valid location (lat/lng) is required' })
   const a = await analyseStore(lat, lng, radiusKm)
   const blocked = a.coveredBy.length > 0 || a.overlaps.length > 0
-  const isSuper = req.admin?.role === 'super'
+  const isSuper = canOverrideStore(req)
   if (blocked && !(isSuper && b.override)) {
     return res.status(409).json({
       error: a.coveredBy.length ? 'This location is already covered by an existing store.' : 'This store overlaps an existing store.',
@@ -1052,7 +1055,7 @@ app.post('/api/admin/stores', adminAuth, requireRole('manager'), async (req, res
       String(b.pincode || '').trim(), lat, lng, radiusKm, ['active', 'paused', 'planned'].includes(b.status) ? b.status : 'active'])
   res.status(201).json({ ...rows[0], overridden: blocked })
 })
-app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/admin/stores/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   const cur = (await pool.query('SELECT * FROM stores WHERE id=$1', [Number(req.params.id)])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Store not found' })
@@ -1062,8 +1065,8 @@ app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req
   if (b.lat !== undefined || b.lng !== undefined || b.radius_km !== undefined) {
     const a = await analyseStore(lat, lng, radiusKm, cur.id)
     const blocked = a.coveredBy.length > 0 || a.overlaps.length > 0
-    if (blocked && !(req.admin?.role === 'super' && b.override))
-      return res.status(409).json({ error: 'This location overlaps an existing store.', coveredBy: a.coveredBy, overlaps: a.overlaps, canOverride: req.admin?.role === 'super' })
+    if (blocked && !(canOverrideStore(req) && b.override))
+      return res.status(409).json({ error: 'This location overlaps an existing store.', coveredBy: a.coveredBy, overlaps: a.overlaps, canOverride: canOverrideStore(req) })
   }
   const { rows } = await pool.query(
     `UPDATE stores SET name=$1,manager=$2,address=$3,pincode=$4,lat=$5,lng=$6,radius_km=$7,status=$8,zone_id=$9 WHERE id=$10 RETURNING *`,
@@ -1071,13 +1074,13 @@ app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req
       lat, lng, radiusKm, b.status ?? cur.status, b.zone_id ?? cur.zone_id, cur.id])
   res.json(rows[0])
 })
-app.delete('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.delete('/api/admin/stores/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   await pool.query('DELETE FROM stores WHERE id=$1', [Number(req.params.id)])
   res.json({ ok: true })
 })
 
 // Customer-facing single-field update kept from the monolith (price/availability toggle).
-app.patch('/api/services/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/services/:id', adminAuth, requirePerm('services.edit'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Service not found' })
   const s = cur.rows[0]
@@ -1096,7 +1099,7 @@ const ENTITY = {
   inventory: { cols: ['zone_id', 'name', 'vendor', 'stock', 'reorder', 'unit'], zoned: true },
   zone_pricing: { cols: ['zone_id', 'service_id', 'price', 'discount', 'active'], zoned: true },
 }
-function entityRoutes(path, table) {
+function entityRoutes(path, table, perm = 'zones.edit') {
   const def = ENTITY[table]
   app.get(`/api/admin/${path}`, adminAuth, async (req, res) => {
     const zone = req.query.zone_id ? Number(req.query.zone_id) : null
@@ -1105,7 +1108,7 @@ function entityRoutes(path, table) {
       : await pool.query(`SELECT * FROM ${table} ORDER BY id`)
     res.json(rows)
   })
-  app.post(`/api/admin/${path}`, adminAuth, requireRole('manager'), async (req, res) => {
+  app.post(`/api/admin/${path}`, adminAuth, requirePerm(perm), async (req, res) => {
     const b = req.body || {}
     const cols = def.cols.filter((c) => b[c] !== undefined)
     if (!cols.length) return res.status(400).json({ error: 'No fields provided' })
@@ -1114,7 +1117,7 @@ function entityRoutes(path, table) {
     const { rows } = await pool.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) RETURNING *`, vals)
     res.status(201).json(rows[0])
   })
-  app.patch(`/api/admin/${path}/:id`, adminAuth, requireRole('manager'), async (req, res) => {
+  app.patch(`/api/admin/${path}/:id`, adminAuth, requirePerm(perm), async (req, res) => {
     const b = req.body || {}
     const cols = def.cols.filter((c) => b[c] !== undefined)
     if (!cols.length) return res.json({ ok: true })
@@ -1123,7 +1126,7 @@ function entityRoutes(path, table) {
     if (!rows.length) return res.status(404).json({ error: 'Not found' })
     res.json(rows[0])
   })
-  app.delete(`/api/admin/${path}/:id`, adminAuth, requireRole('manager'), async (req, res) => {
+  app.delete(`/api/admin/${path}/:id`, adminAuth, requirePerm(perm), async (req, res) => {
     await pool.query(`DELETE FROM ${table} WHERE id=$1`, [Number(req.params.id)])
     res.json({ ok: true })
   })
@@ -1132,7 +1135,7 @@ entityRoutes('cities', 'cities')
 entityRoutes('clusters', 'clusters')
 entityRoutes('apartments', 'apartments')
 entityRoutes('inventory', 'inventory')
-entityRoutes('zone-pricing', 'zone_pricing')
+entityRoutes('zone-pricing', 'zone_pricing', 'pricing.edit')
 
 /* Real per-zone operations metrics, aggregated from live DB (apartments, inventory, workers,
  * bookings) — powers the dashboards with real numbers instead of derived estimates. */

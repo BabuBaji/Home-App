@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import {
-  makePool, migrate, makeAdminAuth, internalOnly, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, internalOnly, subscribeEvents, invalidateSettings,
   publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
@@ -475,7 +475,7 @@ app.get('/api/admin/refunds', adminAuth, async (_q, res) => {
     payment_status: b.payment_status ?? null, created: b.created,
   })))
 })
-app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => {
+app.post('/api/admin/refunds/:id', adminAuth, requirePerm('refunds.approve'), async (req, res) => {
   await internalPost(BOOKING_URL, `/api/internal/bookings/${Number(req.params.id)}/refund`, {})
   res.json({ ok: true })
 })

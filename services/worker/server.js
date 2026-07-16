@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import {
-  makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
   getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
@@ -1858,7 +1858,7 @@ app.get('/api/admin/workers/:id/equipment', adminAuth, async (req, res) => {
   res.json({ ok: true, types, issued: await workerEquipment(workerId) })
 })
 
-app.post('/api/admin/workers/:id/equipment', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/equipment', adminAuth, requirePerm('equipment.manage'), async (req, res) => {
   const workerId = Number(req.params.id)
   const typeId = Number(req.body?.typeId)
   const w = await getWorker(workerId)
@@ -1878,7 +1878,7 @@ app.post('/api/admin/workers/:id/equipment', adminAuth, async (req, res) => {
   res.json({ ok: true, issued: await workerEquipment(workerId) })
 })
 
-app.post('/api/admin/workers/:id/equipment/:eid/return', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/equipment/:eid/return', adminAuth, requirePerm('equipment.manage'), async (req, res) => {
   const workerId = Number(req.params.id)
   const row = (await pool.query(
     `SELECT e.*, t.name FROM worker_equipment e JOIN equipment_types t ON t.id = e.type_id
@@ -2048,7 +2048,7 @@ function readPlan(b) {
   return { name, commissionPercent: pct, salaryType, monthlyBasic, attendanceAllowance, otherAllowance, notes: String(b?.notes || '').trim().slice(0, 200) }
 }
 
-app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
+app.post('/api/admin/salary-plans', adminAuth, requirePerm('salary_plans.edit'), async (req, res) => {
   const v = readPlan(req.body)
   if (v.error) return res.status(400).json({ error: v.error })
   const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM salary_plans')).rows[0].n
@@ -2066,7 +2066,7 @@ app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
   }
 })
 
-app.patch('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
+app.patch('/api/admin/salary-plans/:id', adminAuth, requirePerm('salary_plans.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const cur = (await pool.query('SELECT * FROM salary_plans WHERE id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Plan not found' })
@@ -2113,7 +2113,7 @@ app.patch('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
   res.json({ ok: true, plan: planDto(r.rows[0]) })
 })
 
-app.delete('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
+app.delete('/api/admin/salary-plans/:id', adminAuth, requirePerm('salary_plans.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const n = (await pool.query('SELECT COUNT(*)::int n FROM workers WHERE salary_plan_id=$1', [id])).rows[0].n
   // Deleting would drop those workers to the platform rate without anyone deciding to.
@@ -2184,7 +2184,7 @@ function readIncentive(b) {
   return { name, perJob, qualAmt, qualMin, tiers, tierMin, peak, referral, festival, estMin, estMax, notes: String(b?.notes || '').trim().slice(0, 200) }
 }
 
-app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
+app.post('/api/admin/incentive-plans', adminAuth, requirePerm('incentive_plans.edit'), async (req, res) => {
   const v = readIncentive(req.body)
   if (v.error) return res.status(400).json({ error: v.error })
   const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM incentive_plans')).rows[0].n
@@ -2204,7 +2204,7 @@ app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
   }
 })
 
-app.patch('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
+app.patch('/api/admin/incentive-plans/:id', adminAuth, requirePerm('incentive_plans.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const cur = (await pool.query('SELECT * FROM incentive_plans WHERE id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Plan not found' })
@@ -2236,7 +2236,7 @@ app.patch('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
   res.json({ ok: true, plan: incentiveDto(r.rows[0]) })
 })
 
-app.delete('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
+app.delete('/api/admin/incentive-plans/:id', adminAuth, requirePerm('incentive_plans.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const n = (await pool.query('SELECT COUNT(*)::int n FROM workers WHERE incentive_plan_id=$1', [id])).rows[0].n
   if (n) return res.status(409).json({ error: `${n} worker(s) are on this plan — move them off it first, or retire it instead` })
@@ -2694,7 +2694,7 @@ app.get('/api/admin/payroll/:id', adminAuth, async (req, res) => {
 })
 
 /** Build (or rebuild) a month's draft. Rebuilding an APPROVED run is refused — it's already paid. */
-app.post('/api/admin/payroll', adminAuth, async (req, res) => {
+app.post('/api/admin/payroll', adminAuth, requirePerm('payroll.run'), async (req, res) => {
   const month = String(req.body?.month || '').trim()
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Month must be YYYY-MM' })
   if (month > monthKey(new Date())) return res.status(400).json({ error: "That month hasn't happened yet" })
@@ -2734,7 +2734,7 @@ app.post('/api/admin/payroll', adminAuth, async (req, res) => {
  * Each line credits once, keyed on payroll-<runId>-<workerId>, so a double-approve or a retry
  * cannot pay anyone twice.
  */
-app.post('/api/admin/payroll/:id/approve', adminAuth, async (req, res) => {
+app.post('/api/admin/payroll/:id/approve', adminAuth, requirePerm('payroll.approve'), async (req, res) => {
   const id = Number(req.params.id)
   const run = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [id])).rows[0]
   if (!run) return res.status(404).json({ error: 'Run not found' })
@@ -2911,7 +2911,7 @@ app.get('/api/admin/incentive-rules/:id', adminAuth, async (req, res) => {
   })
 })
 
-app.post('/api/admin/incentive-rules', adminAuth, async (req, res) => {
+app.post('/api/admin/incentive-rules', adminAuth, requirePerm('comp_rules.edit'), async (req, res) => {
   const name = String(req.body?.name || '').trim()
   if (!name) return res.status(400).json({ error: 'Name required' })
   const v = readRuleVersion(req.body)
@@ -2935,7 +2935,7 @@ app.post('/api/admin/incentive-rules', adminAuth, async (req, res) => {
 })
 
 /** Save a new version. The old one is retained; this becomes current. */
-app.post('/api/admin/incentive-rules/:id/version', adminAuth, async (req, res) => {
+app.post('/api/admin/incentive-rules/:id/version', adminAuth, requirePerm('comp_rules.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const r = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
   if (!r) return res.status(404).json({ error: 'Rule not found' })
@@ -2958,7 +2958,7 @@ app.post('/api/admin/incentive-rules/:id/version', adminAuth, async (req, res) =
   res.json({ ok: true, rule: ruleDto(fresh, ver) })
 })
 
-app.patch('/api/admin/incentive-rules/:id', adminAuth, async (req, res) => {
+app.patch('/api/admin/incentive-rules/:id', adminAuth, requirePerm('comp_rules.edit'), async (req, res) => {
   const id = Number(req.params.id)
   const r = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
   if (!r) return res.status(404).json({ error: 'Rule not found' })
@@ -3013,7 +3013,7 @@ app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   })
 })
 
-app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
+app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit'), async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
@@ -3748,7 +3748,7 @@ app.get('/api/admin/workers', adminAuth, async (req, res) => res.json({ stats: a
 // first+last when those are supplied. A caller sending only `name` (the old shape) still works.
 const fullName = (b) => [b.first_name, b.last_name].filter(Boolean).join(' ').trim() || String(b.name || '').trim()
 
-app.post('/api/admin/workers', adminAuth, async (req, res) => {
+app.post('/api/admin/workers', adminAuth, requirePerm('workers.create'), async (req, res) => {
   const b = req.body || {}
   const name = fullName(b)
   if (!name) return res.status(400).json({ error: 'Name required' })
@@ -4065,8 +4065,8 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   // what happened to be uploaded — an absent Police Verification is the thing they need to chase.
   res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
 })
-app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
-app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
+app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
 // Admin notes on a worker.
 app.get('/api/admin/workers/:id/notes', adminAuth, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
 app.post('/api/admin/workers/:id/notes', adminAuth, async (req, res) => {

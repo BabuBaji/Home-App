@@ -1,7 +1,18 @@
 export interface Admin {
   id: number; name: string; email: string; phone?: string
-  role: 'super' | 'admin' | 'manager' | 'support'
+  // Role is now a free-form key (system role or a custom one). `permissions` is the resolved,
+  // authoritative list the whole UI gates on; `role` is kept for display + the super fast-path.
+  role: string
+  permissions?: string[]
   status: string; avatar?: string | null; last_login?: string | null; created: string
+}
+
+/* RBAC — a role is a named bundle of permission keys (see the server-owned catalog). */
+export interface PermGroup { module: string; label: string; perms: { key: string; label: string }[] }
+export interface Role {
+  id: number; key: string; name: string; description: string; rank: number
+  isSystem: boolean; active: boolean; landing: string
+  permissions: string[]; users: number; created: string
 }
 
 export interface DashboardData {

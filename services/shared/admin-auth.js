@@ -19,3 +19,14 @@ export function makeAdminAuth(adminUrl) {
 
 export const requireRole = (min) => (req, res, next) =>
   (RANK[req.admin?.role] || 0) >= RANK[min] ? next() : res.status(403).json({ error: 'Insufficient permissions' })
+
+// Permission gate. req.admin.permissions is resolved by the admin service (rides inside the
+// /api/admin/me payload every service already fetches), so this works in any service unchanged.
+// super always passes — it holds every permission by definition, and this is the backstop if a
+// super's resolved list is ever stale. Fails closed: no permissions array → denied.
+export const requirePerm = (...need) => (req, res, next) => {
+  if (req.admin?.role === 'super') return next()
+  const have = req.admin?.permissions
+  if (Array.isArray(have) && need.every((k) => have.includes(k))) return next()
+  return res.status(403).json({ error: 'Insufficient permissions' })
+}

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { fetchSettings, updateSettings } from '../api'
 import { Card, Field, Loading, ErrorState, useToast } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 
 // Left vertical nav. Only "general" maps to live fields; others are placeholders.
 const NAV = [
@@ -46,7 +46,7 @@ export default function SettingsScreen() {
   const [err, setErr] = useState('')
   const [nav, setNav] = useState<string>('general')
   const [busy, setBusy] = useState(false)
-  const editable = can(admin?.role, 'admin')
+  const editable = has(admin, 'settings.edit')
 
   const load = () => { setErr(''); fetchSettings().then(setS).catch((e) => setErr(e.message)) }
   useEffect(load, [])

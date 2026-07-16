@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Plus, Search, MapPin, Store as StoreIcon, Trash2, AlertTriangle, CheckCircle2, ArrowLeft, ShieldAlert } from 'lucide-react'
 import { useToast, useConfirm } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 import { fetchStores, checkStore, createStore, deleteStore, fetchZones, type Store, type StoreCheck, type StoreNear, type Zone } from '../api'
 import '../zones/zones.css'
 
@@ -25,7 +25,7 @@ export default function Stores() {
   const { admin } = useStore()
   const toast = useToast()
   const confirm = useConfirm()
-  const isSuper = can(admin?.role, 'super')
+  const isSuper = has(admin, 'zones.stores_override')
   const [stores, setStores] = useState<Store[]>([])
   const [zones, setZones] = useState<Zone[]>([])
   const [loading, setLoading] = useState(true)

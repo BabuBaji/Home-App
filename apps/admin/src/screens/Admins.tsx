@@ -2,18 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { UserCog, UserCheck, UserX, ShieldCheck, Pencil, MoreVertical, Filter, Plus, UserPlus, KeyRound } from 'lucide-react'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, useConfirm, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
-import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit } from '../api'
-import type { Admin } from '../types'
-import { useStore, can } from '../store'
+import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit, fetchRoles } from '../api'
+import type { Admin, Role } from '../types'
+import { useStore, has } from '../store'
 
-const ROLE_META: { id: Admin['role']; label: string; tone: string; color: string }[] = [
-  { id: 'super', label: 'Super Admin', tone: 'violet', color: '#5b51e8' },
-  { id: 'admin', label: 'Admin', tone: 'blue', color: '#2e90fa' },
-  { id: 'manager', label: 'Manager', tone: 'green', color: '#16a34a' },
-  { id: 'support', label: 'Support Admin', tone: 'amber', color: '#f59e0b' },
-]
-const roleLabel = (r: string) => ROLE_META.find((m) => m.id === r)?.label || r
-const roleTone = (r: string) => ROLE_META.find((m) => m.id === r)?.tone || 'gray'
+// Colours for the four system roles; custom roles fall back to a neutral tone. Labels always come
+// from the live roles list so a custom role shows its real name everywhere.
+const SYS_TONE: Record<string, { tone: string; color: string }> = {
+  super: { tone: 'violet', color: '#5b51e8' },
+  admin: { tone: 'blue', color: '#2e90fa' },
+  manager: { tone: 'green', color: '#16a34a' },
+  support: { tone: 'amber', color: '#f59e0b' },
+}
+const roleTone = (r: string) => SYS_TONE[r]?.tone || 'gray'
+const roleColor = (r: string) => SYS_TONE[r]?.color || '#98a2b3'
 
 type AuditRow = { admin: string; action: string; target?: string | null; created: string }
 const ACTIVITY_ICON = (action: string) => {
@@ -31,6 +33,7 @@ export default function Admins() {
   const confirm = useConfirm()
   const { admin } = useStore()
   const [rows, setRows] = useState<Admin[] | null>(null)
+  const [roles, setRoles] = useState<Role[]>([])
   const [audit, setAudit] = useState<AuditRow[]>([])
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -51,6 +54,11 @@ export default function Admins() {
     fetchAudit().then((a: any[]) => setAudit(a as AuditRow[])).catch(() => setAudit([]))
   }
   useEffect(load, [])
+  // Roles for the dropdowns/labels — includes custom roles. Needs roles.view; harmless if it 403s
+  // (the admin simply sees role keys instead of names, and the built-in add/edit modals still work).
+  useEffect(() => { fetchRoles().then((r) => setRoles(r.roles)).catch(() => setRoles([])) }, [])
+  const roleLabel = (key: string) => roles.find((r) => r.key === key)?.name || key
+  const assignableRoles = roles.filter((r) => r.active)
 
   const set = (k: keyof typeof blank, v: string) => setForm((p) => ({ ...p, [k]: v }))
 
@@ -99,12 +107,14 @@ export default function Admins() {
   const roleBars = useMemo(() => {
     const list = rows || []
     const total = Math.max(1, list.length)
-    return ROLE_META.map((m) => {
-      const n = list.filter((r) => r.role === m.id).length
+    // One bar per role that either exists in the catalogue or is actually held by someone.
+    const keys = [...new Set([...roles.map((r) => r.key), ...list.map((r) => r.role)])]
+    return keys.map((key) => {
+      const n = list.filter((r) => r.role === key).length
       const pct = (n / total) * 100
-      return { label: m.label, value: `${n} (${pct.toFixed(1)}%)`, pct, color: m.color }
-    })
-  }, [rows])
+      return { label: roles.find((r) => r.key === key)?.name || key, value: `${n} (${pct.toFixed(1)}%)`, pct, color: roleColor(key) }
+    }).filter((b) => !b.label.startsWith('_') )
+  }, [rows, roles])
 
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!rows) return <Loading />
@@ -114,7 +124,9 @@ export default function Admins() {
   const inactiveCount = rows.filter((r) => (r.status || 'active') !== 'active').length
   const superCount = rows.filter((r) => r.role === 'super').length
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
-  const canDelete = can(admin?.role, 'super')
+  const canDelete = has(admin, 'admins.delete')
+  const canCreate = has(admin, 'admins.create')
+  const canEdit = has(admin, 'admins.edit')
 
   return (
     <div className="grid" style={{ gap: 16 }}>
@@ -131,10 +143,7 @@ export default function Admins() {
             <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by name, email or role..." />
             <select className="select flt" value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value); setPage(1) }}>
               <option value="all">All Roles</option>
-              <option value="super">Super Admin</option>
-              <option value="admin">Admin</option>
-              <option value="manager">Manager</option>
-              <option value="support">Support Admin</option>
+              {roles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
             </select>
             <select className="select flt" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}>
               <option value="all">All Status</option>
@@ -145,7 +154,7 @@ export default function Admins() {
             <select className="select flt" defaultValue="date"><option value="date">Joined Date</option></select>
             <button className="btn line"><Filter size={16} /> Filters</button>
             <div className="tb-spacer" />
-            <button className="btn" onClick={() => { setForm(blank); setAdding(true) }}><Plus size={17} /> Add Admin User</button>
+            {canCreate && <button className="btn" onClick={() => { setForm(blank); setAdding(true) }}><Plus size={17} /> Add Admin User</button>}
           </div>
 
           <div className="tablewrap">
@@ -165,12 +174,13 @@ export default function Admins() {
                     <td><Badge tone={active ? 'green' : 'red'}>{active ? 'Active' : 'Inactive'}</Badge></td>
                     <td className="muted">{r.last_login ? shortDate(r.last_login) : '—'}</td>
                     <td><div className="actions" style={{ position: 'relative' }}>
-                      <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={() => openEdit(r)}><Pencil size={15} /></button>
-                      <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}><MoreVertical size={15} /></button>
+                      {canEdit && <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={() => openEdit(r)}><Pencil size={15} /></button>}
+                      {(canEdit || canDelete) && <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}><MoreVertical size={15} /></button>}
+                      {!canEdit && !canDelete && <span className="muted" style={{ fontSize: 12 }}>—</span>}
                       {menuFor === r.id && (
                         <div className="menu" style={{ position: 'absolute', right: 0, top: 34, zIndex: 20, background: 'var(--card, #fff)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,.12)', minWidth: 160, padding: 6 }}>
-                          <button className="menu-item" style={menuItemStyle} onClick={() => toggleStatus(r)}>{active ? 'Deactivate' : 'Activate'}</button>
-                          <button className="menu-item" style={menuItemStyle} onClick={() => { setMenuFor(null); openEdit(r) }}>Edit</button>
+                          {canEdit && <button className="menu-item" style={menuItemStyle} onClick={() => toggleStatus(r)}>{active ? 'Deactivate' : 'Activate'}</button>}
+                          {canEdit && <button className="menu-item" style={menuItemStyle} onClick={() => { setMenuFor(null); openEdit(r) }}>Edit</button>}
                           {canDelete && <button className="menu-item" style={{ ...menuItemStyle, color: 'var(--red)' }} onClick={() => removeAdmin(r)}>Delete</button>}
                         </div>
                       )}
@@ -234,10 +244,7 @@ export default function Admins() {
             <Field label="Phone"><input value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
             <Field label="Role">
               <select value={form.role} onChange={(e) => set('role', e.target.value)}>
-                <option value="super">Super Admin</option>
-                <option value="admin">Admin</option>
-                <option value="manager">Manager</option>
-                <option value="support">Support Admin</option>
+                {assignableRoles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
               </select>
             </Field>
             <Field label="Password"><input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} /></Field>
@@ -258,10 +265,7 @@ export default function Admins() {
             <Field label="Phone"><input value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
             <Field label="Role">
               <select value={form.role} onChange={(e) => set('role', e.target.value)}>
-                <option value="super">Super Admin</option>
-                <option value="admin">Admin</option>
-                <option value="manager">Manager</option>
-                <option value="support">Support Admin</option>
+                {assignableRoles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
               </select>
             </Field>
             <Field label="Status">

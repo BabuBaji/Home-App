@@ -4,7 +4,7 @@ import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } f
 import { fetchWorkers, updateWorker, deleteWorker, inviteWorker, fetchServices, fetchZones, type Zone } from '../api'
 import type { Worker } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 import { CITIES } from '../cities'
 
 type Stats = { total: number; active: number; onboarding: number; pending: number; inactive: number }
@@ -224,7 +224,7 @@ export default function Workers() {
                             )}
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'active', verified: true }, 'Worker approved') }}>Approve</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'suspended' }, 'Worker suspended') }}>Suspend</button>
-                            {can(admin?.role, 'admin') && (
+                            {has(admin, 'workers.delete') && (
                               <button className="menu-item" style={{ ...MENU_ITEM, color: '#d92d20' }} onClick={() => { setMenuId(null); doDelete(w) }}>Delete</button>
                             )}
                           </div>

@@ -3,6 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
+  PermGroup, Role,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -362,6 +363,13 @@ export const fetchAdmins = () => req<Admin[]>('/admins')
 export const createAdminUser = (body: Record<string, unknown>) => req<Admin>('/admins', post('', body))
 export const updateAdminUser = (id: number, body: Record<string, unknown>) => req<Admin>(`/admins/${id}`, patch(body))
 export const deleteAdminUser = (id: number) => req<{ ok: boolean }>(`/admins/${id}`, { method: 'DELETE' })
+
+/* RBAC — roles are named permission bundles; the catalog drives the matrix editor. */
+export const fetchPermissionCatalog = () => req<{ ok: boolean; catalog: PermGroup[] }>('/permissions')
+export const fetchRoles = () => req<{ ok: boolean; roles: Role[] }>('/roles')
+export const createRole = (body: Record<string, unknown>) => req<{ ok: boolean; role: Role }>('/roles', post('', body))
+export const updateRole = (key: string, body: Record<string, unknown>) => req<{ ok: boolean; role: Role }>(`/roles/${key}`, patch(body))
+export const deleteRole = (key: string) => req<{ ok: boolean }>(`/roles/${key}`, { method: 'DELETE' })
 
 export const runShaktiSettlement = (month?: string) =>
   req<{ ok: boolean; month: string; qualified: number; error?: string }>('/shakti/settle', post('/shakti/settle', { month }))
