@@ -52,6 +52,7 @@ type Draft = {
   // UI-only: which salary type the plan dropdown is filtered to. The plan itself carries the type;
   // this just drives the three cards. Not sent to the server.
   salary_type: 'per_job' | 'fixed' | 'hybrid'
+  salary_basic: string; salary_attendance: string; salary_allowance: string
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -66,6 +67,7 @@ const empty: Draft = {
   incentive_plan_id: '', salary_effective_from: today(),
   pf_applicable: false, esi_applicable: false, tds_applicable: false, salary_payment_mode: 'bank',
   salary_type: 'fixed',
+  salary_basic: '', salary_attendance: '', salary_allowance: '',
 }
 
 export default function AddWorker() {
@@ -110,6 +112,21 @@ export default function AddWorker() {
   const zoneName = zones.find((z) => String(z.id) === d.zone_id)?.name || '--'
   const planObj = plans.find((p) => String(p.id) === d.salary_plan_id)
 
+  // Picking a plan pre-fills the Salary Details amounts (the admin can then adjust them for this
+  // worker). Runs only on a plan change, so hand-edits aren't clobbered on re-render.
+  useEffect(() => {
+    if (!planObj) return
+    setD((p) => ({
+      ...p,
+      salary_basic: planObj.monthlyBasic ? String(planObj.monthlyBasic) : '',
+      salary_attendance: planObj.attendanceAllowance ? String(planObj.attendanceAllowance) : '',
+      salary_allowance: planObj.otherAllowance ? String(planObj.otherAllowance) : '',
+    }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.salary_plan_id])
+
+  const salaryTotal = (Number(d.salary_basic) || 0) + (Number(d.salary_attendance) || 0) + (Number(d.salary_allowance) || 0)
+
   // Only what the server actually requires. Everything else the worker supplies later.
   const step1Ok = !!(d.first_name.trim() && d.phone.trim().length >= 10 && d.worker_category && d.employment_type && d.joining_date)
   const step2Ok = !!(d.city && d.zone_id)
@@ -134,6 +151,9 @@ export default function AddWorker() {
     allow_outside_radius: d.allow_outside_radius,
     incentive_plan_id: d.incentive_plan_id ? Number(d.incentive_plan_id) : null,
     salary_effective_from: d.salary_effective_from || null,
+    salary_basic: d.salary_type !== 'per_job' && d.salary_basic !== '' ? Number(d.salary_basic) : null,
+    salary_attendance: d.salary_type !== 'per_job' && d.salary_attendance !== '' ? Number(d.salary_attendance) : null,
+    salary_allowance: d.salary_type !== 'per_job' && d.salary_allowance !== '' ? Number(d.salary_allowance) : null,
     pf_applicable: d.pf_applicable, esi_applicable: d.esi_applicable, tds_applicable: d.tds_applicable,
     salary_payment_mode: d.salary_payment_mode,
     status: 'pending',
@@ -363,68 +383,66 @@ export default function AddWorker() {
               <Card>
                 <SectionHead icon={<IndianRupee size={16} />} title="Salary Plan" sub="Select the salary structure and plan for this worker." />
 
-                {/* Salary Type — three cards, the plan list follows the choice */}
-                <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>Salary Type <span style={{ color: '#dc2626' }}>*</span></div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-                  {TYPE_CARDS.map((c) => {
-                    const on = d.salary_type === c.type
-                    return (
-                      <button key={c.type} onClick={() => { set('salary_type', c.type); if (plan && plan.salaryType !== c.type) set('salary_plan_id', '') }}
-                        style={{
-                          textAlign: 'left', padding: 14, borderRadius: 12, cursor: 'pointer', background: on ? '#eef2ff' : '#fff',
-                          border: '1.5px solid ' + (on ? '#4f46e5' : 'var(--line,#e5e7eb)'), position: 'relative',
-                        }}>
-                        <span style={{ display: 'inline-grid', placeItems: 'center', width: 34, height: 34, borderRadius: 9, background: on ? '#4f46e5' : '#f1f5f9', color: on ? '#fff' : '#64748b', marginBottom: 8 }}>{c.icon}</span>
-                        {on && <span style={{ position: 'absolute', top: 12, right: 12, color: '#4f46e5' }}><Check size={16} /></span>}
-                        <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.title}</div>
-                        <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 2 }}>{c.blurb}</div>
-                      </button>
-                    )
-                  })}
-                </div>
-
-                {/* Plan + effective-from */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {/* Top: Salary Type on the left, plan + effective-from on the right (mock layout) */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.55fr) minmax(0, 1fr)', gap: 24 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>Salary Type <span style={{ color: '#dc2626' }}>*</span></div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                      {TYPE_CARDS.map((c) => {
+                        const on = d.salary_type === c.type
+                        return (
+                          <button key={c.type} onClick={() => { set('salary_type', c.type); if (plan && plan.salaryType !== c.type) set('salary_plan_id', '') }}
+                            style={{
+                              textAlign: 'left', padding: 14, borderRadius: 12, cursor: 'pointer', background: on ? '#eef2ff' : '#fff',
+                              border: '1.5px solid ' + (on ? '#4f46e5' : 'var(--line,#e5e7eb)'), position: 'relative',
+                            }}>
+                            <span style={{ display: 'inline-grid', placeItems: 'center', width: 34, height: 34, borderRadius: 9, background: on ? '#4f46e5' : '#f1f5f9', color: on ? '#fff' : '#64748b', marginBottom: 8 }}>{c.icon}</span>
+                            {on && <span style={{ position: 'absolute', top: 12, right: 12, color: '#4f46e5' }}><Check size={16} /></span>}
+                            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.title}</div>
+                            <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 2 }}>{c.blurb}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                   <div>
                     <Field label="Salary Plan *">
-                      <Dropdown value={d.salary_plan_id} width="100%" placeholder={typePlans.length ? 'Select salary plan' : 'No plans of this type'}
+                      <Dropdown value={d.salary_plan_id} width="100%" placeholder={typePlans.length ? 'Select Salary Plan' : 'No plans of this type'}
                         options={typePlans.map((p) => ({ value: String(p.id), label: p.name }))}
                         onChange={(v) => set('salary_plan_id', v)} />
                     </Field>
-                    <button onClick={() => nav('/salary-plans')} style={{ background: 'none', border: 0, color: '#4f46e5', fontSize: 12, cursor: 'pointer', padding: '4px 0 0' }}>+ Create New Plan</button>
+                    <button onClick={() => nav('/salary-plans')} style={{ background: 'none', border: 0, color: '#4f46e5', fontSize: 12, cursor: 'pointer', padding: '4px 0 8px' }}>+ Create New Plan</button>
+                    {d.salary_type !== 'per_job' && (
+                      <Field label="Effective From *">
+                        <input type="date" value={d.salary_effective_from} onChange={(e) => set('salary_effective_from', e.target.value)} />
+                      </Field>
+                    )}
                   </div>
-                  {plan?.paysMonthly && (
-                    <Field label="Effective From *">
-                      <input type="date" value={d.salary_effective_from} onChange={(e) => set('salary_effective_from', e.target.value)} />
-                    </Field>
-                  )}
                 </div>
+
                 {typePlans.length === 0 && (
-                  <div style={{ padding: 12, borderLeft: '3px solid #d97706', background: '#fffbeb', borderRadius: 8, fontSize: 12.5, marginTop: 4 }}>
-                    No <strong>{TYPE_LABEL[d.salary_type]}</strong> plans yet. Create one under <em>Salary Plans</em>. Left unset, this worker
-                    earns on the platform commission ({platformPct}%) and shows as <em>Salary not configured</em> at go-live.
+                  <div style={{ padding: 12, borderLeft: '3px solid #d97706', background: '#fffbeb', borderRadius: 8, fontSize: 12.5, marginTop: 12 }}>
+                    No <strong>{TYPE_LABEL[d.salary_type]}</strong> plans yet — pick one to pre-fill the amounts below, or type them in directly.
+                    Create reusable plans under <em>Salary Plans</em>.
                   </div>
                 )}
 
-                {/* Salary Details — read-only, from the chosen plan (the plan is the source of truth) */}
-                {plan && (
-                  <div style={{ marginTop: 14 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>Salary Details <span className="muted" style={{ fontWeight: 400 }}>({TYPE_LABEL[plan.salaryType]} — from the plan)</span></div>
-                    <div style={{ display: 'grid', gridTemplateColumns: plan.paysMonthly ? 'repeat(4, 1fr)' : '1fr', gap: 10 }}>
-                      {plan.paysMonthly && <Metric label="Monthly Basic Salary" value={rupee(plan.monthlyBasic)} />}
-                      {plan.paysMonthly && <Metric label="Attendance Bonus (Monthly)" value={rupee(plan.attendanceAllowance)} />}
-                      {plan.paysMonthly && <Metric label="Other Allowance (Monthly)" value={rupee(plan.otherAllowance)} />}
-                      {plan.paysPerJob && !plan.paysMonthly && <Metric label="Per-Job Share" value={`keeps ${plan.workerKeeps}%`} />}
-                      {plan.paysMonthly && <Metric label="Total Fixed Pay (Monthly)" value={rupee(plan.totalFixedPay)} accent />}
+                {/* Salary Details — editable ₹ fields, pre-filled from the plan, overridable per worker */}
+                {d.salary_type !== 'per_job' && (
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line,#eef0f4)' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Salary Details <span className="muted" style={{ fontWeight: 400 }}>({TYPE_LABEL[d.salary_type]})</span></div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) minmax(0, 1.1fr)', gap: 12, alignItems: 'end' }}>
+                      <RupeeField label="Monthly Basic Salary" required value={d.salary_basic} onChange={(v) => set('salary_basic', v)} />
+                      <RupeeField label="Attendance Bonus (Monthly)" value={d.salary_attendance} onChange={(v) => set('salary_attendance', v)} />
+                      <RupeeField label="Other Allowance (Monthly)" value={d.salary_allowance} onChange={(v) => set('salary_allowance', v)} />
+                      <div style={{ background: '#eef2ff', borderRadius: 10, padding: '10px 12px' }}>
+                        <div className="muted" style={{ fontSize: 11 }}>Total Fixed Pay (Monthly)</div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: '#4f46e5', marginTop: 2 }}>{rupee(salaryTotal)}</div>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 10 }}>
+                    <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 12 }}>
                       <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                      <span>
-                        {plan.salaryType === 'fixed' ? 'Fixed salary is paid every month by payroll, whatever the job count. No per-job share.'
-                          : plan.salaryType === 'hybrid' ? 'A monthly salary from payroll plus a per-job share credited as jobs complete.'
-                            : 'A per-job share credited by the wallet as jobs complete. Amounts are set on the plan.'}
-                        {' '}To change the amounts, edit the plan under Salary Plans.
-                      </span>
+                      <span>Fixed salary is paid every month as per the payroll cycle. Picking a plan pre-fills these amounts — you can adjust them for this worker.</span>
                     </div>
                   </div>
                 )}
@@ -673,6 +691,19 @@ function SectionHead({ icon, title, sub, n }: { icon: React.ReactNode; title: st
         <div className="muted" style={{ fontSize: 12 }}>{sub}</div>
       </div>
     </div>
+  )
+}
+
+function RupeeField({ label, value, onChange, required }: { label: string; value: string; onChange: (v: string) => void; required?: boolean }) {
+  return (
+    <label className="field" style={{ display: 'block' }}>
+      <span style={{ display: 'block', fontSize: 12, color: 'var(--muted,#667085)', marginBottom: 5 }}>{label}{required && <span style={{ color: '#dc2626' }}> *</span>}</span>
+      <span style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--line,#e5e7eb)', borderRadius: 9, background: '#fff', overflow: 'hidden' }}>
+        <span style={{ padding: '9px 10px', color: '#94a3b8', background: '#f8fafc', borderRight: '1px solid var(--line,#e5e7eb)' }}>₹</span>
+        <input value={value} onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="0"
+          style={{ border: 0, outline: 'none', padding: '9px 11px', fontSize: 13, width: '100%', background: 'transparent' }} />
+      </span>
+    </label>
   )
 }
 

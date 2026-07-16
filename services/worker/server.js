@@ -236,6 +236,14 @@ async function init() {
     // hadn't joined.
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_effective_from DATE`,
 
+    /* Per-worker salary amounts. The plan is a TEMPLATE that pre-fills these; an admin can override
+     * them for one worker (the Salary Details fields on the wizard). NULL = use the plan's value, so
+     * a worker left untouched follows their plan and can't silently drift. Payroll reads the
+     * override if present, else the plan. */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_basic INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_attendance INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_allowance INTEGER`,
+
     /* Statutory deductions are per-WORKER applicability (it depends on their wage and their opt-in),
      * while the RATES are platform settings an admin enters. We apply their numbers; we don't
      * invent the law. */
@@ -1896,6 +1904,20 @@ async function incentivePlanFor(w) {
   return (await pool.query('SELECT * FROM incentive_plans WHERE id=$1', [w.incentive_plan_id])).rows[0] || null
 }
 
+/**
+ * The worker's effective monthly salary amounts: a per-worker override wins, else the plan's value.
+ * `overridden` is true when any amount was set by hand — the panel shows that so an admin knows
+ * this worker isn't simply following the template.
+ */
+function salaryAmounts(w, plan) {
+  const pick = (own, planVal) => (Number.isInteger(own) ? own : (planVal || 0))
+  const basic = pick(w?.salary_basic, plan?.monthly_basic)
+  const attendance = pick(w?.salary_attendance, plan?.attendance_allowance)
+  const allowance = pick(w?.salary_allowance, plan?.other_allowance)
+  const overridden = [w?.salary_basic, w?.salary_attendance, w?.salary_allowance].some(Number.isInteger)
+  return { basic, attendance, allowance, total: basic + attendance + allowance, overridden }
+}
+
 /* Salary types.
  *  per_job — commission only; nothing monthly. The original model.
  *  fixed   — a monthly salary, paid whatever the job count. NO per-job share: that's what "paid
@@ -2194,9 +2216,10 @@ async function payrollLine(w, month) {
   // silently pay them for months they hadn't joined.
   if (w.salary_effective_from && monthKey(new Date(w.salary_effective_from)) > month) return null
 
-  const basic = plan.monthly_basic || 0
+  const amt = salaryAmounts(w, plan)
+  const basic = amt.basic
   // The guaranteed monthly attendance allowance rides with the allowance line on the payslip.
-  const allowance = (plan.other_allowance || 0) + (plan.attendance_allowance || 0)
+  const allowance = amt.allowance + amt.attendance
   const incentives = []
 
   const inc = await incentivePlanFor(w)
@@ -2359,11 +2382,16 @@ app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   const plans = (await pool.query('SELECT * FROM salary_plans WHERE active=true ORDER BY sort, id')).rows
   const incPlans = (await pool.query('SELECT * FROM incentive_plans WHERE active=true ORDER BY sort, id')).rows
   const inc = await incentivePlanFor(w)
+  const amt = salaryAmounts(w, plan)
   res.json({
     ok: true,
     commissionPercent: w.commission_percent, // null unless a manual rate was set
     salaryPlanId: w.salary_plan_id ?? null,
     salaryPlan: planDto(plan),
+    // Effective monthly amounts: per-worker override if set, else the plan's. `salaryOverridden`
+    // flags a hand-edited worker so the panel doesn't imply they're simply on the template.
+    salaryBasic: amt.basic, salaryAttendance: amt.attendance, salaryAllowance: amt.allowance,
+    salaryTotalFixed: amt.total, salaryOverridden: amt.overridden,
     platformCommissionPercent: platform,
     effectiveCommissionPercent: pct,
     /** 'plan' | 'manual' | 'platform' — where the effective rate came from. */
@@ -2435,6 +2463,18 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   }
   const mode = b.salaryPaymentMode !== undefined ? String(b.salaryPaymentMode) : (w.salary_payment_mode || 'bank')
   if (!['bank', 'upi'].includes(mode)) return res.status(400).json({ error: 'Payment mode must be bank or upi' })
+  // Per-worker salary amounts. '' / null clears the override (back to the plan); a number sets it.
+  const amount = (v, cur) => {
+    if (v === undefined) return cur
+    if (v === null || v === '') return null
+    const n = Number(v)
+    if (!Number.isInteger(n) || n < 0 || n > 10_000_000) return NaN
+    return n
+  }
+  const sBasic = amount(b.salaryBasic, w.salary_basic)
+  const sAtt = amount(b.salaryAttendance, w.salary_attendance)
+  const sAllow = amount(b.salaryAllowance, w.salary_allowance)
+  if ([sBasic, sAtt, sAllow].some(Number.isNaN)) return res.status(400).json({ error: 'Salary amounts must be whole rupee values' })
   const flag = (k, col) => (b[k] !== undefined ? !!b[k] : !!w[col])
   const pf = flag('pfApplicable', 'pf_applicable')
   const esi = flag('esiApplicable', 'esi_applicable')
@@ -2442,9 +2482,10 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
 
   await pool.query(
     `UPDATE workers SET commission_percent=$1, salary_plan_id=$2, wallet_enabled=$3, incentive_plan_id=$4,
-       salary_effective_from=$5, pf_applicable=$6, esi_applicable=$7, tds_applicable=$8, salary_payment_mode=$9
-     WHERE id=$10`,
-    [pct, planId, walletEnabled, incId, effFrom, pf, esi, tds, mode, id])
+       salary_effective_from=$5, pf_applicable=$6, esi_applicable=$7, tds_applicable=$8, salary_payment_mode=$9,
+       salary_basic=$10, salary_attendance=$11, salary_allowance=$12
+     WHERE id=$13`,
+    [pct, planId, walletEnabled, incId, effFrom, pf, esi, tds, mode, sBasic, sAtt, sAllow, id])
 
   const who = req.admin?.name || req.admin?.email || 'Admin'
   const after = await resolveCommission(await getWorker(id))
@@ -3135,8 +3176,9 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
                           worker_category,employment_type,joining_date,recruiter,referral_source,
                           cluster_id,store_id,reporting_manager_id,salary_plan_id,shift_def_id,wallet_enabled,
                           job_radius_km,allow_outside_radius,incentive_plan_id,salary_effective_from,
-                          pf_applicable,esi_applicable,tds_applicable,salary_payment_mode)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32) RETURNING *`,
+                          pf_applicable,esi_applicable,tds_applicable,salary_payment_mode,
+                          salary_basic,salary_attendance,salary_allowance)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) RETURNING *`,
     [name, b.first_name || null, b.last_name || null, b.phone ? String(b.phone).trim() : null, b.alternate_mobile || null,
       b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5,
       b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker',
@@ -3149,7 +3191,10 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
       b.incentive_plan_id ? Number(b.incentive_plan_id) : null,
       b.salary_effective_from || b.joining_date || null,
       !!b.pf_applicable, !!b.esi_applicable, !!b.tds_applicable,
-      ['bank', 'upi'].includes(b.salary_payment_mode) ? b.salary_payment_mode : 'bank'])
+      ['bank', 'upi'].includes(b.salary_payment_mode) ? b.salary_payment_mode : 'bank',
+      Number.isInteger(b.salary_basic) ? b.salary_basic : null,
+      Number.isInteger(b.salary_attendance) ? b.salary_attendance : null,
+      Number.isInteger(b.salary_allowance) ? b.salary_allowance : null])
   // Badge number is derived from the id, so it needs the row to exist first.
   const id = rows[0].id
   await pool.query(`UPDATE workers SET employee_id = 'WKR' || (1000 + $1) WHERE id=$1 AND employee_id IS NULL`, [id])
