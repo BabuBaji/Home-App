@@ -2208,6 +2208,12 @@ async function attendanceForMonth(w, month) {
   return { scheduled, present, pct: scheduled ? Math.round((present / scheduled) * 100) : 0 }
 }
 
+/** Jobs this worker actually completed in a month — used to gate the quality bonus on activity. */
+async function completedJobsInMonth(workerId, month) {
+  const bookings = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${workerId}&status=completed`, [])
+  return (bookings || []).filter((b) => b.completed_at && String(b.completed_at).slice(0, 7) === month).length
+}
+
 /**
  * One worker's line for a month. Returns null only when there's nothing to pay.
  *
@@ -2242,8 +2248,14 @@ async function payrollLine(w, month) {
       incentives.push({ label: `Attendance Bonus (${att.pct}%)`, amount: inc.attendance_bonus_amount })
     }
   }
+  // Quality bonus: a high rating AND at least one job completed this month. The rating alone is a
+  // lifetime figure, so without the activity gate a worker would collect it every month — even one
+  // they never worked. Requiring a completed job ties it to the month being paid for.
   if (inc?.quality_bonus_amount > 0 && (w.rating || 0) >= inc.quality_min_rating) {
-    incentives.push({ label: `Quality Bonus (${w.rating}★)`, amount: inc.quality_bonus_amount })
+    const completed = await completedJobsInMonth(w.id, month)
+    if (completed > 0) {
+      incentives.push({ label: `Quality Bonus (${w.rating}★, ${completed} job${completed === 1 ? '' : 's'})`, amount: inc.quality_bonus_amount })
+    }
   }
 
   const gross = basic + allowance + incentives.reduce((n, i) => n + i.amount, 0)
