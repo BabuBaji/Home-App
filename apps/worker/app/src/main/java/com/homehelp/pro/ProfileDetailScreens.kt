@@ -64,7 +64,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -483,22 +485,39 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
     }
     // Report the real outcome (wrong file type, too large, storage unreachable).
     LaunchedEffect(vm.uploadError) { vm.uploadError?.let { toast(ctx, it); vm.clearUploadError() } }
+    // The server owns the document set — fetch it rather than trusting the seeded placeholder.
+    LaunchedEffect(Unit) { vm.loadDocumentTypes() }
 
     DetailScaffold("Documents", nav) {
+        val required = vm.documents.filter { vm.documentRequired[it.name] != false }
+        val done = required.count { it.status == "Verified" }
         Card(padding = Dp16.S) {
             Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
                 IconChip(Icons.Filled.Info, Purple, PurpleLight)
                 Spacer(Modifier.width(Space.m))
-                Text(
-                    "Upload a clear photo or PDF scan for each document. Files are reviewed within 24–48 hours.",
-                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
-                )
+                Column {
+                    Text(
+                        // Only claim a review window we can actually keep: an admin approves these
+                        // by hand, so promise the mechanism, not a deadline nobody owns.
+                        "Upload a clear photo or PDF scan of each document. An admin checks each one and you'll be told if any needs re-doing.",
+                        fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                    )
+                    if (required.isNotEmpty()) {
+                        Spacer(Modifier.height(Space.s))
+                        Text(
+                            "$done of ${required.size} required documents verified",
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (done == required.size) GreenSuccess else TextDark,
+                        )
+                    }
+                }
             }
         }
         // One tap-through row per document — status colour tells verified / pending / missing
         // at a glance, and tapping the row opens the picker (upload / replace) as before.
         vm.documents.forEach { doc ->
             val hasFile = doc.fileName.isNotBlank()
+            val isRequired = vm.documentRequired[doc.name] != false
             val icon: ImageVector
             val tint: Color
             val bg: Color
@@ -508,32 +527,41 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
                     icon = Icons.Filled.CheckCircle; tint = GreenSuccess; bg = GreenLight
                     subtitle = doc.fileName.ifBlank { "Verified" }
                 }
-                doc.status == "Under Review" -> {
-                    icon = Icons.Filled.Schedule; tint = Purple; bg = PurpleLight
-                    subtitle = "Under review • ${doc.fileName.ifBlank { "submitted" }}"
+                // An admin sent it back. Without this branch a rejection rendered as amber
+                // "pending" and the worker had no idea anything was wrong.
+                doc.status == "Rejected" -> {
+                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
+                    subtitle = doc.rejectReason.ifBlank { "Rejected — please upload a new copy" }
                 }
                 hasFile -> {
                     icon = Icons.Filled.Schedule; tint = Amber; bg = GoldLight
-                    subtitle = doc.fileName
+                    subtitle = "Waiting for review • ${doc.fileName}"
                 }
                 else -> {
-                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
-                    subtitle = "Not uploaded yet — tap to add"
+                    icon = if (isRequired) Icons.Filled.Close else Icons.Filled.Add
+                    tint = if (isRequired) RedCancel else TextGray
+                    bg = if (isRequired) RedLight else FieldFill
+                    subtitle = vm.documentHints[doc.name]?.takeIf { it.isNotBlank() } ?: "Tap to add"
                 }
             }
-            StatusListRow(
-                icon = icon,
-                iconTint = tint,
-                iconBg = bg,
-                title = doc.name,
-                subtitle = subtitle,
-                subtitleColor = tint,
-                value = if (doc.status == "Verified") "Replace" else "Upload",
-                valueColor = tint,
-            ) {
-                pendingDoc = doc.name
-                // Accept images and PDFs; system picker honours the mime hint.
-                picker.launch("*/*")
+            Column {
+                StatusListRow(
+                    icon = icon,
+                    iconTint = tint,
+                    iconBg = bg,
+                    title = doc.name + if (isRequired) "" else "  (optional)",
+                    subtitle = subtitle,
+                    subtitleColor = tint,
+                    value = if (hasFile || doc.status == "Verified") "Replace" else "Upload",
+                    valueColor = if (doc.status == "Verified") GreenSuccess else Purple,
+                ) {
+                    pendingDoc = doc.name
+                    // Accept images and PDFs; system picker honours the mime hint.
+                    picker.launch("*/*")
+                }
+                if (vm.uploadingDoc == doc.name) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = Space.m), color = Purple)
+                }
             }
         }
     }

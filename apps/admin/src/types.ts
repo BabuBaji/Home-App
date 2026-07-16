@@ -113,8 +113,10 @@ export interface WalletState {
   withdrawals: WalletWithdrawal[]
   advances?: unknown[]
 }
+/** The canonical KYC set, from the server — lets the admin see what's MISSING, not just uploaded. */
+export interface WorkerDocType { name: string; required: boolean; hint?: string }
 export interface WorkerDetail extends Worker {
-  documents?: WorkerDoc[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
+  documents?: WorkerDoc[]; documentTypes?: WorkerDocType[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
   activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice; health?: WorkerHealth
   jobsPerformance?: JobsPerformance

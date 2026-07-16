@@ -147,7 +147,7 @@ data class WalletTxn(
 )
 
 /** A verification document and its current review status. */
-data class DocItem(val name: String, val status: String, val fileName: String = "")
+data class DocItem(val name: String, val status: String, val fileName: String = "", val rejectReason: String = "")
 
 class AppViewModel : ViewModel() {
 
@@ -348,11 +348,40 @@ class AppViewModel : ViewModel() {
     // ---- verification documents ----
     // The required-document checklist. Statuses start as "Pending" and are replaced by the
     // backend's real review status on load (no document is shown as verified until it is).
+    // Phase 4. Seeded from the SERVER's list (loadDocumentTypes) rather than hardcoded here — the
+    // server validates uploads against the same list, so a second copy would drift. These three are
+    // only a first paint for an offline start; the real set replaces them on load.
     val documents = mutableStateListOf(
-        DocItem("Aadhaar Card", "Pending"),
-        DocItem("PAN Card", "Pending"),
-        DocItem("Passport Size Photo", "Pending"),
+        DocItem("Aadhaar Front", "Missing"),
+        DocItem("Aadhaar Back", "Missing"),
+        DocItem("PAN Card", "Missing"),
     )
+    /** name -> required?  Drives the Required/Optional pill and the completion counter. */
+    val documentRequired = mutableStateMapOf<String, Boolean>()
+    val documentHints = mutableStateMapOf<String, String>()
+
+    /** Required documents the worker still hasn't had approved. Empty = KYC done. */
+    val pendingRequiredDocs: List<String>
+        get() = documents.filter { documentRequired[it.name] != false && it.status != "Verified" }.map { it.name }
+
+    /**
+     * Pull the canonical document set, then overlay what this worker has actually uploaded.
+     * A type with no row yet is "Missing" — the app used to invent its own three-item list and
+     * show them all as "Pending", implying they'd been submitted when nothing had.
+     */
+    fun loadDocumentTypes() = sync {
+        val types = api.documentTypes().types
+        if (types.isNotEmpty()) {
+            documentRequired.clear(); documentHints.clear()
+            types.forEach { documentRequired[it.name] = it.required; documentHints[it.name] = it.hint }
+            val mine = api.getDocuments().associateBy { it.name }
+            documents.clear()
+            documents.addAll(types.map { t ->
+                val d = mine[t.name]
+                DocItem(t.name, d?.status?.ifBlank { "Missing" } ?: "Missing", d?.fileName ?: "", d?.rejectReason ?: "")
+            })
+        }
+    }
 
     /** True only when every required document has been reviewed and approved — drives the
      *  verified badge on the Home profile header. */
@@ -401,7 +430,7 @@ class AppViewModel : ViewModel() {
         if (b.walletTxns.isNotEmpty()) { walletTxns.clear(); walletTxns.addAll(b.walletTxns) }
         if (b.documents.isNotEmpty()) {
             documents.clear()
-            documents.addAll(b.documents.map { DocItem(it.name, it.status, it.fileName) })
+            documents.addAll(b.documents.map { DocItem(it.name, it.status, it.fileName, it.rejectReason) })
         }
         // Restore any job the worker is mid-way through, so relaunching the app (or coming
         // back to Home) keeps the active/in-progress job visible instead of losing it.
@@ -1287,7 +1316,7 @@ class AppViewModel : ViewModel() {
                 backendConnected = true
                 if (r.documents.isNotEmpty()) {
                     documents.clear()
-                    documents.addAll(r.documents.map { DocItem(it.name, it.status, it.fileName) })
+                    documents.addAll(r.documents.map { DocItem(it.name, it.status, it.fileName, it.rejectReason) })
                 }
             } catch (e: retrofit2.HttpException) {
                 uploadError = httpErrorMessage(e)   // e.g. wrong file type, too large, storage down

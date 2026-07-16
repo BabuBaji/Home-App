@@ -788,6 +788,26 @@ app.get('/api/worker/ifsc/:code', auth, async (req, res) => {
 })
 
 /* ---------- profile / documents ---------- */
+/* ---------- Phase 4: the KYC document set ----------
+ * The server owns this list so it is ONE source of truth: it validates uploads against it, the
+ * worker app renders its checklist from it, and the admin panel uses it to show what's missing.
+ * Hardcoding it in three places would let them drift.
+ *
+ * The spec also lists "Profile Photo" here; that's the avatar captured in Phase 2 (public bucket,
+ * shown to customers), so it isn't duplicated as a KYC document.
+ */
+const DOC_TYPES = [
+  { name: 'Aadhaar Front', required: true, hint: 'Photo side showing your name and number' },
+  { name: 'Aadhaar Back', required: true, hint: 'Address side' },
+  { name: 'PAN Card', required: true, hint: 'Clear photo of the front' },
+  { name: 'Police Verification', required: true, hint: 'Certificate from your local station' },
+  { name: 'Address Proof', required: true, hint: 'Rent agreement, utility bill or ration card' },
+  { name: 'Medical Certificate', required: true, hint: 'Fitness certificate from a doctor' },
+  { name: 'Driving License', required: false, hint: 'Only if you drive to jobs' },
+  { name: 'Passport', required: false, hint: 'Optional' },
+]
+const DOC_NAMES = new Set(DOC_TYPES.map((d) => d.name))
+
 /* Uploads (KYC documents + profile photos). Declared HERE, above the first route that uses it —
  * `const` is hoisted into a temporal dead zone, so defining it further down crashed the service
  * at import with "Cannot access 'upload' before initialization". 8 MB, in memory, one file. */
@@ -1103,7 +1123,16 @@ const settleShaftiSafe = (y, m) => settleShaktiForMonth(y, m).catch((e) => { con
 
 app.put('/api/worker/preferences', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { preferences: req.body || {} }))))
 app.put('/api/worker/notifications', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { notifications: req.body || {} }))))
-app.get('/api/worker/documents', auth, async (req, res) => res.json(await documents(req.worker.id)))
+/* The worker app's view of one document. This used to return raw DB rows, so the app received
+ * `file_name`/`reject_reason` while its DTO reads `fileName`/`rejectReason` — both were always
+ * empty, which made every uploaded document render as "Not uploaded yet" and hid the admin's
+ * rejection reason entirely. */
+const docDto = (d) => ({
+  id: d.id, name: d.name, fileName: d.file_name || '', status: d.status || 'Pending',
+  hasFile: !!d.storage_key, rejectReason: d.reject_reason || '',
+  reviewedAt: d.reviewed_at || null, created: d.created,
+})
+app.get('/api/worker/documents', auth, async (req, res) => res.json((await documents(req.worker.id)).map(docDto)))
 
 /* ---------- KYC documents ----------
  * Real multipart upload into private object storage. Previously this endpoint took {name, fileName}
@@ -1128,9 +1157,13 @@ async function replaceDocument(wid, name, { key, mime, size, sum, fileName }) {
   for (const o of old) if (o.storage_key) await deleteObject(o.storage_key).catch(() => {})
 }
 
+app.get('/api/worker/documents/types', auth, (_q, res) => res.json({ ok: true, types: DOC_TYPES }))
+
 app.post('/api/worker/documents/upload', auth, upload.single('file'), async (req, res) => {
   const name = String(req.body?.name || '').trim()
   if (!name) return res.status(400).json({ ok: false, error: 'Document name required' })
+  // Only known types: an arbitrary name would store a file nobody ever reviews or looks for.
+  if (!DOC_NAMES.has(name)) return res.status(400).json({ ok: false, error: `Unknown document type: ${name}` })
   if (!storageConfigured()) return res.status(503).json({ ok: false, error: 'Document storage is not configured. Contact support.' })
   if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: 'Attach a photo or PDF of the document' })
 
@@ -1147,7 +1180,7 @@ app.post('/api/worker/documents/upload', auth, upload.single('file'), async (req
     fileName: String(req.body?.fileName || req.file.originalname || `${name}.${kind.ext}`).slice(0, 180),
   })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.document', entityType: 'worker', entityId: req.worker.id, detail: `Uploaded document: ${name}` })
-  res.json({ ok: true, documents: await documents(req.worker.id) })
+  res.json({ ok: true, documents: (await documents(req.worker.id)).map(docDto) })
 })
 
 // The worker viewing their own document. Ownership is enforced by the worker_id filter.
@@ -1435,7 +1468,9 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
     : 'Rating dipping — coaching / a check-in is recommended.'
   const health = { riskScore, level, attendanceRisk, burnoutRisk, lateProbability, complaintProbability, suggestion }
 
-  res.json({ ...rowToWorker(w), documents: documentsOut, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
+  // documentTypes travels with the detail so the admin can show what's still MISSING, not just
+  // what happened to be uploaded — an absent Police Verification is the thing they need to chase.
+  res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
 })
 app.patch('/api/admin/workers/:id', adminAuth, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })

@@ -60,9 +60,13 @@ data class WalletDto(
 )
 
 data class DocumentDto(
+    val id: Int = 0,
     val name: String = "",
     val status: String = "",
     val fileName: String = "",
+    val hasFile: Boolean = false,
+    /** Why an admin sent it back. The worker cannot fix a document without being told. */
+    val rejectReason: String = "",
 )
 
 /* ---------- wallet module ---------- */
@@ -519,6 +523,10 @@ data class ProfileBody(
 )
 /** Short-lived signed URL for viewing a stored KYC document. */
 data class SignedUrlResponse(val ok: Boolean = true, val url: String = "")
+
+/** Phase 4: the canonical KYC document set, owned by the server (it validates uploads against it). */
+data class DocTypeDto(val name: String = "", val required: Boolean = true, val hint: String = "")
+data class DocTypesResponse(val ok: Boolean = true, val types: List<DocTypeDto> = emptyList())
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
 data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)

@@ -490,8 +490,19 @@ export default function WorkerDetail() {
       ) : <div className="muted" style={{ fontSize: 13, padding: '12px 0' }}>No active job right now.</div>}
     </Panel>
   )
+  // The list the server owns, so the panel can show what hasn't been uploaded at all — an absent
+  // Police Verification is the thing an admin needs to chase, and it has no row to render.
+  const docTypes = w.documentTypes || []
+  const byName = new Map((w.documents || []).map((d) => [d.name, d]))
+  const missingRequired = docTypes.filter((t) => t.required && !byName.has(t.name))
+  const requiredDone = docTypes.filter((t) => t.required && byName.get(t.name)?.status === 'Verified').length
+  const requiredTotal = docTypes.filter((t) => t.required).length
+
   const documentsPanel = (
-    <Panel title={`Documents (${w.documents?.length ?? 0})`}>
+    <Panel
+      title={`Documents (${requiredTotal ? `${requiredDone}/${requiredTotal} verified` : (w.documents?.length ?? 0)})`}
+      action={missingRequired.length > 0 ? <Badge tone="red" dot={false}>{missingRequired.length} missing</Badge> : undefined}
+    >
       {(w.documents && w.documents.length > 0) ? w.documents.map((d) => (
         <div key={d.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
@@ -524,6 +535,16 @@ export default function WorkerDetail() {
           )}
         </div>
       )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No documents uploaded.</div>}
+      {/* Required types with no row at all. Listing only what was uploaded hides the gap. */}
+      {missingRequired.map((t) => (
+        <div key={t.name} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+          <span style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted,#667085)' }}>{t.name}</div>
+            {t.hint && <div className="muted" style={{ fontSize: 11.5 }}>{t.hint}</div>}
+          </span>
+          <Badge tone="gray" dot={false}>Not uploaded</Badge>
+        </div>
+      ))}
     </Panel>
   )
   const skillsPanel = (

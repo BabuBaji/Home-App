@@ -94,6 +94,9 @@ interface ApiService {
     @GET("api/worker/documents/{id}/url")
     suspend fun documentUrl(@Path("id") id: Int): SignedUrlResponse
 
+    @GET("api/worker/documents/types")
+    suspend fun documentTypes(): DocTypesResponse
+
     // Profile photo. Public bucket (customers see it), so the DTO carries a stable URL.
     @Multipart
     @POST("api/worker/profile/photo")
