@@ -12,7 +12,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, publishEvent } from '@homehelp/shared'
+import { makePool, migrate, nowIso, internalOnly, publishEvent, smsConfigured, sendOtpSms } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('auth') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -21,6 +21,7 @@ const PORT = Number(process.env.PORT || 4002)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5433/auth'
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '')
+const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '') // owns `settings` (SMS provider keys)
 /* DEV_OTP pins the code to a known value AND returns it in the response, so demos work with no SMS
  * provider wired up. It is the ONLY way a code is ever disclosed and must be set explicitly —
  * unset means a random code that is never disclosed. It used to default to '4321', i.e. disclosure
@@ -276,7 +277,7 @@ async function auth(req, res, next) {
 }
 
 /* ---------- login ---------- */
-app.post('/api/auth/request-otp', (req, res) => {
+app.post('/api/auth/request-otp', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   if (phone.length < 6) return res.status(400).json({ error: 'Enter a valid mobile number' })
   const prev = otpStore.get(phone)
@@ -295,8 +296,16 @@ app.post('/api/auth/request-otp', (req, res) => {
     hash: hashOtp(phone, code), expires: now + OTP_TTL_MS, attempts: 0,
     sent: fresh ? 1 : prev.sent + 1, windowStarted: fresh ? now : prev.windowStarted, sentAt: now,
   })
-  // TODO: deliver by SMS once a provider is wired up (settings.msg91_key). Until then a code is
-  // only usable when DEV_OTP is set — otherwise it's generated, stored, and undeliverable.
+  // Deliver it. Disclosure in the response is only the fallback for an unconfigured provider —
+  // never both: if the SMS goes out, the code must not also come back over HTTP.
+  if (await smsConfigured(ADMIN_URL)) {
+    const sent = await sendOtpSms(ADMIN_URL, phone, code)
+    if (!sent.ok) {
+      console.error(`[auth] OTP SMS failed for ${phone}: ${sent.error}`)
+      return res.status(502).json({ error: 'Could not send the code right now. Please try again.' })
+    }
+    return res.json({ ok: true })
+  }
   const exposed = !!DEV_OTP
   if (!exposed) console.log(`[auth] OTP issued for ${phone} — no SMS provider configured, so it cannot be delivered.`)
   res.json({ ok: true, ...(exposed ? { devOtp: code } : {}) })

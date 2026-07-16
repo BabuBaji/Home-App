@@ -6,6 +6,8 @@ export * from './internal.js'
 export * from './customer-auth.js'
 export * from './admin-auth.js'
 export * from './config.js'
+// Safe to re-export: sms.js only needs config.js + global fetch, no extra dependency.
+export * from './sms.js'
 // jwt.js is NOT re-exported for the same reason as storage.js: it carries a dependency
 // (jsonwebtoken) that only the three services minting/verifying sessions install. Import it
 // directly:  import { tokenSubject } from '@homehelp/shared/jwt.js'

@@ -55,6 +55,10 @@ const DEFAULT_SETTINGS = {
   company_address: '3rd Floor, Cyber Heights, HITEC City, Hyderabad, Telangana 500081',
   company_state: 'Telangana', service_sac: '9987', invoice_prefix: 'INV',
   razorpay_key_id: '', razorpay_key_secret: '', google_maps_key: '', msg91_key: '',
+  // India requires a DLT-registered template for transactional SMS, so a template id is as
+  // essential as the key — without it MSG91 rejects the send. Empty = SMS disabled, and the
+  // login flows fall back to disclosing the code (dev only; see DEV_OTP / WORKER_DEV_OTP).
+  msg91_otp_template_id: '', msg91_sender_id: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
   serviceable_pincodes: '', service_cities: '',
@@ -94,6 +98,9 @@ async function init() {
     razorpay_key_secret: process.env.RAZORPAY_KEY_SECRET,
     razorpay_webhook_secret: process.env.RAZORPAY_WEBHOOK_SECRET,
     google_maps_key: process.env.GOOGLE_MAPS_KEY,
+    msg91_key: process.env.MSG91_KEY,
+    msg91_otp_template_id: process.env.MSG91_OTP_TEMPLATE_ID,
+    msg91_sender_id: process.env.MSG91_SENDER_ID,
     upi_vpa: process.env.UPI_VPA,
     upi_payee_name: process.env.UPI_PAYEE_NAME,
     upi_mode: process.env.UPI_MODE,

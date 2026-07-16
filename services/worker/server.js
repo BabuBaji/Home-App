@@ -11,7 +11,7 @@ import express from 'express'
 import multer from 'multer'
 import {
   makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
-  getSettingInt,
+  getSettingInt, smsConfigured, sendOtpSms,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
 // that only the services actually using them install.
@@ -671,8 +671,17 @@ app.post('/api/worker/auth/request-otp', async (req, res) => {
        created = now()`,
     [phone, hashOtp(phone, code), OTP_TTL_MIN, windowFresh])
 
-  // TODO: deliver by SMS once a provider is wired up (see settings.msg91_key). Until then the code
-  // is only usable when WORKER_DEV_OTP is set — otherwise it is generated, stored, and undeliverable.
+  // Deliver it. Disclosure in the response is the fallback for when no provider is configured —
+  // never both: if the SMS goes out, the code must not also come back over HTTP.
+  if (await smsConfigured(ADMIN_URL)) {
+    const sent = await sendOtpSms(ADMIN_URL, phone, code)
+    if (!sent.ok) {
+      console.error(`[worker] OTP SMS failed for ${phone}: ${sent.error}`)
+      // Don't leave the worker staring at a code that never arrives.
+      return res.status(502).json({ ok: false, error: 'Could not send the code right now. Please try again.' })
+    }
+    return res.json({ ok: true, message: `OTP sent to ${phone}` })
+  }
   const exposed = !!WORKER_DEV_OTP
   if (!exposed) console.log(`[worker] OTP issued for ${phone} — no SMS provider configured, so it cannot be delivered.`)
   res.json({

@@ -114,6 +114,7 @@ services:
       INTERNAL_KEY: ${INTERNAL_KEY}
       JWT_SECRET: ${JWT_SECRET}
       CATALOG_URL: http://catalog:4001
+      ADMIN_URL: http://admin:4010
       DEV_OTP: ${DEV_OTP}
     ports: ["4002:4002"]
     depends_on:
@@ -257,6 +258,12 @@ services:
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
       JWT_SECRET: ${JWT_SECRET}
+
+      MSG91_KEY: ${MSG91_KEY:-}
+
+      MSG91_OTP_TEMPLATE_ID: ${MSG91_OTP_TEMPLATE_ID:-}
+
+      MSG91_SENDER_ID: ${MSG91_SENDER_ID:-}
       AUTH_URL: http://auth:4002
       CATALOG_URL: http://catalog:4001
       BOOKING_URL: http://booking:4006
