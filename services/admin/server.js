@@ -231,7 +231,18 @@ async function resolveScope(a, roster) {
 // computed; every service reads it through the /api/admin/me payload, so a role change here takes
 // effect platform-wide on the next request. super always resolves to every key (drift-proof).
 const permCache = new Map()
-const invalidatePerms = (roleKey) => { if (roleKey) permCache.delete(roleKey); else permCache.clear() }
+const landingCache = new Map()
+const invalidatePerms = (roleKey) => {
+  if (roleKey) { permCache.delete(roleKey); landingCache.delete(roleKey) } else { permCache.clear(); landingCache.clear() }
+}
+// The page a role lands on after sign-in (cached; invalidated with perms on any role change).
+async function roleLanding(roleKey) {
+  if (landingCache.has(roleKey)) return landingCache.get(roleKey)
+  const r = (await pool.query('SELECT landing FROM roles WHERE key=$1', [roleKey])).rows[0]
+  const l = r?.landing || '/dashboard'
+  landingCache.set(roleKey, l)
+  return l
+}
 async function resolvePermissions(roleKey) {
   if (roleKey === 'super') return [...ALL_PERMISSIONS]
   if (permCache.has(roleKey)) return permCache.get(roleKey)
@@ -244,8 +255,8 @@ async function resolvePermissions(roleKey) {
  *  service receives as req.admin (so requirePerm works uniformly across the platform). */
 async function adminWithPerms(a) {
   if (!a) return a
-  const [permissions, scope] = await Promise.all([resolvePermissions(a.role), resolveScope(a)])
-  return { ...publicAdmin(a), permissions, scope }
+  const [permissions, scope, landing] = await Promise.all([resolvePermissions(a.role), resolveScope(a), roleLanding(a.role)])
+  return { ...publicAdmin(a), permissions, scope, landing }
 }
 async function getAdmin(id) { const { rows } = await pool.query('SELECT * FROM admins WHERE id=$1', [id]); return rows[0] || null }
 async function getAdminByEmail(email) { const { rows } = await pool.query('SELECT * FROM admins WHERE email=$1', [String(email).toLowerCase()]); return rows[0] || null }

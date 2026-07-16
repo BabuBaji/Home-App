@@ -21,7 +21,7 @@ export default function Login() {
     try {
       const { token, admin } = await login(email.trim(), password)
       signIn(token, admin)
-      nav('/dashboard', { replace: true })
+      nav(admin.landing || '/dashboard', { replace: true }) // land on the role's configured page
     } catch (e: any) { setErr(e.message || 'Login failed') } finally { setBusy(false) }
   }
 

@@ -10,6 +10,8 @@ export interface Admin {
   // Org hierarchy: who this admin reports to, and their EFFECTIVE scope (own + rolled-up reports).
   reportsTo?: number | null
   effectiveScope?: { type: string; zoneIds: number[] | null; cities: string[] | null }
+  // The page this admin's role lands on after sign-in (from the role's `landing`).
+  landing?: string
   status: string; avatar?: string | null; last_login?: string | null; created: string
 }
 

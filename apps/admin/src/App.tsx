@@ -51,12 +51,15 @@ export default function App() {
     if (getToken()) fetchMe().then(({ admin }) => { signIn(getToken(), admin); setAdmin(admin) }).catch(() => {})
   }, [])
 
+  // Where a signed-in admin lands — their role's configured landing page, else the dashboard.
+  const home = admin?.landing || '/dashboard'
+
   return (
     <ToastHost>
      <ConfirmHost>
       {admin && <SosAlert />}
       <Routes>
-        <Route path="/login" element={admin ? <Navigate to="/dashboard" replace /> : <Login />} />
+        <Route path="/login" element={admin ? <Navigate to={home} replace /> : <Login />} />
         <Route element={<Guard authed={!!admin} />}>
           <Route path="/dashboard" element={<Page perm="dashboard.view"><Dashboard /></Page>} />
           <Route path="/customers" element={<Page perm="customers.view"><Customers /></Page>} />
@@ -100,7 +103,7 @@ export default function App() {
           <Route path="/approvals" element={<Page perm="approvals.review"><Approvals /></Page>} />
           <Route path="/organization" element={<Page perm="admins.view"><OrgHierarchy /></Page>} />
         </Route>
-        <Route path="*" element={<Navigate to={admin ? '/dashboard' : '/login'} replace />} />
+        <Route path="*" element={<Navigate to={admin ? home : '/login'} replace />} />
       </Routes>
      </ConfirmHost>
     </ToastHost>
