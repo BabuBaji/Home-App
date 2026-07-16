@@ -1921,6 +1921,104 @@ app.delete('/api/admin/training/questions/:id', adminAuth, async (req, res) => {
  */
 const docVerified = (docs, name) => docs.some((d) => d.name === name && d.status === 'Verified')
 
+/* ---------- The worker's 8-step onboarding wizard ----------
+ * Every step's completion is DERIVED from the same data the rest of the system reads. There is no
+ * "step 3 done" flag: a stored flag and the underlying data disagree the moment anything changes,
+ * and the flag is what the wizard would show.
+ *
+ * The wizard covers only what the WORKER can do. Documents count as done when uploaded, not when
+ * verified — verification is the admin's job, and a worker who has done everything asked of them
+ * shouldn't sit at "incomplete" waiting on someone else.
+ */
+const need = (v) => !!String(v || '').trim()
+
+async function onboardingState(workerId) {
+  const w = await getWorker(workerId)
+  if (!w) return null
+  const p = w.profile || {}
+  const person = p.personal || {}
+  const [docs, training] = await Promise.all([
+    pool.query('SELECT name, storage_key FROM worker_documents WHERE worker_id=$1', [workerId]).then((r) => r.rows),
+    trainingState(workerId),
+  ])
+  const uploaded = new Set(docs.filter((d) => d.storage_key).map((d) => d.name))
+  const missingDocs = DOC_TYPES.filter((t) => t.required && !uploaded.has(t.name)).map((t) => t.name)
+  const bank = p.bank || {}
+  const skills = p.skills || {}
+
+  const step = (key, label, done, detail, optional = false) => ({ key, label, done, detail, optional })
+
+  // Which fields make a step "done" is a judgement, so it's stated rather than implied: each step
+  // names exactly what's outstanding instead of showing a bare incomplete tick.
+  const missingPersonal = [['gender', 'gender'], ['dob', 'date of birth']].filter(([k]) => !need(person[k])).map(([, l]) => l)
+  const missingAddress = [['address', 'address'], ['emergencyName', 'emergency contact name'], ['emergencyPhone', 'emergency contact number']]
+    .filter(([k]) => !need(person[k])).map(([, l]) => l)
+
+  const steps = [
+    step('otp', 'Mobile Verification', !!w.phone_verified_at, w.phone_verified_at ? 'Your number is verified' : 'Sign in with an OTP'),
+    step('personal', 'Personal Information', missingPersonal.length === 0,
+      missingPersonal.length ? `Still needed: ${missingPersonal.join(', ')}` : 'Done'),
+    step('address', 'Address & Emergency Contact', missingAddress.length === 0,
+      missingAddress.length ? `Still needed: ${missingAddress.join(', ')}` : 'Done'),
+    // Uploaded, not verified — the worker cannot approve their own documents.
+    step('documents', 'Documents Upload', missingDocs.length === 0,
+      missingDocs.length ? `Still to upload: ${missingDocs.join(', ')}` : 'All required documents uploaded'),
+    step('bank', 'Bank Details', !!(bank.bankAccount || bank.bankUpi),
+      (bank.bankAccount || bank.bankUpi) ? 'Added — your admin verifies it' : 'Add where you want to be paid'),
+    step('skills', 'Skills & Experience', Object.keys(skills).length > 0,
+      Object.keys(skills).length ? `${Object.keys(skills).length} claimed — your admin approves them` : 'Pick the services you can do'),
+    training.modules.length === 0 || !training.quiz.ready
+      // Can't require someone to finish training that hasn't been written, or sit an assessment
+      // that doesn't exist yet.
+      ? step('training', 'Training & Assessment', true, 'Nothing to do yet — your admin hasn\'t published training', true)
+      : step('training', 'Training & Assessment', training.progress.completed === training.progress.total && training.quiz.passed,
+        training.quiz.passed ? `Passed with ${training.quiz.bestPct}%`
+          : training.progress.completed < training.progress.total ? `${training.progress.completed} of ${training.progress.total} modules read`
+            : `Assessment not passed yet (need ${training.quiz.passPct}%)`),
+  ]
+
+  const submittedAt = p.onboarding?.submittedAt || null
+  const outstanding = steps.filter((s) => !s.done && !s.optional)
+  return {
+    worker: { id: w.id, name: w.name, status: w.status },
+    steps,
+    completed: steps.filter((s) => s.done).length,
+    total: steps.length,
+    canSubmit: outstanding.length === 0,
+    outstanding: outstanding.map((s) => s.key),
+    submittedAt,
+    live: w.status === 'active',
+  }
+}
+
+app.get('/api/worker/onboarding', auth, async (req, res) => {
+  res.json({ ok: true, ...(await onboardingState(req.worker.id)) })
+})
+
+/**
+ * "I'm done." Records that the worker considers their part finished and tells the admin.
+ * It approves nothing — Go Live stays the admin's call. Editing afterwards is deliberately still
+ * allowed: a worker who spots their own typo shouldn't have to ask permission to fix it.
+ */
+app.post('/api/worker/onboarding/submit', auth, async (req, res) => {
+  const st = await onboardingState(req.worker.id)
+  if (!st.canSubmit) {
+    return res.status(400).json({ ok: false, error: 'Finish the remaining steps first', outstanding: st.outstanding })
+  }
+  const w = await getWorker(req.worker.id)
+  const prior = w.profile?.onboarding?.submittedAt || null
+  await mergeProfile(req.worker.id, {
+    onboarding: { ...(w.profile?.onboarding || {}), submittedAt: prior || new Date().toISOString() },
+  })
+  if (!prior) {
+    publishEvent(REDIS_URL, 'activity', {
+      actorType: 'worker', actorId: req.worker.id, actorName: w.name, action: 'onboarding.submit',
+      entityType: 'worker', entityId: req.worker.id, detail: `${w.name} submitted their profile for approval`,
+    })
+  }
+  res.json({ ok: true, ...(await onboardingState(req.worker.id)) })
+})
+
 /* ---------- Phase 11: admin reviews availability ----------
  * The one place a preference becomes an assignment. Approving adopts what the worker asked for;
  * modifying assigns something else and must say why — a worker whose requested shift is silently
@@ -2173,6 +2271,9 @@ async function goLiveChecklist(workerId) {
     blocking: blocking.map((i) => i.key),
     ready: blocking.length === 0,
     live: w.status === 'active',
+    // The worker saying "I've finished my part". Not an approval and not a checklist item — it
+    // tells the admin there's something to look at.
+    submittedAt: w.profile?.onboarding?.submittedAt || null,
   }
 }
 

@@ -8,6 +8,10 @@ import com.homehelp.pro.WalletTxn
 /** Worker profile as stored on the backend. Field names match the JSON 1:1. */
 data class WorkerDto(
     val name: String = "",
+    /** 'pending' | 'onboarding' | 'active' | … The app had no idea which; the wizard needs it. */
+    val status: String = "",
+    /** Rides along on bootstrap (workerDto spreads profile), so routing needs no extra call. */
+    val onboarding: OnboardingMark? = null,
     val phone: String = "",
     val email: String = "",
     val city: String = "",
@@ -619,6 +623,30 @@ data class IssuedEquipmentDto(
     val returnedAt: String? = null,
 )
 data class EquipmentResponse(val ok: Boolean = true, val issued: List<IssuedEquipmentDto> = emptyList())
+
+data class OnboardingMark(val submittedAt: String? = null)
+
+/* The worker's 8-step onboarding wizard. Every step's `done` is DERIVED server-side from the same
+ * data everything else reads — there is no stored "step 3 done" flag to fall out of sync. */
+data class OnboardingStep(
+    val key: String = "",
+    val label: String = "",
+    val done: Boolean = false,
+    val detail: String = "",
+    /** True when there's genuinely nothing to do (e.g. no training published yet). Never blocks. */
+    val optional: Boolean = false,
+)
+data class OnboardingResponse(
+    val ok: Boolean = true,
+    val steps: List<OnboardingStep> = emptyList(),
+    val completed: Int = 0,
+    val total: Int = 0,
+    val canSubmit: Boolean = false,
+    val outstanding: List<String> = emptyList(),
+    /** Set once the worker says they've finished. Not an approval — the admin still decides. */
+    val submittedAt: String? = null,
+    val live: Boolean = false,
+)
 
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")

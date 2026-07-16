@@ -227,6 +227,8 @@ export interface GoLiveChecklist {
   blocking: string[]
   ready: boolean
   live: boolean
+  /** The worker saying "I've finished my part". Not an approval — Go Live stays the admin's call. */
+  submittedAt: string | null
   history: ApprovalRecord[]
 }
 

@@ -294,6 +294,10 @@ class AppViewModel : ViewModel() {
 
     // ---- editable profile state (Profile sub-screens) — empty until the backend loads it ----
     var workerName by mutableStateOf("")
+    /* 'onboarding' until an admin approves them; 'active' means dispatchable. The app used to have
+     * no idea, so an onboarding worker saw a home built around jobs they cannot accept. */
+    var workerStatus by mutableStateOf("")
+        private set
     var workerPhone by mutableStateOf("")
     var workerEmail by mutableStateOf("")
     var workerCity by mutableStateOf("")
@@ -1036,6 +1040,8 @@ class AppViewModel : ViewModel() {
      */
     private fun applyWorker(w: WorkerDto) {
         workerName = w.name
+        if (w.status.isNotBlank()) workerStatus = w.status
+        onboardingSubmittedAt = w.onboarding?.submittedAt
         workerPhone = w.phone
         workerEmail = w.email
         workerCity = w.city
@@ -1212,6 +1218,48 @@ class AppViewModel : ViewModel() {
             } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
             catch (e: Exception) { trainingError = "Could not submit. Check your connection and try again." }
             finally { loadingQuiz = false }
+        }
+    }
+
+    /* ---- Onboarding wizard ----
+     * Step completion is computed by the server from real data; the app renders it and nothing more.
+     * Submitting says "I've done my part" — it is not an approval, and the screen says so.
+     */
+    val onboardingSteps = mutableStateListOf<com.homehelp.pro.network.OnboardingStep>()
+    var onboardingDone by mutableStateOf(0)
+        private set
+    var onboardingTotal by mutableStateOf(0)
+        private set
+    var canSubmitOnboarding by mutableStateOf(false)
+        private set
+    var onboardingSubmittedAt by mutableStateOf<String?>(null)
+        private set
+    var submittingOnboarding by mutableStateOf(false)
+        private set
+    var onboardingError by mutableStateOf<String?>(null)
+    fun clearOnboardingError() { onboardingError = null }
+
+    private fun applyOnboarding(r: com.homehelp.pro.network.OnboardingResponse) {
+        onboardingSteps.clear(); onboardingSteps.addAll(r.steps)
+        onboardingDone = r.completed
+        onboardingTotal = r.total
+        canSubmitOnboarding = r.canSubmit
+        onboardingSubmittedAt = r.submittedAt
+    }
+
+    fun loadOnboarding() = sync { applyOnboarding(api.getOnboarding()) }
+
+    fun submitOnboarding(onDone: () -> Unit = {}) {
+        onboardingError = null
+        submittingOnboarding = true
+        viewModelScope.launch {
+            try {
+                applyOnboarding(withContext(Dispatchers.IO) { api.submitOnboarding() })
+                backendConnected = true
+                onDone()
+            } catch (e: retrofit2.HttpException) { onboardingError = httpErrorMessage(e) }
+            catch (e: Exception) { onboardingError = "Could not submit. Check your connection and try again." }
+            finally { submittingOnboarding = false }
         }
     }
 

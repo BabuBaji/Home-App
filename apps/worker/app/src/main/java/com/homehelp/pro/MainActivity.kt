@@ -85,6 +85,7 @@ object Routes {
     const val P_SKILLS = "profile_skills"
     const val P_TRAINING = "profile_training"
     const val P_EQUIPMENT = "profile_equipment"
+    const val ONBOARDING = "onboarding"
     const val P_AVAILABILITY = "profile_availability"
     const val P_PREFERENCES = "profile_preferences"
     const val P_NOTIFICATIONS = "profile_notifications"
@@ -156,6 +157,19 @@ fun AppRoot() {
     }
     val startDestination = if (Session.isLoggedIn) Routes.HOME else Routes.LOGIN
 
+    /* Send a still-onboarding worker to the wizard rather than a home built around jobs they can't
+     * accept. Status arrives with bootstrap, so this can't be decided at composition — it runs once
+     * per launch, and only from Home, so it never yanks someone out of a screen they opened. */
+    val routedToOnboarding = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(vm.workerStatus, vm.onboardingSubmittedAt, route) {
+        if (!routedToOnboarding.value && route == Routes.HOME &&
+            vm.workerStatus == "onboarding" && vm.onboardingSubmittedAt == null
+        ) {
+            routedToOnboarding.value = true
+            nav.navigate(Routes.ONBOARDING) { popUpTo(Routes.HOME) { inclusive = true } }
+        }
+    }
+
     // App-wide side drawer, reachable via the ☰ menu on every screen's header.
     val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -223,6 +237,7 @@ fun AppRoot() {
             composable(Routes.P_SKILLS) { SkillsScreen(vm, nav) }
             composable(Routes.P_TRAINING) { TrainingScreen(vm, nav) }
             composable(Routes.P_EQUIPMENT) { EquipmentScreen(vm, nav) }
+            composable(Routes.ONBOARDING) { OnboardingScreen(vm, nav) }
             composable(Routes.P_BANK) { BankDetailsScreen(vm, nav) }
             composable(Routes.P_AVAILABILITY) { AvailabilityScreen(vm, nav) }
             composable(Routes.P_PREFERENCES) { PreferencesScreen(vm, nav) }
