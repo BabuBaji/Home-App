@@ -231,6 +231,7 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-homehelp}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-minio}
       S3_BUCKET: ${S3_BUCKET:-homehelp-kyc}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-homehelp-media}
     ports: ["4004:4004"]
     depends_on:
       worker-db: { condition: service_healthy }

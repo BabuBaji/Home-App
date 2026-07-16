@@ -19,6 +19,22 @@ data class WorkerDto(
     val bankHolder: String = "",
     val bankUpi: String = "",
     val bankAccountType: String = "",
+    // Phase 2/3 — the worker's own profile. Previously admin-entered only; the app never saw them.
+    val gender: String = "",
+    val dob: String = "",
+    val bloodGroup: String = "",
+    val maritalStatus: String = "",
+    val fatherName: String = "",
+    val motherName: String = "",
+    val emergencyName: String = "",
+    val emergencyPhone: String = "",
+    val address: String = "",           // current address
+    val permanentAddress: String = "",
+    val languages: String = "",
+    val qualification: String = "",
+    val experienceYears: String = "",
+    val previousCompany: String = "",
+    val avatar: String = "",
     val bankStatus: String = "Not Added",
     val bankRemarks: String = "",
     val bankRegisteredName: String = "",
@@ -479,7 +495,28 @@ data class AmountBody(val amount: Int)
 data class WithdrawBody(val amount: Int, val method: String, val otp: String)
 data class AdvanceBody(val amount: Int)
 data class ReasonBody(val reason: String)
-data class ProfileBody(val name: String, val phone: String, val email: String, val city: String)
+/** Phase 2/3. Nulls are omitted by Gson, and the server allow-lists + merges, so a screen can
+ *  send just the fields it owns without blanking the rest. */
+data class ProfileBody(
+    val name: String? = null,
+    val phone: String? = null,
+    val email: String? = null,
+    val city: String? = null,
+    val gender: String? = null,
+    val dob: String? = null,
+    val bloodGroup: String? = null,
+    val maritalStatus: String? = null,
+    val fatherName: String? = null,
+    val motherName: String? = null,
+    val emergencyName: String? = null,
+    val emergencyPhone: String? = null,
+    val address: String? = null,
+    val permanentAddress: String? = null,
+    val languages: String? = null,
+    val qualification: String? = null,
+    val experienceYears: String? = null,
+    val previousCompany: String? = null,
+)
 /** Short-lived signed URL for viewing a stored KYC document. */
 data class SignedUrlResponse(val ok: Boolean = true, val url: String = "")
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")

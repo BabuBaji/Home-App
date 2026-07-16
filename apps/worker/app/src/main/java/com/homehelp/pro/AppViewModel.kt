@@ -60,6 +60,7 @@ import com.homehelp.pro.network.SettlementDto
 import com.homehelp.pro.network.TrendPoint
 import com.homehelp.pro.network.WalletStateResponse
 import com.homehelp.pro.network.WalletSummaryDto
+import com.homehelp.pro.network.WorkerDto
 import com.homehelp.pro.network.WithdrawBody
 import com.homehelp.pro.network.WithdrawalEntry
 import kotlinx.coroutines.Dispatchers
@@ -380,37 +381,7 @@ class AppViewModel : ViewModel() {
         // Remember the auth token so every later call is attached to this worker, and
         // persist it so the session survives the app process being killed/backgrounded.
         b.token?.let { RetrofitClient.token = it; Session.token = it }
-        b.worker?.let { w ->
-            workerName = w.name
-            workerPhone = w.phone
-            workerEmail = w.email
-            workerCity = w.city
-            if (w.jobsCompleted > 0) jobsCompleted = w.jobsCompleted
-            if (w.rating > 0) workerRating = w.rating
-            bankName = w.bankName
-            bankAccount = w.bankAccount
-            bankIfsc = w.bankIfsc
-            bankHolder = w.bankHolder
-            bankUpi = w.bankUpi
-            bankAccountType = w.bankAccountType
-            bankStatus = w.bankStatus
-            bankRemarks = w.bankRemarks
-            bankRegisteredName = w.bankRegisteredName
-            bankNameMatch = w.bankNameMatch
-            shiftStart = w.shiftStart
-            shiftEnd = w.shiftEnd
-            if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
-            if (w.availableDays.isNotEmpty()) {
-                availableDays.clear(); availableDays.putAll(w.availableDays)
-            }
-            if (w.jobPreferences.isNotEmpty()) {
-                jobPreferences.clear(); jobPreferences.putAll(w.jobPreferences)
-            }
-            notifNewJobs = w.notifNewJobs
-            notifPayments = w.notifPayments
-            notifPromotions = w.notifPromotions
-            notifRatings = w.notifRatings
-        }
+        b.worker?.let { applyWorker(it) }
         b.wallet?.let { wl ->
             walletBalance = wl.balance
             totalEarned = wl.totalEarned
@@ -1019,7 +990,127 @@ class AppViewModel : ViewModel() {
     val lastWithdrawalId: Int get() = withdrawals.firstOrNull()?.id ?: 0
 
     // ---- profile persistence (called from the Save buttons) ----
-    fun saveProfile() = sync { api.updateProfile(ProfileBody(workerName, workerPhone, workerEmail, workerCity)) }
+    /**
+     * Hydrate every worker-scoped field from a WorkerDto. Extracted from applyBootstrap so the
+     * profile/photo/bank saves — which all return the same DTO — refresh state through ONE path
+     * instead of each repeating the field list and drifting.
+     */
+    private fun applyWorker(w: WorkerDto) {
+        workerName = w.name
+        workerPhone = w.phone
+        workerEmail = w.email
+        workerCity = w.city
+        if (w.jobsCompleted > 0) jobsCompleted = w.jobsCompleted
+        if (w.rating > 0) workerRating = w.rating
+        bankName = w.bankName
+        bankAccount = w.bankAccount
+        bankIfsc = w.bankIfsc
+        bankHolder = w.bankHolder
+        bankUpi = w.bankUpi
+        bankAccountType = w.bankAccountType
+        bankStatus = w.bankStatus
+        bankRemarks = w.bankRemarks
+        bankRegisteredName = w.bankRegisteredName
+        bankNameMatch = w.bankNameMatch
+        // Phase 2/3
+        gender = w.gender
+        dob = w.dob
+        bloodGroup = w.bloodGroup
+        maritalStatus = w.maritalStatus
+        fatherName = w.fatherName
+        motherName = w.motherName
+        emergencyName = w.emergencyName
+        emergencyPhone = w.emergencyPhone
+        currentAddress = w.address
+        permanentAddress = w.permanentAddress
+        languages = w.languages
+        qualification = w.qualification
+        experienceYears = w.experienceYears
+        previousCompany = w.previousCompany
+        avatarUrl = w.avatar
+        shiftStart = w.shiftStart
+        shiftEnd = w.shiftEnd
+        if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
+        if (w.availableDays.isNotEmpty()) { availableDays.clear(); availableDays.putAll(w.availableDays) }
+        if (w.jobPreferences.isNotEmpty()) { jobPreferences.clear(); jobPreferences.putAll(w.jobPreferences) }
+        notifNewJobs = w.notifNewJobs
+        notifPayments = w.notifPayments
+        notifPromotions = w.notifPromotions
+        notifRatings = w.notifRatings
+    }
+
+    /* ---- Phase 2/3: the worker's own profile ----
+     * These were admin-entered and invisible to the app. Held as plain state and sent together;
+     * the server allow-lists and MERGES, so sending a subset never blanks the rest. */
+    var gender by mutableStateOf("")
+    var dob by mutableStateOf("")
+    var bloodGroup by mutableStateOf("")
+    var maritalStatus by mutableStateOf("")
+    var fatherName by mutableStateOf("")
+    var motherName by mutableStateOf("")
+    var emergencyName by mutableStateOf("")
+    var emergencyPhone by mutableStateOf("")
+    var currentAddress by mutableStateOf("")
+    var permanentAddress by mutableStateOf("")
+    var languages by mutableStateOf("")
+    var qualification by mutableStateOf("")
+    var experienceYears by mutableStateOf("")
+    var previousCompany by mutableStateOf("")
+    var avatarUrl by mutableStateOf("")
+        private set
+
+    var savingProfile by mutableStateOf(false)
+        private set
+    var profileError by mutableStateOf<String?>(null)
+    fun clearProfileError() { profileError = null }
+
+    fun saveProfile(onDone: () -> Unit = {}) {
+        profileError = null
+        savingProfile = true
+        viewModelScope.launch {
+            try {
+                val w = withContext(Dispatchers.IO) {
+                    api.updateProfile(ProfileBody(
+                        name = workerName, phone = workerPhone, email = workerEmail, city = workerCity,
+                        gender = gender, dob = dob, bloodGroup = bloodGroup, maritalStatus = maritalStatus,
+                        fatherName = fatherName, motherName = motherName,
+                        emergencyName = emergencyName, emergencyPhone = emergencyPhone,
+                        address = currentAddress, permanentAddress = permanentAddress, languages = languages,
+                        qualification = qualification, experienceYears = experienceYears, previousCompany = previousCompany,
+                    ))
+                }
+                applyWorker(w)
+                backendConnected = true
+                onDone()
+            } catch (e: retrofit2.HttpException) {
+                profileError = httpErrorMessage(e)
+            } catch (e: Exception) {
+                profileError = "Could not save. Check your connection and try again."
+            } finally { savingProfile = false }
+        }
+    }
+
+    /** Upload a profile photo (public bucket — customers see it on their job screen). */
+    fun uploadPhoto(ctx: android.content.Context, uri: android.net.Uri) {
+        profileError = null
+        savingProfile = true
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+                    ?: throw IllegalStateException("Could not read that image")
+                if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("Image is too large (max 8 MB)")
+                val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
+                val part = MultipartBody.Part.createFormData("file", "avatar.jpg", bytes.toRequestBody(mime.toMediaTypeOrNull()))
+                val w = withContext(Dispatchers.IO) { api.uploadProfilePhoto(part) }
+                applyWorker(w)
+                backendConnected = true
+            } catch (e: retrofit2.HttpException) {
+                profileError = httpErrorMessage(e)
+            } catch (e: Exception) {
+                profileError = e.message ?: "Could not upload the photo."
+            } finally { savingProfile = false }
+        }
+    }
 
     /** Resolve bank + branch from the IFSC (auto-fills the bank name and confirms the code is real).
      *  Only the penny-drop on save can prove the ACCOUNT NUMBER itself — this just validates the IFSC. */

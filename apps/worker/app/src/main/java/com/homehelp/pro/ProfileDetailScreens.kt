@@ -62,9 +62,14 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -298,14 +303,67 @@ private fun NavRow(
     }
 }
 
+/** A labelled pick-one row. Used where the value is a small fixed set (gender, blood group…) — a
+ *  free-text field there just produces data nobody can group by. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChoiceRow(label: String, options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column {
+        SectionLabel(label)
+        Spacer(Modifier.height(Space.xs))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            options.forEach { opt ->
+                val on = selected.equals(opt, ignoreCase = true)
+                Text(
+                    opt, fontSize = 13.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (on) Purple else TextGray,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Radius.field))
+                        .background(if (on) PurpleLight else FieldFill)
+                        .clickable { onSelect(if (on) "" else opt) }
+                        .padding(horizontal = Space.m, vertical = Space.s),
+                )
+            }
+        }
+    }
+}
+
+private val GENDERS = listOf("Male", "Female", "Other")
+private val BLOOD_GROUPS = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-")
+private val MARITAL = listOf("Single", "Married", "Other")
+private val QUALIFICATIONS = listOf("Below 10th", "10th", "12th", "Diploma", "Graduate", "Post Graduate")
+
 @Composable
 fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
+    var sameAsCurrent by remember { mutableStateOf(false) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) vm.uploadPhoto(ctx, uri)
+    }
+    LaunchedEffect(vm.profileError) { vm.profileError?.let { toast(ctx, it); vm.clearProfileError() } }
+
     DetailScaffold("Personal Information", nav) {
-        // Identity hero — avatar, name, rating and earned tier.
+        // Identity hero — photo, name, rating and earned tier.
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    if (vm.avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = vm.avatarUrl, contentDescription = "Profile photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(60.dp).clip(CircleShape).clickable { photoPicker.launch("image/*") },
+                        )
+                    } else {
+                        Box(Modifier.clickable { photoPicker.launch("image/*") }) {
+                            Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
+                        }
+                    }
+                    Icon(
+                        Icons.Filled.PhotoCamera, contentDescription = null, tint = Color.White,
+                        modifier = Modifier.size(20.dp).clip(CircleShape).background(Purple).padding(3.dp),
+                    )
+                }
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(vm.workerName, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
@@ -321,19 +379,74 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
                     TierBadge(vm.tier)
                 }
             }
+            Spacer(Modifier.height(Space.s))
+            Text("Tap your photo to change it. Customers see this on their booking.", fontSize = 11.5.sp, color = TextGray)
         }
-        // Editable contact details.
+
+        // Phase 2 — registration details.
         Card {
             SectionLabel("Contact Details")
             Spacer(Modifier.height(Space.m))
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Field("Full Name", vm.workerName) { vm.workerName = it }
-                Field("Mobile Number", vm.workerPhone) { vm.workerPhone = it }
+                // The mobile is the login identity — changing it here would lock them out of their
+                // own account, so it's shown but not editable.
+                Field("Mobile Number", vm.workerPhone) { }
+                Text("Your mobile is your login — contact the admin to change it.", fontSize = 11.sp, color = TextGray)
                 Field("Email", vm.workerEmail) { vm.workerEmail = it }
                 Field("City", vm.workerCity) { vm.workerCity = it }
+                Field("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
+                ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
+                ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
+                ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
             }
         }
-        PrimaryButton("Save Changes") { vm.saveProfile(); toast(ctx, "Profile updated") }
+
+        // Phase 3 — personal profile.
+        Card {
+            SectionLabel("Family & Emergency")
+            Spacer(Modifier.height(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Field("Father's Name", vm.fatherName) { vm.fatherName = it }
+                Field("Mother's Name", vm.motherName) { vm.motherName = it }
+                Field("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
+                Field("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
+            }
+        }
+
+        Card {
+            SectionLabel("Address")
+            Spacer(Modifier.height(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Field("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = sameAsCurrent, onCheckedChange = {
+                        sameAsCurrent = it
+                        if (it) vm.permanentAddress = vm.currentAddress
+                    })
+                    Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
+                }
+                if (!sameAsCurrent) Field("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it }
+            }
+        }
+
+        Card {
+            SectionLabel("Experience")
+            Spacer(Modifier.height(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
+                Field("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
+                Field("Previous Company", vm.previousCompany) { vm.previousCompany = it }
+                Field("Languages Known", vm.languages) { vm.languages = it }
+                Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextGray)
+            }
+        }
+
+        PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
+            // Only claim it saved once the server says so — the old code toasted immediately and
+            // fired the request into the background.
+            vm.saveProfile { toast(ctx, "Profile updated") }
+        }
     }
 }
 

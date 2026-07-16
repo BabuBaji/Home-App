@@ -15,7 +15,7 @@ import {
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
 // that only the services actually using them install.
-import { ensureBucket, storageConfigured, sniffType, checksum, storageKey, putObject, signedGetUrl, deleteObject } from '@homehelp/shared/storage.js'
+import { ensureBucket, ensurePublicBucket, storageConfigured, sniffType, checksum, storageKey, putObject, putPublicObject, publicUrl, signedGetUrl, deleteObject } from '@homehelp/shared/storage.js'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('worker') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -264,6 +264,17 @@ const workerDto = (w) => {
     bankHolder: bank.bankHolder || '', bankName: bank.bankName || '', bankAccount: bank.bankAccount || '',
     bankIfsc: bank.bankIfsc || '', bankUpi: bank.bankUpi || '', chequePhoto: bank.chequePhoto || '',
     bankAccountType: bank.bankAccountType || '', // 'savings' | 'current' — passed to RazorpayX on payout
+    // Phase 2/3. `...p` above already spreads profile.* (including `personal` as an object), but the
+    // app's WorkerDto is flat — these are the fields it actually binds to. Empty string, never null:
+    // Gson would keep a null and the Compose fields expect non-null strings.
+    gender: (p.personal || {}).gender || '', dob: (p.personal || {}).dob || '',
+    bloodGroup: (p.personal || {}).bloodGroup || '', maritalStatus: (p.personal || {}).maritalStatus || '',
+    fatherName: (p.personal || {}).fatherName || '', motherName: (p.personal || {}).motherName || '',
+    emergencyName: (p.personal || {}).emergencyName || '', emergencyPhone: (p.personal || {}).emergencyPhone || '',
+    address: (p.personal || {}).address || '', permanentAddress: (p.personal || {}).permanentAddress || '',
+    languages: (p.personal || {}).languages || '',
+    qualification: (p.personal || {}).qualification || '', experienceYears: (p.personal || {}).experienceYears || '',
+    previousCompany: (p.personal || {}).previousCompany || '',
     bankRemarks: bv.reason || '',
     bankRegisteredName: bv.registeredName || '',
     bankNameMatch: (bv.nameMatch === undefined || bv.nameMatch === null) ? null : !!bv.nameMatch,
@@ -777,7 +788,54 @@ app.get('/api/worker/ifsc/:code', auth, async (req, res) => {
 })
 
 /* ---------- profile / documents ---------- */
-app.put('/api/worker/profile', auth, async (req, res) => { const b = req.body || {}; await pool.query('UPDATE workers SET name=COALESCE($1,name), email=COALESCE($2,email), city=COALESCE($3,city), avatar=COALESCE($4,avatar) WHERE id=$5', [b.name ?? null, b.email ?? null, b.city ?? null, b.avatar ?? null, req.worker.id]); res.json(workerDto(await getWorker(req.worker.id))) })
+/* Uploads (KYC documents + profile photos). Declared HERE, above the first route that uses it —
+ * `const` is hoisted into a temporal dead zone, so defining it further down crashed the service
+ * at import with "Cannot access 'upload' before initialization". 8 MB, in memory, one file. */
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } })
+
+/* Phase 2/3: the worker fills in their own profile.
+ *
+ * This used to accept name/email/city/avatar ONLY, so everything below was admin-entered and the
+ * app could neither read nor write it. Allow-listed rather than merged wholesale: `personal` is a
+ * JSONB blob, and letting a client post arbitrary keys into it invites junk that no reader expects.
+ */
+const PERSONAL_FIELDS = [
+  'gender', 'dob', 'bloodGroup', 'maritalStatus',                       // Phase 2
+  'fatherName', 'motherName', 'emergencyName', 'emergencyPhone',        // Phase 3
+  'address', 'permanentAddress', 'languages',                           // `address` = current address
+  'qualification', 'experienceYears', 'previousCompany',
+  'aadhaar', 'pan', 'whatsapp',                                         // pre-existing admin-entered keys
+]
+app.put('/api/worker/profile', auth, async (req, res) => {
+  const b = req.body || {}
+  await pool.query('UPDATE workers SET name=COALESCE($1,name), email=COALESCE($2,email), city=COALESCE($3,city), avatar=COALESCE($4,avatar) WHERE id=$5',
+    [b.name ?? null, b.email ?? null, b.city ?? null, b.avatar ?? null, req.worker.id])
+  const patch = {}
+  for (const k of PERSONAL_FIELDS) if (b[k] !== undefined) patch[k] = b[k]
+  // Merge, don't replace: the admin may have filled some of these in, and a worker editing one
+  // screen must not blank the rest.
+  if (Object.keys(patch).length) {
+    const cur = (await getWorker(req.worker.id))?.profile?.personal || {}
+    await mergeProfile(req.worker.id, { personal: { ...cur, ...patch } })
+  }
+  res.json(workerDto(await getWorker(req.worker.id)))
+})
+
+/* Profile photo. Public bucket, stable URL — customers see this on their job screen, so it can't
+ * be a signed URL that expires. Same magic-byte check as KYC: a declared mime is not evidence. */
+app.post('/api/worker/profile/photo', auth, upload.single('file'), async (req, res) => {
+  if (!storageConfigured()) return res.status(503).json({ ok: false, error: 'Photo storage is not configured' })
+  if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: 'Attach a photo' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind || kind.mime === 'application/pdf') return res.status(415).json({ ok: false, error: 'Profile photo must be a JPG, PNG or WebP image' })
+  const key = storageKey(`workers/${req.worker.id}/avatar`, kind.ext)
+  try { await putPublicObject(key, req.file.buffer, kind.mime) }
+  catch (e) { console.error('[worker] avatar upload failed:', e.message); return res.status(502).json({ ok: false, error: 'Could not store the photo. Please try again.' }) }
+  await pool.query('UPDATE workers SET avatar=$1 WHERE id=$2', [publicUrl(key), req.worker.id])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'profile.photo', entityType: 'worker', entityId: req.worker.id, detail: 'Updated profile photo' })
+  res.json(workerDto(await getWorker(req.worker.id)))
+})
 app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'bank.verify.requested', { workerId: req.worker.id, bank: req.body || {}, name: req.worker.name }); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (verifying)' }); res.json(workerDto(await getWorker(req.worker.id))) })
 app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
 
@@ -1056,8 +1114,6 @@ app.get('/api/worker/documents', auth, async (req, res) => res.json(await docume
  * endpoints use): an identity document must not be readable by anyone who can fetch the JSON.
  * Reads go through a short-lived signed URL, issued only after checking who is asking.
  */
-const MAX_DOC_BYTES = 8 * 1024 * 1024
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOC_BYTES, files: 1 } })
 
 // Re-uploading a document supersedes the previous one: a rejected Aadhaar must be replaceable, and
 // keeping both would leave the admin guessing which is current.
@@ -1715,6 +1771,7 @@ init()
     // Create the KYC bucket if it isn't there. Non-fatal: the service still serves everything
     // else, and the upload endpoint returns a clear 503 rather than accepting files it can't store.
     await ensureBucket().catch((e) => console.error('[worker] storage init failed:', e.message))
+    await ensurePublicBucket().catch((e) => console.error('[worker] public storage init failed:', e.message))
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
     scheduleShaktiSettlement()
     scheduleMetricSnapshots()

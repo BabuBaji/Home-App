@@ -53,6 +53,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
+    // Loads the worker's profile photo from object storage. The app had no remote-image loader at
+    // all before this — the avatar was a bundled placeholder because the API carried no photo URL.
+    implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("org.osmdroid:osmdroid-android:6.1.18")
 
     // Google Maps (Jetpack Compose) — renders genuine Google Maps tiles. Needs an API key

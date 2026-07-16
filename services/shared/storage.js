@@ -8,7 +8,7 @@
 // URL only after the owning service has checked who is asking. That is the whole point of not
 // reusing the base64-data-URI pattern the photo endpoints use — an identity document must not
 // be inlined into any JSON a client can already fetch.
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand, CreateBucketCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand, CreateBucketCommand, PutBucketPolicyCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import crypto from 'node:crypto'
 
@@ -83,3 +83,41 @@ export const signedGetUrl = (key, expiresIn = 300, bucket = S3_BUCKET) =>
 
 export const deleteObject = (key, bucket = S3_BUCKET) =>
   s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+
+/* ---------- public media (profile photos) ----------
+ * A SECOND bucket, public-read, deliberately separate from the KYC one.
+ *
+ * A worker's face photo is not an identity document: it is already shown to every customer who
+ * books them, rendered by the customer app straight from `pro.avatar`. Signed URLs can't serve
+ * that — they expire, so a customer's job screen would show a dead image minutes later. Keeping
+ * avatars in their own public bucket means the KYC bucket stays private with no exception carved
+ * into it, which is the part that must never leak.
+ */
+export const S3_PUBLIC_BUCKET = process.env.S3_PUBLIC_BUCKET || 'homehelp-media'
+
+/** Create the public bucket and mark it read-only-to-the-world. Safe to call on every boot. */
+export async function ensurePublicBucket(bucket = S3_PUBLIC_BUCKET) {
+  if (!storageConfigured()) return false
+  try { await s3.send(new HeadBucketCommand({ Bucket: bucket })) }
+  catch { try { await s3.send(new CreateBucketCommand({ Bucket: bucket })); console.log(`[storage] created public bucket ${bucket}`) } catch (e) { console.error('[storage] could not create public bucket:', e.message); return false } }
+  try {
+    // Anonymous GET only. No list, no write — a leaked key name is the most anyone can learn.
+    await s3.send(new PutBucketPolicyCommand({
+      Bucket: bucket,
+      Policy: JSON.stringify({
+        Version: '2012-10-17',
+        Statement: [{ Effect: 'Allow', Principal: { AWS: ['*'] }, Action: ['s3:GetObject'], Resource: [`arn:aws:s3:::${bucket}/*`] }],
+      }),
+    }))
+    return true
+  } catch (e) { console.error('[storage] could not set public policy:', e.message); return false }
+}
+
+export async function putPublicObject(key, buf, mime, bucket = S3_PUBLIC_BUCKET) {
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: buf, ContentType: mime }))
+  return key
+}
+
+/** A stable, non-expiring URL. Built against the PUBLIC endpoint — a browser/phone fetches it. */
+export const publicUrl = (key, bucket = S3_PUBLIC_BUCKET) =>
+  `${(PUBLIC_ENDPOINT || '').replace(/\/$/, '')}/${bucket}/${key}`
