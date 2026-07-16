@@ -872,7 +872,29 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
 fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    LaunchedEffect(Unit) { vm.loadAvailability() }
+    LaunchedEffect(vm.availabilityError) { vm.availabilityError?.let { toast(ctx, it); vm.clearAvailabilityError() } }
     DetailScaffold("Availability", nav) {
+        // What the admin decided. Without this the worker assumes what they picked is what they got.
+        Card(padding = Dp16.S) {
+            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                val (tint, bg) = when (vm.availabilityStatus) {
+                    "Approved" -> GreenSuccess to GreenLight
+                    "Modified" -> Amber to GoldLight
+                    else -> Purple to PurpleLight
+                }
+                IconChip(Icons.Filled.Info, tint, bg)
+                Spacer(Modifier.width(Space.m))
+                Text(
+                    when (vm.availabilityStatus) {
+                        "Approved" -> "Your admin approved these preferences."
+                        "Modified" -> "Your admin changed this: ${vm.availabilityReason}"
+                        else -> "These are your preferences — an admin confirms them. Only the hours limit applies straight away."
+                    },
+                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                )
+            }
+        }
         Card {
             SectionLabel("Working Days")
             Text("Tap the days you want to work.", fontSize = 12.sp, color = TextGray)
@@ -917,11 +939,28 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             HairlineDivider()
             LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
         }
+
+        // The one preference that binds: past this, no more jobs are offered until the worker
+        // raises it themselves. Everything else on this screen guides the admin's assignment.
+        Card {
+            SectionLabel("Maximum Working Hours")
+            Text(
+                "The most you want to work in a week. Once you hit it you won't be offered more jobs until you raise it. Leave blank for no limit.",
+                fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.m))
+            Field("Hours per week", vm.maxWeeklyHours, KeyboardType.Number) {
+                vm.maxWeeklyHours = it.filter(Char::isDigit).take(2)
+            }
+            Spacer(Modifier.height(Space.s))
+            LabeledRow("Worked so far this week", "${vm.hoursThisWeek} h")
+        }
+
         PrimaryButton("Save Availability") {
-            vm.saveAvailability()
-            val active = vm.availableDays.count { it.value }
-            val shift = if (vm.shiftStart.isNotBlank()) " • ${vm.shiftStart}–${vm.shiftEnd}" else ""
-            toast(ctx, "Saved • $active days/week$shift")
+            vm.saveAvailability {
+                val active = vm.availableDays.count { it.value }
+                toast(ctx, "Sent for approval • $active days/week")
+            }
         }
     }
 }
@@ -1146,7 +1185,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             SectionLabel("Your Shift Plan")
             Text(
-                "Pick one shift. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
+                "Ask for a shift — an admin confirms it. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
                 fontSize = 12.sp, color = TextGray,
             )
             Spacer(Modifier.height(Space.m))
@@ -1155,10 +1194,28 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     vm.shifts.forEach { s ->
+                        // Only the ASSIGNED shift shows as selected. A request in flight is marked
+                        // as such — the earnings guarantee follows the assignment, and showing a
+                        // pending request as chosen would have workers counting on one they lack.
                         ShiftOption(s, vm.selectedShiftId == s.id) {
-                            vm.selectShift(s.id) { toast(ctx, "Shift set: ${s.name}") }
+                            vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} — awaiting approval") }
                         }
                     }
+                }
+                val requested = vm.requestedShiftId
+                if (requested != null && requested != vm.selectedShiftId) {
+                    Spacer(Modifier.height(Space.s))
+                    val name = vm.shifts.firstOrNull { it.id == requested }?.name ?: "that shift"
+                    Text(
+                        "You've asked for $name — waiting for an admin to confirm it. " +
+                            (if (vm.selectedShiftId == null) "You're not on a shift yet." else "Until then your current shift stands."),
+                        fontSize = 12.sp, color = Amber, lineHeight = 17.sp,
+                    )
+                }
+                if (vm.shiftStatus == "Modified" && vm.selectedShiftId != null) {
+                    Spacer(Modifier.height(Space.s))
+                    val name = vm.shifts.firstOrNull { it.id == vm.selectedShiftId }?.name ?: "a different shift"
+                    Text("An admin put you on $name.", fontSize = 12.sp, color = TextGray)
                 }
             }
         }

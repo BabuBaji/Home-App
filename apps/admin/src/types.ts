@@ -176,6 +176,29 @@ export interface WorkerPay {
   walletEnabled: boolean
 }
 
+/* Phase 11 — availability. A PREFERENCE (what the worker asked for) is distinct from the
+   ASSIGNMENT (workers.shift_def_id / zone_id), which only an admin writes. weeklyOff is derived
+   server-side from availableDays — one fact, one representation. */
+export interface WorkerAvailability {
+  /** Keys are 'Mon'…'Sun' — the worker app's vocabulary, not 'Monday'. */
+  availableDays: Record<string, boolean>
+  weeklyOff: string[]
+  shiftStart: string; shiftEnd: string
+  preferredShiftId: number | null
+  /** The only preference that enforces: dispatch stops offering work past it. */
+  maxWeeklyHours: number | null
+  preferredZoneId: number | null
+  status: 'Pending' | 'Approved' | 'Modified'
+  reason: string; reviewedBy: string; reviewedAt: string | null
+}
+export interface WorkerAvailabilityState {
+  ok: boolean
+  availability: WorkerAvailability
+  shifts: { id: number; name: string; start?: string; end?: string }[]
+  assigned: { shiftDefId: number | null; zoneId: number | null }
+  hoursThisWeek: number
+}
+
 /* Phase 8 — background verification.
    source 'document' items are DERIVED from the Phase 4 document review — there is no second tick
    for them, because two sources of truth for "Aadhaar verified" would drift. Only 'check' items

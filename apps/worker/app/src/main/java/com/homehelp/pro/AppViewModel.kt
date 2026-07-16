@@ -433,7 +433,7 @@ class AppViewModel : ViewModel() {
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
         schedule.clear(); schedule.addAll(b.schedule)
         b.attendance?.let { attendance = it }
-        b.shift?.let { shifts.clear(); shifts.addAll(it.shifts); selectedShiftId = it.selectedId }
+        b.shift?.let { shifts.clear(); shifts.addAll(it.shifts); selectedShiftId = it.selectedId; requestedShiftId = it.requestedId; shiftStatus = it.shiftStatus }
         leaves.clear(); leaves.addAll(b.leaves)
         tickets.clear(); tickets.addAll(b.tickets)
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
@@ -1336,21 +1336,95 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun saveAvailability() = sync {
-        api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))
+    /* ---- Phase 11: availability ----
+     * These are PREFERENCES. An admin approves them or assigns something else, so the screen shows
+     * the review status and what was actually assigned rather than implying the request took effect.
+     */
+    var maxWeeklyHours by mutableStateOf("")
+    var hoursThisWeek by mutableStateOf(0.0)
+        private set
+    var availabilityStatus by mutableStateOf("Pending")
+        private set
+    var availabilityReason by mutableStateOf("")
+        private set
+    var assignedShiftId by mutableStateOf<Int?>(null)
+        private set
+    var availabilityError by mutableStateOf<String?>(null)
+    fun clearAvailabilityError() { availabilityError = null }
+
+    fun loadAvailability() = sync {
+        val r = api.getAvailability()
+        availableDays.clear(); availableDays.putAll(r.availability.availableDays)
+        shiftStart = r.availability.shiftStart
+        shiftEnd = r.availability.shiftEnd
+        maxWeeklyHours = r.availability.maxWeeklyHours?.toString() ?: ""
+        availabilityStatus = r.availability.status
+        availabilityReason = r.availability.reason
+        assignedShiftId = r.assigned.shiftDefId
+        hoursThisWeek = r.hoursThisWeek
     }
 
-    // ---- shift plans (min-guarantee) ----
+    /** The server validates (at least one day, HH:MM, 1..90 hours) and reports why on rejection. */
+    fun saveAvailability(onDone: () -> Unit = {}) {
+        availabilityError = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    api.updateAvailability(AvailabilityBody(
+                        availableDays.toMap(), shiftStart, shiftEnd,
+                        maxWeeklyHours.trim().toIntOrNull(),
+                    ))
+                }
+                backendConnected = true
+                loadAvailability()
+                onDone()
+            } catch (e: retrofit2.HttpException) { availabilityError = httpErrorMessage(e) }
+            catch (e: Exception) { availabilityError = "Could not save. Check your connection and try again." }
+        }
+    }
+
+    /* ---- shift plans (min-guarantee) ----
+     * `selectedShiftId` is the shift an ADMIN assigned — it's what the earnings guarantee hangs on.
+     * `requestedShiftId` is what the worker asked for. Picking a shift only requests it: the app
+     * must not show it as selected before an admin approves, or a worker will count on a guarantee
+     * they haven't been given.
+     */
     val shifts = mutableStateListOf<com.homehelp.pro.network.ShiftDto>()
     var selectedShiftId by mutableStateOf<Int?>(null)
         private set
-    /** Sign the worker up for a shift plan; the server re-derives attendance/guarantee status. */
+    var requestedShiftId by mutableStateOf<Int?>(null)
+        private set
+    var shiftStatus by mutableStateOf("Pending")
+        private set
+
+    fun loadShifts() = sync {
+        val r = api.getShifts()
+        shifts.clear(); shifts.addAll(r.shifts)
+        selectedShiftId = r.selectedId
+        requestedShiftId = r.requestedId
+        shiftStatus = r.shiftStatus
+    }
+
+    /** Ask for a shift. The admin grants it — this does NOT assign it. */
     fun selectShift(id: Int, onDone: () -> Unit = {}) {
-        selectedShiftId = id
+        requestedShiftId = id
+        shiftStatus = "Pending"
         viewModelScope.launch {
-            try { attendance = api.selectShift(com.homehelp.pro.network.SelectShiftBody(id)); backendConnected = true } catch (_: Exception) {}
+            try {
+                attendance = api.selectShift(com.homehelp.pro.network.SelectShiftBody(id))
+                backendConnected = true
+                runCatching { loadShiftsNow() }
+            } catch (_: Exception) {}
             onDone()
         }
+    }
+
+    private suspend fun loadShiftsNow() {
+        val r = withContext(Dispatchers.IO) { api.getShifts() }
+        shifts.clear(); shifts.addAll(r.shifts)
+        selectedShiftId = r.selectedId
+        requestedShiftId = r.requestedId
+        shiftStatus = r.shiftStatus
     }
 
     // ---- geofence (assigned-apartment radius) ----

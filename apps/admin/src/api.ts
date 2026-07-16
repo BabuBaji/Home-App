@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
-  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -156,6 +156,13 @@ export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; i
 export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
 export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; walletEnabled?: boolean }) =>
   req<WorkerPay>(`/workers/${id}/pay`, patch(body))
+
+/* availability (Phase 11). The worker states a preference; this is where it becomes an assignment.
+   Approving adopts what they asked for; modifying assigns something else and requires a reason —
+   the worker is notified either way. */
+export const fetchWorkerAvailability = (id: number) => req<WorkerAvailabilityState>(`/workers/${id}/availability`)
+export const reviewWorkerAvailability = (id: number, body: { approve: boolean; shiftDefId?: number | null; zoneId?: number | null; reason?: string }) =>
+  req<{ ok: boolean; availability: WorkerAvailabilityState['availability']; assigned: WorkerAvailabilityState['assigned'] }>(`/workers/${id}/availability/review`, post('', body))
 
 /* background verification (Phase 8). The five document-backed points are DERIVED from the document
    review — verify a document once, on the Documents tab, and this follows. Only the previous

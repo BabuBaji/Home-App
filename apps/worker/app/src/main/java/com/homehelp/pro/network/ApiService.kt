@@ -39,6 +39,9 @@ interface ApiService {
     @PUT("api/worker/availability")
     suspend fun updateAvailability(@Body body: AvailabilityBody): WorkerDto
 
+    @GET("api/worker/availability")
+    suspend fun getAvailability(): AvailabilityResponse
+
     @POST("api/worker/attendance/checkin")
     suspend fun checkIn(@Body body: AttendanceBody): AttendanceDto
 

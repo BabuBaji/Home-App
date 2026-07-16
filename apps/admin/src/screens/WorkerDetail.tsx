@@ -10,6 +10,7 @@ import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
 import WorkerApproval from './WorkerApproval'
+import WorkerAvailability from './WorkerAvailability'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
@@ -695,7 +696,8 @@ export default function WorkerDetail() {
     <Panel title="Weekly Availability">
       {(() => {
         const av = w.profile?.availability
-        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        // The worker app sends 'Mon'…'Sun'; looking up 'Monday' made every day render as Off.
+        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         if (!av || !av.availableDays) return <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>Not set by the worker yet.</div>
         return (
           <div className="grid" style={{ gap: 4 }}>
@@ -1433,6 +1435,7 @@ export default function WorkerDetail() {
         </>
       )}
 
+      {tab === 'avail' && <WorkerAvailability workerId={Number(id)} />}
       {(show('avail')) && <div style={grid3}>{availabilityPanel}
         <Panel title="Attendance & Shift">
           <Info label="On Shift" value={<Badge tone={w.on_shift ? 'green' : 'gray'} dot={false}>{w.on_shift ? 'On shift' : 'Off'}</Badge>} />

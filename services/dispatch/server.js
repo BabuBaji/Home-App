@@ -250,12 +250,24 @@ async function auth(req, res, next) {
   next()
 }
 
+/* Phase 11: the worker's own stated weekly hours cap.
+ * Enforced here rather than in the app, because the app isn't the only thing that can call this.
+ * It's the ONE availability preference that gates: jobs are pull-based, so refusing a worker who
+ * is actively asking for work because they'd marked the day off would be absurd — but a cap they
+ * set on themselves is a boundary worth holding when they're tired enough to ignore it.
+ */
+const cappedMsg = (wl) => `You've reached the ${wl.maxWeeklyHours}h weekly limit you set (${wl.hoursThisWeek}h worked). Raise it in Availability if you want more work.`
+
 app.get('/api/worker/jobs/available', auth, async (req, res) => {
+  const wl = req.worker.workLimit
+  if (wl?.capped) return res.json({ available: false, count: 0, capped: true, reason: cappedMsg(wl) })
   const n = (await matchingBookings(req.worker)).length
   res.json({ available: n > 0, count: n })
 })
 
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
+  const wl = req.worker.workLimit
+  if (wl?.capped) return res.json({ job: null, jobStatus: 'NONE', capped: true, error: cappedMsg(wl) })
   const match = (await matchingBookings(req.worker))[0]
   if (!match) return res.json({ job: null, jobStatus: 'NONE' })
   await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: match.id })

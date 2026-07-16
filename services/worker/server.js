@@ -741,7 +741,14 @@ async function shiftPlans(wid) {
   const { weekday } = istNow()
   const { rows } = await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')
   const w = await getWorker(wid)
-  return { selectedId: w?.shift_def_id || null, shifts: rows.map((s) => shiftDefDto(s, weekday)) }
+  // selectedId is the ADMIN'S assignment; requestedId is what the worker asked for. Both, because
+  // showing only the assignment would make a pending request look like it never registered.
+  return {
+    selectedId: w?.shift_def_id || null,
+    requestedId: w?.profile?.availability?.preferredShiftId ?? null,
+    shiftStatus: w?.profile?.availability?.status || 'Pending',
+    shifts: rows.map((s) => shiftDefDto(s, weekday)),
+  }
 }
 
 // A worker's support tickets, newest first.
@@ -975,21 +982,159 @@ app.post('/api/worker/profile/photo', auth, upload.single('file'), async (req, r
   res.json(workerDto(await getWorker(req.worker.id)))
 })
 app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.worker.id, { bank: req.body || {} }); await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id]); publishEvent(REDIS_URL, 'bank.verify.requested', { workerId: req.worker.id, bank: req.body || {}, name: req.worker.name }); publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: 'Updated bank / payout details (verifying)' }); res.json(workerDto(await getWorker(req.worker.id))) })
-app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
+/* ---------- Phase 11: availability ----------
+ * A PREFERENCE, not an assignment — the same line as Phase 6's skills. What a worker would like
+ * (shift, days off, hours, area) lives in profile.availability; what actually governs their work
+ * is workers.shift_def_id and workers.zone_id, which only an admin writes. An admin reads the
+ * preference and either adopts it or assigns something else.
+ *
+ * Weekly off is DERIVED from availableDays rather than stored separately: a day is an off day
+ * precisely when it isn't an available one, and two representations of one fact drift.
+ *
+ * Of these, only maxWeeklyHours enforces anything (see /internal/workers/:id/service-set). Jobs
+ * are pull-based — refusing a worker who is actively asking for work because they'd said they were
+ * off would be absurd. A stated hours cap is different: it's a boundary worth holding even when
+ * the tired worker asking is the one who set it.
+ */
+const DAY_KEYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/
+
+/**
+ * Hours actually worked since Monday, from real check-in/check-out pairs.
+ * A day still open (checked in, not out) counts up to now — otherwise a worker on an 11th
+ * straight hour would read as 0 for today and sail past their own cap.
+ */
+async function hoursThisWeek(workerId) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(check_out, now()) - check_in))), 0) secs
+     FROM attendance
+     WHERE worker_id = $1 AND check_in IS NOT NULL
+       AND day >= date_trunc('week', (now() AT TIME ZONE 'Asia/Kolkata')::date)`,
+    [workerId])
+  return Math.round((Number(rows[0].secs) / 3600) * 10) / 10
+}
+
+/** The stated cap and where they are against it. maxWeeklyHours null = no cap. */
+async function workLimit(w) {
+  const max = w?.profile?.availability?.maxWeeklyHours ?? null
+  if (!max) return { maxWeeklyHours: null, hoursThisWeek: null, capped: false }
+  const hours = await hoursThisWeek(w.id)
+  return { maxWeeklyHours: max, hoursThisWeek: hours, capped: hours >= max }
+}
+
+/** Whatever the admin last decided about this worker's stated preference. */
+const availabilityDto = (w) => {
+  const a = w?.profile?.availability || {}
+  const days = a.availableDays && typeof a.availableDays === 'object' ? a.availableDays : {}
+  return {
+    availableDays: days,
+    weeklyOff: DAY_KEYS.filter((d) => days[d] === false), // derived — never stored
+    shiftStart: a.shiftStart || '',
+    shiftEnd: a.shiftEnd || '',
+    preferredShiftId: a.preferredShiftId ?? null,
+    maxWeeklyHours: a.maxWeeklyHours ?? null,
+    preferredZoneId: a.preferredZoneId ?? null,
+    status: a.status || 'Pending',
+    reason: a.reason || '',
+    reviewedBy: a.reviewedBy || '',
+    reviewedAt: a.reviewedAt || null,
+  }
+}
+
+app.put('/api/worker/availability', auth, async (req, res) => {
+  const b = req.body || {}
+  // The online/offline toggle is a live state, not a preference — it stays a direct write.
+  if (b.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!b.available, req.worker.id])
+
+  const cur = (await getWorker(req.worker.id))?.profile?.availability || {}
+  const next = { ...cur }
+
+  if (b.availableDays !== undefined) {
+    if (typeof b.availableDays !== 'object' || b.availableDays === null) return res.status(400).json({ ok: false, error: 'availableDays must be an object' })
+    const days = {}
+    for (const d of DAY_KEYS) days[d] = b.availableDays[d] !== false
+    if (DAY_KEYS.every((d) => !days[d])) return res.status(400).json({ ok: false, error: 'Pick at least one day you can work' })
+    next.availableDays = days
+  }
+  for (const [k, label] of [['shiftStart', 'start time'], ['shiftEnd', 'end time']]) {
+    if (b[k] !== undefined) {
+      const v = String(b[k] || '')
+      if (v && !HHMM.test(v)) return res.status(400).json({ ok: false, error: `Enter a valid ${label} (HH:MM)` })
+      next[k] = v
+    }
+  }
+  if (b.preferredShiftId !== undefined) {
+    const id = b.preferredShiftId === null || b.preferredShiftId === '' ? null : Number(b.preferredShiftId)
+    if (id !== null && !(await getShiftDef(id))) return res.status(400).json({ ok: false, error: 'Unknown shift' })
+    next.preferredShiftId = id
+  }
+  if (b.maxWeeklyHours !== undefined) {
+    const h = b.maxWeeklyHours === null || b.maxWeeklyHours === '' ? null : Number(b.maxWeeklyHours)
+    // 1..90: a cap of 0 would silently stop all work, and 100+ isn't a cap at all.
+    if (h !== null && (!Number.isInteger(h) || h < 1 || h > 90)) return res.status(400).json({ ok: false, error: 'Maximum hours must be between 1 and 90 (leave blank for no limit)' })
+    next.maxWeeklyHours = h
+  }
+  if (b.preferredZoneId !== undefined) {
+    next.preferredZoneId = b.preferredZoneId === null || b.preferredZoneId === '' ? null : Number(b.preferredZoneId)
+  }
+
+  // Any change to what they're asking for goes back for review — an approved preference the worker
+  // then edits is no longer the thing the admin approved.
+  const material = ['availableDays', 'shiftStart', 'shiftEnd', 'preferredShiftId', 'maxWeeklyHours', 'preferredZoneId']
+  const changed = material.some((k) => b[k] !== undefined && JSON.stringify(next[k]) !== JSON.stringify(cur[k]))
+  if (changed) { next.status = 'Pending'; next.reason = ''; next.reviewedBy = ''; next.reviewedAt = null }
+
+  await mergeProfile(req.worker.id, { availability: next })
+  const w = await getWorker(req.worker.id)
+  if (changed) publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w.name, action: 'availability.request', entityType: 'worker', entityId: req.worker.id, detail: 'Updated their availability preferences' })
+  res.json({ ...workerDto(w), availability: availabilityDto(w) })
+})
+
+app.get('/api/worker/availability', auth, async (req, res) => {
+  const w = await getWorker(req.worker.id)
+  const shifts = (await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')).rows
+  const { weekday } = istNow()
+  res.json({
+    ok: true,
+    availability: availabilityDto(w),
+    shifts: shifts.map((s) => shiftDefDto(s, weekday)),
+    // What the admin actually assigned — shown beside the preference so the difference is visible
+    // rather than the worker assuming their pick took effect.
+    assigned: { shiftDefId: w?.shift_def_id || null, zoneId: w?.zone_id ?? null },
+    hoursThisWeek: await hoursThisWeek(req.worker.id),
+  })
+})
 
 /* ---------- shift plans (min-guarantee) ---------- */
 app.get('/api/worker/shifts', auth, async (req, res) => {
   const { weekday } = istNow()
   const { rows } = await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')
   const w = await getWorker(req.worker.id)
-  res.json({ selectedId: w?.shift_def_id || null, shifts: rows.map((s) => shiftDefDto(s, weekday)) })
+  res.json({
+    selectedId: w?.shift_def_id || null,
+    requestedId: w?.profile?.availability?.preferredShiftId ?? null,
+    shiftStatus: w?.profile?.availability?.status || 'Pending',
+    shifts: rows.map((s) => shiftDefDto(s, weekday)),
+  })
 })
+/**
+ * Phase 11: the worker asks for a shift — this REQUESTS one, it doesn't take it.
+ *
+ * This used to write workers.shift_def_id directly, which meant a worker could self-grant the
+ * shift's minimum-earnings guarantee and tick Phase 12's "Shift Assigned" check without any admin
+ * involved. shift_def_id is now admin-only; this records the preference and sends it for review.
+ */
 app.post('/api/worker/shift', auth, async (req, res) => {
   const id = Number(req.body?.shiftId) || null
-  await pool.query('UPDATE workers SET shift_def_id=$1 WHERE id=$2', [id, req.worker.id])
+  if (id !== null && !(await getShiftDef(id))) return res.status(400).json({ ok: false, error: 'Unknown shift' })
+  const w = await getWorker(req.worker.id)
+  const cur = w?.profile?.availability || {}
+  await mergeProfile(req.worker.id, {
+    availability: { ...cur, preferredShiftId: id, status: 'Pending', reason: '', reviewedBy: '', reviewedAt: null },
+  })
   const sd = await getShiftDef(id)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'shift.select', entityType: 'worker', entityId: req.worker.id, detail: `Chose ${sd ? sd.name + ' shift' : 'no shift'}` })
-  res.json(await attendanceToday(req.worker.id))
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'shift.request', entityType: 'worker', entityId: req.worker.id, detail: `Requested ${sd ? sd.name + ' shift' : 'no shift'} — awaiting admin approval` })
+  res.json({ ...(await attendanceToday(req.worker.id)), availability: availabilityDto(await getWorker(req.worker.id)) })
 })
 
 /* ---------- attendance (check-in / check-out) ---------- */
@@ -1776,6 +1921,71 @@ app.delete('/api/admin/training/questions/:id', adminAuth, async (req, res) => {
  */
 const docVerified = (docs, name) => docs.some((d) => d.name === name && d.status === 'Verified')
 
+/* ---------- Phase 11: admin reviews availability ----------
+ * The one place a preference becomes an assignment. Approving adopts what the worker asked for;
+ * modifying assigns something else and must say why — a worker whose requested shift is silently
+ * swapped learns about it from their roster, which is how goodwill gets spent.
+ */
+app.get('/api/admin/workers/:id/availability', adminAuth, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const shifts = (await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')).rows
+  const { weekday } = istNow()
+  res.json({
+    ok: true,
+    availability: availabilityDto(w),
+    shifts: shifts.map((s) => shiftDefDto(s, weekday)),
+    assigned: { shiftDefId: w.shift_def_id || null, zoneId: w.zone_id ?? null },
+    hoursThisWeek: await hoursThisWeek(w.id),
+  })
+})
+
+app.post('/api/admin/workers/:id/availability/review', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const pref = w.profile?.availability || {}
+  const approve = !!req.body?.approve
+  const reason = String(req.body?.reason || '').trim()
+
+  // Approving means "what you asked for"; anything else is a modification and needs a reason.
+  const shiftId = approve
+    ? (pref.preferredShiftId ?? null)
+    : (req.body?.shiftDefId === null || req.body?.shiftDefId === undefined || req.body?.shiftDefId === '' ? null : Number(req.body.shiftDefId))
+  const zoneId = approve
+    ? (pref.preferredZoneId ?? w.zone_id ?? null)
+    : (req.body?.zoneId === null || req.body?.zoneId === undefined || req.body?.zoneId === '' ? null : Number(req.body.zoneId))
+  if (!approve && !reason) return res.status(400).json({ error: 'Say why this differs from what the worker asked for' })
+  if (shiftId !== null && !(await getShiftDef(shiftId))) return res.status(400).json({ error: 'Unknown shift' })
+
+  await pool.query('UPDATE workers SET shift_def_id=$1, zone_id=$2 WHERE id=$3', [shiftId, zoneId, id])
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  await mergeProfile(id, {
+    availability: {
+      ...pref,
+      status: approve ? 'Approved' : 'Modified',
+      reason: approve ? '' : reason,
+      reviewedBy: who,
+      reviewedAt: new Date().toISOString(),
+    },
+  })
+
+  const sd = await getShiftDef(shiftId)
+  publishEvent(REDIS_URL, 'worker.notify', {
+    workerId: id,
+    title: approve ? 'Availability approved' : 'Availability changed',
+    body: approve
+      ? `You're on the ${sd ? sd.name : 'flexible'} shift.`
+      : `You've been put on the ${sd ? sd.name : 'flexible'} shift: ${reason}`,
+  })
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'admin', actorName: who, action: 'availability.review', entityType: 'worker', entityId: id,
+    detail: `${approve ? 'Approved' : 'Modified'} availability for ${w.name} — ${sd ? sd.name : 'no'} shift${approve ? '' : ` (${reason})`}`,
+  })
+  const after = await getWorker(id)
+  res.json({ ok: true, availability: availabilityDto(after), assigned: { shiftDefId: after.shift_def_id || null, zoneId: after.zone_id ?? null } })
+})
+
 /* ---------- Phase 8: background verification ----------
  * The spec's 7 points. Five of them ARE Phase 4 documents, so they're derived from the document
  * review — the admin verifies a document once, in one place, and this view reflects it.
@@ -1940,7 +2150,12 @@ async function goLiveChecklist(workerId) {
       : item('assessment_passed', 'Assessment Passed', yn(training.quiz.passed),
         training.quiz.passed ? `Passed with ${training.quiz.bestPct}%` : training.quiz.attempts ? `Best ${training.quiz.bestPct}% over ${training.quiz.attempts} attempt(s) — needs ${training.quiz.passPct}%` : 'Not attempted yet'),
     item('zone_assigned', 'Zone Assigned', yn(!!w.zone_id), w.zone_id ? '' : 'No zone — dispatch cannot place this worker'),
-    item('shift_assigned', 'Shift Assigned', yn(!!w.shift_def_id), w.shift_def_id ? '' : 'No shift assigned'),
+    // shift_def_id is admin-only since Phase 11 — before that the worker wrote it themselves, which
+    // made this check something they could tick for themselves.
+    item('shift_assigned', 'Shift Assigned', yn(!!w.shift_def_id),
+      w.shift_def_id ? '' : (w.profile?.availability?.preferredShiftId
+        ? 'The worker has requested a shift — approve it under Availability'
+        : 'No shift assigned')),
     eqTypes.length === 0
       ? item('equipment_issued', 'Equipment Issued', 'na', 'No equipment is marked as required — this check is not enforced')
       : item('equipment_issued', 'Equipment Issued', yn(missingKit.length === 0),
@@ -2511,7 +2726,17 @@ app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
   res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: !!w.available, lat: w.last_lat, lng: w.last_lng })))
 })
 app.get('/internal/workers/:id', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
-app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json({ services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available, status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null, last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null }) })
+app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  res.json({
+    services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available,
+    status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null,
+    last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null,
+    // Phase 11: the worker's own weekly hours cap. Dispatch already calls this on every request,
+    // so the limit rides along rather than costing another round trip.
+    workLimit: w ? await workLimit(w) : { maxWeeklyHours: null, hoursThisWeek: null, capped: false },
+  })
+})
 app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => {
   const wid = Number(req.params.id)
   const bookingId = req.body?.bookingId ?? null

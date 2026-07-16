@@ -313,7 +313,11 @@ data class ShiftDto(
 
 /** The available shift plans + which one the worker has selected. */
 data class ShiftInfo(
+    /** What the ADMIN assigned — the shift whose minimum-earnings guarantee actually applies. */
     val selectedId: Int? = null,
+    /** What the worker asked for. Pending until an admin approves it; a request is not a grant. */
+    val requestedId: Int? = null,
+    val shiftStatus: String = "Pending",
     val shifts: List<ShiftDto> = emptyList(),
 )
 
@@ -619,7 +623,37 @@ data class EquipmentResponse(val ok: Boolean = true, val issued: List<IssuedEqui
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
 data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)
-data class AvailabilityBody(val availableDays: Map<String, Boolean>, val shiftStart: String, val shiftEnd: String)
+/* Phase 11: what the worker would LIKE. An admin approves it or assigns something else — only
+ * maxWeeklyHours binds anything on its own (dispatch stops offering work past it). */
+data class AvailabilityBody(
+    val availableDays: Map<String, Boolean>,
+    val shiftStart: String,
+    val shiftEnd: String,
+    /** Null = no self-imposed limit. */
+    val maxWeeklyHours: Int? = null,
+)
+data class AvailabilityDto(
+    val availableDays: Map<String, Boolean> = emptyMap(),
+    /** Derived server-side from availableDays — never stored twice. */
+    val weeklyOff: List<String> = emptyList(),
+    val shiftStart: String = "",
+    val shiftEnd: String = "",
+    val preferredShiftId: Int? = null,
+    val maxWeeklyHours: Int? = null,
+    val preferredZoneId: Int? = null,
+    val status: String = "Pending",
+    val reason: String = "",
+    val reviewedBy: String = "",
+)
+data class AssignedDto(val shiftDefId: Int? = null, val zoneId: Int? = null)
+data class AvailabilityResponse(
+    val ok: Boolean = true,
+    val availability: AvailabilityDto = AvailabilityDto(),
+    val shifts: List<ShiftDto> = emptyList(),
+    /** What the admin actually assigned, shown beside the request so the gap is visible. */
+    val assigned: AssignedDto = AssignedDto(),
+    val hoursThisWeek: Double = 0.0,
+)
 data class PreferencesBody(val jobPreferences: Map<String, Boolean>)
 data class NotificationsBody(
     val notifNewJobs: Boolean,
