@@ -116,6 +116,10 @@ export const approveWorkerBank = (id: number) => req<any>(`/workers/${id}/bank/a
 export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/workers/${id}/bank/reject`, post('', { reason }))
 /* KYC documents. The URL is short-lived and signed — fetch it when the admin clicks View, never
    store it. A rejection must carry a reason: the worker is told why so they can re-upload. */
+/* Invite: moves a created worker from 'pending' (can't log in) to 'onboarding' (can log in to
+   complete their profile, still not dispatchable) and texts them. `delivery` reports what actually
+   happened to the SMS — the status change succeeds even when sending doesn't. */
+export const inviteWorker = (id: number) => req<{ ok: boolean; delivery: string; worker: Worker }>(`/workers/${id}/invite`, post(''))
 export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)
 export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, reason?: string) =>
   req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))

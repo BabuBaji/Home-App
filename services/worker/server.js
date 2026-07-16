@@ -11,7 +11,7 @@ import express from 'express'
 import multer from 'multer'
 import {
   makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
-  getSettingInt, smsConfigured, sendOtpSms,
+  getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
 // that only the services actually using them install.
@@ -109,6 +109,25 @@ async function init() {
       lat REAL NOT NULL, lng REAL NOT NULL, radius INTEGER NOT NULL DEFAULT 300,
       active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ DEFAULT now()
     )`,
+    /* ---- Phase 1: admin creates worker ----
+     * employee_id is the human-facing badge number (WKR1001…), derived from the row id so it's
+     * stable and never collides. `name` stays the canonical display field used by bookings,
+     * dispatch and both apps — first/last are captured alongside and `name` is kept in sync,
+     * rather than splitting a column half the stack reads.
+     */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS employee_id TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS first_name TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_name TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS alternate_mobile TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS worker_category TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS employment_type TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS joining_date DATE`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS recruiter TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS referral_source TEXT`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_workers_employee_id ON workers(employee_id)`,
+    // Backfill: every existing worker gets a badge number, so the column is never half-empty.
+    `UPDATE workers SET employee_id = 'WKR' || (1000 + id) WHERE employee_id IS NULL`,
     // KYC document storage. `file_name` stays the worker's display label; `storage_key` is the
     // real object in S3/MinIO. Review columns give the admin an actual approve/reject trail —
     // before this, `status` was written only by its DEFAULT and could never leave 'Pending'.
@@ -445,7 +464,11 @@ async function listWorkers({ status, city, q } = {}) {
 }
 async function workerStats() {
   const all = (await pool.query('SELECT status FROM workers')).rows
-  return { total: all.length, active: all.filter((w) => w.status === 'active').length, pending: all.filter((w) => w.status === 'pending').length, inactive: all.filter((w) => w.status === 'inactive' || w.status === 'suspended').length }
+  const n = (...s) => all.filter((w) => s.includes(w.status)).length
+  // Every status lands in exactly one bucket, so the cards always sum to total. 'onboarding'
+  // (invited, completing their profile) is its own bucket — folding it into pending or active
+  // would either hide it or imply they're dispatchable.
+  return { total: all.length, active: n('active'), onboarding: n('onboarding'), pending: n('pending'), inactive: n('inactive', 'suspended') }
 }
 async function documents(wid) { return (await pool.query('SELECT * FROM worker_documents WHERE worker_id=$1 ORDER BY id DESC', [wid])).rows }
 async function mergeProfile(wid, patch) {
@@ -715,7 +738,12 @@ app.post('/api/worker/auth/verify', async (req, res) => {
 
   const w = await getByPhone(phone)
   if (!w) return res.status(403).json({ ok: false, error: 'This number is not registered. Please contact the admin to onboard you.' })
-  if (w.status !== 'active') return res.status(403).json({ ok: false, error: `Your account is ${w.status}. Please ask the admin to activate it.` })
+  // 'onboarding' (invited) can sign in to complete their own profile/documents/bank; dispatch
+  // still refuses them work until an admin approves them to 'active'. 'pending' means not yet
+  // invited, so there is nothing for them to do in the app.
+  if (!['active', 'onboarding'].includes(w.status)) {
+    return res.status(403).json({ ok: false, error: w.status === 'pending' ? 'Your account is not activated yet. Please ask the admin to send your invite.' : `Your account is ${w.status}. Please contact the admin.` })
+  }
   await pool.query('DELETE FROM worker_login_otps WHERE phone=$1', [phone]) // single use
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: w.id, actorName: w.name, action: 'worker.login', entityType: 'worker', entityId: w.id, detail: `Worker signed in (${phone || ''})` })
   res.json({ ok: true, token: signToken('worker', w.id), ...(await bootstrap(w.id)) })
@@ -1075,17 +1103,71 @@ app.get('/api/worker/documents/:id/url', auth, async (req, res) => {
 
 /* ---------- admin worker management ---------- */
 app.get('/api/admin/workers', adminAuth, async (req, res) => res.json({ stats: await workerStats(), workers: await listWorkers(req.query) }))
+// `name` is what bookings/dispatch/both apps read, so it stays authoritative and is derived from
+// first+last when those are supplied. A caller sending only `name` (the old shape) still works.
+const fullName = (b) => [b.first_name, b.last_name].filter(Boolean).join(' ').trim() || String(b.name || '').trim()
+
 app.post('/api/admin/workers', adminAuth, async (req, res) => {
   const b = req.body || {}
-  if (!b.name) return res.status(400).json({ error: 'Name required' })
+  const name = fullName(b)
+  if (!name) return res.status(400).json({ error: 'Name required' })
+  // The phone IS the login identity (OTP by number), so a duplicate would create a worker who can
+  // never sign in — whoever was created first wins the number.
+  if (b.phone) {
+    const dup = await pool.query('SELECT id, name FROM workers WHERE phone=$1', [String(b.phone).trim()])
+    if (dup.rows.length) return res.status(409).json({ error: `That mobile number already belongs to ${dup.rows[0].name}` })
+  }
   const { rows } = await pool.query(
-    `INSERT INTO workers (name,phone,email,city,services,status,verified,rating,zone_id,designation) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *`,
-    [b.name, b.phone || null, b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5, b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker'])
+    `INSERT INTO workers (name,first_name,last_name,phone,alternate_mobile,email,city,services,status,verified,rating,zone_id,designation,
+                          worker_category,employment_type,joining_date,recruiter,referral_source)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+    [name, b.first_name || null, b.last_name || null, b.phone ? String(b.phone).trim() : null, b.alternate_mobile || null,
+      b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5,
+      b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker',
+      b.worker_category || null, b.employment_type || null, b.joining_date || null, b.recruiter || null, b.referral_source || null])
+  // Badge number is derived from the id, so it needs the row to exist first.
+  const id = rows[0].id
+  await pool.query(`UPDATE workers SET employee_id = 'WKR' || (1000 + $1) WHERE id=$1 AND employee_id IS NULL`, [id])
   const profPatch = {}
   if (b.personal && typeof b.personal === 'object') profPatch.personal = b.personal
   if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = b.skillLevels
-  if (Object.keys(profPatch).length) await mergeProfile(rows[0].id, profPatch)
-  res.status(201).json(rowToWorker(await getWorker(rows[0].id)))
+  if (Object.keys(profPatch).length) await mergeProfile(id, profPatch)
+  res.status(201).json(rowToWorker(await getWorker(id)))
+})
+
+/* Invite: let a created worker into the app to complete their own onboarding.
+ *
+ * There is deliberately no activation token. Login is OTP-by-phone, which already proves the
+ * worker owns the number the admin entered — a token in the SMS would add ceremony, not security,
+ * and the record is keyed by that phone anyway. What the invite actually does is move them from
+ * 'pending' (cannot log in) to 'onboarding' (can log in, cannot be dispatched).
+ */
+app.post('/api/admin/workers/:id/invite', adminAuth, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  if (!w.phone) return res.status(400).json({ error: 'Add a mobile number before inviting' })
+  if (w.status === 'active') return res.status(409).json({ error: 'This worker is already live' })
+
+  await pool.query("UPDATE workers SET status='onboarding', invited_at=now() WHERE id=$1", [w.id])
+
+  const tmpl = await getSetting(ADMIN_URL, 'msg91_invite_template_id', '')
+  let delivery = 'not sent'
+  if (await smsConfigured(ADMIN_URL)) {
+    if (!tmpl) delivery = 'SMS provider is configured but msg91_invite_template_id is not set'
+    else {
+      const sent = await sendTemplateSms(ADMIN_URL, w.phone, tmpl, { name: w.name, company: 'HomeHelp' })
+      delivery = sent.ok ? 'sent' : `failed: ${sent.error}`
+      if (!sent.ok) console.error(`[worker] invite SMS failed for ${w.phone}: ${sent.error}`)
+    }
+  } else {
+    console.log(`[worker] invite for ${w.name} (${w.phone}) — no SMS provider configured, so nothing was sent.`)
+    delivery = 'no SMS provider configured'
+  }
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'worker.invite', entityType: 'worker', entityId: w.id, detail: `Invited ${w.name} (${w.phone}) — ${delivery}` })
+  // Report delivery honestly: the status change succeeded even if the SMS didn't, and the admin
+  // needs to know which so they can pass the message on themselves.
+  res.json({ ok: true, delivery, worker: rowToWorker(await getWorker(w.id)) })
 })
 // Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
 app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
@@ -1424,11 +1506,31 @@ app.get('/internal/on-shift', internalOnly, async (req, res) => {
 
 async function patchWorker(id, b, res) {
   const w = await getWorker(id); if (!w) { res.status(404); return { error: 'Not found' } }
-  await pool.query('UPDATE workers SET name=$1, phone=$2, email=$3, city=$4, services=$5::jsonb, status=$6, verified=$7, bank_status=COALESCE($8,bank_status), zone_id=$9, designation=COALESCE($10,designation) WHERE id=$11', [
-    b.name ?? w.name, b.phone ?? w.phone, b.email ?? w.email, b.city ?? w.city,
-    JSON.stringify(b.services ?? w.services), b.status ?? w.status,
-    b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
-    b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), b.designation ?? null, id])
+  // The phone is the login identity, so it can't be moved onto a number another worker already
+  // owns — that would leave one of them unable to sign in.
+  if (b.phone && String(b.phone).trim() !== w.phone) {
+    const dup = await pool.query('SELECT name FROM workers WHERE phone=$1 AND id<>$2', [String(b.phone).trim(), id])
+    if (dup.rows.length) { res.status(409); return { error: `That mobile number already belongs to ${dup.rows[0].name}` } }
+  }
+  // Keep `name` in step with first/last when either is supplied — `name` is what bookings,
+  // dispatch and both apps read, so it must never drift from the parts the admin edited.
+  const first = b.first_name ?? w.first_name
+  const last = b.last_name ?? w.last_name
+  const derived = [first, last].filter(Boolean).join(' ').trim()
+  const name = (b.first_name !== undefined || b.last_name !== undefined) && derived ? derived : (b.name ?? w.name)
+  await pool.query(
+    `UPDATE workers SET name=$1, phone=$2, email=$3, city=$4, services=$5::jsonb, status=$6, verified=$7,
+       bank_status=COALESCE($8,bank_status), zone_id=$9, designation=COALESCE($10,designation),
+       first_name=$11, last_name=$12, alternate_mobile=$13, worker_category=$14, employment_type=$15,
+       joining_date=$16, recruiter=$17, referral_source=$18
+     WHERE id=$19`, [
+      name, b.phone ?? w.phone, b.email ?? w.email, b.city ?? w.city,
+      JSON.stringify(b.services ?? w.services), b.status ?? w.status,
+      b.verified === undefined ? w.verified : !!b.verified, b.bank_status ?? null,
+      b.zone_id === undefined ? w.zone_id : (b.zone_id ? Number(b.zone_id) : null), b.designation ?? null,
+      first ?? null, last ?? null, b.alternate_mobile ?? w.alternate_mobile,
+      b.worker_category ?? w.worker_category, b.employment_type ?? w.employment_type,
+      b.joining_date ?? w.joining_date, b.recruiter ?? w.recruiter, b.referral_source ?? w.referral_source, id])
   const profPatch = {}
   if (b.personal && typeof b.personal === 'object') profPatch.personal = { ...(w.profile?.personal || {}), ...b.personal }
   if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = { ...(w.profile?.skillLevels || {}), ...b.skillLevels }

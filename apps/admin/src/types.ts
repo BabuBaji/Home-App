@@ -28,6 +28,11 @@ export interface Worker {
   services: string[]; avatar?: string | null; status: string; verified: boolean
   rating: number; jobs: number; earnings: number; joined: string; designation?: string
   bank_status?: string; available?: boolean; on_shift?: boolean
+  // Phase 1 (admin creates worker). employee_id is server-assigned (WKR1001…); `name` stays the
+  // canonical display field and is derived from first+last.
+  employee_id?: string; first_name?: string; last_name?: string; alternate_mobile?: string
+  worker_category?: string; employment_type?: string; joining_date?: string
+  recruiter?: string; referral_source?: string; invited_at?: string | null
   balance?: number; withdrawn?: number; hold?: number; pending?: number; advance_outstanding?: number
   last_lat?: number | null; last_lng?: number | null; shift_def_id?: number | null; site_id?: number | null
   profile?: {

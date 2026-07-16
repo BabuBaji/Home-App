@@ -58,7 +58,7 @@ const DEFAULT_SETTINGS = {
   // India requires a DLT-registered template for transactional SMS, so a template id is as
   // essential as the key — without it MSG91 rejects the send. Empty = SMS disabled, and the
   // login flows fall back to disclosing the code (dev only; see DEV_OTP / WORKER_DEV_OTP).
-  msg91_otp_template_id: '', msg91_sender_id: '',
+  msg91_otp_template_id: '', msg91_sender_id: '', msg91_invite_template_id: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
   serviceable_pincodes: '', service_cities: '',
