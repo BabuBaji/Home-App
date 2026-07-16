@@ -470,12 +470,20 @@ app.get('/api/admin/live-ops', admin, async (req, res) => {
   res.json({ zones: zoneRows, unzoned, totals })
 })
 
-app.get('/api/admin/dashboard', admin, async (_q, res) => {
-  const [customers, bookings, workers] = await Promise.all([
+app.get('/api/admin/dashboard', admin, async (req, res) => {
+  const [customersAll, bookingsAll, workersResp] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.worker, '/internal/workers', { stats: {}, workers: [] }),
   ])
+  // Data scope: filter every source array up front, so every metric below is scoped. Worker stats
+  // are recomputed from the filtered list (the internal /workers stats are global, unscoped).
+  const scope = req.admin?.scope
+  const customers = customersAll.filter((c) => inScope(scope, { city: c.city }))
+  const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const wList = (workersResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
+  const wCount = (...s) => wList.filter((w) => s.includes(w.status)).length
+  const workers = { stats: { total: wList.length, active: wCount('active'), pending: wCount('pending', 'onboarding'), inactive: wCount('inactive', 'suspended') } }
   const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
   const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
   const revenue = bookings.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0)
@@ -535,7 +543,8 @@ app.get('/api/admin/dashboard', admin, async (_q, res) => {
 })
 
 app.get('/api/admin/analytics', admin, async (req, res) => {
-  const bookings = await tryGet(U.booking, '/api/internal/bookings', [])
+  const bookingsAll = await tryGet(U.booking, '/api/internal/bookings', [])
+  const bookings = bookingsAll.filter((b) => inScope(req.admin?.scope, { zoneId: b.zone_id })) // data scope
   const revenue = bookings.filter((b) => b.payment_status === 'paid' || b.status === 'completed').reduce((s, b) => s + (b.total || 0), 0)
   const byDay = {}
   for (const b of bookings) { const d = String(b.created).slice(0, 10); byDay[d] = (byDay[d] || 0) + 1 }
@@ -544,13 +553,17 @@ app.get('/api/admin/analytics', admin, async (req, res) => {
 
 // Reports screen (fetchInsights). Builds the full analytics contract the frontend expects;
 // every field is a safe default so the screen renders cleanly even with zero data.
-app.get('/api/admin/insights', admin, async (_q, res) => {
-  const [bookings, customers, wResp] = await Promise.all([
+app.get('/api/admin/insights', admin, async (req, res) => {
+  const [bookingsAll, customersAll, wResp] = await Promise.all([
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.worker, '/internal/workers', { stats: {}, workers: [] }),
   ])
-  const workers = wResp.workers || []
+  // Data scope: filter every source array up front so all insights below are scoped.
+  const scope = req.admin?.scope
+  const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const customers = customersAll.filter((c) => inScope(scope, { city: c.city }))
+  const workers = (wResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
   const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
   const paid = bookings.filter(isPaid)
   const revenue = paid.reduce((s, b) => s + (b.total || 0), 0)
@@ -659,6 +672,9 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
+  // Data scope: a scoped admin can't open an out-of-scope customer by id. 404 (not 403) so they
+  // can't probe which ids exist outside their scope.
+  if (!inScope(req.admin?.scope, { city: customer.city })) return res.status(404).json({ error: 'Not found' })
   const bookings = allBookings.filter((b) => b.user_id === id)
     .map((b) => ({ id: b.id, ref: b.ref, service: (b.items || []).map((i) => i.name).join(', '), total: b.total, status: b.status, created: b.created }))
   res.json({ customer, addresses, bookings, transactions })

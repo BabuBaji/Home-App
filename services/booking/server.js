@@ -574,15 +574,18 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
   // Admin Bookings list reads `pro` (worker name) and `service` (joined item names) directly.
   res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer', pro: b.pro_name || '', service: (b.items || []).map((i) => i.name).join(', ') })))
 })
+// Data scope: bookings are zone-tagged; a scoped admin can't touch one outside their zones. 404
+// (not 403) so they can't probe which booking ids exist outside their scope.
+const bookingInScope = (req, b) => inScope(req.admin?.scope, { zoneId: b.zone_id })
 app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
-  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   res.json({ ...b, customer: u?.user?.name || 'Customer' })
 })
 app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
-  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   if (req.body?.status) { await pool.query('UPDATE bookings SET status=$1 WHERE id=$2', [req.body.status, b.id]); await emitBookingUpdate(b.id) }
   res.json(await getBooking(b.id))
 })

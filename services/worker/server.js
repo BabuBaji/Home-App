@@ -3857,6 +3857,9 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
+  // Data scope: a scoped admin can't open an out-of-scope worker by id. 404 (not 403) so they can't
+  // probe which worker ids exist outside their scope.
+  if (!inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Not found' })
   const [docs, bookings, wallet, noteRows, activityRes, snapRes] = await Promise.all([
     documents(id),
     tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
