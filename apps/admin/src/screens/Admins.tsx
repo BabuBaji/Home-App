@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { UserCog, UserCheck, UserX, ShieldCheck, Pencil, MoreVertical, Filter, Plus, UserPlus, KeyRound } from 'lucide-react'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, useConfirm, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
-import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit, fetchRoles } from '../api'
+import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit, fetchRoles, fetchZones, type Zone } from '../api'
 import type { Admin, Role } from '../types'
 import { useStore, has } from '../store'
 
@@ -26,7 +26,8 @@ const ACTIVITY_ICON = (action: string) => {
   return UserPlus
 }
 
-const blank = { name: '', email: '', phone: '', role: 'support' as Admin['role'], status: 'active', password: '' }
+type ScopeType = 'all' | 'city' | 'zone'
+const blank = { name: '', email: '', phone: '', role: 'support', status: 'active', password: '', scopeType: 'all' as ScopeType, scopeValues: [] as (string | number)[] }
 
 export default function Admins() {
   const toast = useToast()
@@ -34,6 +35,7 @@ export default function Admins() {
   const { admin } = useStore()
   const [rows, setRows] = useState<Admin[] | null>(null)
   const [roles, setRoles] = useState<Role[]>([])
+  const [zones, setZones] = useState<Zone[]>([])
   const [audit, setAudit] = useState<AuditRow[]>([])
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -57,15 +59,28 @@ export default function Admins() {
   // Roles for the dropdowns/labels — includes custom roles. Needs roles.view; harmless if it 403s
   // (the admin simply sees role keys instead of names, and the built-in add/edit modals still work).
   useEffect(() => { fetchRoles().then((r) => setRoles(r.roles)).catch(() => setRoles([])) }, [])
+  // Zones carry their city, so we derive both the city list and the zone list for the scope picker.
+  useEffect(() => { fetchZones().then(setZones).catch(() => setZones([])) }, [])
   const roleLabel = (key: string) => roles.find((r) => r.key === key)?.name || key
   const assignableRoles = roles.filter((r) => r.active)
+  const cityOptions = [...new Set(zones.map((z) => z.city).filter(Boolean))].sort()
+  const zoneName = (id: number | string) => zones.find((z) => z.id === Number(id))?.name || `Zone ${id}`
+  const scopeSummary = (a: Admin) => {
+    if (!a.scopeType || a.scopeType === 'all') return 'All'
+    const vals = a.scopeValues || []
+    if (!vals.length) return 'All'
+    const labels = a.scopeType === 'zone' ? vals.map(zoneName) : vals.map(String)
+    return labels.length <= 2 ? labels.join(', ') : `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`
+  }
 
   const set = (k: keyof typeof blank, v: string) => setForm((p) => ({ ...p, [k]: v }))
+  const setScopeType = (t: ScopeType) => setForm((p) => ({ ...p, scopeType: t, scopeValues: [] }))
+  const toggleScopeValue = (v: string | number) => setForm((p) => ({ ...p, scopeValues: p.scopeValues.includes(v) ? p.scopeValues.filter((x) => x !== v) : [...p.scopeValues, v] }))
 
   async function submitAdd() {
     setBusy(true)
     try {
-      await createAdminUser({ name: form.name, email: form.email, phone: form.phone, role: form.role, password: form.password })
+      await createAdminUser({ name: form.name, email: form.email, phone: form.phone, role: form.role, password: form.password, scopeType: form.scopeType, scopeValues: form.scopeValues })
       toast('Admin user created'); setAdding(false); load()
     } catch (e: any) { toast(e.message, 'err') } finally { setBusy(false) }
   }
@@ -73,7 +88,7 @@ export default function Admins() {
     if (!editing) return
     setBusy(true)
     try {
-      await updateAdminUser(editing.id, { name: form.name, phone: form.phone, role: form.role, status: form.status })
+      await updateAdminUser(editing.id, { name: form.name, phone: form.phone, role: form.role, status: form.status, scopeType: form.scopeType, scopeValues: form.scopeValues })
       toast('Admin user updated'); setEditing(null); load()
     } catch (e: any) { toast(e.message, 'err') } finally { setBusy(false) }
   }
@@ -90,7 +105,7 @@ export default function Admins() {
     try { await deleteAdminUser(a.id); toast('Admin user deleted'); load() } catch (e: any) { toast(e.message, 'err') }
   }
 
-  const openEdit = (a: Admin) => { setForm({ name: a.name, email: a.email, phone: a.phone || '', role: a.role, status: a.status || 'active', password: '' }); setEditing(a) }
+  const openEdit = (a: Admin) => { setForm({ name: a.name, email: a.email, phone: a.phone || '', role: a.role, status: a.status || 'active', password: '', scopeType: a.scopeType || 'all', scopeValues: a.scopeValues || [] }); setEditing(a) }
 
   // hooks must run before any early return
   const filtered = useMemo(() => {
@@ -159,7 +174,7 @@ export default function Admins() {
 
           <div className="tablewrap">
             <table className="tbl">
-              <thead><tr><th>User</th><th>Role</th><th>Email</th><th>Phone</th><th>City</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+              <thead><tr><th>User</th><th>Role</th><th>Email</th><th>Phone</th><th>Scope</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
               <tbody>
                 {pageRows.map((r) => {
                   const active = (r.status || 'active') === 'active'
@@ -170,7 +185,9 @@ export default function Admins() {
                     <td><Badge tone={roleTone(r.role)} dot={false}>{roleLabel(r.role)}</Badge></td>
                     <td className="muted">{r.email}</td>
                     <td className="muted">{r.phone || '—'}</td>
-                    <td className="muted">—</td>
+                    <td>{(!r.scopeType || r.scopeType === 'all')
+                      ? <span className="muted">All</span>
+                      : <Badge tone="blue" dot={false}>{r.scopeType === 'city' ? 'City' : 'Zone'}: {scopeSummary(r)}</Badge>}</td>
                     <td><Badge tone={active ? 'green' : 'red'}>{active ? 'Active' : 'Inactive'}</Badge></td>
                     <td className="muted">{r.last_login ? shortDate(r.last_login) : '—'}</td>
                     <td><div className="actions" style={{ position: 'relative' }}>
@@ -248,6 +265,7 @@ export default function Admins() {
               </select>
             </Field>
             <Field label="Password"><input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} /></Field>
+            <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} onType={setScopeType} onToggle={toggleScopeValue} />
           </div>
         </Modal>
       )}
@@ -274,6 +292,7 @@ export default function Admins() {
                 <option value="inactive">Inactive</option>
               </select>
             </Field>
+            <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} onType={setScopeType} onToggle={toggleScopeValue} />
           </div>
         </Modal>
       )}
@@ -285,6 +304,39 @@ const menuItemStyle: React.CSSProperties = {
   display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
   border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 7,
   fontSize: 13, fontWeight: 600, color: 'var(--ink-2)',
+}
+
+function ScopePicker({ scopeType, scopeValues, cities, zones, onType, onToggle }:
+  { scopeType: ScopeType; scopeValues: (string | number)[]; cities: string[]; zones: Zone[]; onType: (t: ScopeType) => void; onToggle: (v: string | number) => void }) {
+  const opts = scopeType === 'city' ? cities.map((c) => ({ v: c as string | number, label: c })) : zones.map((z) => ({ v: z.id as string | number, label: `${z.name} · ${z.city || '—'}` }))
+  return (
+    <Field label="Data scope">
+      <select value={scopeType} onChange={(e) => onType(e.target.value as ScopeType)}>
+        <option value="all">Entire company — all data</option>
+        <option value="city">Specific cities</option>
+        <option value="zone">Specific zones</option>
+      </select>
+      {scopeType !== 'all' && (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {opts.length === 0 && <span className="muted" style={{ fontSize: 12 }}>No {scopeType === 'city' ? 'cities' : 'zones'} defined yet.</span>}
+            {opts.map((o) => {
+              const on = scopeValues.includes(o.v)
+              return (
+                <button type="button" key={String(o.v)} onClick={() => onToggle(o.v)} style={{
+                  padding: '5px 10px', fontSize: 12.5, borderRadius: 999, cursor: 'pointer',
+                  border: '1px solid ' + (on ? '#4f46e5' : 'var(--line,#e5e7eb)'), background: on ? '#eef2ff' : '#fff', color: on ? '#4f46e5' : 'inherit', fontWeight: on ? 600 : 400,
+                }}>{o.label}</button>
+              )
+            })}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+            Sees only workers, bookings, live-ops and customers within the selected {scopeType === 'city' ? 'cities' : 'zones'}. Permissions still control what they can do.
+          </div>
+        </>
+      )}
+    </Field>
+  )
 }
 
 function LegendRow({ color, label, value }: { color: string; label: string; value: string }) {

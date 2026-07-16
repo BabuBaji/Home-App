@@ -4,6 +4,9 @@ export interface Admin {
   // authoritative list the whole UI gates on; `role` is kept for display + the super fast-path.
   role: string
   permissions?: string[]
+  // Data scope — 'all' (unrestricted), or 'city'/'zone' with scopeValues = city names / zone ids.
+  scopeType?: 'all' | 'city' | 'zone'
+  scopeValues?: (string | number)[]
   status: string; avatar?: string | null; last_login?: string | null; created: string
 }
 

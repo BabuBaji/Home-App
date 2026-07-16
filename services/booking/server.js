@@ -9,7 +9,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeAdminAuth, internalOnly,
+  makePool, migrate, nowIso, makeAdminAuth, inScope, internalOnly,
   internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
@@ -559,7 +559,13 @@ app.get('/api/policy/cancellation', async (_q, res) => {
 
 /* ================= admin ================= */
 app.get('/api/admin/bookings', adminAuth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
+  // Data scope: bookings are zone-tagged (no city), so a scoped admin filters by their zone ids.
+  // Filter in SQL, before the LIMIT, so they get their full 500 rather than 500-then-filtered.
+  const scope = req.admin?.scope
+  const zids = scope && scope.type !== 'all' && Array.isArray(scope.zoneIds) ? scope.zoneIds : null
+  const { rows } = zids
+    ? await pool.query('SELECT * FROM bookings WHERE zone_id = ANY($1) ORDER BY id DESC LIMIT 500', [zids])
+    : await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
   const bookings = rows.map(rowTo)
   // Enrich with customer name from the auth service (best-effort).
   const ids = [...new Set(bookings.map((b) => b.user_id))]

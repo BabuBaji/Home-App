@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, publishEvent, tryGet, internalPost, internalPatch,
-  PERMISSION_CATALOG, ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, isSystemRole } from '@homehelp/shared'
+  PERMISSION_CATALOG, ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, isSystemRole, inScope } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('admin') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -101,6 +101,10 @@ async function init() {
       role_key TEXT NOT NULL REFERENCES roles(key) ON DELETE CASCADE,
       perm TEXT NOT NULL, PRIMARY KEY (role_key, perm)
     )`,
+    // Data scope. 'all' (default) = unrestricted; 'city' = scope_values are city names; 'zone' =
+    // scope_values are zone ids. Resolved into req.admin.scope and enforced on the list endpoints.
+    `ALTER TABLE admins ADD COLUMN IF NOT EXISTS scope_type TEXT NOT NULL DEFAULT 'all'`,
+    `ALTER TABLE admins ADD COLUMN IF NOT EXISTS scope_values JSONB NOT NULL DEFAULT '[]'::jsonb`,
   ])
   // Seed / re-sync the four system roles. Their permission bundle is reset to canonical every boot,
   // so a new permission added to the catalog reaches them and no drift can strip their access.
@@ -150,7 +154,32 @@ async function init() {
 }
 
 /* ---------- data helpers ---------- */
-const publicAdmin = (a) => a && ({ id: a.id, name: a.name, email: a.email, phone: a.phone, role: a.role, status: a.status, avatar: a.avatar, last_login: a.last_login, created: a.created })
+const publicAdmin = (a) => a && ({ id: a.id, name: a.name, email: a.email, phone: a.phone, role: a.role, status: a.status, avatar: a.avatar, last_login: a.last_login, created: a.created, scopeType: a.scope_type || 'all', scopeValues: a.scope_values || [] })
+
+// Zones snapshot (id → city), cached briefly, used only to resolve a scoped admin's scope. A city
+// contains zones (zones.city is a string), so this maps between the two geographic keys.
+let zonesSnap = { at: 0, list: [] }
+async function getZonesSnapshot() {
+  if (Date.now() - zonesSnap.at < 60000 && zonesSnap.list.length) return zonesSnap.list
+  const list = await tryGet(U.catalog, '/api/internal/zones', [])
+  if (Array.isArray(list) && list.length) zonesSnap = { at: Date.now(), list }
+  return zonesSnap.list
+}
+/** Resolve an admin's stored scope into { type, zoneIds, cities } — both keys populated so every
+ *  service can filter whatever geographic column its rows carry. Empty scope → unrestricted. */
+async function resolveScope(a) {
+  const type = a.scope_type || 'all'
+  const values = Array.isArray(a.scope_values) ? a.scope_values : []
+  if (type === 'all' || !values.length) return { type: 'all', zoneIds: null, cities: null }
+  const zones = await getZonesSnapshot()
+  if (type === 'city') {
+    const cities = values.map(String)
+    return { type: 'city', cities, zoneIds: zones.filter((z) => cities.includes(z.city)).map((z) => z.id) }
+  }
+  const zoneIds = values.map(Number)
+  const cities = [...new Set(zones.filter((z) => zoneIds.includes(z.id)).map((z) => z.city).filter(Boolean))]
+  return { type: 'zone', zoneIds, cities }
+}
 
 // Resolved permission keys per role, cached in-process. This is the ONE place authorization is
 // computed; every service reads it through the /api/admin/me payload, so a role change here takes
@@ -169,7 +198,8 @@ async function resolvePermissions(roleKey) {
  *  service receives as req.admin (so requirePerm works uniformly across the platform). */
 async function adminWithPerms(a) {
   if (!a) return a
-  return { ...publicAdmin(a), permissions: await resolvePermissions(a.role) }
+  const [permissions, scope] = await Promise.all([resolvePermissions(a.role), resolveScope(a)])
+  return { ...publicAdmin(a), permissions, scope }
 }
 async function getAdmin(id) { const { rows } = await pool.query('SELECT * FROM admins WHERE id=$1', [id]); return rows[0] || null }
 async function getAdminByEmail(email) { const { rows } = await pool.query('SELECT * FROM admins WHERE email=$1', [String(email).toLowerCase()]); return rows[0] || null }
@@ -199,7 +229,11 @@ async function admin(req, res, next) {
   const id = tokenSubject(req.headers.authorization, 'admin')
   const a = Number.isFinite(id) ? await getAdmin(id) : null
   if (!a || a.status !== 'active') return res.status(401).json({ error: 'Not authenticated' })
+  // Enrich with resolved permissions + scope, exactly as other services receive via /me — so
+  // requirePerm and inScope work on the admin service's OWN routes too, not just the super bypass.
   req.admin = a
+  req.admin.permissions = await resolvePermissions(a.role)
+  req.admin.scope = await resolveScope(a)
   next()
 }
 
@@ -238,9 +272,22 @@ app.patch('/api/admin/settings', admin, requirePerm('settings.edit'), async (req
 
 /* ---------- admins management ---------- */
 app.get('/api/admin/admins', admin, requirePerm('admins.view'), async (_q, res) => {
-  const { rows } = await pool.query('SELECT id,name,email,phone,role,status,avatar,last_login,created FROM admins ORDER BY id')
+  const { rows } = await pool.query('SELECT id,name,email,phone,role,status,avatar,last_login,created, scope_type AS "scopeType", scope_values AS "scopeValues" FROM admins ORDER BY id')
   res.json(rows)
 })
+// Validate a scope payload from the admin form. Returns { scopeType, scopeValues } or { error }.
+function readScope(b, fallback = { scope_type: 'all', scope_values: [] }) {
+  if (b.scopeType === undefined && b.scopeValues === undefined) return { scopeType: fallback.scope_type, scopeValues: fallback.scope_values }
+  const scopeType = String(b.scopeType || 'all')
+  if (!['all', 'city', 'zone'].includes(scopeType)) return { error: 'Scope must be all, city or zone' }
+  let scopeValues = Array.isArray(b.scopeValues) ? b.scopeValues : []
+  if (scopeType === 'all') scopeValues = []
+  else {
+    scopeValues = scopeType === 'zone' ? scopeValues.map(Number).filter((n) => Number.isFinite(n)) : scopeValues.map(String).filter(Boolean)
+    if (!scopeValues.length) return { error: `Pick at least one ${scopeType} for the scope` }
+  }
+  return { scopeType, scopeValues }
+}
 // A new/edited admin must land on a role that actually exists and is active — otherwise they'd
 // authenticate with an empty permission set and every screen would 403 with no explanation.
 async function assertAssignableRole(roleKey) {
@@ -255,10 +302,12 @@ app.post('/api/admin/admins', admin, requirePerm('admins.create'), async (req, r
   const roleKey = b.role || 'manager'
   const roleErr = await assertAssignableRole(roleKey)
   if (roleErr) return res.status(400).json({ error: roleErr })
+  const scope = readScope(b)
+  if (scope.error) return res.status(400).json({ error: scope.error })
   try {
     const { rows } = await pool.query(
-      'INSERT INTO admins (name,email,phone,pass_hash,role,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), roleKey, b.status || 'active'])
+      'INSERT INTO admins (name,email,phone,pass_hash,role,status,scope_type,scope_values) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *',
+      [b.name, String(b.email).toLowerCase(), b.phone || null, hashPw(b.password || process.env.NEW_ADMIN_DEFAULT_PASSWORD || 'changeme123'), roleKey, b.status || 'active', scope.scopeType, JSON.stringify(scope.scopeValues)])
     await logAudit(req.admin.email, 'admin.create', b.email)
     res.status(201).json(publicAdmin(rows[0]))
   } catch { res.status(409).json({ error: 'Email already exists' }) }
@@ -270,8 +319,10 @@ app.patch('/api/admin/admins/:id', admin, requirePerm('admins.edit'), async (req
     const roleErr = await assertAssignableRole(b.role)
     if (roleErr) return res.status(400).json({ error: roleErr })
   }
-  await pool.query('UPDATE admins SET name=$1,phone=$2,role=$3,status=$4 WHERE id=$5',
-    [b.name ?? a.name, b.phone ?? a.phone, b.role ?? a.role, b.status ?? a.status, a.id])
+  const scope = readScope(b, a)
+  if (scope.error) return res.status(400).json({ error: scope.error })
+  await pool.query('UPDATE admins SET name=$1,phone=$2,role=$3,status=$4,scope_type=$5,scope_values=$6::jsonb WHERE id=$7',
+    [b.name ?? a.name, b.phone ?? a.phone, b.role ?? a.role, b.status ?? a.status, scope.scopeType, JSON.stringify(scope.scopeValues), a.id])
   if (b.password) await pool.query('UPDATE admins SET pass_hash=$1 WHERE id=$2', [hashPw(b.password), a.id])
   await logAudit(req.admin.email, 'admin.update', a.email)
   res.json(publicAdmin(await getAdmin(a.id)))
@@ -374,14 +425,19 @@ app.get('/api/admin/audit', admin, async (req, res) => {
 
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
 // Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).
-app.get('/api/admin/live-ops', admin, async (_q, res) => {
+app.get('/api/admin/live-ops', admin, async (req, res) => {
   const ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
-  const [zones, wres, ops] = await Promise.all([
+  const [zonesAll, wres, opsAll] = await Promise.all([
     tryGet(U.catalog, '/api/internal/zones', []),
     tryGet(U.worker, '/internal/workers', { workers: [] }),
     tryGet(U.booking, '/api/internal/ops', []),
   ])
-  const workers = wres.workers || []
+  // Data scope: a City/Zone-scoped admin only sees their own zones' supply and demand. Filtering the
+  // three source arrays up front means every count below (zoneRows, totals, unzoned) is scoped too.
+  const scope = req.admin?.scope
+  const zones = (zonesAll || []).filter((z) => inScope(scope, { zoneId: z.id, city: z.city }))
+  const ops = (opsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const workers = (wres.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
   const zoneRows = (zones || []).map((z) => {
     const zw = workers.filter((w) => w.zone_id === z.id)
     const online = zw.filter((w) => w.status === 'active' && w.available).length
@@ -577,11 +633,13 @@ app.get('/api/admin/alerts', admin, async (_q, res) => {
 })
 
 /* ---------- customers (proxied to the auth service) ---------- */
-app.get('/api/admin/customers', admin, async (_q, res) => {
-  const [customers, bookings] = await Promise.all([
+app.get('/api/admin/customers', admin, async (req, res) => {
+  const [customersAll, bookings] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.booking, '/api/internal/bookings', []),
   ])
+  // Customers are only city-tagged (no zone), so a scoped admin sees them by city (the coarse key).
+  const customers = customersAll.filter((c) => inScope(req.admin?.scope, { city: c.city }))
   const cnt = {}, spend = {}
   for (const b of bookings) {
     cnt[b.user_id] = (cnt[b.user_id] || 0) + 1

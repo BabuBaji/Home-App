@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import {
-  makePool, migrate, makeAdminAuth, requirePerm, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, inScope, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
   getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
@@ -771,17 +771,18 @@ async function shiftsByWorker() {
   const by = {}; for (const s of rows) (by[s.worker_id] ||= []).push(s); return by
 }
 
-async function listWorkers({ status, city, q } = {}) {
+async function listWorkers({ status, city, q } = {}, scope = null) {
   let rows = (await pool.query('SELECT * FROM workers ORDER BY id DESC')).rows.map(rowToWorker)
   const by = await shiftsByWorker()
   rows = rows.map((w) => ({ ...w, on_shift: onShiftNow(by[w.id] || []) }))
+  rows = rows.filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city })) // data scope
   if (status && status !== 'all') rows = rows.filter((w) => w.status === status)
   if (city && city !== 'all') rows = rows.filter((w) => w.city === city)
   if (q) { const s = q.toLowerCase(); rows = rows.filter((w) => w.name.toLowerCase().includes(s) || (w.phone || '').includes(s) || (w.email || '').toLowerCase().includes(s)) }
   return rows
 }
-async function workerStats() {
-  const all = (await pool.query('SELECT status FROM workers')).rows
+async function workerStats(scope = null) {
+  const all = (await pool.query('SELECT status, zone_id, city FROM workers')).rows.filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
   const n = (...s) => all.filter((w) => s.includes(w.status)).length
   // Every status lands in exactly one bucket, so the cards always sum to total. 'onboarding'
   // (invited, completing their profile) is its own bucket — folding it into pending or active
@@ -3743,7 +3744,7 @@ app.get('/api/worker/documents/:id/url', auth, async (req, res) => {
 })
 
 /* ---------- admin worker management ---------- */
-app.get('/api/admin/workers', adminAuth, async (req, res) => res.json({ stats: await workerStats(), workers: await listWorkers(req.query) }))
+app.get('/api/admin/workers', adminAuth, async (req, res) => res.json({ stats: await workerStats(req.admin?.scope), workers: await listWorkers(req.query, req.admin?.scope) }))
 // `name` is what bookings/dispatch/both apps read, so it stays authoritative and is derived from
 // first+last when those are supplied. A caller sending only `name` (the old shape) still works.
 const fullName = (b) => [b.first_name, b.last_name].filter(Boolean).join(' ').trim() || String(b.name || '').trim()
