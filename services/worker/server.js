@@ -6,6 +6,7 @@
 // service owns the earnings LEDGER and adjusts the balance snapshot here via /internal.
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+import crypto from 'node:crypto'
 import express from 'express'
 import {
   makePool, migrate, makeAdminAuth, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
@@ -100,6 +101,14 @@ async function init() {
       id SERIAL PRIMARY KEY, name TEXT NOT NULL, address TEXT,
       lat REAL NOT NULL, lng REAL NOT NULL, radius INTEGER NOT NULL DEFAULT 300,
       active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ DEFAULT now()
+    )`,
+    // Login OTPs. Stored HASHED with an expiry and an attempt counter — the code itself never
+    // rests in the database, and one row per phone means a new request invalidates the previous
+    // code. Rows are disposable: deleted on success, and expired ones are swept on each request.
+    `CREATE TABLE IF NOT EXISTS worker_login_otps (
+      phone TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires TIMESTAMPTZ NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0, sent_count INTEGER NOT NULL DEFAULT 1,
+      window_started TIMESTAMPTZ NOT NULL DEFAULT now(), created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS site_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_id INTEGER`,
@@ -595,14 +604,92 @@ function auth(req, res, next) {
   getWorker(id).then((w) => { if (!w) return res.status(401).json({ ok: false, error: 'Not authenticated' }); req.worker = w; next() })
 }
 
-const WORKER_DEV_OTP = process.env.WORKER_DEV_OTP || '1234'
-app.post('/api/worker/auth/request-otp', (req, res) => res.json({ ok: true, devOtp: WORKER_DEV_OTP, message: `OTP sent to ${req.body?.phone || ''}` }))
+/* ---------- login OTP ----------
+ * WORKER_DEV_OTP pins the code to a known value AND returns it in the response, so demos and QA
+ * can sign in with no SMS provider wired up. It is the ONLY way a code is ever disclosed, it must
+ * be set explicitly, and the code is still stored, expired, rate-limited and compared exactly like
+ * a real one — an unset variable means a random code that is never disclosed. Leave it UNSET in
+ * production; once an SMS provider exists, delivery replaces disclosure.
+ */
+const WORKER_DEV_OTP = process.env.WORKER_DEV_OTP || ''
+const OTP_TTL_MIN = 5
+const OTP_MAX_ATTEMPTS = 5   // per issued code, then it's burned
+const OTP_MAX_PER_HOUR = 5   // per phone
+const OTP_RESEND_WAIT_S = 30 // between sends, per phone
+
+// Peppered so a leaked database still doesn't let anyone precompute the 10,000 possible codes.
+// Falls back to a per-process random value: without a configured pepper, codes simply don't
+// survive a restart — which is safer than hashing them with a known constant.
+const OTP_PEPPER = process.env.INTERNAL_KEY || crypto.randomBytes(32).toString('hex')
+const hashOtp = (phone, code) => crypto.createHash('sha256').update(`${phone}:${code}:${OTP_PEPPER}`).digest('hex')
+const newOtp = () => WORKER_DEV_OTP || String(crypto.randomInt(1000, 10000)) // 4 digits — the app's field is 4 wide
+
+app.post('/api/worker/auth/request-otp', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  if (!phone) return res.status(400).json({ ok: false, error: 'Enter your mobile number' })
+  await pool.query('DELETE FROM worker_login_otps WHERE expires < now() - interval \'1 hour\'')
+
+  // Rate limit per phone regardless of whether the number is registered, so this can't be used to
+  // hammer the endpoint or enumerate numbers by timing.
+  const prev = (await pool.query('SELECT * FROM worker_login_otps WHERE phone=$1', [phone])).rows[0]
+  if (prev) {
+    const sinceSent = (Date.now() - new Date(prev.created).getTime()) / 1000
+    if (sinceSent < OTP_RESEND_WAIT_S) {
+      return res.status(429).json({ ok: false, error: `Please wait ${Math.ceil(OTP_RESEND_WAIT_S - sinceSent)}s before requesting another code.` })
+    }
+    const windowAgeMin = (Date.now() - new Date(prev.window_started).getTime()) / 60000
+    if (windowAgeMin < 60 && prev.sent_count >= OTP_MAX_PER_HOUR) {
+      return res.status(429).json({ ok: false, error: 'Too many codes requested. Try again in an hour.' })
+    }
+  }
+  const windowFresh = !prev || (Date.now() - new Date(prev.window_started).getTime()) / 60000 >= 60
+  const code = newOtp()
+  await pool.query(
+    `INSERT INTO worker_login_otps (phone, code_hash, expires, attempts, sent_count, window_started, created)
+     VALUES ($1,$2, now() + make_interval(mins => $3), 0, 1, now(), now())
+     ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, expires=EXCLUDED.expires, attempts=0,
+       sent_count = CASE WHEN $4 THEN 1 ELSE worker_login_otps.sent_count + 1 END,
+       window_started = CASE WHEN $4 THEN now() ELSE worker_login_otps.window_started END,
+       created = now()`,
+    [phone, hashOtp(phone, code), OTP_TTL_MIN, windowFresh])
+
+  // TODO: deliver by SMS once a provider is wired up (see settings.msg91_key). Until then the code
+  // is only usable when WORKER_DEV_OTP is set — otherwise it is generated, stored, and undeliverable.
+  const exposed = !!WORKER_DEV_OTP
+  if (!exposed) console.log(`[worker] OTP issued for ${phone} — no SMS provider configured, so it cannot be delivered.`)
+  res.json({
+    ok: true,
+    message: exposed ? `Demo mode — use ${code}` : `OTP sent to ${phone}`,
+    ...(exposed ? { devOtp: code } : {}),
+  })
+})
+
 app.post('/api/worker/auth/verify', async (req, res) => {
-  const { phone, otp } = req.body || {}
-  if (!otp || String(otp).length < 4) return res.status(400).json({ ok: false, error: 'Invalid OTP' })
+  const phone = String(req.body?.phone || '').trim()
+  const otp = String(req.body?.otp || '').trim()
+  if (!/^\d{4}$/.test(otp)) return res.status(400).json({ ok: false, error: 'Enter the 4-digit code' })
+
+  const row = (await pool.query('SELECT * FROM worker_login_otps WHERE phone=$1', [phone])).rows[0]
+  if (!row) return res.status(400).json({ ok: false, error: 'Request a code first' })
+  if (new Date(row.expires).getTime() < Date.now()) {
+    await pool.query('DELETE FROM worker_login_otps WHERE phone=$1', [phone])
+    return res.status(400).json({ ok: false, error: 'That code has expired. Request a new one.' })
+  }
+  if (row.attempts >= OTP_MAX_ATTEMPTS) {
+    await pool.query('DELETE FROM worker_login_otps WHERE phone=$1', [phone])
+    return res.status(429).json({ ok: false, error: 'Too many wrong attempts. Request a new code.' })
+  }
+  // timingSafeEqual over the hashes — both are fixed-length hex, so lengths always match.
+  const ok = crypto.timingSafeEqual(Buffer.from(hashOtp(phone, otp), 'hex'), Buffer.from(row.code_hash, 'hex'))
+  if (!ok) {
+    await pool.query('UPDATE worker_login_otps SET attempts = attempts + 1 WHERE phone=$1', [phone])
+    return res.status(400).json({ ok: false, error: 'Incorrect code' })
+  }
+
   const w = await getByPhone(phone)
   if (!w) return res.status(403).json({ ok: false, error: 'This number is not registered. Please contact the admin to onboard you.' })
   if (w.status !== 'active') return res.status(403).json({ ok: false, error: `Your account is ${w.status}. Please ask the admin to activate it.` })
+  await pool.query('DELETE FROM worker_login_otps WHERE phone=$1', [phone]) // single use
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: w.id, actorName: w.name, action: 'worker.login', entityType: 'worker', entityId: w.id, detail: `Worker signed in (${phone || ''})` })
   res.json({ ok: true, token: 'worker-' + w.id, ...(await bootstrap(w.id)) })
 })

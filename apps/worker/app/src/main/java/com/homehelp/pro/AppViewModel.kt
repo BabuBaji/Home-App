@@ -449,6 +449,39 @@ class AppViewModel : ViewModel() {
         private set
     fun clearLoginError() { loginError = null }
 
+    /** True once the backend has actually issued a code — the OTP field only appears after this. */
+    var otpRequested by mutableStateOf(false)
+        private set
+    var requestingOtp by mutableStateOf(false)
+        private set
+    /** Only populated in demo mode (WORKER_DEV_OTP set server-side); pre-fills the field. */
+    var devOtp by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Ask the backend to issue a login code. This has to happen for real — the server stores the
+     * code hashed and compares it on verify, so a locally-flipped "OTP sent" flag would leave the
+     * worker typing a code that was never issued.
+     */
+    fun requestLoginOtp(phone: String) {
+        val p = phone.trim()
+        loginError = null
+        requestingOtp = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.requestOtp(AuthRequest(phone = p))
+                backendConnected = true
+                otpRequested = true
+                devOtp = r["devOtp"] as? String
+            } catch (e: retrofit2.HttpException) {
+                loginError = httpErrorMessage(e)   // surfaces the server's rate-limit message
+            } catch (e: Exception) {
+                loginError = "Could not reach the server. Check your connection and try again."
+            } finally { requestingOtp = false }
+        }
+    }
+
     fun login(phone: String, otp: String) {
         val p = phone.trim()
         loginError = null

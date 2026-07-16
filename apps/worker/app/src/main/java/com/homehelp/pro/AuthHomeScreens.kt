@@ -213,8 +213,32 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                     if (vm.isLoggedIn) nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
                 }
             } else {
+                // Surface a failed/rate-limited request too — otherwise "Get OTP" looks like it worked.
+                if (vm.loginError != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        shape = RoundedCornerShape(Radius.field),
+                        color = RedLight,
+                    ) {
+                        Text(
+                            vm.loginError!!,
+                            color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
-                PrimaryButton("Get OTP", enabled = phone.length == 10) { otpSent = true }
+                // Must round-trip to the server: it issues and stores the code we later verify against.
+                PrimaryButton("Get OTP", enabled = phone.length == 10 && !vm.requestingOtp, loading = vm.requestingOtp) {
+                    vm.requestLoginOtp(phone)
+                }
+            }
+            // The field appears only once the backend confirms a code was actually issued.
+            LaunchedEffect(vm.otpRequested) {
+                if (vm.otpRequested) {
+                    otpSent = true
+                    vm.devOtp?.let { otp = it }   // demo mode (WORKER_DEV_OTP) pre-fills it
+                }
             }
 
             Spacer(Modifier.height(28.dp))
