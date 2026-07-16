@@ -23,6 +23,7 @@ import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
 import Shifts from './screens/Shifts'
 import Training from './screens/Training'
+import Equipment from './screens/Equipment'
 import Payments from './screens/Payments'
 import Refunds from './screens/Refunds'
 import Complaints from './screens/Complaints'
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/roster" element={<Page><Roster /></Page>} />
           <Route path="/shift-plans" element={<Page><Shifts /></Page>} />
           <Route path="/training" element={<Page><Training /></Page>} />
+          <Route path="/equipment" element={<Page><Equipment /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
           <Route path="/refunds" element={<Page><Refunds /></Page>} />
           <Route path="/complaints" element={<Page><Complaints /></Page>} />

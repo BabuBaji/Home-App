@@ -41,6 +41,7 @@ const NAV: NavGroup[] = [
     { to: '/roster', label: 'Shifts / Roster', Icon: CalendarClock, min: 'admin' },
     { to: '/shift-plans', label: 'Shift Plans & Attendance', Icon: Timer, min: 'admin' },
     { to: '/training', label: 'Training & Assessment', Icon: GraduationCap, min: 'admin' },
+    { to: '/equipment', label: 'Equipment', Icon: Package, min: 'admin' },
     { to: '/complaints', label: 'Complaints', Icon: AlertOctagon },
     { to: '/cancellations', label: 'Cancellations', Icon: Ban },
     { to: '/worker-wallet', label: 'Add Funds / Wallet', Icon: Wallet },
@@ -62,7 +63,7 @@ const NAV: NavGroup[] = [
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', payments: 'Payments', refunds: 'Refunds',
-  zones: 'Zone Operations', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
+  zones: 'Zone Operations', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', roles: 'Roles & Permissions',
 }
 

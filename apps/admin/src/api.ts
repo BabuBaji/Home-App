@@ -2,6 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -139,6 +140,27 @@ export const updateTrainingQuestion = (id: number, body: Partial<TrainingQuestio
 export const deleteTrainingQuestion = (id: number) => req<{ ok: boolean }>(`/training/questions/${id}`, { method: 'DELETE' })
 /** One worker's progress — for the detail screen and Phase 12's checklist. */
 export const fetchWorkerTraining = (id: number) => req<WorkerTrainingState>(`/workers/${id}/training`)
+
+/* equipment (Phase 9) */
+export const fetchEquipmentTypes = () => req<{ ok: boolean; types: EquipmentType[] }>('/equipment')
+export const createEquipmentType = (name: string, required = false) => req<{ ok: boolean; type: EquipmentType }>('/equipment', post('', { name, required }))
+export const updateEquipmentType = (id: number, body: Partial<EquipmentType>) => req<{ ok: boolean; type: EquipmentType }>(`/equipment/${id}`, patch(body))
+export const deleteEquipmentType = (id: number) => req<{ ok: boolean }>(`/equipment/${id}`, { method: 'DELETE' })
+export const fetchWorkerEquipment = (id: number) => req<WorkerEquipmentState>(`/workers/${id}/equipment`)
+export const issueEquipment = (id: number, body: { typeId: number; serial?: string; notes?: string }) =>
+  req<{ ok: boolean; issued: IssuedEquipment[] }>(`/workers/${id}/equipment`, post('', body))
+export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; issued: IssuedEquipment[] }>(`/workers/${id}/equipment/${eid}/return`, post(''))
+
+/* per-worker pay (Phase 10). The wallet reads commissionPercent when it settles a job — changing
+   it changes what the worker is actually paid, so it isn't a display setting. */
+export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
+export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; walletEnabled?: boolean }) =>
+  req<WorkerPay>(`/workers/${id}/pay`, patch(body))
+
+/* final approval (Phase 12). goLiveWorker without a reason fails while checks are outstanding and
+   returns needsOverride; pass a reason to waive them — it's recorded against the admin. */
+export const fetchChecklist = (id: number) => req<GoLiveChecklist>(`/workers/${id}/checklist`)
+export const goLiveWorker = (id: number, reason?: string) => req<GoLiveChecklist>(`/workers/${id}/go-live`, post('', { reason }))
 
 export async function downloadWalletReport() {
   const res = await fetch(API_BASE + '/api/admin/wallet/report.csv', { headers: token ? { Authorization: 'Bearer ' + token } : {} })

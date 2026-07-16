@@ -139,6 +139,48 @@ async function init() {
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reject_reason TEXT`,
+    /* ---- Phase 9: equipment allocation ----
+     * `required` drives Phase 12's "Equipment Issued" check and defaults to FALSE for everything:
+     * which kit a worker must hold before going live is the company's call, not ours. The admin
+     * panel says so, rather than letting the check pass silently for a reason nobody chose.
+     */
+    `CREATE TABLE IF NOT EXISTS equipment_types (
+      id SERIAL PRIMARY KEY, key TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      required BOOLEAN NOT NULL DEFAULT false, active BOOLEAN NOT NULL DEFAULT true,
+      sort INTEGER NOT NULL DEFAULT 0, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS worker_equipment (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL,
+      type_id INTEGER NOT NULL REFERENCES equipment_types(id) ON DELETE CASCADE,
+      serial TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'issued',
+      issued_at TIMESTAMPTZ NOT NULL DEFAULT now(), issued_by TEXT NOT NULL DEFAULT '',
+      returned_at TIMESTAMPTZ, returned_by TEXT NOT NULL DEFAULT ''
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_equipment_worker ON worker_equipment(worker_id, status)`,
+
+    /* ---- Phase 10: per-worker pay ----
+     * commission_percent is NULL by default, meaning "use the platform-wide commission_percent
+     * setting" — the behaviour every existing worker already has. Only an explicit per-worker
+     * number overrides it, and the wallet reads this when it settles a job, so it moves real money.
+     * wallet_enabled defaults TRUE: today every worker's wallet works, and a schema change must not
+     * quietly stop people being paid.
+     */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS commission_percent INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS wallet_enabled BOOLEAN NOT NULL DEFAULT true`,
+    // Proven by a successful OTP login — the code was texted to that number and came back.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`,
+
+    /* ---- Phase 12: final approval ----
+     * One row per go-live decision. An override records WHO waived WHAT and why: a real onboarding
+     * always has a legitimate exception, and an unrecorded one is the actual problem.
+     */
+    `CREATE TABLE IF NOT EXISTS worker_approvals (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, admin TEXT NOT NULL DEFAULT '',
+      overridden JSONB NOT NULL DEFAULT '[]'::jsonb, reason TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+
     /* ---- Phase 7: training + assessment ----
      * Content is AUTHORED BY THE ADMIN, not seeded with invented policy. The 9 modules below are
      * created as empty, UNPUBLISHED drafts: titles only. A module is invisible to workers until
@@ -210,6 +252,18 @@ async function init() {
     await pool.query(
       `INSERT INTO training_modules (key, title, sort) VALUES ($1, $2, $3) ON CONFLICT (key) DO NOTHING`,
       [title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), title, i + 1],
+    )
+  }
+
+  /* Phase 9 kit list, straight from the spec. Unlike the training modules these are just item
+   * names, not policy — nothing is asserted by seeding "Mop". What IS policy is which of them a
+   * worker must hold before going live, so every one seeds required=false for an admin to decide. */
+  for (const [i, name] of [
+    'Uniform', 'ID Card', 'Vacuum', 'Bucket', 'Mop', 'Shoes', 'Gloves', 'Mask', 'Cleaning Kit', 'Mobile Device',
+  ].entries()) {
+    await pool.query(
+      `INSERT INTO equipment_types (key, name, sort) VALUES ($1, $2, $3) ON CONFLICT (key) DO NOTHING`,
+      [name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, i + 1],
     )
   }
 
@@ -802,6 +856,10 @@ app.post('/api/worker/auth/verify', async (req, res) => {
     return res.status(403).json({ ok: false, error: w.status === 'pending' ? 'Your account is not activated yet. Please ask the admin to send your invite.' : `Your account is ${w.status}. Please contact the admin.` })
   }
   await pool.query('DELETE FROM worker_login_otps WHERE phone=$1', [phone]) // single use
+  // This is the moment the number is PROVEN: a code we texted to it came back. Phase 12's
+  // "Mobile Verified" reads this, so it can never be ticked by anything but a real login.
+  // COALESCE keeps the first verification date rather than moving it on every sign-in.
+  await pool.query('UPDATE workers SET phone_verified_at = COALESCE(phone_verified_at, now()) WHERE id=$1', [w.id])
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: w.id, actorName: w.name, action: 'worker.login', entityType: 'worker', entityId: w.id, detail: `Worker signed in (${phone || ''})` })
   res.json({ ok: true, token: signToken('worker', w.id), ...(await bootstrap(w.id)) })
 })
@@ -1420,6 +1478,175 @@ app.post('/api/worker/training/quiz', auth, async (req, res) => {
   res.json({ ok: true, score, total: QUIZ_SIZE, pct, passed, passPct: QUIZ_PASS_PCT, ...(await trainingState(req.worker.id)) })
 })
 
+/* ---------- Phase 9: equipment allocation ---------- */
+const eqTypeDto = (t) => ({ id: t.id, key: t.key, name: t.name, required: t.required, active: t.active, sort: t.sort, issued: t.issued ?? undefined })
+const eqDto = (e) => ({
+  id: e.id, typeId: e.type_id, name: e.name, serial: e.serial || '', notes: e.notes || '',
+  status: e.status, issuedAt: e.issued_at, issuedBy: e.issued_by || '',
+  returnedAt: e.returned_at || null, returnedBy: e.returned_by || '',
+})
+
+async function workerEquipment(workerId) {
+  const { rows } = await pool.query(
+    `SELECT e.*, t.name FROM worker_equipment e JOIN equipment_types t ON t.id = e.type_id
+     WHERE e.worker_id = $1 ORDER BY e.issued_at DESC`, [workerId])
+  return rows.map(eqDto)
+}
+
+app.get('/api/admin/equipment', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT t.*, (SELECT COUNT(*)::int FROM worker_equipment e WHERE e.type_id = t.id AND e.status = 'issued') issued
+     FROM equipment_types t ORDER BY t.sort, t.id`)
+  res.json({ ok: true, types: rows.map(eqTypeDto) })
+})
+
+app.post('/api/admin/equipment', adminAuth, async (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Name required' })
+  const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)
+  const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM equipment_types')).rows[0].n
+  try {
+    const r = await pool.query('INSERT INTO equipment_types (key, name, required, sort) VALUES ($1, $2, $3, $4) RETURNING *', [key, name, !!req.body?.required, sort])
+    res.json({ ok: true, type: eqTypeDto(r.rows[0]) })
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'That item already exists' })
+    throw e
+  }
+})
+
+app.patch('/api/admin/equipment/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const cur = (await pool.query('SELECT * FROM equipment_types WHERE id=$1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Item not found' })
+  const b = req.body || {}
+  const name = b.name !== undefined ? String(b.name).trim() : cur.name
+  if (!name) return res.status(400).json({ error: 'Name required' })
+  const r = await pool.query('UPDATE equipment_types SET name=$1, required=$2, active=$3 WHERE id=$4 RETURNING *',
+    [name, b.required !== undefined ? !!b.required : cur.required, b.active !== undefined ? !!b.active : cur.active, id])
+  res.json({ ok: true, type: eqTypeDto(r.rows[0]) })
+})
+
+app.delete('/api/admin/equipment/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  // Deleting the type would cascade away the record of what a worker is holding. Retire instead —
+  // an item you no longer issue is not an item nobody was ever given.
+  const held = (await pool.query("SELECT COUNT(*)::int n FROM worker_equipment WHERE type_id=$1", [id])).rows[0].n
+  if (held) return res.status(409).json({ error: 'This has been issued before — retire it instead of deleting, so the history survives' })
+  await pool.query('DELETE FROM equipment_types WHERE id=$1', [id])
+  res.json({ ok: true })
+})
+
+app.get('/api/admin/workers/:id/equipment', adminAuth, async (req, res) => {
+  const workerId = Number(req.params.id)
+  const types = (await pool.query('SELECT * FROM equipment_types WHERE active = true ORDER BY sort, id')).rows.map(eqTypeDto)
+  res.json({ ok: true, types, issued: await workerEquipment(workerId) })
+})
+
+app.post('/api/admin/workers/:id/equipment', adminAuth, async (req, res) => {
+  const workerId = Number(req.params.id)
+  const typeId = Number(req.body?.typeId)
+  const w = await getWorker(workerId)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const t = (await pool.query('SELECT * FROM equipment_types WHERE id=$1 AND active=true', [typeId])).rows[0]
+  if (!t) return res.status(404).json({ error: 'Equipment item not found' })
+  // Two live "Uniform" rows would make "returned" ambiguous — which one came back?
+  const dup = (await pool.query("SELECT id FROM worker_equipment WHERE worker_id=$1 AND type_id=$2 AND status='issued'", [workerId, typeId])).rows[0]
+  if (dup) return res.status(409).json({ error: `${t.name} is already issued to ${w.name}. Mark it returned first.` })
+
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  await pool.query(
+    'INSERT INTO worker_equipment (worker_id, type_id, serial, notes, issued_by) VALUES ($1, $2, $3, $4, $5)',
+    [workerId, typeId, String(req.body?.serial || '').trim().slice(0, 60), String(req.body?.notes || '').trim().slice(0, 200), who])
+  publishEvent(REDIS_URL, 'worker.notify', { workerId, title: 'Equipment issued', body: `${t.name} has been issued to you.` })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'equipment.issue', entityType: 'worker', entityId: workerId, detail: `Issued ${t.name} to ${w.name}` })
+  res.json({ ok: true, issued: await workerEquipment(workerId) })
+})
+
+app.post('/api/admin/workers/:id/equipment/:eid/return', adminAuth, async (req, res) => {
+  const workerId = Number(req.params.id)
+  const row = (await pool.query(
+    `SELECT e.*, t.name FROM worker_equipment e JOIN equipment_types t ON t.id = e.type_id
+     WHERE e.id=$1 AND e.worker_id=$2`, [Number(req.params.eid), workerId])).rows[0]
+  if (!row) return res.status(404).json({ error: 'Not found' })
+  if (row.status === 'returned') return res.status(409).json({ error: 'Already marked returned' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  await pool.query("UPDATE worker_equipment SET status='returned', returned_at=now(), returned_by=$1 WHERE id=$2", [who, row.id])
+  const w = await getWorker(workerId)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'equipment.return', entityType: 'worker', entityId: workerId, detail: `${row.name} returned by ${w?.name || `worker ${workerId}`}` })
+  res.json({ ok: true, issued: await workerEquipment(workerId) })
+})
+
+/** What the worker is holding — read-only; issuing is the admin's job. */
+app.get('/api/worker/equipment', auth, async (req, res) => {
+  res.json({ ok: true, issued: await workerEquipment(req.worker.id) })
+})
+
+/* ---------- Phase 10: per-worker pay ----------
+ * Only what genuinely moves money. `commissionPercent` is read by the wallet when it settles a
+ * job (see /api/internal/workers/:id/pay-config), so a number set here changes what the worker is
+ * actually paid. NULL means "use the platform-wide setting" — every existing worker's behaviour.
+ *
+ * Deliberately NOT here: Fixed/Hybrid salary (needs a monthly payroll run — offering it without
+ * one would silently pay a worker nothing per job), the named bonuses (each needs a real trigger),
+ * and TDS/ESI/PF (statutory rates aren't ours to invent). Better absent than decorative.
+ */
+app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  res.json({
+    ok: true,
+    commissionPercent: w.commission_percent, // null = inherit
+    platformCommissionPercent: platform,
+    effectiveCommissionPercent: w.commission_percent ?? platform,
+    walletEnabled: w.wallet_enabled !== false,
+  })
+})
+
+app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const b = req.body || {}
+  let pct = w.commission_percent
+  if (b.commissionPercent !== undefined) {
+    if (b.commissionPercent === null || b.commissionPercent === '') pct = null
+    else {
+      pct = Number(b.commissionPercent)
+      if (!Number.isInteger(pct) || pct < 0 || pct > 100) return res.status(400).json({ error: 'Commission must be a whole number between 0 and 100' })
+    }
+  }
+  const walletEnabled = b.walletEnabled !== undefined ? !!b.walletEnabled : w.wallet_enabled !== false
+  await pool.query('UPDATE workers SET commission_percent=$1, wallet_enabled=$2 WHERE id=$3', [pct, walletEnabled, id])
+
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+  const bits = []
+  if (b.commissionPercent !== undefined) bits.push(pct === null ? `commission back to the platform default (${platform}%)` : `commission ${pct}%`)
+  if (b.walletEnabled !== undefined && walletEnabled !== (w.wallet_enabled !== false)) bits.push(walletEnabled ? 'wallet enabled' : 'wallet disabled')
+  if (bits.length) publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'worker.pay', entityType: 'worker', entityId: id, detail: `${w.name}: ${bits.join(', ')}` })
+  // Tell the worker their take-home changed — this is their money, not a silent setting.
+  if (b.commissionPercent !== undefined && (w.commission_percent ?? platform) !== (pct ?? platform)) {
+    publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Your earnings rate changed', body: `You now keep ${100 - (pct ?? platform)}% of each job.` })
+  }
+  if (b.walletEnabled !== undefined && !walletEnabled && w.wallet_enabled !== false) {
+    publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: 'Withdrawals paused', body: 'Your wallet has been put on hold. Please contact the admin.' })
+  }
+  const after = await getWorker(id)
+  res.json({ ok: true, commissionPercent: after.commission_percent, platformCommissionPercent: platform, effectiveCommissionPercent: after.commission_percent ?? platform, walletEnabled: after.wallet_enabled !== false })
+})
+
+/** How the wallet settles this worker. The commission lives here because the worker service owns
+ *  the worker; the wallet asks rather than keeping a copy that can drift. */
+app.get('/api/internal/workers/:id/pay-config', internalOnly, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  res.json({
+    commissionPercent: w.commission_percent, // null = caller falls back to the platform setting
+    walletEnabled: w.wallet_enabled !== false,
+  })
+})
+
 /* ---------- admin: authoring ---------- */
 const qDto = (q) => ({ id: q.id, moduleId: q.module_id, question: q.question, options: q.options || [], correctIndex: q.correct_index, active: q.active })
 
@@ -1520,6 +1747,120 @@ app.patch('/api/admin/training/questions/:id', adminAuth, async (req, res) => {
 app.delete('/api/admin/training/questions/:id', adminAuth, async (req, res) => {
   await pool.query('DELETE FROM training_questions WHERE id = $1', [Number(req.params.id)])
   res.json({ ok: true })
+})
+
+/* ---------- Phase 12: final approval ----------
+ * The 15-point checklist, every item computed from real state — nothing here is a stored tick an
+ * admin can set directly, so the list can't drift from what's actually true.
+ *
+ * Three-way status, not a checkbox:
+ *   ok   — satisfied
+ *   no   — genuinely outstanding, blocks Go Live
+ *   n/a  — nothing to satisfy (no training published, no equipment marked required, no email
+ *          provider configured). These do NOT block. Requiring a worker to pass an exam that
+ *          doesn't exist would wedge Go Live shut for a reason nobody chose.
+ */
+const docVerified = (docs, name) => docs.some((d) => d.name === name && d.status === 'Verified')
+
+async function goLiveChecklist(workerId) {
+  const w = await getWorker(workerId)
+  if (!w) return null
+  const [docs, training, eqTypes, eqIssued] = await Promise.all([
+    pool.query('SELECT name, status FROM worker_documents WHERE worker_id=$1', [workerId]).then((r) => r.rows),
+    trainingState(workerId),
+    pool.query('SELECT id, name FROM equipment_types WHERE active = true AND required = true').then((r) => r.rows),
+    pool.query("SELECT type_id FROM worker_equipment WHERE worker_id=$1 AND status='issued'", [workerId]).then((r) => r.rows),
+  ])
+  const heldTypes = new Set(eqIssued.map((e) => e.type_id))
+  const missingKit = eqTypes.filter((t) => !heldTypes.has(t.id))
+  const platform = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+
+  const item = (key, label, state, detail) => ({ key, label, state, detail })
+  const yn = (ok) => (ok ? 'ok' : 'no')
+
+  const items = [
+    item('mobile_verified', 'Mobile Verified', w.phone_verified_at ? 'ok' : 'no',
+      w.phone_verified_at ? `Signed in with an OTP on ${new Date(w.phone_verified_at).toLocaleDateString('en-IN')}` : 'The worker has not completed an OTP sign-in yet'),
+    // No email transport exists anywhere in the platform, so this can never be earned. It stays
+    // visible rather than being quietly dropped from the spec, and never blocks.
+    item('email_verified', 'Email Verified', 'na', 'No email provider is configured — this check is not enforced'),
+    item('aadhaar_verified', 'Aadhaar Verified', yn(docVerified(docs, 'Aadhaar Front') && docVerified(docs, 'Aadhaar Back')),
+      'Both sides must be uploaded and verified'),
+    item('pan_verified', 'PAN Verified', yn(docVerified(docs, 'PAN Card')), ''),
+    item('police_verified', 'Police Verified', yn(docVerified(docs, 'Police Verification')), ''),
+    item('medical_verified', 'Medical Verified', yn(docVerified(docs, 'Medical Certificate')), ''),
+    item('bank_verified', 'Bank Verified', yn(w.bank_status === 'Verified'),
+      w.bank_status ? `Bank status: ${w.bank_status}` : 'No bank details submitted yet'),
+    item('skills_approved', 'Skills Approved', yn((w.services || []).length > 0),
+      (w.services || []).length ? `Approved for ${(w.services || []).join(', ')}` : 'No skill has been approved — the worker would match no jobs'),
+    training.modules.length === 0
+      ? item('training_completed', 'Training Completed', 'na', 'No training modules are published — nothing to complete')
+      : item('training_completed', 'Training Completed', yn(training.progress.completed === training.progress.total),
+        `${training.progress.completed} of ${training.progress.total} modules read`),
+    !training.quiz.ready
+      ? item('assessment_passed', 'Assessment Passed', 'na', `The question bank holds ${training.quiz.bank} of the ${training.quiz.size} needed — the assessment cannot be sat`)
+      : item('assessment_passed', 'Assessment Passed', yn(training.quiz.passed),
+        training.quiz.passed ? `Passed with ${training.quiz.bestPct}%` : training.quiz.attempts ? `Best ${training.quiz.bestPct}% over ${training.quiz.attempts} attempt(s) — needs ${training.quiz.passPct}%` : 'Not attempted yet'),
+    item('zone_assigned', 'Zone Assigned', yn(!!w.zone_id), w.zone_id ? '' : 'No zone — dispatch cannot place this worker'),
+    item('shift_assigned', 'Shift Assigned', yn(!!w.shift_def_id), w.shift_def_id ? '' : 'No shift assigned'),
+    eqTypes.length === 0
+      ? item('equipment_issued', 'Equipment Issued', 'na', 'No equipment is marked as required — this check is not enforced')
+      : item('equipment_issued', 'Equipment Issued', yn(missingKit.length === 0),
+        missingKit.length ? `Still to issue: ${missingKit.map((t) => t.name).join(', ')}` : `All ${eqTypes.length} required items issued`),
+    item('salary_configured', 'Salary Configured', yn(w.commission_percent !== null && w.commission_percent !== undefined),
+      w.commission_percent === null || w.commission_percent === undefined
+        ? `No per-worker rate set — they would earn on the platform default (${platform}% commission)`
+        : `Commission ${w.commission_percent}% — the worker keeps ${100 - w.commission_percent}%`),
+    item('wallet_enabled', 'Wallet Enabled', yn(w.wallet_enabled !== false), w.wallet_enabled !== false ? '' : 'Withdrawals are on hold'),
+  ]
+  const blocking = items.filter((i) => i.state === 'no')
+  return {
+    worker: { id: w.id, name: w.name, status: w.status },
+    items,
+    blocking: blocking.map((i) => i.key),
+    ready: blocking.length === 0,
+    live: w.status === 'active',
+  }
+}
+
+app.get('/api/admin/workers/:id/checklist', adminAuth, async (req, res) => {
+  const c = await goLiveChecklist(Number(req.params.id))
+  if (!c) return res.status(404).json({ error: 'Worker not found' })
+  const history = (await pool.query('SELECT * FROM worker_approvals WHERE worker_id=$1 ORDER BY created DESC LIMIT 10', [Number(req.params.id)])).rows
+  res.json({ ok: true, ...c, history: history.map((h) => ({ id: h.id, admin: h.admin, overridden: h.overridden || [], reason: h.reason, created: h.created })) })
+})
+
+/**
+ * GO LIVE — the one place a worker becomes dispatchable.
+ * Outstanding items block, but an admin may override with a reason. The override records who
+ * waived exactly which checks and why: real onboarding always has a legitimate exception, and an
+ * exception nobody can trace afterwards is the thing that actually hurts.
+ */
+app.post('/api/admin/workers/:id/go-live', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const c = await goLiveChecklist(id)
+  if (!c) return res.status(404).json({ error: 'Worker not found' })
+  if (c.live) return res.status(409).json({ error: 'This worker is already active' })
+
+  const reason = String(req.body?.reason || '').trim()
+  if (!c.ready && !reason) {
+    return res.status(400).json({
+      error: `${c.blocking.length} check${c.blocking.length === 1 ? '' : 's'} still outstanding. Give a reason to override.`,
+      blocking: c.blocking, needsOverride: true,
+    })
+  }
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  await pool.query('UPDATE workers SET status=$1, verified=true WHERE id=$2', ['active', id])
+  await pool.query('INSERT INTO worker_approvals (worker_id, admin, overridden, reason) VALUES ($1, $2, $3::jsonb, $4)',
+    [id, who, JSON.stringify(c.blocking), c.ready ? '' : reason])
+
+  publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: "You're live", body: 'Your onboarding is complete — you can start accepting jobs.' })
+  const waived = c.ready ? '' : ` — overrode ${c.blocking.join(', ')}: ${reason}`
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'admin', actorName: who, action: 'worker.golive', entityType: 'worker', entityId: id,
+    detail: `${c.worker.name} is live${waived}`,
+  })
+  res.json({ ok: true, ...(await goLiveChecklist(id)) })
 })
 
 /** One worker's training state, for the detail screen and Phase 12's checklist. */

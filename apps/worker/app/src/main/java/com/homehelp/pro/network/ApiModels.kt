@@ -601,6 +601,21 @@ data class QuizResultResponse(
     val quiz: QuizState = QuizState(),
 )
 
+/* Phase 9: the kit an admin has issued. Read-only in the app — issuing is the admin's job, and a
+ * worker ticking "I have a vacuum" would make the Go Live check meaningless. */
+data class IssuedEquipmentDto(
+    val id: Int = 0,
+    val typeId: Int = 0,
+    val name: String = "",
+    val serial: String = "",
+    val notes: String = "",
+    val status: String = "issued",
+    val issuedAt: String = "",
+    val issuedBy: String = "",
+    val returnedAt: String? = null,
+)
+data class EquipmentResponse(val ok: Boolean = true, val issued: List<IssuedEquipmentDto> = emptyList())
+
 data class BankBody(val bankHolder: String, val bankName: String, val bankAccount: String, val bankIfsc: String, val bankUpi: String = "", val chequePhoto: String = "", val bankAccountType: String = "")
 data class IfscDto(val valid: Boolean = false, val ifsc: String = "", val bank: String = "", val branch: String = "", val city: String = "", val state: String = "", val error: String = "")
 data class HeartbeatBody(val battery: Int? = null, val network: String? = null, val lat: Double? = null, val lng: Double? = null)

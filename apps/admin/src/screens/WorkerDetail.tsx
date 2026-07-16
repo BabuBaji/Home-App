@@ -9,6 +9,7 @@ import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorker
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
+import WorkerApproval from './WorkerApproval'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
@@ -185,7 +186,7 @@ function PerfTile({ label, value, sub, subTone }: { label: string; value: ReactN
 }
 
 const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
-const TABS = [['overview', 'Overview'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity']] as const
+const TABS = [['overview', 'Overview'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['approval', 'Approval & Go Live'], ['notes', 'Notes & Activity']] as const
 
 export default function WorkerDetail() {
   const { id } = useParams()
@@ -896,6 +897,9 @@ export default function WorkerDetail() {
           {(show('skills')) && skillsPanel}
         </div>
       )}
+
+      {/* Phase 12. Reloads the worker on success so the header's status pill follows the go-live. */}
+      {tab === 'approval' && <WorkerApproval workerId={Number(id)} onChanged={load} />}
 
       {tab === 'overview' && <div style={grid3}>{timelinePanel}{recentJobsPanel}</div>}
 

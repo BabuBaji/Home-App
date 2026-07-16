@@ -68,6 +68,26 @@ async function init() {
 }
 
 const commission = () => getSettingInt(ADMIN_URL, 'commission_percent', 20)
+
+/* Phase 10: a worker may have their own commission, which overrides the platform-wide one.
+ * The worker service owns the worker, so we ASK rather than keep a copy that drifts.
+ *
+ * On failure this falls back to the platform rate — the same number used before Phase 10 existed.
+ * That matters: settleBooking runs on booking.completed, and a worker who finished a job must be
+ * paid even if the worker service is briefly unreachable. Erring toward the default pays them;
+ * erring toward zero would silently swallow their earnings.
+ */
+async function payConfig(workerId) {
+  const platform = await commission()
+  const cfg = await tryGet(WORKER_URL, `/api/internal/workers/${workerId}/pay-config`, null)
+  if (!cfg) {
+    console.error(`[wallet] pay-config unavailable for worker ${workerId} — settling at the platform rate (${platform}%)`)
+    return { pct: platform, walletEnabled: true, inherited: true }
+  }
+  const own = cfg.commissionPercent
+  const valid = Number.isInteger(own) && own >= 0 && own <= 100
+  return { pct: valid ? own : platform, walletEnabled: cfg.walletEnabled !== false, inherited: !valid }
+}
 const minPayoutLimit = () => getSettingInt(ADMIN_URL, 'min_payout_limit', 500)
 
 /* ---------- payout policy ----------
@@ -108,7 +128,9 @@ const serviceOf = (b) => (Array.isArray(b?.items) && b.items[0]?.name) || b?.typ
 // Credit a worker's earnings for a completed booking (idempotent on ref_id).
 async function settleBooking(b) {
   if (!b?.worker_id) return
-  const pct = await commission()
+  // Per-worker commission if one is set, else the platform rate. This is the number that decides
+  // what the worker is actually paid, so Phase 10's setting has to be read HERE or it means nothing.
+  const { pct } = await payConfig(b.worker_id)
   const share = Math.max(0, Math.round(((b.total || 0) * (100 - pct)) / 100))
   if (share <= 0) return
   // Label reads "Kitchen Cleaning · #HH10234" — the service name is what makes a ledger row
@@ -539,6 +561,11 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)
   const avail = (await summary(req.wid)).available
   if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
+  // Phase 10: an admin can put a wallet on hold. Earnings keep accruing — this stops money leaving,
+  // it doesn't confiscate it. Checked here rather than only hidden in the UI, since the app isn't
+  // the only thing that can call this.
+  const { walletEnabled } = await payConfig(req.wid)
+  if (!walletEnabled) return res.json({ ok: false, error: 'Withdrawals are on hold on your account. Please contact the admin.' })
   // Enforce the configured minimum — a payout costs the same to process whatever its size.
   const minAmt = await minPayoutLimit()
   if (amount < minAmt) return res.json({ ok: false, error: `Minimum payout is ₹${minAmt}` })

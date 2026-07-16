@@ -124,6 +124,10 @@ interface ApiService {
     @POST("api/worker/training/quiz")
     suspend fun submitQuiz(@Body body: QuizSubmitBody): QuizResultResponse
 
+    /* Phase 9 — equipment issued to me (read-only) */
+    @GET("api/worker/equipment")
+    suspend fun getEquipment(): EquipmentResponse
+
     // Profile photo. Public bucket (customers see it), so the DTO carries a stable URL.
     @Multipart
     @POST("api/worker/profile/photo")

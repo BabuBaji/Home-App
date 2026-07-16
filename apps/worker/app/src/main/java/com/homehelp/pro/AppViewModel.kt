@@ -69,6 +69,7 @@ import com.homehelp.pro.network.QuizState
 import com.homehelp.pro.network.QuizQuestionDto
 import com.homehelp.pro.network.QuizSubmitBody
 import com.homehelp.pro.network.QuizResultResponse
+import com.homehelp.pro.network.IssuedEquipmentDto
 import com.homehelp.pro.network.WorkerDto
 import com.homehelp.pro.network.WithdrawBody
 import com.homehelp.pro.network.WithdrawalEntry
@@ -1212,6 +1213,16 @@ class AppViewModel : ViewModel() {
             catch (e: Exception) { trainingError = "Could not submit. Check your connection and try again." }
             finally { loadingQuiz = false }
         }
+    }
+
+    /* ---- Phase 9: equipment ----
+     * Read-only. An admin issues the kit; a worker ticking "I have a vacuum" would make Phase 12's
+     * Go Live check worthless. The app just shows what's on their record.
+     */
+    val equipment = mutableStateListOf<IssuedEquipmentDto>()
+    fun loadEquipment() = sync {
+        val r = api.getEquipment()
+        equipment.clear(); equipment.addAll(r.issued)
     }
 
     /* ---- Phase 2/3: the worker's own profile ----

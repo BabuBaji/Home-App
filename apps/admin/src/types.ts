@@ -156,6 +156,42 @@ export interface WorkerTrainingState {
   }
 }
 
+/* Phase 9 — equipment. `required` drives Phase 12's "Equipment Issued" check and defaults to false
+   on every item: which kit a worker must hold before going live is the company's call. */
+export interface EquipmentType { id: number; key: string; name: string; required: boolean; active: boolean; sort: number; issued?: number }
+export interface IssuedEquipment {
+  id: number; typeId: number; name: string; serial: string; notes: string
+  status: 'issued' | 'returned'; issuedAt: string; issuedBy: string
+  returnedAt: string | null; returnedBy: string
+}
+export interface WorkerEquipmentState { ok: boolean; types: EquipmentType[]; issued: IssuedEquipment[] }
+
+/* Phase 10 — per-worker pay. commissionPercent null means "inherit the platform rate", which is
+   every existing worker. The wallet reads this when it settles a job, so it moves real money. */
+export interface WorkerPay {
+  ok: boolean
+  commissionPercent: number | null
+  platformCommissionPercent: number
+  effectiveCommissionPercent: number
+  walletEnabled: boolean
+}
+
+/* Phase 12 — final approval. Every item is computed from real state; none is a stored tick an
+   admin can set directly. 'na' means there is nothing to satisfy (no training published, no
+   equipment marked required, no email provider) — those never block. */
+export type CheckState = 'ok' | 'no' | 'na'
+export interface ChecklistItem { key: string; label: string; state: CheckState; detail: string }
+export interface ApprovalRecord { id: number; admin: string; overridden: string[]; reason: string; created: string }
+export interface GoLiveChecklist {
+  ok: boolean
+  worker: { id: number; name: string; status: string }
+  items: ChecklistItem[]
+  blocking: string[]
+  ready: boolean
+  live: boolean
+  history: ApprovalRecord[]
+}
+
 export interface AdminBooking {
   id: number; ref: string; customer: string; service: string; pro: string
   date?: string; time?: string; type: string; total: number
