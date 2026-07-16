@@ -290,20 +290,6 @@ async function deductionsDto(wid) {
 }
 
 // Credit a month-end Shakti Bonus (idempotent per worker per month via ref_id).
-async function creditShaktiBonus(d) {
-  const amt = Math.max(0, Number(d.amount) || 0)
-  if (!d.workerId || amt <= 0) return
-  const ref = `shakti-${d.workerId}-${d.month}`
-  const ins = await pool.query(
-    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
-     VALUES ($1, 'Sitara Bonus', $2, $3, $4, 'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [d.workerId, `${d.tier || ''} Sitara Bonus · ${d.month}`, amt, ref])
-  if (!ins.rowCount) return // already paid this month
-  await adjustBalance(d.workerId, { balance: amt, earnings: amt })
-  await notify(d.workerId, 'Sitara Bonus credited', `₹${amt} ${d.tier || ''} bonus for ${d.month}`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.sitara', entityType: 'worker', entityId: d.workerId, detail: `Sitara Bonus ₹${amt} (${d.tier}) for ${d.month}`, meta: { amount: amt } })
-}
-
 // Everything is derived from the real LEDGER (worker_income / withdrawals / deductions), so the
 // balance reflects only actual completed-service earnings — never a stale/seeded snapshot.
 // Field names match the worker app's WalletSummaryDto (weekEarnings/monthEarnings/todayEarnings/
@@ -685,7 +671,6 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })
   else if (type === 'job.start') await resolveOnStart({ bookingId: data.bookingId })
-  else if (type === 'shakti.bonus') await creditShaktiBonus(data)
   else if (type === 'booking.cancelled' && data.booking?.worker_id && data.quote?.workerComp > 0) {
     const b = data.booking, comp = data.quote.workerComp
     const cSvc = serviceOf(b)

@@ -230,6 +230,13 @@ async function init() {
      * WE produced would be invented. Blank hides the estimate lines. */
     `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS est_incentive_min INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS est_incentive_max INTEGER NOT NULL DEFAULT 0`,
+    /* The Sitara/Shakti tier bonus, folded in from the standalone monthly scheduler. A tiered
+     * ATTENDANCE reward — the worker earns the highest tier they reach that month by working days
+     * (Gold also wants Sundays), gated by tier_min_rating. Paid by the payroll run, not a separate
+     * cron. Each tier: { label, days, sundays, amount }. Empty = no tier bonus on this plan.
+     * This replaces the old flat attendance_bonus_amount / attendance_min_pct (now unused). */
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS attendance_tiers JSONB NOT NULL DEFAULT '[]'::jsonb`,
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS tier_min_rating REAL NOT NULL DEFAULT 4.5`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS incentive_plan_id INTEGER REFERENCES incentive_plans(id) ON DELETE SET NULL`,
     // When this salary arrangement starts. A payroll run skips a worker whose salary starts after
     // the month it's paying for, so back-dating a hire doesn't silently pay them for months they
@@ -1434,79 +1441,43 @@ app.post('/api/worker/merch/order', auth, async (req, res) => {
 /* ---------- Shakti Bonus (monthly performance bonus, mapped to our per-job model) ---------- */
 // "Sitara Bonus" — monthly bonus based on WORKING DAYS + rating (Gold also needs Sundays worked).
 // Bronze 25 days · Silver 27 days · Gold 28 days incl. 4 Sundays. All require ≥ rating gate.
-const SHAKTI = [
-  { name: 'Bronze', amount: Number(process.env.SHAKTI_BRONZE || 3500), days: Number(process.env.SHAKTI_BRONZE_DAYS || 25), sundays: Number(process.env.SHAKTI_BRONZE_SUNDAYS || 0) },
-  { name: 'Silver', amount: Number(process.env.SHAKTI_SILVER || 4500), days: Number(process.env.SHAKTI_SILVER_DAYS || 27), sundays: Number(process.env.SHAKTI_SILVER_SUNDAYS || 0) },
-  { name: 'Gold', amount: Number(process.env.SHAKTI_GOLD || 5500), days: Number(process.env.SHAKTI_GOLD_DAYS || 28), sundays: Number(process.env.SHAKTI_GOLD_SUNDAYS || 4) },
-]
-const SHAKTI_RATING = Number(process.env.SHAKTI_RATING || 4.5)
-
-// Distinct working (checked-in) days + Sundays worked in [start,end); highest tier reached.
-async function computeShakti(wid, rating, start, end) {
-  const s = start.toISOString().slice(0, 10), e = end.toISOString().slice(0, 10)
-  const wd = (await pool.query(
-    'SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND day >= $2 AND day < $3',
-    [wid, s, e])).rows[0].n
-  const su = (await pool.query(
-    'SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND day >= $2 AND day < $3 AND EXTRACT(DOW FROM day) = 0',
-    [wid, s, e])).rows[0].n
-  let currentIdx = -1
-  for (let i = 0; i < SHAKTI.length; i++) if (wd >= SHAKTI[i].days && su >= SHAKTI[i].sundays && rating >= SHAKTI_RATING) currentIdx = i
-  return { workingDays: wd, sundays: su, currentIdx }
-}
-
+/* The Sitara/Shakti tier bonus now lives on the worker's incentive plan and is paid by the monthly
+ * payroll run (see payrollLine). This endpoint drives the worker app's Sitara screen — the tier
+ * table, this month's working days, and progress to the next tier — read live from their plan.
+ * The old standalone SHAKTI constants and month-end scheduler are gone; payroll is the one place
+ * the money is decided. */
 app.get('/api/worker/shakti-bonus', auth, async (req, res) => {
-  const w = req.worker
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth(), 1)
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  const rating = Number(w.rating || 0)
-  const { workingDays, sundays, currentIdx } = await computeShakti(w.id, rating, start, end)
-  const next = currentIdx + 1 < SHAKTI.length ? SHAKTI[currentIdx + 1] : null
+  const w = await getWorker(req.worker.id)
+  const inc = await incentivePlanFor(w)
+  const tiers = tierRows(inc)
+  const minRating = inc?.tier_min_rating ?? 4.5
+  const rating = Number(w?.rating || 0)
+  const month = monthKey(new Date())
+  const worked = tiers.length ? await workedDaysInMonth(w.id, month) : { days: 0, sundays: 0 }
+
+  // tiers are ascending by amount; the highest one whose gates are all met is the current tier.
+  let idx = -1
+  for (let i = 0; i < tiers.length; i++) {
+    const t = tiers[i]
+    if (worked.days >= t.days && worked.sundays >= (t.sundays || 0) && rating >= minRating) idx = i
+  }
+  const next = idx + 1 < tiers.length ? tiers[idx + 1] : null
+
   res.json({
-    tiers: SHAKTI,
-    workingDays,
-    sundays,
+    // `name` for the app's DTO; the plan stores it as `label`.
+    tiers: tiers.map((t) => ({ name: t.label, amount: t.amount, days: t.days, sundays: t.sundays })),
+    workingDays: worked.days,
+    sundays: worked.sundays,
     rating,
-    ratingTarget: SHAKTI_RATING,
-    ratingMet: rating >= SHAKTI_RATING,
-    currentTier: currentIdx >= 0 ? SHAKTI[currentIdx].name : '',
-    nextTier: next ? next.name : '',
-    daysToNext: next ? Math.max(0, next.days - workingDays) : 0,
-    sundaysToNext: next ? Math.max(0, next.sundays - sundays) : 0,
-    lastUpdated: now.toISOString().slice(0, 10),
+    ratingTarget: minRating,
+    ratingMet: rating >= minRating,
+    currentTier: idx >= 0 ? tiers[idx].label : '',
+    nextTier: next ? next.label : '',
+    daysToNext: next ? Math.max(0, next.days - worked.days) : 0,
+    sundaysToNext: next ? Math.max(0, next.sundays - worked.sundays) : 0,
+    lastUpdated: new Date().toISOString().slice(0, 10),
   })
 })
-
-// Month-end settlement: for each worker who met a Shakti tier that month (jobs + rating),
-// publish a shakti.bonus event; the wallet service credits it idempotently (once per month).
-async function settleShaktiForMonth(y, m) {
-  const monthStr = `${y}-${String(m + 1).padStart(2, '0')}`
-  const start = new Date(y, m, 1), end = new Date(y, m + 1, 1)
-  const { rows: workers } = await pool.query('SELECT id, rating FROM workers')
-  let paid = 0
-  for (const w of workers) {
-    const rating = Number(w.rating || 0)
-    if (rating < SHAKTI_RATING) continue
-    const { currentIdx } = await computeShakti(w.id, rating, start, end)
-    if (currentIdx < 0) continue
-    const tier = SHAKTI[currentIdx]
-    publishEvent(REDIS_URL, 'shakti.bonus', { workerId: w.id, amount: tier.amount, tier: tier.name, month: monthStr })
-    paid++
-  }
-  console.log(`[worker] shakti settlement ${monthStr}: ${paid} worker(s) qualified`)
-  return { month: monthStr, qualified: paid }
-}
-
-// Manual trigger (admin/testing). Body { month:'YYYY-MM' } — defaults to the current month.
-app.post('/internal/shakti/settle', internalOnly, async (req, res) => {
-  let y, m
-  const mth = req.body?.month
-  if (mth && /^\d{4}-\d{2}$/.test(mth)) { const [yy, mm] = mth.split('-').map(Number); y = yy; m = mm - 1 }
-  else { const n = new Date(); y = n.getFullYear(); m = n.getMonth() }
-  res.json({ ok: true, ...(await settleShaftiSafe(y, m)) })
-})
-const settleShaftiSafe = (y, m) => settleShaktiForMonth(y, m).catch((e) => { console.error('[worker] shakti settle error:', e.message); return { error: e.message } })
 
 app.put('/api/worker/preferences', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { preferences: req.body || {} }))))
 app.put('/api/worker/notifications', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { notifications: req.body || {} }))))
@@ -1943,31 +1914,40 @@ const planDto = (p) => p && ({
   paysMonthly: MONTHLY_TYPES.includes(p.salary_type),
 })
 
-const incentiveDto = (p) => p && ({
-  id: p.id, name: p.name, notes: p.notes || '', active: p.active, sort: p.sort,
-  perJobAmount: p.per_job_amount || 0,
-  attendanceBonusAmount: p.attendance_bonus_amount || 0,
-  attendanceMinPct: p.attendance_min_pct,
-  qualityBonusAmount: p.quality_bonus_amount || 0,
-  qualityMinRating: p.quality_min_rating,
-  peakHourAmount: p.peak_hour_amount || 0,
-  referralAmount: p.referral_amount || 0,
-  festivalAmount: p.festival_amount || 0,
-  estIncentiveMin: p.est_incentive_min || 0,
-  estIncentiveMax: p.est_incentive_max || 0,
-  // All six components. `auto` = paid by the system (per-job on completion, attendance & quality by
-  // payroll); the rest the admin pays with the manual-bonus action, so the plan documents the
-  // intent without pretending a trigger exists. `on` = this plan has an amount for it.
-  components: [
-    { key: 'per_job', label: 'Per Job Incentive', auto: true, on: p.per_job_amount > 0, detail: `₹${p.per_job_amount} per completed job` },
-    { key: 'attendance', label: 'Attendance Bonus', auto: true, on: p.attendance_bonus_amount > 0, detail: `₹${p.attendance_bonus_amount}/month at ${p.attendance_min_pct}%+ attendance` },
-    { key: 'quality', label: 'Quality Bonus', auto: true, on: p.quality_bonus_amount > 0, detail: `₹${p.quality_bonus_amount}/month at ${p.quality_min_rating}★ or better` },
-    { key: 'peak_hour', label: 'Peak Hour Incentive', auto: false, on: p.peak_hour_amount > 0, detail: `₹${p.peak_hour_amount} — paid manually` },
-    { key: 'referral', label: 'Referral Bonus', auto: false, on: p.referral_amount > 0, detail: `₹${p.referral_amount} — paid manually` },
-    { key: 'festival', label: 'Festival Bonus', auto: false, on: p.festival_amount > 0, detail: `₹${p.festival_amount} — paid manually` },
-  ],
-  workers: p.workers ?? undefined,
-})
+const tierRows = (p) => Array.isArray(p?.attendance_tiers) ? p.attendance_tiers : []
+const tierSummary = (tiers) => tiers.length
+  ? tiers.map((t) => `${t.label} ₹${t.amount} (${t.days}d${t.sundays ? `, ${t.sundays} Sun` : ''})`).join(', ')
+  : ''
+
+const incentiveDto = (p) => {
+  if (!p) return p
+  const tiers = tierRows(p)
+  return {
+    id: p.id, name: p.name, notes: p.notes || '', active: p.active, sort: p.sort,
+    perJobAmount: p.per_job_amount || 0,
+    qualityBonusAmount: p.quality_bonus_amount || 0,
+    qualityMinRating: p.quality_min_rating,
+    // Sitara/Shakti attendance tiers.
+    attendanceTiers: tiers,
+    tierMinRating: p.tier_min_rating ?? 4.5,
+    peakHourAmount: p.peak_hour_amount || 0,
+    referralAmount: p.referral_amount || 0,
+    festivalAmount: p.festival_amount || 0,
+    estIncentiveMin: p.est_incentive_min || 0,
+    estIncentiveMax: p.est_incentive_max || 0,
+    // `auto` = paid by the system (per-job on completion, tiers & quality by payroll); the rest the
+    // admin pays with the manual-bonus action. `on` = this plan funds it.
+    components: [
+      { key: 'per_job', label: 'Per Job Incentive', auto: true, on: p.per_job_amount > 0, detail: `₹${p.per_job_amount} per completed job` },
+      { key: 'tiers', label: 'Attendance Bonus', auto: true, on: tiers.length > 0, detail: tiers.length ? `Tiered — ${tierSummary(tiers)}, rating ${p.tier_min_rating ?? 4.5}★+` : 'No tiers set' },
+      { key: 'quality', label: 'Quality Bonus', auto: true, on: p.quality_bonus_amount > 0, detail: `₹${p.quality_bonus_amount}/month at ${p.quality_min_rating}★+ with a completed job` },
+      { key: 'peak_hour', label: 'Peak Hour Incentive', auto: false, on: p.peak_hour_amount > 0, detail: `₹${p.peak_hour_amount} — paid manually` },
+      { key: 'referral', label: 'Referral Bonus', auto: false, on: p.referral_amount > 0, detail: `₹${p.referral_amount} — paid manually` },
+      { key: 'festival', label: 'Festival Bonus', auto: false, on: p.festival_amount > 0, detail: `₹${p.festival_amount} — paid manually` },
+    ],
+    workers: p.workers ?? undefined,
+  }
+}
 
 app.get('/api/admin/salary-plans', adminAuth, async (_q, res) => {
   const { rows } = await pool.query(
@@ -2101,28 +2081,45 @@ function readIncentive(b) {
   if (!name) return { error: 'Name required' }
   const n = (v, d = 0) => (v === '' || v === null || v === undefined ? d : Number(v))
   const perJob = n(b?.perJobAmount)
-  const attAmt = n(b?.attendanceBonusAmount)
-  const attPct = n(b?.attendanceMinPct, 95)
   const qualAmt = n(b?.qualityBonusAmount)
   const qualMin = n(b?.qualityMinRating, 4.5)
+  const tierMin = n(b?.tierMinRating, 4.5)
   const peak = n(b?.peakHourAmount)
   const referral = n(b?.referralAmount)
   const festival = n(b?.festivalAmount)
   const estMin = n(b?.estIncentiveMin)
   const estMax = n(b?.estIncentiveMax)
-  for (const [v, label] of [[perJob, 'Per job incentive'], [attAmt, 'Attendance bonus'], [qualAmt, 'Quality bonus'],
+  for (const [v, label] of [[perJob, 'Per job incentive'], [qualAmt, 'Quality bonus'],
     [peak, 'Peak hour incentive'], [referral, 'Referral bonus'], [festival, 'Festival bonus'], [estMin, 'Estimate (min)'], [estMax, 'Estimate (max)']]) {
     if (!Number.isInteger(v) || v < 0 || v > 1_000_000) return { error: `${label} must be a whole rupee amount (0 to switch it off)` }
   }
-  if (!Number.isInteger(attPct) || attPct < 1 || attPct > 100) return { error: 'Attendance threshold must be between 1 and 100%' }
   if (!(qualMin >= 1 && qualMin <= 5)) return { error: 'Quality threshold must be a rating between 1 and 5' }
+  if (!(tierMin >= 1 && tierMin <= 5)) return { error: 'Tier rating threshold must be between 1 and 5' }
   if (estMax > 0 && estMax < estMin) return { error: 'The estimate maximum cannot be below the minimum' }
-  // A plan with every component off pays nothing — assigning it would look like a decision and do
-  // nothing at all.
-  if (perJob === 0 && attAmt === 0 && qualAmt === 0 && peak === 0 && referral === 0 && festival === 0) {
-    return { error: 'Set at least one component above 0 — a plan with nothing switched on pays nothing' }
+
+  // Attendance tiers. Each { label, days, sundays, amount }. Ordered by the amount they pay so the
+  // "highest tier reached" is unambiguous — a worker who clears several gets the best one.
+  const rawTiers = Array.isArray(b?.attendanceTiers) ? b.attendanceTiers : []
+  const tiers = []
+  for (const t of rawTiers) {
+    const label = String(t?.label || '').trim().slice(0, 30)
+    const days = n(t?.days)
+    const sundays = n(t?.sundays)
+    const amount = n(t?.amount)
+    if (!label) return { error: 'Each attendance tier needs a name' }
+    if (!Number.isInteger(days) || days < 1 || days > 31) return { error: `${label}: days must be between 1 and 31` }
+    if (!Number.isInteger(sundays) || sundays < 0 || sundays > 5) return { error: `${label}: Sundays must be between 0 and 5` }
+    if (!Number.isInteger(amount) || amount < 1 || amount > 1_000_000) return { error: `${label}: amount must be a whole rupee value` }
+    tiers.push({ label, days, sundays, amount })
   }
-  return { name, perJob, attAmt, attPct, qualAmt, qualMin, peak, referral, festival, estMin, estMax, notes: String(b?.notes || '').trim().slice(0, 200) }
+  tiers.sort((a, c) => a.amount - c.amount)
+
+  // A plan with nothing switched on pays nothing — assigning it would look like a decision and do
+  // nothing at all.
+  if (perJob === 0 && qualAmt === 0 && peak === 0 && referral === 0 && festival === 0 && tiers.length === 0) {
+    return { error: 'Set at least one component — a plan with nothing switched on pays nothing' }
+  }
+  return { name, perJob, qualAmt, qualMin, tiers, tierMin, peak, referral, festival, estMin, estMax, notes: String(b?.notes || '').trim().slice(0, 200) }
 }
 
 app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
@@ -2131,10 +2128,11 @@ app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
   const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM incentive_plans')).rows[0].n
   try {
     const r = await pool.query(
-      `INSERT INTO incentive_plans (name, per_job_amount, attendance_bonus_amount, attendance_min_pct, quality_bonus_amount, quality_min_rating,
+      `INSERT INTO incentive_plans (name, per_job_amount, quality_bonus_amount, quality_min_rating,
+                                    attendance_tiers, tier_min_rating,
                                     peak_hour_amount, referral_amount, festival_amount, est_incentive_min, est_incentive_max, notes, sort)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.peak, v.referral, v.festival, v.estMin, v.estMax, v.notes, sort])
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [v.name, v.perJob, v.qualAmt, v.qualMin, JSON.stringify(v.tiers), v.tierMin, v.peak, v.referral, v.festival, v.estMin, v.estMax, v.notes, sort])
     const who = req.admin?.name || req.admin?.email || 'Admin'
     publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'incentiveplan.create', entityType: 'incentive_plan', entityId: r.rows[0].id, detail: `Created incentive plan ${v.name}` })
     res.status(201).json({ ok: true, plan: incentiveDto(r.rows[0]) })
@@ -2155,10 +2153,10 @@ app.patch('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
   const v = readIncentive({
     name: req.body?.name ?? cur.name,
     perJobAmount: req.body?.perJobAmount ?? cur.per_job_amount,
-    attendanceBonusAmount: req.body?.attendanceBonusAmount ?? cur.attendance_bonus_amount,
-    attendanceMinPct: req.body?.attendanceMinPct ?? cur.attendance_min_pct,
     qualityBonusAmount: req.body?.qualityBonusAmount ?? cur.quality_bonus_amount,
     qualityMinRating: req.body?.qualityMinRating ?? cur.quality_min_rating,
+    attendanceTiers: req.body?.attendanceTiers ?? cur.attendance_tiers,
+    tierMinRating: req.body?.tierMinRating ?? cur.tier_min_rating,
     peakHourAmount: req.body?.peakHourAmount ?? cur.peak_hour_amount,
     referralAmount: req.body?.referralAmount ?? cur.referral_amount,
     festivalAmount: req.body?.festivalAmount ?? cur.festival_amount,
@@ -2168,10 +2166,10 @@ app.patch('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
   })
   if (v.error) return res.status(400).json({ error: v.error })
   const r = await pool.query(
-    `UPDATE incentive_plans SET name=$1, per_job_amount=$2, attendance_bonus_amount=$3, attendance_min_pct=$4,
-       quality_bonus_amount=$5, quality_min_rating=$6, peak_hour_amount=$7, referral_amount=$8, festival_amount=$9,
+    `UPDATE incentive_plans SET name=$1, per_job_amount=$2, quality_bonus_amount=$3, quality_min_rating=$4,
+       attendance_tiers=$5::jsonb, tier_min_rating=$6, peak_hour_amount=$7, referral_amount=$8, festival_amount=$9,
        est_incentive_min=$10, est_incentive_max=$11, notes=$12, active=$13 WHERE id=$14 RETURNING *`,
-    [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.peak, v.referral, v.festival, v.estMin, v.estMax, v.notes,
+    [v.name, v.perJob, v.qualAmt, v.qualMin, JSON.stringify(v.tiers), v.tierMin, v.peak, v.referral, v.festival, v.estMin, v.estMax, v.notes,
       req.body?.active !== undefined ? !!req.body.active : cur.active, id])
   res.json({ ok: true, plan: incentiveDto(r.rows[0]) })
 })
@@ -2208,6 +2206,33 @@ async function attendanceForMonth(w, month) {
   return { scheduled, present, pct: scheduled ? Math.round((present / scheduled) * 100) : 0 }
 }
 
+/**
+ * Working (checked-in) days and Sundays worked in a month, for the attendance-tier bonus.
+ * Absolute counts — a tier is "≥ N days", the Shakti model folded in from the old scheduler.
+ */
+async function workedDaysInMonth(workerId, month) {
+  const days = (await pool.query(
+    `SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND to_char(day,'YYYY-MM')=$2`,
+    [workerId, month])).rows[0].n
+  const sundays = (await pool.query(
+    `SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND to_char(day,'YYYY-MM')=$2 AND EXTRACT(DOW FROM day)=0`,
+    [workerId, month])).rows[0].n
+  return { days, sundays }
+}
+
+/**
+ * The highest attendance tier a worker reached this month, or null.
+ * tiers are pre-sorted ascending by amount; a tier is reached when the worker has enough working
+ * days AND enough Sundays AND their rating clears the gate.
+ */
+function reachedTier(tiers, minRating, worked, rating) {
+  let best = null
+  for (const t of tiers) {
+    if (worked.days >= t.days && worked.sundays >= (t.sundays || 0) && rating >= minRating) best = t
+  }
+  return best
+}
+
 /** Jobs this worker actually completed in a month — used to gate the quality bonus on activity. */
 async function completedJobsInMonth(workerId, month) {
   const bookings = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${workerId}&status=completed`, [])
@@ -2242,11 +2267,13 @@ async function payrollLine(w, month) {
   const incentives = []
 
   const inc = await incentivePlanFor(w)
-  if (inc?.attendance_bonus_amount > 0) {
-    const att = await attendanceForMonth(w, month)
-    if (att.pct >= inc.attendance_min_pct) {
-      incentives.push({ label: `Attendance Bonus (${att.pct}%)`, amount: inc.attendance_bonus_amount })
-    }
+  // Attendance tier bonus (Sitara/Shakti, folded in). The worker earns the single highest tier they
+  // reach — tiers don't stack.
+  const tiers = tierRows(inc)
+  if (tiers.length > 0) {
+    const worked = await workedDaysInMonth(w.id, month)
+    const tier = reachedTier(tiers, inc.tier_min_rating ?? 4.5, worked, w.rating || 0)
+    if (tier) incentives.push({ label: `${tier.label} Attendance Bonus (${worked.days} days)`, amount: tier.amount })
   }
   // Quality bonus: a high rating AND at least one job completed this month. The rating alone is a
   // lifetime figure, so without the activity gate a worker would collect it every month — even one
@@ -2329,7 +2356,7 @@ app.get('/api/admin/payroll', adminAuth, async (_q, res) => {
   const onMonthly = (await pool.query(
     `SELECT COUNT(*)::int n FROM workers w WHERE w.status='active' AND (
        EXISTS (SELECT 1 FROM salary_plans p WHERE p.id=w.salary_plan_id AND p.salary_type = ANY($1))
-       OR EXISTS (SELECT 1 FROM incentive_plans i WHERE i.id=w.incentive_plan_id AND (i.attendance_bonus_amount > 0 OR i.quality_bonus_amount > 0))
+       OR EXISTS (SELECT 1 FROM incentive_plans i WHERE i.id=w.incentive_plan_id AND (jsonb_array_length(i.attendance_tiers) > 0 OR i.quality_bonus_amount > 0))
      )`, [MONTHLY_TYPES])).rows[0].n
   res.json({
     ok: true, workersOnMonthlySalary: onMonthly,
@@ -3858,19 +3885,6 @@ subscribeEvents(REDIS_URL, 'worker', async (type, data) => {
   if (type === 'bank.verify.failed') return applyBankVerification(data.workerId, false, data)
 })
 
-// Auto-settle Shakti bonuses at the start of each month (pays out the PREVIOUS month).
-// Runs daily but only acts on the 1st–2nd; the wallet credit is idempotent per worker/month.
-function scheduleShaktiSettlement() {
-  const tick = () => {
-    const now = new Date()
-    if (now.getDate() <= 2) {
-      const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      settleShaftiSafe(prev.getFullYear(), prev.getMonth())
-    }
-  }
-  setInterval(tick, 24 * 3600 * 1000) // once a day
-  setTimeout(tick, 15000) // and shortly after boot (catches a missed run)
-}
 
 // Daily snapshot of each active worker's metrics, so the Worker Details KPI tiles can show a
 // real period-over-period trend (▲/▼) instead of a faked delta. One row per worker per day.
@@ -3906,7 +3920,6 @@ init()
     await ensureBucket().catch((e) => console.error('[worker] storage init failed:', e.message))
     await ensurePublicBucket().catch((e) => console.error('[worker] public storage init failed:', e.message))
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
-    scheduleShaktiSettlement()
     scheduleMetricSnapshots()
   })
   .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) });

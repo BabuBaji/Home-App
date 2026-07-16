@@ -78,20 +78,27 @@ credit = ONTIME_INCENTIVE   (env, default ₹15)
   `START_WINDOW_MIN` (default 15 minutes) of accepting.
 - **ref_id:** `ontime-{bookingId}`. Category `Incentive`.
 
-### 4. Attendance bonus — *payroll, monthly*
+### 4. Attendance bonus — tiered (Sitara) — *payroll, monthly*
+
+Tiers live on the incentive plan (`attendance_tiers`: `[{ label, days, sundays,
+amount }]`, ascending by amount). The worker earns the **single highest tier they
+reach** — tiers do not stack.
 
 ```
-attendance% = round( present_days / scheduled_days × 100 )
-credit      = incentive_plan.attendance_bonus_amount   (if attendance% ≥ attendance_min_pct)
+worked_days    = distinct days that month with a check-in
+worked_sundays = of those, how many were Sundays
+tier is reached when:  worked_days ≥ tier.days
+                  AND  worked_sundays ≥ tier.sundays
+                  AND  rating ≥ tier_min_rating
+credit = highest reached tier's amount
 ```
 
-- **scheduled_days** = the working days in the month, from the worker's
-  availability (`availableDays`, Mon–Sun). A day the worker marked off is not
-  scheduled.
-- **present_days** = distinct days that month with a check-in.
 - **Who:** any worker on an incentive plan (per-job included).
-- If the worker has **no availability set**, `scheduled = 0` → attendance% = 0 →
-  no bonus (it cannot be measured).
+- Absolute working days, not a percentage. Example (the Shakti defaults): Bronze
+  ₹3,500 @ 25 days, Silver ₹4,500 @ 27 days, Gold ₹5,500 @ 28 days + 4 Sundays.
+- A worker with 28 days but only 2 Sundays gets **Silver**, not Gold.
+- This folds in the former standalone Shakti/Sitara scheduler — there is no
+  longer a separate monthly cron; payroll is the single place it is paid.
 
 ### 5. Quality bonus — *payroll, monthly*
 
@@ -128,11 +135,6 @@ salary = basic + attendance_allowance + other_allowance
 incentive plan but have **no automatic trigger**. The admin pays them by hand with
 the Add Bonus action. They never post themselves.
 
-### Shakti / Sitara tier bonus — *separate legacy system*
-
-A monthly attendance-tier bonus, independent of incentive plans: Bronze ₹3,500
-(≥25 days), Silver ₹4,500 (≥27 days), Gold ₹5,500 (≥28 days + 4 Sundays), all
-requiring rating ≥ 4.5. Idempotent per worker per month. Configured by env vars.
 
 ---
 

@@ -1,25 +1,36 @@
 import { useEffect, useState } from 'react'
 import { Gift, Users, Plus, Pencil, Trash2, Eye, EyeOff, CheckCircle2 } from 'lucide-react'
 import { fetchIncentivePlans, createIncentivePlan, updateIncentivePlan, deleteIncentivePlan } from '../api'
-import type { IncentivePlan } from '../types'
+import type { IncentivePlan, AttendanceTier } from '../types'
 import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
 
-/* Incentive plans — three components, each a rule with a threshold the admin sets. None is a named
- * policy that does nothing: per-job fires on the booking that credits earnings, attendance and
- * quality are computed by the payroll run from real attendance and real ratings.
+/* Incentive plans — each component a rule the admin sets. None is a named policy that does nothing:
+ * per-job fires on the booking that credits earnings; the attendance tiers (Sitara/Shakti, folded
+ * in) and quality bonus are computed by the payroll run from real attendance and real ratings.
  *
- * Referral, Peak Hour and Festival bonuses are deliberately absent — each needs a trigger that
- * doesn't exist, and a component that never fires is worse than one that isn't offered.
+ * Referral, Peak Hour and Festival bonuses are recorded but paid manually — no automatic trigger
+ * exists for them.
  */
 
+// Days each tier needs. Ordered ascending; the worker earns the highest they reach.
+type TierRow = { label: string; days: string; sundays: string; amount: string }
+const SHAKTI_DEFAULTS: TierRow[] = [
+  { label: 'Bronze', days: '25', sundays: '0', amount: '3500' },
+  { label: 'Silver', days: '27', sundays: '0', amount: '4500' },
+  { label: 'Gold', days: '28', sundays: '4', amount: '5500' },
+]
+const inp: React.CSSProperties = { width: '100%', border: '1px solid var(--line,#e5e7eb)', borderRadius: 8, padding: '7px 9px', fontSize: 13 }
+
 type Draft = {
-  name: string; perJobAmount: string; attendanceBonusAmount: string; attendanceMinPct: string
+  name: string; perJobAmount: string
   qualityBonusAmount: string; qualityMinRating: string
+  tiers: TierRow[]; tierMinRating: string
   peakHourAmount: string; referralAmount: string; festivalAmount: string
   estIncentiveMin: string; estIncentiveMax: string; notes: string
 }
 const EMPTY: Draft = {
-  name: '', perJobAmount: '', attendanceBonusAmount: '', attendanceMinPct: '95', qualityBonusAmount: '', qualityMinRating: '4.5',
+  name: '', perJobAmount: '', qualityBonusAmount: '', qualityMinRating: '4.5',
+  tiers: [], tierMinRating: '4.5',
   peakHourAmount: '', referralAmount: '', festivalAmount: '', estIncentiveMin: '', estIncentiveMax: '', notes: '',
 }
 
@@ -44,13 +55,17 @@ export default function IncentivePlans() {
   const num = (v: string) => (v === '' ? 0 : Number(v))
   const save = async () => {
     if (!draft.name.trim()) { toast('Name required', 'err'); return }
+    // Only rows the admin actually filled in (a name and an amount) become tiers.
+    const tiers: AttendanceTier[] = draft.tiers
+      .filter((t) => t.label.trim() && Number(t.amount) > 0)
+      .map((t) => ({ label: t.label.trim(), days: num(t.days), sundays: num(t.sundays), amount: num(t.amount) }))
     const body = {
       name: draft.name.trim(),
       perJobAmount: num(draft.perJobAmount),
-      attendanceBonusAmount: num(draft.attendanceBonusAmount),
-      attendanceMinPct: num(draft.attendanceMinPct),
       qualityBonusAmount: num(draft.qualityBonusAmount),
       qualityMinRating: num(draft.qualityMinRating),
+      attendanceTiers: tiers,
+      tierMinRating: num(draft.tierMinRating),
       peakHourAmount: num(draft.peakHourAmount),
       referralAmount: num(draft.referralAmount),
       festivalAmount: num(draft.festivalAmount),
@@ -76,8 +91,10 @@ export default function IncentivePlans() {
       setEditing(p)
       const str = (n: number) => (n ? String(n) : '')
       setDraft({
-        name: p.name, perJobAmount: str(p.perJobAmount), attendanceBonusAmount: str(p.attendanceBonusAmount), attendanceMinPct: String(p.attendanceMinPct),
+        name: p.name, perJobAmount: str(p.perJobAmount),
         qualityBonusAmount: str(p.qualityBonusAmount), qualityMinRating: String(p.qualityMinRating),
+        tiers: (p.attendanceTiers || []).map((t) => ({ label: t.label, days: String(t.days), sundays: String(t.sundays), amount: String(t.amount) })),
+        tierMinRating: String(p.tierMinRating ?? 4.5),
         peakHourAmount: str(p.peakHourAmount), referralAmount: str(p.referralAmount), festivalAmount: str(p.festivalAmount),
         estIncentiveMin: str(p.estIncentiveMin), estIncentiveMax: str(p.estIncentiveMax), notes: p.notes,
       }); setModal('edit')
@@ -157,12 +174,43 @@ export default function IncentivePlans() {
               <Field label="₹ per job"><input value={draft.perJobAmount} onChange={(e) => setDraft({ ...draft, perJobAmount: e.target.value.replace(/\D/g, '').slice(0, 5) })} placeholder="0" /></Field>
             </div>
             <div style={{ padding: 10, borderRadius: 10, border: '1px solid var(--line,#e5e7eb)' }}>
-              <strong style={{ fontSize: 13 }}>Attendance Bonus</strong>
-              <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>Paid monthly by payroll if the worker's attendance meets the threshold.</div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <Field label="₹ / month"><input value={draft.attendanceBonusAmount} onChange={(e) => setDraft({ ...draft, attendanceBonusAmount: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="0" /></Field>
-                <Field label="Minimum attendance %"><input value={draft.attendanceMinPct} onChange={(e) => setDraft({ ...draft, attendanceMinPct: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="95" /></Field>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: 13 }}>Attendance Bonus (Sitara tiers)</strong>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {draft.tiers.length === 0 && (
+                    <button className="btn line" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => setDraft({ ...draft, tiers: SHAKTI_DEFAULTS.map((t) => ({ ...t })) })}>Use Bronze/Silver/Gold</button>
+                  )}
+                  <button className="btn line" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => setDraft({ ...draft, tiers: [...draft.tiers, { label: '', days: '', sundays: '0', amount: '' }] })}>+ Tier</button>
+                </div>
               </div>
+              <div className="muted" style={{ fontSize: 11.5, margin: '4px 0 8px' }}>
+                Paid monthly by payroll — the worker earns the highest tier they reach that month by working days.
+                Higher tiers can also require Sundays.
+              </div>
+              {draft.tiers.length === 0
+                ? <div className="muted" style={{ fontSize: 12 }}>No tiers. Add one, or start from the Bronze/Silver/Gold defaults.</div>
+                : (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1.2fr 28px', gap: 8, fontSize: 11, color: 'var(--muted,#667085)' }}>
+                      <span>Tier name</span><span>Working days</span><span>Sundays</span><span>₹ / month</span><span></span>
+                    </div>
+                    {draft.tiers.map((t, i) => {
+                      const upd = (patch: Partial<TierRow>) => { const rows = [...draft.tiers]; rows[i] = { ...rows[i], ...patch }; setDraft({ ...draft, tiers: rows }) }
+                      return (
+                        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1.2fr 28px', gap: 8, alignItems: 'center' }}>
+                          <input value={t.label} onChange={(e) => upd({ label: e.target.value })} placeholder="Bronze" style={inp} />
+                          <input value={t.days} onChange={(e) => upd({ days: e.target.value.replace(/\D/g, '').slice(0, 2) })} placeholder="25" style={inp} />
+                          <input value={t.sundays} onChange={(e) => upd({ sundays: e.target.value.replace(/\D/g, '').slice(0, 1) })} placeholder="0" style={inp} />
+                          <input value={t.amount} onChange={(e) => upd({ amount: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="3500" style={inp} />
+                          <button className="iconbtn" title="Remove tier" onClick={() => setDraft({ ...draft, tiers: draft.tiers.filter((_, j) => j !== i) })}><Trash2 size={15} /></button>
+                        </div>
+                      )
+                    })}
+                    <Field label="Minimum rating for any tier (1–5)">
+                      <input value={draft.tierMinRating} onChange={(e) => setDraft({ ...draft, tierMinRating: e.target.value.replace(/[^\d.]/g, '').slice(0, 3) })} placeholder="4.5" style={{ maxWidth: 100 }} />
+                    </Field>
+                  </div>
+                )}
             </div>
             <div style={{ padding: 10, borderRadius: 10, border: '1px solid var(--line,#e5e7eb)' }}>
               <strong style={{ fontSize: 13 }}>Quality Bonus</strong>

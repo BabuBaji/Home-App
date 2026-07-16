@@ -218,11 +218,13 @@ export interface SalaryPlan {
   workers?: number
 }
 export interface IncentiveComponent { key: string; label: string; detail: string; auto: boolean; on: boolean }
+export interface AttendanceTier { label: string; days: number; sundays: number; amount: number }
 export interface IncentivePlan {
   id: number; name: string; notes: string; active: boolean; sort: number
   perJobAmount: number
-  attendanceBonusAmount: number; attendanceMinPct: number
   qualityBonusAmount: number; qualityMinRating: number
+  /** Sitara/Shakti attendance tiers, folded in. Worker earns the highest they reach that month. */
+  attendanceTiers: AttendanceTier[]; tierMinRating: number
   /** Paid by the admin's manual-bonus action — no automated trigger exists for these. */
   peakHourAmount: number; referralAmount: number; festivalAmount: number
   /** The admin's own estimate of typical monthly incentives, shown as a range. 0 = not set. */
