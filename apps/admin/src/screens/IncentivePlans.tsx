@@ -12,8 +12,16 @@ import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, useToast, use
  * doesn't exist, and a component that never fires is worse than one that isn't offered.
  */
 
-type Draft = { name: string; perJobAmount: string; attendanceBonusAmount: string; attendanceMinPct: string; qualityBonusAmount: string; qualityMinRating: string; notes: string }
-const EMPTY: Draft = { name: '', perJobAmount: '', attendanceBonusAmount: '', attendanceMinPct: '95', qualityBonusAmount: '', qualityMinRating: '4.5', notes: '' }
+type Draft = {
+  name: string; perJobAmount: string; attendanceBonusAmount: string; attendanceMinPct: string
+  qualityBonusAmount: string; qualityMinRating: string
+  peakHourAmount: string; referralAmount: string; festivalAmount: string
+  estIncentiveMin: string; estIncentiveMax: string; notes: string
+}
+const EMPTY: Draft = {
+  name: '', perJobAmount: '', attendanceBonusAmount: '', attendanceMinPct: '95', qualityBonusAmount: '', qualityMinRating: '4.5',
+  peakHourAmount: '', referralAmount: '', festivalAmount: '', estIncentiveMin: '', estIncentiveMax: '', notes: '',
+}
 
 export default function IncentivePlans() {
   const toast = useToast()
@@ -43,6 +51,11 @@ export default function IncentivePlans() {
       attendanceMinPct: num(draft.attendanceMinPct),
       qualityBonusAmount: num(draft.qualityBonusAmount),
       qualityMinRating: num(draft.qualityMinRating),
+      peakHourAmount: num(draft.peakHourAmount),
+      referralAmount: num(draft.referralAmount),
+      festivalAmount: num(draft.festivalAmount),
+      estIncentiveMin: num(draft.estIncentiveMin),
+      estIncentiveMax: num(draft.estIncentiveMax),
       notes: draft.notes,
     }
     setSaving(true)
@@ -59,7 +72,16 @@ export default function IncentivePlans() {
   }
 
   const open = (p?: IncentivePlan) => {
-    if (p) { setEditing(p); setDraft({ name: p.name, perJobAmount: p.perJobAmount ? String(p.perJobAmount) : '', attendanceBonusAmount: p.attendanceBonusAmount ? String(p.attendanceBonusAmount) : '', attendanceMinPct: String(p.attendanceMinPct), qualityBonusAmount: p.qualityBonusAmount ? String(p.qualityBonusAmount) : '', qualityMinRating: String(p.qualityMinRating), notes: p.notes }); setModal('edit') }
+    if (p) {
+      setEditing(p)
+      const str = (n: number) => (n ? String(n) : '')
+      setDraft({
+        name: p.name, perJobAmount: str(p.perJobAmount), attendanceBonusAmount: str(p.attendanceBonusAmount), attendanceMinPct: String(p.attendanceMinPct),
+        qualityBonusAmount: str(p.qualityBonusAmount), qualityMinRating: String(p.qualityMinRating),
+        peakHourAmount: str(p.peakHourAmount), referralAmount: str(p.referralAmount), festivalAmount: str(p.festivalAmount),
+        estIncentiveMin: str(p.estIncentiveMin), estIncentiveMax: str(p.estIncentiveMax), notes: p.notes,
+      }); setModal('edit')
+    }
     else { setEditing(null); setDraft(EMPTY); setModal('add') }
   }
 
@@ -149,6 +171,26 @@ export default function IncentivePlans() {
                 <Field label="₹ / month"><input value={draft.qualityBonusAmount} onChange={(e) => setDraft({ ...draft, qualityBonusAmount: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="0" /></Field>
                 <Field label="Minimum rating (1–5)"><input value={draft.qualityMinRating} onChange={(e) => setDraft({ ...draft, qualityMinRating: e.target.value.replace(/[^\d.]/g, '').slice(0, 3) })} placeholder="4.5" /></Field>
               </div>
+            </div>
+
+            {/* Paid manually — no automated trigger exists (peak-hour windows, a referral graph, a
+                festival calendar). The plan records the amount; the admin pays it with Add Bonus. */}
+            <div style={{ padding: 10, borderRadius: 10, border: '1px dashed var(--line,#cbd5e1)', background: '#fafbfc' }}>
+              <strong style={{ fontSize: 13 }}>Paid manually <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>— recorded on the plan; you pay these with Add Bonus</span></strong>
+              <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                <Field label="Peak Hour ₹"><input value={draft.peakHourAmount} onChange={(e) => setDraft({ ...draft, peakHourAmount: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="0" /></Field>
+                <Field label="Referral ₹"><input value={draft.referralAmount} onChange={(e) => setDraft({ ...draft, referralAmount: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="0" /></Field>
+                <Field label="Festival ₹"><input value={draft.festivalAmount} onChange={(e) => setDraft({ ...draft, festivalAmount: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="0" /></Field>
+              </div>
+            </div>
+
+            <div style={{ padding: 10, borderRadius: 10, border: '1px solid var(--line,#e5e7eb)' }}>
+              <strong style={{ fontSize: 13 }}>Estimated monthly incentive <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>— your estimate, shown as a range on the summary</span></strong>
+              <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                <Field label="From ₹"><input value={draft.estIncentiveMin} onChange={(e) => setDraft({ ...draft, estIncentiveMin: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="2000" /></Field>
+                <Field label="To ₹"><input value={draft.estIncentiveMax} onChange={(e) => setDraft({ ...draft, estIncentiveMax: e.target.value.replace(/\D/g, '').slice(0, 6) })} placeholder="3000" /></Field>
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Leave blank to hide the estimate — a worker's actual incentives always show once they're earning.</div>
             </div>
           </div>
           <Field label="Notes (optional)"><input value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field>

@@ -214,6 +214,18 @@ async function init() {
       active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    /* The three components without an automated trigger. They're recorded on the plan as amounts and
+     * the admin pays them with the existing manual-bonus action (peak-hour windows, a referral graph
+     * and a festival calendar don't exist to fire them automatically). Marked 'manual' in the DTO so
+     * the panel shows WHICH pay by themselves and which the admin must action. */
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS peak_hour_amount INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS referral_amount INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS festival_amount INTEGER NOT NULL DEFAULT 0`,
+    /* The admin's own estimate of typical monthly incentives, shown as the "Average Incentive (Est.)"
+     * range. Admin-set, not computed by us — a new worker has no history to average, so any number
+     * WE produced would be invented. Blank hides the estimate lines. */
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS est_incentive_min INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE incentive_plans ADD COLUMN IF NOT EXISTS est_incentive_max INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS incentive_plan_id INTEGER REFERENCES incentive_plans(id) ON DELETE SET NULL`,
     // When this salary arrangement starts. A payroll run skips a worker whose salary starts after
     // the month it's paying for, so back-dating a hire doesn't silently pay them for months they
@@ -1911,12 +1923,22 @@ const incentiveDto = (p) => p && ({
   attendanceMinPct: p.attendance_min_pct,
   qualityBonusAmount: p.quality_bonus_amount || 0,
   qualityMinRating: p.quality_min_rating,
-  // What's actually switched on, so the UI lists real components instead of a fixed menu.
+  peakHourAmount: p.peak_hour_amount || 0,
+  referralAmount: p.referral_amount || 0,
+  festivalAmount: p.festival_amount || 0,
+  estIncentiveMin: p.est_incentive_min || 0,
+  estIncentiveMax: p.est_incentive_max || 0,
+  // All six components. `auto` = paid by the system (per-job on completion, attendance & quality by
+  // payroll); the rest the admin pays with the manual-bonus action, so the plan documents the
+  // intent without pretending a trigger exists. `on` = this plan has an amount for it.
   components: [
-    p.per_job_amount > 0 && { key: 'per_job', label: 'Per Job Incentive', detail: `₹${p.per_job_amount} per completed job` },
-    p.attendance_bonus_amount > 0 && { key: 'attendance', label: 'Attendance Bonus', detail: `₹${p.attendance_bonus_amount}/month at ${p.attendance_min_pct}%+ attendance` },
-    p.quality_bonus_amount > 0 && { key: 'quality', label: 'Quality Bonus', detail: `₹${p.quality_bonus_amount}/month at ${p.quality_min_rating}★ or better` },
-  ].filter(Boolean),
+    { key: 'per_job', label: 'Per Job Incentive', auto: true, on: p.per_job_amount > 0, detail: `₹${p.per_job_amount} per completed job` },
+    { key: 'attendance', label: 'Attendance Bonus', auto: true, on: p.attendance_bonus_amount > 0, detail: `₹${p.attendance_bonus_amount}/month at ${p.attendance_min_pct}%+ attendance` },
+    { key: 'quality', label: 'Quality Bonus', auto: true, on: p.quality_bonus_amount > 0, detail: `₹${p.quality_bonus_amount}/month at ${p.quality_min_rating}★ or better` },
+    { key: 'peak_hour', label: 'Peak Hour Incentive', auto: false, on: p.peak_hour_amount > 0, detail: `₹${p.peak_hour_amount} — paid manually` },
+    { key: 'referral', label: 'Referral Bonus', auto: false, on: p.referral_amount > 0, detail: `₹${p.referral_amount} — paid manually` },
+    { key: 'festival', label: 'Festival Bonus', auto: false, on: p.festival_amount > 0, detail: `₹${p.festival_amount} — paid manually` },
+  ],
   workers: p.workers ?? undefined,
 })
 
@@ -2054,15 +2076,24 @@ function readIncentive(b) {
   const attPct = n(b?.attendanceMinPct, 95)
   const qualAmt = n(b?.qualityBonusAmount)
   const qualMin = n(b?.qualityMinRating, 4.5)
-  for (const [v, label] of [[perJob, 'Per job incentive'], [attAmt, 'Attendance bonus'], [qualAmt, 'Quality bonus']]) {
+  const peak = n(b?.peakHourAmount)
+  const referral = n(b?.referralAmount)
+  const festival = n(b?.festivalAmount)
+  const estMin = n(b?.estIncentiveMin)
+  const estMax = n(b?.estIncentiveMax)
+  for (const [v, label] of [[perJob, 'Per job incentive'], [attAmt, 'Attendance bonus'], [qualAmt, 'Quality bonus'],
+    [peak, 'Peak hour incentive'], [referral, 'Referral bonus'], [festival, 'Festival bonus'], [estMin, 'Estimate (min)'], [estMax, 'Estimate (max)']]) {
     if (!Number.isInteger(v) || v < 0 || v > 1_000_000) return { error: `${label} must be a whole rupee amount (0 to switch it off)` }
   }
   if (!Number.isInteger(attPct) || attPct < 1 || attPct > 100) return { error: 'Attendance threshold must be between 1 and 100%' }
   if (!(qualMin >= 1 && qualMin <= 5)) return { error: 'Quality threshold must be a rating between 1 and 5' }
+  if (estMax > 0 && estMax < estMin) return { error: 'The estimate maximum cannot be below the minimum' }
   // A plan with every component off pays nothing — assigning it would look like a decision and do
   // nothing at all.
-  if (perJob === 0 && attAmt === 0 && qualAmt === 0) return { error: 'Set at least one component above 0 — a plan with nothing switched on pays nothing' }
-  return { name, perJob, attAmt, attPct, qualAmt, qualMin, notes: String(b?.notes || '').trim().slice(0, 200) }
+  if (perJob === 0 && attAmt === 0 && qualAmt === 0 && peak === 0 && referral === 0 && festival === 0) {
+    return { error: 'Set at least one component above 0 — a plan with nothing switched on pays nothing' }
+  }
+  return { name, perJob, attAmt, attPct, qualAmt, qualMin, peak, referral, festival, estMin, estMax, notes: String(b?.notes || '').trim().slice(0, 200) }
 }
 
 app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
@@ -2071,9 +2102,10 @@ app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
   const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM incentive_plans')).rows[0].n
   try {
     const r = await pool.query(
-      `INSERT INTO incentive_plans (name, per_job_amount, attendance_bonus_amount, attendance_min_pct, quality_bonus_amount, quality_min_rating, notes, sort)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.notes, sort])
+      `INSERT INTO incentive_plans (name, per_job_amount, attendance_bonus_amount, attendance_min_pct, quality_bonus_amount, quality_min_rating,
+                                    peak_hour_amount, referral_amount, festival_amount, est_incentive_min, est_incentive_max, notes, sort)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.peak, v.referral, v.festival, v.estMin, v.estMax, v.notes, sort])
     const who = req.admin?.name || req.admin?.email || 'Admin'
     publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'incentiveplan.create', entityType: 'incentive_plan', entityId: r.rows[0].id, detail: `Created incentive plan ${v.name}` })
     res.status(201).json({ ok: true, plan: incentiveDto(r.rows[0]) })
@@ -2098,13 +2130,19 @@ app.patch('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
     attendanceMinPct: req.body?.attendanceMinPct ?? cur.attendance_min_pct,
     qualityBonusAmount: req.body?.qualityBonusAmount ?? cur.quality_bonus_amount,
     qualityMinRating: req.body?.qualityMinRating ?? cur.quality_min_rating,
+    peakHourAmount: req.body?.peakHourAmount ?? cur.peak_hour_amount,
+    referralAmount: req.body?.referralAmount ?? cur.referral_amount,
+    festivalAmount: req.body?.festivalAmount ?? cur.festival_amount,
+    estIncentiveMin: req.body?.estIncentiveMin ?? cur.est_incentive_min,
+    estIncentiveMax: req.body?.estIncentiveMax ?? cur.est_incentive_max,
     notes: req.body?.notes ?? cur.notes,
   })
   if (v.error) return res.status(400).json({ error: v.error })
   const r = await pool.query(
     `UPDATE incentive_plans SET name=$1, per_job_amount=$2, attendance_bonus_amount=$3, attendance_min_pct=$4,
-       quality_bonus_amount=$5, quality_min_rating=$6, notes=$7, active=$8 WHERE id=$9 RETURNING *`,
-    [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.notes,
+       quality_bonus_amount=$5, quality_min_rating=$6, peak_hour_amount=$7, referral_amount=$8, festival_amount=$9,
+       est_incentive_min=$10, est_incentive_max=$11, notes=$12, active=$13 WHERE id=$14 RETURNING *`,
+    [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.peak, v.referral, v.festival, v.estMin, v.estMax, v.notes,
       req.body?.active !== undefined ? !!req.body.active : cur.active, id])
   res.json({ ok: true, plan: incentiveDto(r.rows[0]) })
 })

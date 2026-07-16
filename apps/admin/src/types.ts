@@ -217,13 +217,17 @@ export interface SalaryPlan {
   paysPerJob: boolean; paysMonthly: boolean
   workers?: number
 }
-export interface IncentiveComponent { key: string; label: string; detail: string }
+export interface IncentiveComponent { key: string; label: string; detail: string; auto: boolean; on: boolean }
 export interface IncentivePlan {
   id: number; name: string; notes: string; active: boolean; sort: number
   perJobAmount: number
   attendanceBonusAmount: number; attendanceMinPct: number
   qualityBonusAmount: number; qualityMinRating: number
-  /** Only the components actually switched on, for display. */
+  /** Paid by the admin's manual-bonus action — no automated trigger exists for these. */
+  peakHourAmount: number; referralAmount: number; festivalAmount: number
+  /** The admin's own estimate of typical monthly incentives, shown as a range. 0 = not set. */
+  estIncentiveMin: number; estIncentiveMax: number
+  /** All six components; `on` = this plan funds it, `auto` = the system pays it. */
   components: IncentiveComponent[]
   workers?: number
 }

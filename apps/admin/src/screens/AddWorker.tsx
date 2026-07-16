@@ -446,22 +446,21 @@ export default function AddWorker() {
                     </Field>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted,#667085)', marginBottom: 6 }}>
-                        {inc ? 'Incentive Components (in this plan)' : 'Pick a plan to see its components'}
+                        {inc ? 'Incentive Components (Included in Plan)' : 'Pick a plan to see its components'}
                       </div>
                       {inc && (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                          {/* All six, as the mockup draws them. A component the plan funds shows a
+                              green tick; one it doesn't is greyed. The 'auto' ones pay themselves,
+                              the rest the admin pays with Add Bonus — the tooltip says which. */}
                           {inc.components.map((c) => (
-                            <div key={c.key} style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <BadgeCheck size={14} color="#16a34a" /> {c.label}
+                            <div key={c.key} title={c.on ? c.detail + (c.auto ? '' : ' (paid manually)') : 'Not funded by this plan'}
+                              style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'center', color: c.on ? 'inherit' : '#cbd5e1' }}>
+                              <BadgeCheck size={14} color={c.on ? '#16a34a' : '#cbd5e1'} /> {c.label}
                             </div>
                           ))}
                         </div>
                       )}
-                      {/* The mockup shows six components; three of them have no trigger, so they're
-                          not offered rather than shown as ticks a worker can never earn. */}
-                      <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-                        Referral, Peak Hour and Festival bonuses aren't available yet — the mechanism behind them doesn't exist.
-                      </div>
                     </div>
                   </div>
                 )}
@@ -558,10 +557,26 @@ export default function AddWorker() {
                   </div>
                 )}
                 {planObj?.paysPerJob && <Summary label="Worker keeps" value={`${planObj.workerKeeps}% per job`} />}
-                <Summary label="Incentive Plan" value={incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name || 'None'} />
-                {/* No 'Average Incentive' or 'Total Earning Potential' — a new worker has no history
-                    to estimate from, and a made-up range on an onboarding screen is exactly what
-                    was removed from Earnings before. Actual incentives show once they're earning. */}
+                {(() => {
+                  const inc = incPlans.find((p) => String(p.id) === d.incentive_plan_id)
+                  const fixed = planObj?.paysMonthly ? planObj.totalFixedPay : 0
+                  const hasEst = inc && (inc.estIncentiveMin > 0 || inc.estIncentiveMax > 0)
+                  return (
+                    <>
+                      <Summary label="Incentive Plan" value={inc?.name || 'None'} />
+                      {/* The estimate is the ADMIN's own figure, set on the plan — shown as a range,
+                          labelled Est. Nothing here is computed by us: a new worker has no history to
+                          average, so any number we invented would be fiction. Blank plan estimate → no lines. */}
+                      {hasEst && <Summary label="Average Incentive (Est.)" value={`${rupee(inc!.estIncentiveMin)} – ${rupee(inc!.estIncentiveMax)}`} />}
+                      {hasEst && planObj?.paysMonthly && (
+                        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', marginTop: 4, borderRadius: 8, background: '#f0fdf4' }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#166534' }}>Total Earning Potential (Est.)</span>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#166534' }}>{rupee(fixed + inc!.estIncentiveMin)} – {rupee(fixed + inc!.estIncentiveMax)}</span>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
                 <Summary label="Deductions" value={[d.pf_applicable && 'PF', d.esi_applicable && 'ESI', d.tds_applicable && 'TDS'].filter(Boolean).join(', ') || 'None'} />
               </div>
             </Card>
