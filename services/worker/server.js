@@ -35,6 +35,18 @@ process.on('unhandledRejection', (e) => console.error('[worker] unhandledRejecti
 const pool = makePool(DATABASE_URL)
 const adminAuth = makeAdminAuth(ADMIN_URL)
 
+// Data scope for a single worker: any /api/admin/workers/:id* route runs this after adminAuth, so a
+// scoped admin can't read or mutate a worker outside their city/zone — even by direct API call. 404
+// (not 403) for both missing and out-of-scope, so ids can't be probed. The loaded row is cached on
+// req._worker for handlers that want to reuse it.
+async function scopeWorker(req, res, next) {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Not found' })
+  if (!inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Not found' })
+  req._worker = w
+  next()
+}
+
 async function init() {
   await migrate(pool, [
     `CREATE TABLE IF NOT EXISTS workers (
@@ -1853,13 +1865,13 @@ app.delete('/api/admin/equipment/:id', adminAuth, async (req, res) => {
   res.json({ ok: true })
 })
 
-app.get('/api/admin/workers/:id/equipment', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/equipment', adminAuth, scopeWorker, async (req, res) => {
   const workerId = Number(req.params.id)
   const types = (await pool.query('SELECT * FROM equipment_types WHERE active = true ORDER BY sort, id')).rows.map(eqTypeDto)
   res.json({ ok: true, types, issued: await workerEquipment(workerId) })
 })
 
-app.post('/api/admin/workers/:id/equipment', adminAuth, requirePerm('equipment.manage'), async (req, res) => {
+app.post('/api/admin/workers/:id/equipment', adminAuth, requirePerm('equipment.manage'), scopeWorker, async (req, res) => {
   const workerId = Number(req.params.id)
   const typeId = Number(req.body?.typeId)
   const w = await getWorker(workerId)
@@ -1879,7 +1891,7 @@ app.post('/api/admin/workers/:id/equipment', adminAuth, requirePerm('equipment.m
   res.json({ ok: true, issued: await workerEquipment(workerId) })
 })
 
-app.post('/api/admin/workers/:id/equipment/:eid/return', adminAuth, requirePerm('equipment.manage'), async (req, res) => {
+app.post('/api/admin/workers/:id/equipment/:eid/return', adminAuth, requirePerm('equipment.manage'), scopeWorker, async (req, res) => {
   const workerId = Number(req.params.id)
   const row = (await pool.query(
     `SELECT e.*, t.name FROM worker_equipment e JOIN equipment_types t ON t.id = e.type_id
@@ -2972,7 +2984,7 @@ app.patch('/api/admin/incentive-rules/:id', adminAuth, requirePerm('comp_rules.e
   res.json({ ok: true, rule: ruleDto((await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0], cur) })
 })
 
-app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/pay', adminAuth, scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const { pct, source, plan, platform } = await resolveCommission(w)
@@ -3014,7 +3026,7 @@ app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   })
 })
 
-app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit'), async (req, res) => {
+app.patch('/api/admin/workers/:id/pay', adminAuth, requirePerm('workers.pay_edit'), scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
@@ -3356,7 +3368,7 @@ app.post('/api/worker/onboarding/submit', auth, async (req, res) => {
  * still offers other work when the zone is quiet — nobody sits idle next to a job they could do.
  * false: the assignment becomes a restriction — own zone only, and within jobRadiusKm of the store.
  */
-app.get('/api/admin/workers/:id/coverage', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/coverage', adminAuth, scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   res.json({
@@ -3368,7 +3380,7 @@ app.get('/api/admin/workers/:id/coverage', adminAuth, async (req, res) => {
   })
 })
 
-app.patch('/api/admin/workers/:id/coverage', adminAuth, async (req, res) => {
+app.patch('/api/admin/workers/:id/coverage', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
@@ -3402,7 +3414,7 @@ app.patch('/api/admin/workers/:id/coverage', adminAuth, async (req, res) => {
  * modifying assigns something else and must say why — a worker whose requested shift is silently
  * swapped learns about it from their roster, which is how goodwill gets spent.
  */
-app.get('/api/admin/workers/:id/availability', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/availability', adminAuth, scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const shifts = (await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')).rows
@@ -3416,7 +3428,7 @@ app.get('/api/admin/workers/:id/availability', adminAuth, async (req, res) => {
   })
 })
 
-app.post('/api/admin/workers/:id/availability/review', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
@@ -3535,14 +3547,14 @@ async function backgroundState(workerId) {
   return { worker: { id: w.id, name: w.name }, items, verified: items.every((i) => i.ok) }
 }
 
-app.get('/api/admin/workers/:id/background', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/background', adminAuth, scopeWorker, async (req, res) => {
   const s = await backgroundState(Number(req.params.id))
   if (!s) return res.status(404).json({ error: 'Worker not found' })
   res.json({ ok: true, ...s })
 })
 
 /** Record the outcome of a check a human performed. */
-app.post('/api/admin/workers/:id/background/:key', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/background/:key', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const key = String(req.params.key)
   const check = BG_KEYS.get(key)
@@ -3664,7 +3676,7 @@ async function goLiveChecklist(workerId) {
   }
 }
 
-app.get('/api/admin/workers/:id/checklist', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/checklist', adminAuth, scopeWorker, async (req, res) => {
   const c = await goLiveChecklist(Number(req.params.id))
   if (!c) return res.status(404).json({ error: 'Worker not found' })
   const history = (await pool.query('SELECT * FROM worker_approvals WHERE worker_id=$1 ORDER BY created DESC LIMIT 10', [Number(req.params.id)])).rows
@@ -3677,7 +3689,7 @@ app.get('/api/admin/workers/:id/checklist', adminAuth, async (req, res) => {
  * waived exactly which checks and why: real onboarding always has a legitimate exception, and an
  * exception nobody can trace afterwards is the thing that actually hurts.
  */
-app.post('/api/admin/workers/:id/go-live', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/go-live', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const c = await goLiveChecklist(id)
   if (!c) return res.status(404).json({ error: 'Worker not found' })
@@ -3705,7 +3717,7 @@ app.post('/api/admin/workers/:id/go-live', adminAuth, async (req, res) => {
 })
 
 /** One worker's training state, for the detail screen and Phase 12's checklist. */
-app.get('/api/admin/workers/:id/training', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/training', adminAuth, scopeWorker, async (req, res) => {
   const st = await trainingState(Number(req.params.id))
   res.json({ ok: true, ...st, modules: st.modules.map(({ body, ...m }) => m) }) // titles + progress; the admin doesn't need the text echoed back
 })
@@ -3825,7 +3837,7 @@ app.post('/api/admin/workers', adminAuth, requirePerm('workers.create'), async (
  * and the record is keyed by that phone anyway. What the invite actually does is move them from
  * 'pending' (cannot log in) to 'onboarding' (can log in, cannot be dispatched).
  */
-app.post('/api/admin/workers/:id/invite', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/invite', adminAuth, scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   if (!w.phone) return res.status(400).json({ error: 'Add a mobile number before inviting' })
@@ -3853,13 +3865,10 @@ app.post('/api/admin/workers/:id/invite', adminAuth, async (req, res) => {
   res.json({ ok: true, delivery, worker: rowToWorker(await getWorker(w.id)) })
 })
 // Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
-app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
-  // Data scope: a scoped admin can't open an out-of-scope worker by id. 404 (not 403) so they can't
-  // probe which worker ids exist outside their scope.
-  if (!inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Not found' })
   const [docs, bookings, wallet, noteRows, activityRes, snapRes] = await Promise.all([
     documents(id),
     tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${id}`, []),
@@ -4069,11 +4078,11 @@ app.get('/api/admin/workers/:id', adminAuth, async (req, res) => {
   // what happened to be uploaded — an absent Police Verification is the thing they need to chase.
   res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
 })
-app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
-app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), scopeWorker, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
+app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), scopeWorker, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
 // Admin notes on a worker.
-app.get('/api/admin/workers/:id/notes', adminAuth, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
-app.post('/api/admin/workers/:id/notes', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
+app.post('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res) => {
   const note = String(req.body?.note || '').trim().slice(0, 2000)
   if (!note) return res.status(400).json({ error: 'Note is empty' })
   const { rows } = await pool.query('INSERT INTO worker_notes (worker_id,note,author) VALUES ($1,$2,$3) RETURNING id, note, author, created', [Number(req.params.id), note, req.body?.author || 'Admin'])
@@ -4172,7 +4181,7 @@ app.delete('/api/admin/sites/:id', adminAuth, async (req, res) => {
   res.json({ ok: true })
 })
 // Assign (or clear) a worker's apartment for their shifts.
-app.post('/api/admin/workers/:id/site', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/site', adminAuth, scopeWorker, async (req, res) => {
   const siteId = req.body?.siteId ? Number(req.body.siteId) : null
   await pool.query('UPDATE workers SET site_id=$1 WHERE id=$2', [siteId, Number(req.params.id)])
   res.json({ ok: true })
@@ -4322,7 +4331,7 @@ app.post('/internal/workers/:id/balance', internalOnly, async (req, res) => {
  * is what dispatch matches on. Rejecting removes it. The worker's claim alone never does either.
  * The admin can also approve at a DIFFERENT level than claimed — that's the point of a review.
  */
-app.post('/api/admin/workers/:id/skills/review', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const service = String(req.body?.service || '').trim()
   const approve = !!req.body?.approve
@@ -4366,12 +4375,12 @@ app.post('/api/admin/workers/:id/skills/review', adminAuth, async (req, res) => 
  * worker_documents.status, so the admin panel's Verified/Rejected badges were unreachable and a
  * document sat on 'Pending' forever.
  */
-app.get('/api/admin/workers/:id/documents/:docId/url', adminAuth, async (req, res) => {
+app.get('/api/admin/workers/:id/documents/:docId/url', adminAuth, scopeWorker, async (req, res) => {
   const d = (await pool.query('SELECT storage_key FROM worker_documents WHERE id=$1 AND worker_id=$2', [Number(req.params.docId), Number(req.params.id)])).rows[0]
   if (!d?.storage_key) return res.status(404).json({ ok: false, error: 'No file for this document' })
   res.json({ ok: true, url: await signedGetUrl(d.storage_key) })
 })
-app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, async (req, res) => {
+app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, scopeWorker, async (req, res) => {
   const wid = Number(req.params.id), docId = Number(req.params.docId)
   const approve = !!req.body?.approve
   const reason = String(req.body?.reason || '').trim()
@@ -4394,8 +4403,8 @@ app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, async (req
   res.json({ ok: true, documents: (await documents(wid)).map((d) => ({ id: d.id, name: d.name, status: d.status })) })
 })
 
-app.post('/api/admin/workers/:id/bank/approve', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
-app.post('/api/admin/workers/:id/bank/reject', adminAuth, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
+app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
+app.post('/api/admin/workers/:id/bank/reject', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 
 /* ---------- events ---------- */
 // Result of the RazorpayX bank-account validation (penny-drop) kicked off on bank save.
