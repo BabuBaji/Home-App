@@ -663,10 +663,29 @@ async function creditPayroll(d) {
   })
 }
 
+/**
+ * A payout the Compensation Rule Engine decided (job_completed trigger). The engine already keyed
+ * it idempotently in its own ledger; this credits the wallet, idempotent again on `ref`, so a
+ * redelivered event pays nothing twice.
+ */
+async function creditEngineIncentive(d) {
+  const amt = Math.max(0, Math.round(Number(d.amount) || 0))
+  if (!d.workerId || amt <= 0 || !d.ref) return
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
+     VALUES ($1,'Incentive',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [d.workerId, d.label || 'Incentive', amt, d.ref])
+  if (!ins.rowCount) return
+  await adjustBalance(d.workerId, { balance: amt, earnings: amt })
+  await notify(d.workerId, 'Incentive credited', `+₹${amt}${d.label ? ` — ${d.label}` : ''}`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Incentive Engine', action: 'wallet.incentive', entityType: 'worker', entityId: d.workerId, detail: `Incentive ₹${amt} credited${d.label ? ` (${d.label})` : ''}`, meta: { amount: amt } })
+}
+
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'settings.updated') return invalidateSettings()
   if (type === 'payroll.credit') return creditPayroll(data)
+  if (type === 'incentive.credit') return creditEngineIncentive(data)
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
   else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })

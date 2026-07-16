@@ -259,6 +259,62 @@ async function init() {
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS tds_applicable BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_payment_mode TEXT NOT NULL DEFAULT 'bank'`,
 
+    /* ================= Compensation Rule Engine =================
+     * Config-driven incentives: Operations authors a rule (scope + eligibility conditions +
+     * calculation) and the engine pays it — no code per bonus. Rules are VERSIONED and immutable:
+     * editing a rule creates a new version; the old one is retained, and every payout pins the
+     * exact version that paid it, so historical payouts never change under a later edit.
+     *
+     * Two triggers in this first slice:
+     *  - job_completed : evaluated per completed booking, credited to the wallet immediately.
+     *  - monthly_close : evaluated in the payroll run, paid on approval.
+     *
+     * Eligibility is a whitelist of [field, op, value] conditions (no free-text formulas), so there
+     * is no arbitrary code deciding real money. Only fields with a real data source exist.
+     */
+    `CREATE TABLE IF NOT EXISTS incentive_rules (
+      id SERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Other',
+      priority INTEGER NOT NULL DEFAULT 100, active BOOLEAN NOT NULL DEFAULT true,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    // Immutable versions. is_current marks the one new evaluations use; a payout references its
+    // exact version_id forever.
+    `CREATE TABLE IF NOT EXISTS incentive_rule_versions (
+      id SERIAL PRIMARY KEY, rule_id INTEGER NOT NULL REFERENCES incentive_rules(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL, is_current BOOLEAN NOT NULL DEFAULT true,
+      trigger TEXT NOT NULL,
+      effective_from DATE, effective_to DATE,
+      scope_type TEXT NOT NULL DEFAULT 'company', scope_values JSONB NOT NULL DEFAULT '[]'::jsonb,
+      match_mode TEXT NOT NULL DEFAULT 'all',           -- 'all' | 'any'
+      conditions JSONB NOT NULL DEFAULT '[]'::jsonb,     -- [{ field, op, value }]
+      calc_type TEXT NOT NULL DEFAULT 'fixed',           -- fixed | per_job | slab | percentage
+      calc JSONB NOT NULL DEFAULT '{}'::jsonb,           -- { amount, perUnit, maxUnits, percent, base, slabMetric, slabs:[{from,to,amount}] }
+      stack TEXT NOT NULL DEFAULT 'allow',               -- allow | highest_wins | exclusive (phase 2)
+      budget_month INTEGER NOT NULL DEFAULT 0,           -- 0 = uncapped; else a hard ₹ ceiling per calendar month
+      notes TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL DEFAULT '', created TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (rule_id, version)
+    )`,
+    // The engine's own ledger: one row per payout it decided. Idempotent on (version, worker, ref)
+    // — ref is the booking id for a job payout, or the YYYY-MM for a monthly one. This is also the
+    // budget ledger (SUM per rule per month) and the audit trail. The MONEY lands in the wallet via
+    // an event (job) or a payroll line (monthly); this records that it was decided.
+    `CREATE TABLE IF NOT EXISTS incentive_payouts (
+      id SERIAL PRIMARY KEY,
+      rule_id INTEGER NOT NULL, version_id INTEGER NOT NULL, worker_id INTEGER NOT NULL,
+      trigger TEXT NOT NULL, month TEXT NOT NULL DEFAULT '', ref TEXT NOT NULL,
+      amount INTEGER NOT NULL, detail TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (version_id, worker_id, ref)
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_incpayout_budget ON incentive_payouts(rule_id, month)`,
+    // Audit: every rule/version change, who and when.
+    `CREATE TABLE IF NOT EXISTS incentive_rule_audit (
+      id SERIAL PRIMARY KEY, rule_id INTEGER NOT NULL, action TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '', changed_by TEXT NOT NULL DEFAULT '', created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+
     /* ---- Payroll runs ----
      * A run is a DRAFT until an admin approves it. Nothing reaches a wallet before that: this
      * credits real money to real people every month, and a wrong rate is far cheaper to catch in a
@@ -2249,7 +2305,7 @@ async function completedJobsInMonth(workerId, month) {
  *    included. That's the point: a per-job worker who shows up and keeps their rating high should
  *    get the bonus their plan promises, not miss it because they have no monthly salary.
  */
-async function payrollLine(w, month) {
+async function payrollLine(w, month, extraIncentives = []) {
   const { plan } = await resolveCommission(w)
   const isMonthly = plan && MONTHLY_TYPES.includes(plan.salary_type)
 
@@ -2284,6 +2340,10 @@ async function payrollLine(w, month) {
       incentives.push({ label: `Quality Bonus (${w.rating}★, ${completed} job${completed === 1 ? '' : 's'})`, amount: inc.quality_bonus_amount })
     }
   }
+
+  // Engine rules (Compensation Rule Engine, monthly_close). Tagged with ruleId/versionId so the
+  // approval step can write the engine ledger row; the payslip just shows label + amount.
+  for (const ei of extraIncentives) incentives.push(ei)
 
   const gross = basic + allowance + incentives.reduce((n, i) => n + i.amount, 0)
   // Nothing to pay this month — no salary and no bonus earned. Keeps per-job workers who earned no
@@ -2346,6 +2406,207 @@ const lineDto = (l) => ({
   gross: l.gross, totalDeductions: l.total_deductions, net: l.net, note: l.note || '',
 })
 
+/* ================= Compensation Rule Engine — evaluator =================
+ * The whitelist. Only fields with a real data source, tagged with the triggers they're valid for.
+ * A condition on a field not valid for the firing trigger fails safe (not eligible). No field here
+ * is invented — there is no "weather" or "AI risk" until something actually produces it.
+ */
+const RULE_FIELDS = {
+  // common — available at every trigger
+  rating: { type: 'number', triggers: ['job_completed', 'monthly_close'], label: 'Worker rating' },
+  worker_category: { type: 'enum', triggers: ['job_completed', 'monthly_close'], label: 'Worker category' },
+  employment_type: { type: 'enum', triggers: ['job_completed', 'monthly_close'], label: 'Employment type' },
+  zone: { type: 'number', triggers: ['job_completed', 'monthly_close'], label: "Worker's zone" },
+  gender: { type: 'enum', triggers: ['job_completed', 'monthly_close'], label: 'Gender (worker-filled)' },
+  experience_months: { type: 'number', triggers: ['job_completed', 'monthly_close'], label: 'Experience (months)' },
+  // monthly context
+  completed_jobs: { type: 'number', triggers: ['monthly_close'], label: 'Completed jobs (this month)' },
+  working_days: { type: 'number', triggers: ['monthly_close'], label: 'Working days (this month)' },
+  attendance_pct: { type: 'number', triggers: ['monthly_close'], label: 'Attendance % (this month)' },
+  // per-job context
+  service: { type: 'enum', triggers: ['job_completed'], label: 'Service (this job)' },
+  job_total: { type: 'number', triggers: ['job_completed'], label: 'Job value ₹ (this job)' },
+  job_zone: { type: 'number', triggers: ['job_completed'], label: 'Job zone (this job)' },
+  weekday: { type: 'enum', triggers: ['job_completed'], label: 'Day of week (this job)' },
+  hour: { type: 'number', triggers: ['job_completed'], label: 'Hour 0–23, IST (this job)' },
+}
+const RULE_TRIGGERS = ['job_completed', 'monthly_close']
+const SCOPE_TYPES = ['company', 'city', 'zone', 'service', 'worker_category', 'employment_type', 'specific_workers']
+const CALC_TYPES = ['fixed', 'per_job', 'slab', 'percentage']
+
+const RULE_OPS = {
+  gte: (a, b) => Number(a) >= Number(b),
+  lte: (a, b) => Number(a) <= Number(b),
+  gt: (a, b) => Number(a) > Number(b),
+  lt: (a, b) => Number(a) < Number(b),
+  eq: (a, b) => String(a) === String(b),
+  neq: (a, b) => String(a) !== String(b),
+  in: (a, b) => (Array.isArray(b) ? b : String(b).split(',')).map((x) => String(x).trim()).includes(String(a)),
+  between: (a, b) => { const [lo, hi] = Array.isArray(b) ? b : String(b).split(','); return Number(a) >= Number(lo) && Number(a) <= Number(hi) },
+}
+
+const monthsBetween = (a, b) => Math.max(0, (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()))
+
+/** All field values for one worker at one trigger — the evaluation context. */
+async function ruleContext(w, trigger, booking, month) {
+  const person = w.profile?.personal || {}
+  const ctx = {
+    rating: Number(w.rating || 0),
+    worker_category: w.worker_category || '',
+    employment_type: w.employment_type || '',
+    zone: w.zone_id ?? '',
+    gender: person.gender || '',
+    experience_months: w.joining_date ? monthsBetween(new Date(w.joining_date), new Date()) : 0,
+  }
+  if (trigger === 'monthly_close') {
+    ctx.completed_jobs = await completedJobsInMonth(w.id, month)
+    ctx.working_days = (await workedDaysInMonth(w.id, month)).days
+    ctx.attendance_pct = (await attendanceForMonth(w, month)).pct
+  }
+  if (trigger === 'job_completed' && booking) {
+    ctx.service = (Array.isArray(booking.items) && booking.items[0]?.name) || booking.type || ''
+    ctx.job_total = Number(booking.total || 0)
+    ctx.job_zone = booking.zone_id ?? ''
+    // IST wall-clock, so "weekend" and "4–8 PM" mean the Indian calendar day/hour, not UTC.
+    const ist = new Date((booking.completed_at ? new Date(booking.completed_at) : new Date()).getTime() + 5.5 * 3600 * 1000)
+    ctx.weekday = DAY_KEYS[(ist.getUTCDay() + 6) % 7]
+    ctx.hour = ist.getUTCHours()
+  }
+  return ctx
+}
+
+/** Does this worker/job fall inside the rule's scope? */
+function matchesScope(v, w, booking) {
+  const vals = (Array.isArray(v.scope_values) ? v.scope_values : []).map(String)
+  switch (v.scope_type) {
+    case 'company': return true
+    case 'city': return vals.includes(String(w.city || ''))
+    case 'zone': return vals.includes(String(booking ? (booking.zone_id ?? '') : (w.zone_id ?? '')))
+    case 'worker_category': return vals.includes(String(w.worker_category || ''))
+    case 'employment_type': return vals.includes(String(w.employment_type || ''))
+    case 'service':
+      return booking
+        ? vals.includes(String((booking.items && booking.items[0]?.name) || ''))
+        : (w.services || []).some((s) => vals.includes(String(s)))
+    case 'specific_workers': return vals.includes(String(w.id))
+    default: return false
+  }
+}
+
+/** All (or any) of the [field, op, value] conditions hold. Unknown field or op → not eligible. */
+function evalConditions(conditions, mode, ctx) {
+  const conds = Array.isArray(conditions) ? conditions : []
+  if (!conds.length) return true
+  const results = conds.map((c) => {
+    const fn = RULE_OPS[c.op]
+    if (!fn || !(c.field in ctx)) return false
+    return !!fn(ctx[c.field], c.value)
+  })
+  return mode === 'any' ? results.some(Boolean) : results.every(Boolean)
+}
+
+/** The payout amount for one eligible rule. Always whole rupees, never negative. */
+function computeCalc(v, ctx) {
+  const c = v.calc || {}
+  const round = (n) => Math.max(0, Math.round(Number(n) || 0))
+  switch (v.calc_type) {
+    case 'fixed':
+      return round(c.amount)
+    case 'percentage': {
+      const base = c.base === 'job_total' ? (ctx.job_total || 0) : 0
+      return round((base * (Number(c.percent) || 0)) / 100)
+    }
+    case 'per_job': {
+      const cap = Number(c.maxUnits) > 0 ? Number(c.maxUnits) : Infinity
+      const units = Math.min(ctx.completed_jobs || 0, cap)
+      return round(units * (Number(c.perUnit) || 0))
+    }
+    case 'slab': {
+      const val = Number(ctx[c.slabMetric || 'completed_jobs'] || 0)
+      // The single bracket the value lands in pays its amount — not cumulative.
+      const slab = (c.slabs || []).find((s) => val >= Number(s.from) && val <= Number(s.to))
+      return slab ? round(slab.amount) : 0
+    }
+    default:
+      return 0
+  }
+}
+
+/** ₹ already paid by this rule in a calendar month — the budget ledger. */
+async function ruleSpent(ruleId, month) {
+  return (await pool.query('SELECT COALESCE(SUM(amount),0)::int n FROM incentive_payouts WHERE rule_id=$1 AND month=$2', [ruleId, month])).rows[0].n
+}
+
+/** Active current versions for a trigger whose effective window covers `on`. */
+async function activeRuleVersions(trigger, on = new Date()) {
+  const day = on.toISOString().slice(0, 10)
+  const { rows } = await pool.query(
+    `SELECT v.*, r.name AS rule_name FROM incentive_rule_versions v JOIN incentive_rules r ON r.id = v.rule_id
+     WHERE v.is_current = true AND r.active = true AND v.trigger = $1
+       AND (v.effective_from IS NULL OR v.effective_from <= $2)
+       AND (v.effective_to IS NULL OR v.effective_to >= $2)
+     ORDER BY r.priority ASC, r.id ASC`, [trigger, day])
+  return rows
+}
+
+/**
+ * job_completed trigger. Evaluated per completed booking; each eligible rule credits the wallet
+ * immediately via an incentive.credit event. Idempotent per (version, worker, booking) in the
+ * engine ledger AND per ref in the wallet, so a redelivered event pays nothing twice.
+ */
+async function evaluateJobRules(booking) {
+  if (!booking?.worker_id) return
+  const w = await getWorker(booking.worker_id)
+  if (!w || w.status !== 'active') return
+  const at = booking.completed_at ? new Date(booking.completed_at) : new Date()
+  const month = monthKey(at)
+  const ref = String(booking.id)
+  for (const v of await activeRuleVersions('job_completed', at)) {
+    if (!matchesScope(v, w, booking)) continue
+    const ctx = await ruleContext(w, 'job_completed', booking, month)
+    if (!evalConditions(v.conditions, v.match_mode, ctx)) continue
+    const amount = computeCalc(v, ctx)
+    if (amount <= 0) continue
+    // Hard budget: once a rule's monthly ceiling is reached it stops paying, rather than overshoot.
+    if (v.budget_month > 0 && (await ruleSpent(v.rule_id, month)) + amount > v.budget_month) {
+      publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Incentive Engine', action: 'incentive.budget', entityType: 'incentive', entityId: v.rule_id, detail: `${v.rule_name}: monthly budget ₹${v.budget_month} reached for ${month} — paused` })
+      continue
+    }
+    const label = `${v.rule_name} · ${booking.ref || '#' + booking.id}`
+    const ins = await pool.query(
+      `INSERT INTO incentive_payouts (rule_id, version_id, worker_id, trigger, month, ref, amount, detail)
+       VALUES ($1,$2,$3,'job_completed',$4,$5,$6,$7) ON CONFLICT (version_id, worker_id, ref) DO NOTHING RETURNING id`,
+      [v.rule_id, v.id, w.id, month, ref, amount, label])
+    if (!ins.rowCount) continue // this version already paid this worker for this booking
+    // The money: wallet credit, idempotent on its own ref.
+    publishEvent(REDIS_URL, 'incentive.credit', { workerId: w.id, amount, ref: `rule-${v.id}-${ref}`, label })
+  }
+}
+
+/**
+ * monthly_close trigger. Evaluated in the payroll build for one worker; returns the eligible
+ * payouts (tagged with the rule + version) to fold into their payroll line. `tally` carries the
+ * running spend per rule ACROSS the run so a monthly budget is honoured over all workers, not
+ * per worker. The engine ledger row is written at APPROVAL (when the money actually moves).
+ */
+async function evaluateMonthlyRules(w, month, tally) {
+  const out = []
+  for (const v of await activeRuleVersions('monthly_close', new Date(`${month}-01T00:00:00`))) {
+    if (!matchesScope(v, w, null)) continue
+    const ctx = await ruleContext(w, 'monthly_close', null, month)
+    if (!evalConditions(v.conditions, v.match_mode, ctx)) continue
+    const amount = computeCalc(v, ctx)
+    if (amount <= 0) continue
+    if (v.budget_month > 0) {
+      const projected = (await ruleSpent(v.rule_id, month)) + (tally.get(v.rule_id) || 0) + amount
+      if (projected > v.budget_month) continue // over the cap — skip this worker for this rule
+      tally.set(v.rule_id, (tally.get(v.rule_id) || 0) + amount)
+    }
+    out.push({ ruleId: v.rule_id, versionId: v.id, label: v.rule_name, amount })
+  }
+  return out
+}
+
 app.get('/api/admin/payroll', adminAuth, async (_q, res) => {
   const { rows } = await pool.query(
     `SELECT r.*, (SELECT COUNT(*)::int FROM payroll_lines l WHERE l.run_id=r.id) workers,
@@ -2388,12 +2649,14 @@ app.post('/api/admin/payroll', adminAuth, async (req, res) => {
     : (await pool.query('INSERT INTO payroll_runs (month, created_by) VALUES ($1,$2) RETURNING *', [month, who])).rows[0]
   await pool.query('DELETE FROM payroll_lines WHERE run_id=$1', [run.id]) // a rebuild reflects today's plans
 
-  // Include incentive-plan-only workers (per-job earning attendance/quality bonuses), not just
-  // those on a salary plan. payrollLine returns null for anyone who earned nothing this month.
-  const workers = (await pool.query("SELECT * FROM workers WHERE status='active' AND (salary_plan_id IS NOT NULL OR incentive_plan_id IS NOT NULL)")).rows
+  // Every active worker is eligible: a plan (salary/incentive) OR an engine monthly_close rule can
+  // pay them. payrollLine returns null for anyone who earned nothing.
+  const workers = (await pool.query("SELECT * FROM workers WHERE status='active'")).rows
+  const budgetTally = new Map() // rule_id -> ₹ committed this run, so a monthly budget holds across all workers
   let n = 0
   for (const w of workers) {
-    const line = await payrollLine(w, month)
+    const engineInc = await evaluateMonthlyRules(w, month, budgetTally)
+    const line = await payrollLine(w, month, engineInc)
     if (!line) continue
     await pool.query(
       `INSERT INTO payroll_lines (run_id, worker_id, basic, allowance, incentives, deductions, gross, total_deductions, net, note)
@@ -2423,6 +2686,15 @@ app.post('/api/admin/payroll/:id/approve', adminAuth, async (req, res) => {
   const who = req.admin?.name || req.admin?.email || 'Admin'
   await pool.query("UPDATE payroll_runs SET status='approved', approved_by=$1, approved_at=now() WHERE id=$2", [who, id])
   for (const l of lines) {
+    // Engine payouts on this line reach the ledger now, when the money actually moves — keyed on
+    // (version, worker, month) so re-approval or a redelivery records nothing twice.
+    for (const inc of (l.incentives || [])) {
+      if (!inc.ruleId || !inc.versionId) continue
+      await pool.query(
+        `INSERT INTO incentive_payouts (rule_id, version_id, worker_id, trigger, month, ref, amount, detail)
+         VALUES ($1,$2,$3,'monthly_close',$4,$4,$5,$6) ON CONFLICT (version_id, worker_id, ref) DO NOTHING`,
+        [inc.ruleId, inc.versionId, l.worker_id, run.month, inc.amount, inc.label || 'Incentive'])
+    }
     // A line with no basic salary is bonuses only (a per-job worker's attendance/quality bonus) —
     // label and categorise it as such so their wallet doesn't show a "Salary" they don't have.
     const bonusOnly = !l.basic
@@ -2442,6 +2714,190 @@ app.post('/api/admin/payroll/:id/approve', adminAuth, async (req, res) => {
   const fresh = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [id])).rows[0]
   const full = (await pool.query(`SELECT l.*, w.name FROM payroll_lines l JOIN workers w ON w.id=l.worker_id WHERE l.run_id=$1 ORDER BY w.name`, [id])).rows
   res.json({ ok: true, run: runDto(fresh, full.map(lineDto)) })
+})
+
+/* ================= Compensation Rule Engine — admin API =================
+ * Author, version, activate and retire compensation rules. Editing NEVER mutates a live version:
+ * every save creates a new version and flips is_current, so past payouts keep the version that
+ * paid them.
+ */
+const versionDto = (v) => v && ({
+  id: v.id, ruleId: v.rule_id, version: v.version, isCurrent: v.is_current, trigger: v.trigger,
+  effectiveFrom: v.effective_from, effectiveTo: v.effective_to,
+  scopeType: v.scope_type, scopeValues: v.scope_values || [],
+  matchMode: v.match_mode, conditions: v.conditions || [], calcType: v.calc_type, calc: v.calc || {},
+  stack: v.stack, budgetMonth: v.budget_month, notes: v.notes || '',
+  createdBy: v.created_by, created: v.created,
+})
+const ruleDto = (r, v, extra = {}) => ({
+  id: r.id, code: r.code, name: r.name, description: r.description || '', category: r.category,
+  priority: r.priority, active: r.active, created: r.created,
+  current: versionDto(v), ...extra,
+})
+
+function readRuleVersion(b) {
+  const trigger = String(b?.trigger || '')
+  if (!RULE_TRIGGERS.includes(trigger)) return { error: `Trigger must be one of: ${RULE_TRIGGERS.join(', ')}` }
+  const scopeType = String(b?.scopeType || 'company')
+  if (!SCOPE_TYPES.includes(scopeType)) return { error: `Scope must be one of: ${SCOPE_TYPES.join(', ')}` }
+  const scopeValues = Array.isArray(b?.scopeValues) ? b.scopeValues.map((x) => String(x)) : []
+  if (scopeType !== 'company' && scopeValues.length === 0) return { error: `Pick at least one ${scopeType.replace('_', ' ')} for the scope` }
+  const matchMode = b?.matchMode === 'any' ? 'any' : 'all'
+
+  const conditions = []
+  for (const c of (Array.isArray(b?.conditions) ? b.conditions : [])) {
+    const field = String(c?.field || '')
+    const op = String(c?.op || '')
+    if (!RULE_FIELDS[field]) return { error: `Unknown condition field: ${field || '(blank)'}` }
+    if (!RULE_FIELDS[field].triggers.includes(trigger)) return { error: `"${RULE_FIELDS[field].label}" isn't available on the ${trigger.replace('_', ' ')} trigger` }
+    if (!RULE_OPS[op]) return { error: `Unknown operator: ${op || '(blank)'}` }
+    if (c.value === undefined || c.value === null || c.value === '') return { error: `Give a value for ${RULE_FIELDS[field].label}` }
+    conditions.push({ field, op, value: c.value })
+  }
+
+  const calcType = String(b?.calcType || 'fixed')
+  if (!CALC_TYPES.includes(calcType)) return { error: `Calculation must be one of: ${CALC_TYPES.join(', ')}` }
+  const rawCalc = b?.calc || {}
+  const int = (v) => Math.round(Number(v) || 0)
+  let calc = {}
+  if (calcType === 'fixed') {
+    calc = { amount: int(rawCalc.amount) }
+    if (calc.amount < 1) return { error: 'Fixed amount must be at least ₹1' }
+  } else if (calcType === 'percentage') {
+    calc = { percent: Number(rawCalc.percent) || 0, base: 'job_total' }
+    if (!(calc.percent > 0 && calc.percent <= 100)) return { error: 'Percentage must be between 1 and 100' }
+    if (trigger !== 'job_completed') return { error: 'Percentage of job value only applies to the job-completed trigger' }
+  } else if (calcType === 'per_job') {
+    calc = { perUnit: int(rawCalc.perUnit), maxUnits: int(rawCalc.maxUnits) }
+    if (calc.perUnit < 1) return { error: 'Per-job amount must be at least ₹1' }
+    if (trigger !== 'monthly_close') return { error: 'Per-job (× completed jobs) only applies to the monthly-close trigger' }
+  } else if (calcType === 'slab') {
+    const metric = String(rawCalc.slabMetric || 'completed_jobs')
+    if (!RULE_FIELDS[metric] || RULE_FIELDS[metric].type !== 'number') return { error: 'Slab metric must be a numeric field' }
+    if (!RULE_FIELDS[metric].triggers.includes(trigger)) return { error: `Slab metric "${RULE_FIELDS[metric].label}" isn't available on this trigger` }
+    const slabs = (Array.isArray(rawCalc.slabs) ? rawCalc.slabs : []).map((s) => ({ from: int(s.from), to: int(s.to), amount: int(s.amount) }))
+    if (!slabs.length) return { error: 'Add at least one slab' }
+    for (const s of slabs) {
+      if (s.from < 0 || s.to < s.from) return { error: 'Each slab needs a valid From ≤ To' }
+      if (s.amount < 1) return { error: 'Each slab amount must be at least ₹1' }
+    }
+    calc = { slabMetric: metric, slabs }
+  }
+
+  const budgetMonth = int(b?.budgetMonth)
+  if (budgetMonth < 0) return { error: 'Budget cannot be negative (0 = no cap)' }
+  const dateOk = (x) => !x || !Number.isNaN(new Date(x).getTime())
+  if (!dateOk(b?.effectiveFrom) || !dateOk(b?.effectiveTo)) return { error: 'Effective dates must be valid' }
+
+  return {
+    trigger, scopeType, scopeValues, matchMode, conditions, calcType, calc,
+    budgetMonth, stack: 'allow',
+    effectiveFrom: b?.effectiveFrom || null, effectiveTo: b?.effectiveTo || null,
+    notes: String(b?.notes || '').slice(0, 500),
+  }
+}
+
+const auditRule = (ruleId, action, detail, who) =>
+  pool.query('INSERT INTO incentive_rule_audit (rule_id, action, detail, changed_by) VALUES ($1,$2,$3,$4)', [ruleId, action, detail, who])
+
+/** Field / operator / scope / calc vocabulary — drives the visual builder in the panel. */
+app.get('/api/admin/incentive-rules/meta', adminAuth, async (_q, res) => {
+  res.json({
+    ok: true,
+    triggers: RULE_TRIGGERS,
+    scopeTypes: SCOPE_TYPES,
+    calcTypes: CALC_TYPES,
+    operators: Object.keys(RULE_OPS),
+    fields: Object.entries(RULE_FIELDS).map(([key, f]) => ({ key, label: f.label, type: f.type, triggers: f.triggers })),
+    categories: ['Attendance', 'Peak Hour', 'Referral', 'Festival', 'Target', 'Quality', 'Zone', 'Weekend', 'Night Shift', 'Retention', 'Joining Bonus', 'Campaign', 'Manual', 'Other'],
+  })
+})
+
+app.get('/api/admin/incentive-rules', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT r.*, v.* , r.id AS rule_id,
+            (SELECT COALESCE(SUM(p.amount),0)::int FROM incentive_payouts p WHERE p.rule_id=r.id AND p.month=to_char(now(),'YYYY-MM')) spent_this_month
+     FROM incentive_rules r LEFT JOIN incentive_rule_versions v ON v.rule_id=r.id AND v.is_current=true
+     ORDER BY r.priority ASC, r.id ASC`)
+  res.json({ ok: true, rules: rows.map((row) => ruleDto(row, row.trigger ? row : null, { spentThisMonth: row.spent_this_month })) })
+})
+
+app.get('/api/admin/incentive-rules/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const r = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Rule not found' })
+  const versions = (await pool.query('SELECT * FROM incentive_rule_versions WHERE rule_id=$1 ORDER BY version DESC', [id])).rows
+  const current = versions.find((v) => v.is_current)
+  const payouts = (await pool.query('SELECT * FROM incentive_payouts WHERE rule_id=$1 ORDER BY created DESC LIMIT 20', [id])).rows
+  const audit = (await pool.query('SELECT * FROM incentive_rule_audit WHERE rule_id=$1 ORDER BY created DESC LIMIT 20', [id])).rows
+  res.json({
+    ok: true,
+    rule: ruleDto(r, current, {
+      versions: versions.map(versionDto),
+      payouts: payouts.map((p) => ({ id: p.id, workerId: p.worker_id, amount: p.amount, month: p.month, ref: p.ref, detail: p.detail, versionId: p.version_id, created: p.created })),
+      audit: audit.map((a) => ({ action: a.action, detail: a.detail, by: a.changed_by, created: a.created })),
+    }),
+  })
+})
+
+app.post('/api/admin/incentive-rules', adminAuth, async (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Name required' })
+  const v = readRuleVersion(req.body)
+  if (v.error) return res.status(400).json({ error: v.error })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const code = (req.body?.code ? String(req.body.code) : name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 40)
+  try {
+    const r = (await pool.query(
+      'INSERT INTO incentive_rules (code, name, description, category, priority, active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [code, name, String(req.body?.description || ''), String(req.body?.category || 'Other'), Number(req.body?.priority) || 100, req.body?.active !== false])).rows[0]
+    const ver = (await pool.query(
+      `INSERT INTO incentive_rule_versions (rule_id, version, is_current, trigger, effective_from, effective_to, scope_type, scope_values, match_mode, conditions, calc_type, calc, stack, budget_month, notes, created_by)
+       VALUES ($1,1,true,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10::jsonb,$11,$12,$13,$14) RETURNING *`,
+      [r.id, v.trigger, v.effectiveFrom, v.effectiveTo, v.scopeType, JSON.stringify(v.scopeValues), v.matchMode, JSON.stringify(v.conditions), v.calcType, JSON.stringify(v.calc), v.stack, v.budgetMonth, v.notes, who])).rows[0]
+    await auditRule(r.id, 'created', `${name} (v1)`, who)
+    res.status(201).json({ ok: true, rule: ruleDto(r, ver) })
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A rule with that code already exists' })
+    throw e
+  }
+})
+
+/** Save a new version. The old one is retained; this becomes current. */
+app.post('/api/admin/incentive-rules/:id/version', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const r = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Rule not found' })
+  const v = readRuleVersion(req.body)
+  if (v.error) return res.status(400).json({ error: v.error })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const nextVer = (await pool.query('SELECT COALESCE(MAX(version),0)+1 n FROM incentive_rule_versions WHERE rule_id=$1', [id])).rows[0].n
+  await pool.query('UPDATE incentive_rule_versions SET is_current=false WHERE rule_id=$1', [id])
+  const ver = (await pool.query(
+    `INSERT INTO incentive_rule_versions (rule_id, version, is_current, trigger, effective_from, effective_to, scope_type, scope_values, match_mode, conditions, calc_type, calc, stack, budget_month, notes, created_by)
+     VALUES ($1,$2,true,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15) RETURNING *`,
+    [id, nextVer, v.trigger, v.effectiveFrom, v.effectiveTo, v.scopeType, JSON.stringify(v.scopeValues), v.matchMode, JSON.stringify(v.conditions), v.calcType, JSON.stringify(v.calc), v.stack, v.budgetMonth, v.notes, who])).rows[0]
+  // Name / description / category / priority live on the rule, not the version.
+  if (req.body?.name || req.body?.description !== undefined || req.body?.category || req.body?.priority !== undefined) {
+    await pool.query('UPDATE incentive_rules SET name=$1, description=$2, category=$3, priority=$4 WHERE id=$5',
+      [String(req.body?.name || r.name).trim(), String(req.body?.description ?? r.description), String(req.body?.category || r.category), Number(req.body?.priority) || r.priority, id])
+  }
+  await auditRule(id, 'versioned', `New version v${nextVer}`, who)
+  const fresh = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
+  res.json({ ok: true, rule: ruleDto(fresh, ver) })
+})
+
+app.patch('/api/admin/incentive-rules/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const r = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Rule not found' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const active = req.body?.active !== undefined ? !!req.body.active : r.active
+  const priority = req.body?.priority !== undefined ? Number(req.body.priority) : r.priority
+  await pool.query('UPDATE incentive_rules SET active=$1, priority=$2 WHERE id=$3', [active, priority, id])
+  if (req.body?.active !== undefined && active !== r.active) await auditRule(id, active ? 'activated' : 'paused', r.name, who)
+  const cur = (await pool.query('SELECT * FROM incentive_rule_versions WHERE rule_id=$1 AND is_current=true', [id])).rows[0]
+  res.json({ ok: true, rule: ruleDto((await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0], cur) })
 })
 
 app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
@@ -3883,6 +4339,9 @@ subscribeEvents(REDIS_URL, 'worker', async (type, data) => {
   if (type === 'settings.updated') return invalidateSettings()
   if (type === 'bank.verified') return applyBankVerification(data.workerId, true, data)
   if (type === 'bank.verify.failed') return applyBankVerification(data.workerId, false, data)
+  // Compensation Rule Engine — job_completed trigger. Runs alongside the wallet's own settlement
+  // (its own consumer group), evaluates every active job rule, and credits eligible payouts.
+  if (type === 'booking.completed' && data.booking) return evaluateJobRules(data.booking).catch((e) => console.error('[worker] job-rule eval failed:', e.message))
 })
 
 
