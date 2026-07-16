@@ -193,6 +193,65 @@ async function init() {
      * Assigning a plan clears the manual rate and vice versa; see resolveCommission(). */
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_plan_id INTEGER REFERENCES salary_plans(id) ON DELETE SET NULL`,
 
+    /* Fixed / Hybrid salary. The plan carries the AMOUNTS — the worker screen displays them rather
+     * than letting anyone re-type a rate per person, which is how two workers on "Level 1" end up
+     * on different money. */
+    `ALTER TABLE salary_plans ADD COLUMN IF NOT EXISTS monthly_basic INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE salary_plans ADD COLUMN IF NOT EXISTS other_allowance INTEGER NOT NULL DEFAULT 0`,
+
+    /* Incentive plans. Each component is a RULE with a threshold the admin sets — not a named
+     * policy that does nothing. Amount 0 = that component is off for this plan.
+     * Only these three exist: Referral, Peak Hour and Festival bonuses would each need a trigger
+     * (a referral graph, peak windows, a festival calendar) that doesn't, so they aren't offered.
+     */
+    `CREATE TABLE IF NOT EXISTS incentive_plans (
+      id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, notes TEXT NOT NULL DEFAULT '',
+      per_job_amount INTEGER NOT NULL DEFAULT 0,
+      attendance_bonus_amount INTEGER NOT NULL DEFAULT 0,
+      attendance_min_pct INTEGER NOT NULL DEFAULT 95,
+      quality_bonus_amount INTEGER NOT NULL DEFAULT 0,
+      quality_min_rating REAL NOT NULL DEFAULT 4.5,
+      active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS incentive_plan_id INTEGER REFERENCES incentive_plans(id) ON DELETE SET NULL`,
+    // When this salary arrangement starts. A payroll run skips a worker whose salary starts after
+    // the month it's paying for, so back-dating a hire doesn't silently pay them for months they
+    // hadn't joined.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_effective_from DATE`,
+
+    /* Statutory deductions are per-WORKER applicability (it depends on their wage and their opt-in),
+     * while the RATES are platform settings an admin enters. We apply their numbers; we don't
+     * invent the law. */
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS pf_applicable BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS esi_applicable BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS tds_applicable BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS salary_payment_mode TEXT NOT NULL DEFAULT 'bank'`,
+
+    /* ---- Payroll runs ----
+     * A run is a DRAFT until an admin approves it. Nothing reaches a wallet before that: this
+     * credits real money to real people every month, and a wrong rate is far cheaper to catch in a
+     * draft than to claw back afterwards.
+     */
+    `CREATE TABLE IF NOT EXISTS payroll_runs (
+      id SERIAL PRIMARY KEY, month TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'draft',
+      created_by TEXT NOT NULL DEFAULT '', approved_by TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now(), approved_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS payroll_lines (
+      id SERIAL PRIMARY KEY,
+      run_id INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+      worker_id INTEGER NOT NULL,
+      basic INTEGER NOT NULL DEFAULT 0, allowance INTEGER NOT NULL DEFAULT 0,
+      incentives JSONB NOT NULL DEFAULT '[]'::jsonb,
+      deductions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      gross INTEGER NOT NULL DEFAULT 0, total_deductions INTEGER NOT NULL DEFAULT 0,
+      net INTEGER NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      UNIQUE (run_id, worker_id)
+    )`,
+
     /* Organisational assignment. Recorded facts an admin asserts — dispatch does NOT read these
      * (it matches on zone), so they inform people, not routing. */
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS cluster_id INTEGER`,
@@ -1801,16 +1860,64 @@ async function resolveCommission(w) {
     const plan = (await pool.query('SELECT * FROM salary_plans WHERE id=$1', [w.salary_plan_id])).rows[0]
     // A retired plan keeps paying whoever is on it — silently reverting them to the platform rate
     // because someone archived a plan would change real pay without anyone deciding to.
-    if (plan) return { pct: plan.commission_percent, source: 'plan', plan, platform }
+    if (plan) {
+      return {
+        // A FIXED worker gets no per-job share at all — payroll pays them. Falling through to a
+        // commission here would pay them twice for the same work.
+        pct: plan.commission_percent,
+        perJob: paysPerJob(plan.salary_type),
+        source: 'plan', plan, platform,
+      }
+    }
   }
-  if (Number.isInteger(w?.commission_percent)) return { pct: w.commission_percent, source: 'manual', plan: null, platform }
-  return { pct: platform, source: 'platform', plan: null, platform }
+  if (Number.isInteger(w?.commission_percent)) return { pct: w.commission_percent, perJob: true, source: 'manual', plan: null, platform }
+  return { pct: platform, perJob: true, source: 'platform', plan: null, platform }
 }
 
+/** The incentive plan a worker is on, if any. */
+async function incentivePlanFor(w) {
+  if (!w?.incentive_plan_id) return null
+  return (await pool.query('SELECT * FROM incentive_plans WHERE id=$1', [w.incentive_plan_id])).rows[0] || null
+}
+
+/* Salary types.
+ *  per_job — commission only; nothing monthly. The original model.
+ *  fixed   — a monthly salary, paid whatever the job count. NO per-job share: that's what "paid
+ *            irrespective of job count" means, and also paying commission would double-pay.
+ *  hybrid  — both: a monthly salary AND a per-job share, usually at a higher commission.
+ * Fixed and hybrid only became offerable once the payroll run below existed to actually pay them.
+ */
+const SALARY_TYPES = ['per_job', 'fixed', 'hybrid']
+const MONTHLY_TYPES = ['fixed', 'hybrid'] // types that a payroll run pays
+const paysPerJob = (t) => t !== 'fixed'
+
 const planDto = (p) => p && ({
-  id: p.id, name: p.name, salaryType: p.salary_type, commissionPercent: p.commission_percent,
+  id: p.id, name: p.name, salaryType: p.salary_type,
+  commissionPercent: p.commission_percent,
+  monthlyBasic: p.monthly_basic || 0,
+  otherAllowance: p.other_allowance || 0,
+  totalFixedPay: (p.monthly_basic || 0) + (p.other_allowance || 0),
   notes: p.notes || '', active: p.active, sort: p.sort,
-  workerKeeps: 100 - p.commission_percent,
+  // Meaningless on a fixed plan — the worker keeps no share because there is no share.
+  workerKeeps: paysPerJob(p.salary_type) ? 100 - p.commission_percent : null,
+  paysPerJob: paysPerJob(p.salary_type),
+  paysMonthly: MONTHLY_TYPES.includes(p.salary_type),
+})
+
+const incentiveDto = (p) => p && ({
+  id: p.id, name: p.name, notes: p.notes || '', active: p.active, sort: p.sort,
+  perJobAmount: p.per_job_amount || 0,
+  attendanceBonusAmount: p.attendance_bonus_amount || 0,
+  attendanceMinPct: p.attendance_min_pct,
+  qualityBonusAmount: p.quality_bonus_amount || 0,
+  qualityMinRating: p.quality_min_rating,
+  // What's actually switched on, so the UI lists real components instead of a fixed menu.
+  components: [
+    p.per_job_amount > 0 && { key: 'per_job', label: 'Per Job Incentive', detail: `₹${p.per_job_amount} per completed job` },
+    p.attendance_bonus_amount > 0 && { key: 'attendance', label: 'Attendance Bonus', detail: `₹${p.attendance_bonus_amount}/month at ${p.attendance_min_pct}%+ attendance` },
+    p.quality_bonus_amount > 0 && { key: 'quality', label: 'Quality Bonus', detail: `₹${p.quality_bonus_amount}/month at ${p.quality_min_rating}★ or better` },
+  ].filter(Boolean),
+  workers: p.workers ?? undefined,
 })
 
 app.get('/api/admin/salary-plans', adminAuth, async (_q, res) => {
@@ -1824,13 +1931,29 @@ app.get('/api/admin/salary-plans', adminAuth, async (_q, res) => {
 function readPlan(b) {
   const name = String(b?.name || '').trim()
   if (!name) return { error: 'Name required' }
-  const pct = Number(b?.commissionPercent)
-  if (!Number.isInteger(pct) || pct < 0 || pct > 100) return { error: 'Commission must be a whole number between 0 and 100' }
-  // Fixed/Hybrid would need a monthly payroll run; without one a per-job worker on them earns
-  // nothing per job and never gets a salary either.
   const salaryType = String(b?.salaryType || 'per_job')
-  if (salaryType !== 'per_job') return { error: 'Only per-job plans are supported — fixed and hybrid salaries need a payroll run that does not exist yet' }
-  return { name, commissionPercent: pct, salaryType, notes: String(b?.notes || '').trim().slice(0, 200) }
+  if (!SALARY_TYPES.includes(salaryType)) return { error: `Salary type must be one of: ${SALARY_TYPES.join(', ')}` }
+
+  const money = (v) => (v === '' || v === null || v === undefined ? 0 : Number(v))
+  const monthlyBasic = money(b?.monthlyBasic)
+  const otherAllowance = money(b?.otherAllowance)
+  for (const [v, label] of [[monthlyBasic, 'Monthly basic salary'], [otherAllowance, 'Other allowance']]) {
+    if (!Number.isInteger(v) || v < 0 || v > 10_000_000) return { error: `${label} must be a whole rupee amount` }
+  }
+  // A fixed/hybrid plan with no salary would quietly pay nothing every month.
+  if (MONTHLY_TYPES.includes(salaryType) && monthlyBasic <= 0) {
+    return { error: 'A fixed or hybrid plan needs a monthly basic salary — otherwise payroll would pay nothing' }
+  }
+
+  let pct = Number(b?.commissionPercent)
+  if (!paysPerJob(salaryType)) {
+    // A commission on a fixed plan is a number nobody would ever apply — store 0 rather than keep a
+    // value the UI might show and the wallet would never use.
+    pct = 0
+  } else if (!Number.isInteger(pct) || pct < 0 || pct > 100) {
+    return { error: 'Commission must be a whole number between 0 and 100' }
+  }
+  return { name, commissionPercent: pct, salaryType, monthlyBasic, otherAllowance, notes: String(b?.notes || '').trim().slice(0, 200) }
 }
 
 app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
@@ -1839,8 +1962,9 @@ app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
   const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM salary_plans')).rows[0].n
   try {
     const r = await pool.query(
-      'INSERT INTO salary_plans (name, salary_type, commission_percent, notes, sort) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [v.name, v.salaryType, v.commissionPercent, v.notes, sort])
+      `INSERT INTO salary_plans (name, salary_type, commission_percent, monthly_basic, other_allowance, notes, sort)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [v.name, v.salaryType, v.commissionPercent, v.monthlyBasic, v.otherAllowance, v.notes, sort])
     const who = req.admin?.name || req.admin?.email || 'Admin'
     publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'salaryplan.create', entityType: 'salary_plan', entityId: r.rows[0].id, detail: `Created salary plan ${v.name} (${v.commissionPercent}% commission)` })
     res.status(201).json({ ok: true, plan: planDto(r.rows[0]) })
@@ -1858,18 +1982,39 @@ app.patch('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
     const r = await pool.query('UPDATE salary_plans SET active=$1 WHERE id=$2 RETURNING *', [!!req.body.active, id])
     return res.json({ ok: true, plan: planDto(r.rows[0]) })
   }
-  const v = readPlan({ ...cur, name: req.body?.name ?? cur.name, commissionPercent: req.body?.commissionPercent ?? cur.commission_percent, salaryType: req.body?.salaryType ?? cur.salary_type, notes: req.body?.notes ?? cur.notes })
+  const v = readPlan({
+    name: req.body?.name ?? cur.name,
+    commissionPercent: req.body?.commissionPercent ?? cur.commission_percent,
+    salaryType: req.body?.salaryType ?? cur.salary_type,
+    monthlyBasic: req.body?.monthlyBasic ?? cur.monthly_basic,
+    otherAllowance: req.body?.otherAllowance ?? cur.other_allowance,
+    notes: req.body?.notes ?? cur.notes,
+  })
   if (v.error) return res.status(400).json({ error: v.error })
-  const r = await pool.query('UPDATE salary_plans SET name=$1, commission_percent=$2, notes=$3, active=$4 WHERE id=$5 RETURNING *',
-    [v.name, v.commissionPercent, v.notes, req.body?.active !== undefined ? !!req.body.active : cur.active, id])
+  const r = await pool.query(
+    `UPDATE salary_plans SET name=$1, salary_type=$2, commission_percent=$3, monthly_basic=$4, other_allowance=$5, notes=$6, active=$7
+     WHERE id=$8 RETURNING *`,
+    [v.name, v.salaryType, v.commissionPercent, v.monthlyBasic, v.otherAllowance, v.notes,
+      req.body?.active !== undefined ? !!req.body.active : cur.active, id])
 
   // Changing a plan's rate changes what everyone on it takes home. Say so out loud, and tell them.
-  if (v.commissionPercent !== cur.commission_percent) {
+  const rateChanged = v.commissionPercent !== cur.commission_percent
+  const payChanged = v.monthlyBasic !== cur.monthly_basic || v.otherAllowance !== cur.other_allowance
+  if (rateChanged || payChanged) {
     const on = (await pool.query('SELECT id FROM workers WHERE salary_plan_id=$1', [id])).rows
     const who = req.admin?.name || req.admin?.email || 'Admin'
-    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'salaryplan.rate', entityType: 'salary_plan', entityId: id, detail: `${v.name}: commission ${cur.commission_percent}% → ${v.commissionPercent}% — affects ${on.length} worker(s)` })
+    const what = [
+      rateChanged && `commission ${cur.commission_percent}% → ${v.commissionPercent}%`,
+      payChanged && `monthly pay ₹${cur.monthly_basic + cur.other_allowance} → ₹${v.monthlyBasic + v.otherAllowance}`,
+    ].filter(Boolean).join(', ')
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'salaryplan.rate', entityType: 'salary_plan', entityId: id, detail: `${v.name}: ${what} — affects ${on.length} worker(s)` })
     for (const w of on) {
-      publishEvent(REDIS_URL, 'worker.notify', { workerId: w.id, title: 'Your earnings rate changed', body: `You now keep ${100 - v.commissionPercent}% of each job.` })
+      publishEvent(REDIS_URL, 'worker.notify', {
+        workerId: w.id, title: 'Your pay changed',
+        body: paysPerJob(v.salaryType)
+          ? `You now keep ${100 - v.commissionPercent}% of each job${v.monthlyBasic ? ` plus ₹${v.monthlyBasic + v.otherAllowance} a month` : ''}.`
+          : `Your monthly pay is now ₹${v.monthlyBasic + v.otherAllowance}.`,
+      })
     }
   }
   res.json({ ok: true, plan: planDto(r.rows[0]) })
@@ -1884,11 +2029,290 @@ app.delete('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
   res.json({ ok: true })
 })
 
+/* ---------- Incentive plans ----------
+ * Three components, each a rule with a threshold the admin sets. Nothing here is a named policy
+ * with no behaviour: per-job fires on the booking that already credits earnings, attendance and
+ * quality are computed by the payroll run from real attendance and real ratings.
+ *
+ * Referral, Peak Hour and Festival bonuses are deliberately absent — each needs a trigger that
+ * doesn't exist (a referral graph, peak windows, a festival calendar), and a component that never
+ * fires is worse than one that isn't offered.
+ */
+app.get('/api/admin/incentive-plans', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT p.*, (SELECT COUNT(*)::int FROM workers w WHERE w.incentive_plan_id = p.id) workers
+     FROM incentive_plans p ORDER BY p.sort, p.id`)
+  res.json({ ok: true, plans: rows.map(incentiveDto) })
+})
+
+function readIncentive(b) {
+  const name = String(b?.name || '').trim()
+  if (!name) return { error: 'Name required' }
+  const n = (v, d = 0) => (v === '' || v === null || v === undefined ? d : Number(v))
+  const perJob = n(b?.perJobAmount)
+  const attAmt = n(b?.attendanceBonusAmount)
+  const attPct = n(b?.attendanceMinPct, 95)
+  const qualAmt = n(b?.qualityBonusAmount)
+  const qualMin = n(b?.qualityMinRating, 4.5)
+  for (const [v, label] of [[perJob, 'Per job incentive'], [attAmt, 'Attendance bonus'], [qualAmt, 'Quality bonus']]) {
+    if (!Number.isInteger(v) || v < 0 || v > 1_000_000) return { error: `${label} must be a whole rupee amount (0 to switch it off)` }
+  }
+  if (!Number.isInteger(attPct) || attPct < 1 || attPct > 100) return { error: 'Attendance threshold must be between 1 and 100%' }
+  if (!(qualMin >= 1 && qualMin <= 5)) return { error: 'Quality threshold must be a rating between 1 and 5' }
+  // A plan with every component off pays nothing — assigning it would look like a decision and do
+  // nothing at all.
+  if (perJob === 0 && attAmt === 0 && qualAmt === 0) return { error: 'Set at least one component above 0 — a plan with nothing switched on pays nothing' }
+  return { name, perJob, attAmt, attPct, qualAmt, qualMin, notes: String(b?.notes || '').trim().slice(0, 200) }
+}
+
+app.post('/api/admin/incentive-plans', adminAuth, async (req, res) => {
+  const v = readIncentive(req.body)
+  if (v.error) return res.status(400).json({ error: v.error })
+  const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM incentive_plans')).rows[0].n
+  try {
+    const r = await pool.query(
+      `INSERT INTO incentive_plans (name, per_job_amount, attendance_bonus_amount, attendance_min_pct, quality_bonus_amount, quality_min_rating, notes, sort)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.notes, sort])
+    const who = req.admin?.name || req.admin?.email || 'Admin'
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'incentiveplan.create', entityType: 'incentive_plan', entityId: r.rows[0].id, detail: `Created incentive plan ${v.name}` })
+    res.status(201).json({ ok: true, plan: incentiveDto(r.rows[0]) })
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A plan with that name already exists' })
+    throw e
+  }
+})
+
+app.patch('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const cur = (await pool.query('SELECT * FROM incentive_plans WHERE id=$1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Plan not found' })
+  if (req.body?.active !== undefined && Object.keys(req.body).length === 1) {
+    const r = await pool.query('UPDATE incentive_plans SET active=$1 WHERE id=$2 RETURNING *', [!!req.body.active, id])
+    return res.json({ ok: true, plan: incentiveDto(r.rows[0]) })
+  }
+  const v = readIncentive({
+    name: req.body?.name ?? cur.name,
+    perJobAmount: req.body?.perJobAmount ?? cur.per_job_amount,
+    attendanceBonusAmount: req.body?.attendanceBonusAmount ?? cur.attendance_bonus_amount,
+    attendanceMinPct: req.body?.attendanceMinPct ?? cur.attendance_min_pct,
+    qualityBonusAmount: req.body?.qualityBonusAmount ?? cur.quality_bonus_amount,
+    qualityMinRating: req.body?.qualityMinRating ?? cur.quality_min_rating,
+    notes: req.body?.notes ?? cur.notes,
+  })
+  if (v.error) return res.status(400).json({ error: v.error })
+  const r = await pool.query(
+    `UPDATE incentive_plans SET name=$1, per_job_amount=$2, attendance_bonus_amount=$3, attendance_min_pct=$4,
+       quality_bonus_amount=$5, quality_min_rating=$6, notes=$7, active=$8 WHERE id=$9 RETURNING *`,
+    [v.name, v.perJob, v.attAmt, v.attPct, v.qualAmt, v.qualMin, v.notes,
+      req.body?.active !== undefined ? !!req.body.active : cur.active, id])
+  res.json({ ok: true, plan: incentiveDto(r.rows[0]) })
+})
+
+app.delete('/api/admin/incentive-plans/:id', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const n = (await pool.query('SELECT COUNT(*)::int n FROM workers WHERE incentive_plan_id=$1', [id])).rows[0].n
+  if (n) return res.status(409).json({ error: `${n} worker(s) are on this plan — move them off it first, or retire it instead` })
+  await pool.query('DELETE FROM incentive_plans WHERE id=$1', [id])
+  res.json({ ok: true })
+})
+
+/* ---------- Payroll ----------
+ * Builds a DRAFT for a month, which an admin reviews and approves. Only approval moves money.
+ *
+ * Statutory deductions use rates an admin enters in Settings — we apply their numbers rather than
+ * invent tax law. TDS here is a FLAT configured percentage, NOT the progressive slab computation a
+ * real payroll product does; the panel says so, because quietly calling a flat rate "as per slabs"
+ * would be a lie with legal consequences.
+ */
+const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+/** Days the worker was scheduled vs days they actually checked in, for that month. */
+async function attendanceForMonth(w, month) {
+  const days = w.profile?.availability?.availableDays || {}
+  const worksDay = (jsDay) => days[DAY_KEYS[(jsDay + 6) % 7]] !== false // Sun=0 → index 6
+  const [y, m] = month.split('-').map(Number)
+  const total = new Date(y, m, 0).getDate()
+  let scheduled = 0
+  for (let d = 1; d <= total; d++) if (worksDay(new Date(y, m - 1, d).getDay())) scheduled++
+  const present = (await pool.query(
+    `SELECT COUNT(*)::int n FROM attendance WHERE worker_id=$1 AND check_in IS NOT NULL AND to_char(day,'YYYY-MM')=$2`,
+    [w.id, month])).rows[0].n
+  return { scheduled, present, pct: scheduled ? Math.round((present / scheduled) * 100) : 0 }
+}
+
+/** One worker's line for a month. Returns null when they aren't on a monthly salary. */
+async function payrollLine(w, month) {
+  const { plan } = await resolveCommission(w)
+  if (!plan || !MONTHLY_TYPES.includes(plan.salary_type)) return null
+  // Someone whose salary starts after this month hasn't earned it. Back-dating a hire must not
+  // silently pay them for months they hadn't joined.
+  if (w.salary_effective_from && monthKey(new Date(w.salary_effective_from)) > month) return null
+
+  const basic = plan.monthly_basic || 0
+  const allowance = plan.other_allowance || 0
+  const incentives = []
+
+  const inc = await incentivePlanFor(w)
+  if (inc?.attendance_bonus_amount > 0) {
+    const att = await attendanceForMonth(w, month)
+    if (att.pct >= inc.attendance_min_pct) {
+      incentives.push({ label: `Attendance Bonus (${att.pct}%)`, amount: inc.attendance_bonus_amount })
+    }
+  }
+  if (inc?.quality_bonus_amount > 0 && (w.rating || 0) >= inc.quality_min_rating) {
+    incentives.push({ label: `Quality Bonus (${w.rating}★)`, amount: inc.quality_bonus_amount })
+  }
+
+  const gross = basic + allowance + incentives.reduce((n, i) => n + i.amount, 0)
+
+  // Rates come from Settings — the admin's numbers, applied to their own policy.
+  const deductions = []
+  const pct = async (key, dflt) => await getSettingInt(ADMIN_URL, key, dflt)
+  if (w.pf_applicable) {
+    const rate = await pct('pf_percent', 0)
+    const ceiling = await pct('pf_wage_ceiling', 0)
+    const base = ceiling > 0 ? Math.min(basic, ceiling) : basic
+    if (rate > 0) deductions.push({ label: `PF (${rate}% of basic)`, amount: Math.round((base * rate) / 100) })
+  }
+  if (w.esi_applicable) {
+    const rate = await pct('esi_percent', 0)
+    const ceiling = await pct('esi_wage_ceiling', 0)
+    // ESI applies only under the wage ceiling — above it nothing is deducted.
+    if (rate > 0 && (ceiling === 0 || gross <= ceiling)) deductions.push({ label: `ESI (${rate}%)`, amount: Math.round((gross * rate) / 100) })
+  }
+  if (w.tds_applicable) {
+    const rate = await pct('tds_percent', 0)
+    if (rate > 0) deductions.push({ label: `TDS (${rate}% flat)`, amount: Math.round((gross * rate) / 100) })
+  }
+  const totalDeductions = deductions.reduce((n, d) => n + d.amount, 0)
+
+  return {
+    workerId: w.id, name: w.name, planName: plan.name, salaryType: plan.salary_type,
+    basic, allowance, incentives, deductions,
+    gross, totalDeductions, net: Math.max(0, gross - totalDeductions),
+    // Flagged, not silently dropped: a rate switched on with no percentage set deducts nothing.
+    note: [
+      w.pf_applicable && !(await pct('pf_percent', 0)) && 'PF is marked applicable but no PF rate is set',
+      w.esi_applicable && !(await pct('esi_percent', 0)) && 'ESI is marked applicable but no ESI rate is set',
+      w.tds_applicable && !(await pct('tds_percent', 0)) && 'TDS is marked applicable but no TDS rate is set',
+    ].filter(Boolean).join('; '),
+  }
+}
+
+const runDto = (r, lines = []) => ({
+  id: r.id, month: r.month, status: r.status,
+  createdBy: r.created_by, approvedBy: r.approved_by, created: r.created, approvedAt: r.approved_at,
+  lines,
+  totals: {
+    workers: lines.length,
+    gross: lines.reduce((n, l) => n + l.gross, 0),
+    deductions: lines.reduce((n, l) => n + l.totalDeductions, 0),
+    net: lines.reduce((n, l) => n + l.net, 0),
+  },
+})
+
+const lineDto = (l) => ({
+  workerId: l.worker_id, name: l.name, basic: l.basic, allowance: l.allowance,
+  incentives: l.incentives || [], deductions: l.deductions || [],
+  gross: l.gross, totalDeductions: l.total_deductions, net: l.net, note: l.note || '',
+})
+
+app.get('/api/admin/payroll', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT r.*, (SELECT COUNT(*)::int FROM payroll_lines l WHERE l.run_id=r.id) workers,
+            (SELECT COALESCE(SUM(l.net),0)::int FROM payroll_lines l WHERE l.run_id=r.id) net
+     FROM payroll_runs r ORDER BY r.month DESC LIMIT 24`)
+  const onMonthly = (await pool.query(
+    `SELECT COUNT(*)::int n FROM workers w JOIN salary_plans p ON p.id=w.salary_plan_id
+     WHERE p.salary_type = ANY($1) AND w.status='active'`, [MONTHLY_TYPES])).rows[0].n
+  res.json({
+    ok: true, workersOnMonthlySalary: onMonthly,
+    runs: rows.map((r) => ({ id: r.id, month: r.month, status: r.status, workers: r.workers, net: r.net, createdBy: r.created_by, approvedBy: r.approved_by, created: r.created, approvedAt: r.approved_at })),
+  })
+})
+
+app.get('/api/admin/payroll/:id', adminAuth, async (req, res) => {
+  const r = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (!r) return res.status(404).json({ error: 'Run not found' })
+  const lines = (await pool.query(
+    `SELECT l.*, w.name FROM payroll_lines l JOIN workers w ON w.id=l.worker_id WHERE l.run_id=$1 ORDER BY w.name`,
+    [r.id])).rows
+  res.json({ ok: true, run: runDto(r, lines.map(lineDto)) })
+})
+
+/** Build (or rebuild) a month's draft. Rebuilding an APPROVED run is refused — it's already paid. */
+app.post('/api/admin/payroll', adminAuth, async (req, res) => {
+  const month = String(req.body?.month || '').trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Month must be YYYY-MM' })
+  if (month > monthKey(new Date())) return res.status(400).json({ error: "That month hasn't happened yet" })
+
+  const existing = (await pool.query('SELECT * FROM payroll_runs WHERE month=$1', [month])).rows[0]
+  if (existing?.status === 'approved') return res.status(409).json({ error: `${month} has already been approved and paid` })
+
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const run = existing
+    ? existing
+    : (await pool.query('INSERT INTO payroll_runs (month, created_by) VALUES ($1,$2) RETURNING *', [month, who])).rows[0]
+  await pool.query('DELETE FROM payroll_lines WHERE run_id=$1', [run.id]) // a rebuild reflects today's plans
+
+  const workers = (await pool.query("SELECT * FROM workers WHERE status='active' AND salary_plan_id IS NOT NULL")).rows
+  let n = 0
+  for (const w of workers) {
+    const line = await payrollLine(w, month)
+    if (!line) continue
+    await pool.query(
+      `INSERT INTO payroll_lines (run_id, worker_id, basic, allowance, incentives, deductions, gross, total_deductions, net, note)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10)`,
+      [run.id, w.id, line.basic, line.allowance, JSON.stringify(line.incentives), JSON.stringify(line.deductions),
+        line.gross, line.totalDeductions, line.net, line.note])
+    n++
+  }
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'payroll.draft', entityType: 'payroll', entityId: run.id, detail: `Built the ${month} payroll draft — ${n} worker(s)` })
+  const lines = (await pool.query(`SELECT l.*, w.name FROM payroll_lines l JOIN workers w ON w.id=l.worker_id WHERE l.run_id=$1 ORDER BY w.name`, [run.id])).rows
+  res.json({ ok: true, run: runDto((await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [run.id])).rows[0], lines.map(lineDto)) })
+})
+
+/**
+ * Approve — the only thing here that moves money.
+ * Each line credits once, keyed on payroll-<runId>-<workerId>, so a double-approve or a retry
+ * cannot pay anyone twice.
+ */
+app.post('/api/admin/payroll/:id/approve', adminAuth, async (req, res) => {
+  const id = Number(req.params.id)
+  const run = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [id])).rows[0]
+  if (!run) return res.status(404).json({ error: 'Run not found' })
+  if (run.status === 'approved') return res.status(409).json({ error: 'This run has already been approved' })
+  const lines = (await pool.query('SELECT * FROM payroll_lines WHERE run_id=$1', [id])).rows
+  if (!lines.length) return res.status(400).json({ error: 'Nothing to approve — this run has no lines' })
+
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  await pool.query("UPDATE payroll_runs SET status='approved', approved_by=$1, approved_at=now() WHERE id=$2", [who, id])
+  for (const l of lines) {
+    publishEvent(REDIS_URL, 'payroll.credit', {
+      runId: id, month: run.month, workerId: l.worker_id,
+      net: l.net, gross: l.gross,
+      deductions: l.deductions || [],
+      label: `Salary ${run.month}`,
+    })
+  }
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'admin', actorName: who, action: 'payroll.approve', entityType: 'payroll', entityId: id,
+    detail: `Approved the ${run.month} payroll — ₹${lines.reduce((n, l) => n + l.net, 0)} to ${lines.length} worker(s)`,
+    meta: { amount: lines.reduce((n, l) => n + l.net, 0) },
+  })
+  const fresh = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [id])).rows[0]
+  const full = (await pool.query(`SELECT l.*, w.name FROM payroll_lines l JOIN workers w ON w.id=l.worker_id WHERE l.run_id=$1 ORDER BY w.name`, [id])).rows
+  res.json({ ok: true, run: runDto(fresh, full.map(lineDto)) })
+})
+
 app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const { pct, source, plan, platform } = await resolveCommission(w)
   const plans = (await pool.query('SELECT * FROM salary_plans WHERE active=true ORDER BY sort, id')).rows
+  const incPlans = (await pool.query('SELECT * FROM incentive_plans WHERE active=true ORDER BY sort, id')).rows
+  const inc = await incentivePlanFor(w)
   res.json({
     ok: true,
     commissionPercent: w.commission_percent, // null unless a manual rate was set
@@ -1900,6 +2324,22 @@ app.get('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
     commissionSource: source,
     walletEnabled: w.wallet_enabled !== false,
     plans: plans.map(planDto),
+    incentivePlanId: w.incentive_plan_id ?? null,
+    incentivePlan: incentiveDto(inc),
+    incentivePlans: incPlans.map(incentiveDto),
+    salaryEffectiveFrom: w.salary_effective_from || null,
+    pfApplicable: !!w.pf_applicable,
+    esiApplicable: !!w.esi_applicable,
+    tdsApplicable: !!w.tds_applicable,
+    salaryPaymentMode: w.salary_payment_mode || 'bank',
+    // The configured statutory rates, so the panel can warn when one is switched on with no rate.
+    statutory: {
+      pfPercent: await getSettingInt(ADMIN_URL, 'pf_percent', 0),
+      pfWageCeiling: await getSettingInt(ADMIN_URL, 'pf_wage_ceiling', 0),
+      esiPercent: await getSettingInt(ADMIN_URL, 'esi_percent', 0),
+      esiWageCeiling: await getSettingInt(ADMIN_URL, 'esi_wage_ceiling', 0),
+      tdsPercent: await getSettingInt(ADMIN_URL, 'tds_percent', 0),
+    },
   })
 })
 
@@ -1932,7 +2372,33 @@ app.patch('/api/admin/workers/:id/pay', adminAuth, async (req, res) => {
     }
   }
   const walletEnabled = b.walletEnabled !== undefined ? !!b.walletEnabled : w.wallet_enabled !== false
-  await pool.query('UPDATE workers SET commission_percent=$1, salary_plan_id=$2, wallet_enabled=$3 WHERE id=$4', [pct, planId, walletEnabled, id])
+
+  let incId = w.incentive_plan_id ?? null
+  if (b.incentivePlanId !== undefined) {
+    incId = b.incentivePlanId === null || b.incentivePlanId === '' ? null : Number(b.incentivePlanId)
+    if (incId !== null) {
+      const ip = (await pool.query('SELECT id, active FROM incentive_plans WHERE id=$1', [incId])).rows[0]
+      if (!ip) return res.status(400).json({ error: 'Unknown incentive plan' })
+      if (!ip.active) return res.status(400).json({ error: 'That incentive plan is retired — pick an active one' })
+    }
+  }
+  let effFrom = w.salary_effective_from
+  if (b.salaryEffectiveFrom !== undefined) {
+    effFrom = b.salaryEffectiveFrom || null
+    if (effFrom && Number.isNaN(new Date(effFrom).getTime())) return res.status(400).json({ error: 'Effective from must be a valid date' })
+  }
+  const mode = b.salaryPaymentMode !== undefined ? String(b.salaryPaymentMode) : (w.salary_payment_mode || 'bank')
+  if (!['bank', 'upi'].includes(mode)) return res.status(400).json({ error: 'Payment mode must be bank or upi' })
+  const flag = (k, col) => (b[k] !== undefined ? !!b[k] : !!w[col])
+  const pf = flag('pfApplicable', 'pf_applicable')
+  const esi = flag('esiApplicable', 'esi_applicable')
+  const tds = flag('tdsApplicable', 'tds_applicable')
+
+  await pool.query(
+    `UPDATE workers SET commission_percent=$1, salary_plan_id=$2, wallet_enabled=$3, incentive_plan_id=$4,
+       salary_effective_from=$5, pf_applicable=$6, esi_applicable=$7, tds_applicable=$8, salary_payment_mode=$9
+     WHERE id=$10`,
+    [pct, planId, walletEnabled, incId, effFrom, pf, esi, tds, mode, id])
 
   const who = req.admin?.name || req.admin?.email || 'Admin'
   const after = await resolveCommission(await getWorker(id))
@@ -1971,11 +2437,17 @@ app.get('/api/internal/workers/:id/pay-config', internalOnly, async (req, res) =
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   // Resolved here, not in the wallet: a salary plan has to reach settleBooking or assigning one
   // changes nothing about what the worker is actually paid.
-  const { pct, source } = await resolveCommission(w)
+  const { pct, perJob, source } = await resolveCommission(w)
+  const inc = await incentivePlanFor(w)
   res.json({
     commissionPercent: pct,
+    /** False on a FIXED salary: payroll pays them monthly, so a per-job share would double-pay. */
+    paysPerJob: perJob,
     /** 'plan' | 'manual' | 'platform' — for the wallet's logs when something looks wrong. */
     commissionSource: source,
+    /** Flat amount added per completed job, from their incentive plan. 0 = none. */
+    perJobIncentive: inc?.per_job_amount || 0,
+    incentivePlanName: inc?.name || '',
     walletEnabled: w.wallet_enabled !== false,
   })
 })
@@ -2616,8 +3088,9 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
     `INSERT INTO workers (name,first_name,last_name,phone,alternate_mobile,email,city,services,status,verified,rating,zone_id,designation,
                           worker_category,employment_type,joining_date,recruiter,referral_source,
                           cluster_id,store_id,reporting_manager_id,salary_plan_id,shift_def_id,wallet_enabled,
-                          job_radius_km,allow_outside_radius)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
+                          job_radius_km,allow_outside_radius,incentive_plan_id,salary_effective_from,
+                          pf_applicable,esi_applicable,tds_applicable,salary_payment_mode)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32) RETURNING *`,
     [name, b.first_name || null, b.last_name || null, b.phone ? String(b.phone).trim() : null, b.alternate_mobile || null,
       b.email || null, b.city || null, JSON.stringify(b.services || []), b.status || 'pending', !!b.verified, b.rating ?? 4.5,
       b.zone_id ? Number(b.zone_id) : null, b.designation || 'Worker',
@@ -2626,7 +3099,11 @@ app.post('/api/admin/workers', adminAuth, async (req, res) => {
       b.reporting_manager_id ? Number(b.reporting_manager_id) : null, planId,
       b.shift_def_id ? Number(b.shift_def_id) : null, b.wallet_enabled === undefined ? true : !!b.wallet_enabled,
       b.job_radius_km ? Number(b.job_radius_km) : null,
-      b.allow_outside_radius === undefined ? true : !!b.allow_outside_radius])
+      b.allow_outside_radius === undefined ? true : !!b.allow_outside_radius,
+      b.incentive_plan_id ? Number(b.incentive_plan_id) : null,
+      b.salary_effective_from || b.joining_date || null,
+      !!b.pf_applicable, !!b.esi_applicable, !!b.tds_applicable,
+      ['bank', 'upi'].includes(b.salary_payment_mode) ? b.salary_payment_mode : 'bank'])
   // Badge number is derived from the id, so it needs the row to exist first.
   const id = rows[0].id
   await pool.query(`UPDATE workers SET employee_id = 'WKR' || (1000 + $1) WHERE id=$1 AND employee_id IS NULL`, [id])

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  UserPlus, Building2, IndianRupee, Send, Check, ChevronRight, Info, Mail, Smartphone, MapPin, Briefcase, BadgeCheck,
+  UserPlus, Building2, IndianRupee, Send, Check, ChevronRight, Info, Mail, Smartphone, MapPin, Briefcase, BadgeCheck, Gift,
 } from 'lucide-react'
 import {
-  createWorker, inviteWorker, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchAdmins, fetchServices, opList,
+  createWorker, inviteWorker, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdmins, fetchServices, opList,
   type Zone, type Store, type ShiftDef,
 } from '../api'
-import type { SalaryPlan, Admin, AdminService } from '../types'
+import type { SalaryPlan, IncentivePlan, Admin, AdminService } from '../types'
 import { CITIES } from '../cities'
 import { Card, Badge, Field, Dropdown, Loading, useToast } from '../components/UI'
 
@@ -18,9 +18,10 @@ import { Card, Badge, Field, Dropdown, Loading, useToast } from '../components/U
  * the app. That keeps this screen to ~15 fields instead of forty, and stops an admin typing
  * someone else's blood group.
  *
- * Everything here is backed. Deliberately absent: an Incentive Plan picker — the bonuses behind it
- * (referral, attendance, peak hour, festival) don't exist, and a dropdown naming rules that never
- * run is worse than no dropdown.
+ * Everything here is backed by real behaviour: salary plans move money through the wallet (per job)
+ * and the payroll run (monthly), incentive components fire on real events and real ratings.
+ * Referral / Peak Hour / Festival bonuses stay out — their triggers don't exist, and a component
+ * that never fires is worse than one that isn't offered.
  */
 
 type Step = 1 | 2 | 3 | 4
@@ -35,6 +36,9 @@ const CATEGORIES = ['Regular', 'Premium', 'Expert', 'Senior']
 const EMPLOYMENT = ['Full Time', 'Part Time', 'Contract', 'Freelance']
 const REFERRAL = ['Walk-in', 'Referral', 'Job Portal', 'Agency', 'Social Media', 'Other']
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const TYPE_LABEL: Record<string, string> = { per_job: 'Per job', fixed: 'Fixed', hybrid: 'Hybrid' }
+const YESNO = [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }]
+const rupee = (n: number) => '₹' + (n || 0).toLocaleString('en-IN')
 
 type Draft = {
   first_name: string; last_name: string; phone: string; alternate_mobile: string; email: string
@@ -43,6 +47,8 @@ type Draft = {
   reporting_manager_id: string; shift_def_id: string; weekly_off: string[]
   services: string[]; salary_plan_id: string; wallet_enabled: boolean
   job_radius_km: string; allow_outside_radius: boolean
+  incentive_plan_id: string; salary_effective_from: string
+  pf_applicable: boolean; esi_applicable: boolean; tds_applicable: boolean; salary_payment_mode: 'bank' | 'upi'
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -54,6 +60,8 @@ const empty: Draft = {
   reporting_manager_id: '', shift_def_id: '', weekly_off: [],
   services: [], salary_plan_id: '', wallet_enabled: true,
   job_radius_km: '', allow_outside_radius: true,
+  incentive_plan_id: '', salary_effective_from: today(),
+  pf_applicable: false, esi_applicable: false, tds_applicable: false, salary_payment_mode: 'bank',
 }
 
 export default function AddWorker() {
@@ -68,6 +76,7 @@ export default function AddWorker() {
   const [stores, setStores] = useState<Store[]>([])
   const [shifts, setShifts] = useState<ShiftDef[]>([])
   const [plans, setPlans] = useState<SalaryPlan[]>([])
+  const [incPlans, setIncPlans] = useState<IncentivePlan[]>([])
   const [platformPct, setPlatformPct] = useState(20)
   const [admins, setAdmins] = useState<Admin[]>([])
   const [services, setServices] = useState<AdminService[]>([])
@@ -80,11 +89,13 @@ export default function AddWorker() {
       fetchStores().catch(() => []),
       fetchShiftDefs().catch(() => []),
       fetchSalaryPlans().catch(() => ({ plans: [], platformCommissionPercent: 20 })),
+      fetchIncentivePlans().catch(() => ({ plans: [] })),
       fetchAdmins().catch(() => []),
       fetchServices().catch(() => []),
-    ]).then(([z, c, s, sh, sp, ad, sv]) => {
+    ]).then(([z, c, s, sh, sp, ip, ad, sv]) => {
       setZones(z); setClusters(c); setStores(s); setShifts(sh)
       setPlans((sp.plans || []).filter((p) => p.active)); setPlatformPct(sp.platformCommissionPercent ?? 20)
+      setIncPlans((ip.plans || []).filter((p) => p.active))
       setAdmins(ad); setServices(sv)
       setLoaded(true)
     })
@@ -117,6 +128,10 @@ export default function AddWorker() {
     wallet_enabled: d.wallet_enabled,
     job_radius_km: d.job_radius_km ? Number(d.job_radius_km) : null,
     allow_outside_radius: d.allow_outside_radius,
+    incentive_plan_id: d.incentive_plan_id ? Number(d.incentive_plan_id) : null,
+    salary_effective_from: d.salary_effective_from || null,
+    pf_applicable: d.pf_applicable, esi_applicable: d.esi_applicable, tds_applicable: d.tds_applicable,
+    salary_payment_mode: d.salary_payment_mode,
     status: 'pending',
   })
 
@@ -328,55 +343,110 @@ export default function AddWorker() {
           </>
         )}
 
-        {step === 3 && (
-          <Card>
-            <SectionHead icon={<IndianRupee size={16} />} title="Salary & Plan" sub="Pick a predefined plan rather than typing a rate." />
-            {plans.length === 0 ? (
-              <div style={{ padding: 14, borderLeft: '3px solid #d97706', background: '#fffbeb', borderRadius: 8, fontSize: 13 }}>
-                <strong>No salary plans exist yet.</strong> They're your payroll rates, so nothing is assumed —
-                create them under <em>Salary Plans</em>. Without one this worker earns on the platform
-                commission ({platformPct}%) and shows as <em>Salary not configured</em> on their go-live checklist.
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: 8 }}>
-                {plans.map((p) => {
-                  const on = String(p.id) === d.salary_plan_id
-                  return (
-                    <label key={p.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 12, padding: 12, borderRadius: 10, cursor: 'pointer',
-                      border: '1px solid ' + (on ? '#4f46e5' : 'var(--line,#e5e7eb)'), background: on ? '#eef2ff' : '#fff',
-                    }}>
-                      <input type="radio" name="plan" checked={on} onChange={() => set('salary_plan_id', String(p.id))} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{p.name}</div>
-                        {p.notes && <div className="muted" style={{ fontSize: 11.5 }}>{p.notes}</div>}
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d' }}>Keeps {p.workerKeeps}%</div>
-                        <div className="muted" style={{ fontSize: 11 }}>{p.commissionPercent}% commission · per job</div>
-                      </div>
-                    </label>
-                  )
-                })}
-                <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, borderRadius: 10, cursor: 'pointer', border: '1px solid var(--line,#e5e7eb)' }}>
-                  <input type="radio" name="plan" checked={!d.salary_plan_id} onChange={() => set('salary_plan_id', '')} />
-                  <div style={{ flex: 1, fontSize: 13.5 }}>No plan — platform default
-                    <div className="muted" style={{ fontSize: 11.5 }}>Earns on {platformPct}% commission; go-live will flag salary as unconfigured</div>
+        {step === 3 && (() => {
+          const plan = plans.find((p) => String(p.id) === d.salary_plan_id)
+          const inc = incPlans.find((p) => String(p.id) === d.incentive_plan_id)
+          return (
+            <>
+              <Card>
+                <SectionHead icon={<IndianRupee size={16} />} title="Salary Plan" sub="Assign a predefined plan — the amounts live on the plan, not typed here." />
+                {plans.length === 0 ? (
+                  <div style={{ padding: 14, borderLeft: '3px solid #d97706', background: '#fffbeb', borderRadius: 8, fontSize: 13 }}>
+                    <strong>No salary plans exist yet.</strong> They're your payroll structures, so nothing is assumed —
+                    create them under <em>Salary Plans</em>. Without one this worker earns on the platform commission
+                    ({platformPct}%) and shows as <em>Salary not configured</em> on their go-live checklist.
                   </div>
+                ) : (
+                  <>
+                    <Field label="Salary Plan *">
+                      <Dropdown value={d.salary_plan_id} width="100%" placeholder={`No plan — platform default (${platformPct}% commission)`}
+                        options={[{ value: '', label: `No plan — platform default (${platformPct}%)` }, ...plans.map((p) => ({ value: String(p.id), label: `${p.name} · ${TYPE_LABEL[p.salaryType]}` }))]}
+                        onChange={(v) => set('salary_plan_id', v)} />
+                    </Field>
+                    {plan && (
+                      <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: '#f8fafc', border: '1px solid var(--line,#eef0f4)' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                          <Badge tone={plan.salaryType === 'per_job' ? 'gray' : plan.salaryType === 'fixed' ? 'blue' : 'violet'} dot={false}>{TYPE_LABEL[plan.salaryType]}</Badge>
+                          <strong style={{ fontSize: 13.5 }}>{plan.name}</strong>
+                        </div>
+                        {plan.paysMonthly && <Line label="Monthly basic" value={rupee(plan.monthlyBasic)} />}
+                        {plan.paysMonthly && plan.otherAllowance > 0 && <Line label="Other allowance" value={rupee(plan.otherAllowance)} />}
+                        {plan.paysMonthly && <Line label="Total fixed pay (monthly)" value={rupee(plan.totalFixedPay)} strong />}
+                        {plan.paysPerJob && <Line label="Per-job share" value={`worker keeps ${plan.workerKeeps}% of each job`} />}
+                        <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+                          {plan.salaryType === 'fixed' ? 'Paid monthly by payroll. No per-job share.'
+                            : plan.salaryType === 'hybrid' ? 'A monthly salary from payroll, plus a per-job share.'
+                              : 'A per-job share credited by the wallet as jobs complete.'}
+                        </div>
+                      </div>
+                    )}
+                    {plan?.paysMonthly && (
+                      <Field label="Effective from">
+                        <input type="date" value={d.salary_effective_from} onChange={(e) => set('salary_effective_from', e.target.value)} />
+                      </Field>
+                    )}
+                  </>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={d.wallet_enabled} onChange={(e) => set('wallet_enabled', e.target.checked)} />
+                  <span style={{ fontSize: 13 }}>Wallet enabled <span className="muted">— when off, they earn but can't withdraw</span></span>
                 </label>
-              </div>
-            )}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer' }}>
-              <input type="checkbox" checked={d.wallet_enabled} onChange={(e) => set('wallet_enabled', e.target.checked)} />
-              <span style={{ fontSize: 13 }}>Wallet enabled <span className="muted">— when off, they earn but can't withdraw</span></span>
-            </label>
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line,#eef0f4)' }}>
-              <strong>Fixed and Hybrid salaries</strong> aren't offered: they need a monthly payroll run, and without one
-              a worker on them would earn nothing per job. <strong>Incentive plans</strong> aren't here because the
-              bonuses they'd name don't exist yet.
-            </div>
-          </Card>
-        )}
+              </Card>
+
+              <Card>
+                <SectionHead icon={<Gift size={16} />} title="Incentive Plan" sub="Bonuses on top of salary — optional." n={2} />
+                {incPlans.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 12.5 }}>
+                    No incentive plans yet. Create one under <em>Incentive Plans</em> to add per-job, attendance or quality bonuses.
+                  </div>
+                ) : (
+                  <>
+                    <Field label="Incentive Plan">
+                      <Dropdown value={d.incentive_plan_id} width="100%" placeholder="None"
+                        options={[{ value: '', label: 'None' }, ...incPlans.map((p) => ({ value: String(p.id), label: p.name }))]}
+                        onChange={(v) => set('incentive_plan_id', v)} />
+                    </Field>
+                    {inc && (
+                      <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+                        {inc.components.map((c) => (
+                          <div key={c.key} style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <BadgeCheck size={13} color="#16a34a" /> {c.detail}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </Card>
+
+              <Card>
+                <SectionHead icon={<IndianRupee size={16} />} title="Deductions & Others" sub="Statutory deductions apply your configured rates." n={3} />
+                <div style={grid4}>
+                  <Field label="PF Applicable">
+                    <Dropdown value={d.pf_applicable ? 'yes' : 'no'} width="100%" options={YESNO} onChange={(v) => set('pf_applicable', v === 'yes')} />
+                  </Field>
+                  <Field label="ESI Applicable">
+                    <Dropdown value={d.esi_applicable ? 'yes' : 'no'} width="100%" options={YESNO} onChange={(v) => set('esi_applicable', v === 'yes')} />
+                  </Field>
+                  <Field label="TDS Applicable">
+                    <Dropdown value={d.tds_applicable ? 'yes' : 'no'} width="100%" options={YESNO} onChange={(v) => set('tds_applicable', v === 'yes')} />
+                  </Field>
+                  <Field label="Salary Payment Mode">
+                    <Dropdown value={d.salary_payment_mode} width="100%" options={[{ value: 'bank', label: 'Bank Account' }, { value: 'upi', label: 'UPI' }]} onChange={(v) => set('salary_payment_mode', v as 'bank' | 'upi')} />
+                  </Field>
+                </div>
+                <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 4 }}>
+                  <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>
+                    Deductions apply the rates you set in Settings when payroll runs — and only for fixed/hybrid workers,
+                    since per-job earnings aren't a monthly salary. TDS here is a flat configured percentage, not a
+                    progressive slab calculation.
+                  </span>
+                </div>
+              </Card>
+            </>
+          )
+        })()}
 
         {step === 4 && (
           <Card>
@@ -392,7 +462,9 @@ export default function AddWorker() {
               <Review label="Weekly Off" value={d.weekly_off.length ? d.weekly_off.join(', ') : 'Not set'} icon={<Building2 size={14} />} />
               <Review label="Services" value={d.services.length ? d.services.join(', ') : 'None yet'} icon={<BadgeCheck size={14} />} />
               <Review label="Coverage" value={d.allow_outside_radius ? 'Zone preferred; nearby jobs allowed' : `Restricted to zone${d.job_radius_km ? ` + ${d.job_radius_km} km of store` : ''}`} icon={<MapPin size={14} />} />
-              <Review label="Salary Plan" value={planObj ? `${planObj.name} — worker keeps ${planObj.workerKeeps}%` : `Platform default (${platformPct}% commission)`} icon={<IndianRupee size={14} />} />
+              <Review label="Salary Plan" value={planObj ? `${planObj.name} · ${TYPE_LABEL[planObj.salaryType]}${planObj.paysMonthly ? ` · ${rupee(planObj.totalFixedPay)}/mo` : ` · keeps ${planObj.workerKeeps}%`}` : `Platform default (${platformPct}% commission)`} icon={<IndianRupee size={14} />} />
+              <Review label="Incentive Plan" value={incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name || 'None'} icon={<Gift size={14} />} />
+              <Review label="Deductions" value={[d.pf_applicable && 'PF', d.esi_applicable && 'ESI', d.tds_applicable && 'TDS'].filter(Boolean).join(', ') || 'None'} icon={<IndianRupee size={14} />} />
               <Review label="Wallet" value={d.wallet_enabled ? 'Enabled' : 'Disabled'} icon={<IndianRupee size={14} />} />
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
@@ -435,7 +507,9 @@ export default function AddWorker() {
             <Summary label="Initial Shift" value={shifts.find((x) => String(x.id) === d.shift_def_id)?.name} />
             <Summary label="Weekly Off" value={d.weekly_off.join(', ')} />
             <Summary label="Job Radius" value={d.job_radius_km ? `${d.job_radius_km} KM` : (d.allow_outside_radius ? 'No limit' : 'Zone only')} />
-            <Summary label="Salary Plan" value={planObj?.name} />
+            <Summary label="Salary Plan" value={planObj ? `${planObj.name} (${TYPE_LABEL[planObj.salaryType]})` : undefined} />
+            {planObj?.paysMonthly && <Summary label="Monthly Pay" value={rupee(planObj.totalFixedPay)} />}
+            <Summary label="Incentive Plan" value={incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name} />
             <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="muted" style={{ fontSize: 12.5 }}>Status</span>
               <Badge tone="amber" dot={false}>Pending Onboarding</Badge>
@@ -477,6 +551,15 @@ function SectionHead({ icon, title, sub, n }: { icon: React.ReactNode; title: st
         <div style={{ fontSize: 14, fontWeight: 700 }}>{title}</div>
         <div className="muted" style={{ fontSize: 12 }}>{sub}</div>
       </div>
+    </div>
+  )
+}
+
+function Line({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '2px 0' }}>
+      <span className="muted" style={{ fontSize: 12.5 }}>{label}</span>
+      <span style={{ fontSize: 12.5, fontWeight: strong ? 700 : 500, color: strong ? '#4f46e5' : 'inherit' }}>{value}</span>
     </div>
   )
 }

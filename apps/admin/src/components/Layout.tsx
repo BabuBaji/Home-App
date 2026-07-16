@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes, GraduationCap,
-  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus,
+  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, can } from '../store'
@@ -43,6 +43,8 @@ const NAV: NavGroup[] = [
     { to: '/training', label: 'Training & Assessment', Icon: GraduationCap, min: 'admin' },
     { to: '/equipment', label: 'Equipment', Icon: Package, min: 'admin' },
     { to: '/salary-plans', label: 'Salary Plans', Icon: IndianRupee, min: 'admin' },
+    { to: '/incentive-plans', label: 'Incentive Plans', Icon: Gift, min: 'admin' },
+    { to: '/payroll', label: 'Payroll', Icon: Wallet, min: 'admin' },
     { to: '/complaints', label: 'Complaints', Icon: AlertOctagon },
     { to: '/cancellations', label: 'Cancellations', Icon: Ban },
     { to: '/worker-wallet', label: 'Add Funds / Wallet', Icon: Wallet },
@@ -64,7 +66,7 @@ const NAV: NavGroup[] = [
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', payments: 'Payments', refunds: 'Refunds',
-  zones: 'Zone Operations', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
+  zones: 'Zone Operations', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', roles: 'Roles & Permissions',
 }
 

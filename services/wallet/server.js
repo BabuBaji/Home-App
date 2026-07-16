@@ -86,7 +86,15 @@ async function payConfig(workerId) {
   }
   const own = cfg.commissionPercent
   const valid = Number.isInteger(own) && own >= 0 && own <= 100
-  return { pct: valid ? own : platform, walletEnabled: cfg.walletEnabled !== false, inherited: !valid }
+  return {
+    pct: valid ? own : platform,
+    // A FIXED-salary worker earns no per-job share — payroll pays them monthly instead. Defaults to
+    // true so an older/partial response behaves exactly as it did before fixed salaries existed.
+    paysPerJob: cfg.paysPerJob !== false,
+    perJobIncentive: Number(cfg.perJobIncentive) || 0,
+    walletEnabled: cfg.walletEnabled !== false,
+    inherited: !valid,
+  }
 }
 const minPayoutLimit = () => getSettingInt(ADMIN_URL, 'min_payout_limit', 500)
 
@@ -130,22 +138,43 @@ async function settleBooking(b) {
   if (!b?.worker_id) return
   // Per-worker commission if one is set, else the platform rate. This is the number that decides
   // what the worker is actually paid, so Phase 10's setting has to be read HERE or it means nothing.
-  const { pct } = await payConfig(b.worker_id)
-  const share = Math.max(0, Math.round(((b.total || 0) * (100 - pct)) / 100))
-  if (share <= 0) return
+  const { pct, paysPerJob, perJobIncentive } = await payConfig(b.worker_id)
+  // A fixed-salary worker earns no share — payroll pays them monthly, and also paying a share here
+  // would pay them twice for the same work. The job is still recorded: the row is what makes this
+  // idempotent, and their job count feeds metrics and their attendance bonus.
+  const share = paysPerJob ? Math.max(0, Math.round(((b.total || 0) * (100 - pct)) / 100)) : 0
+  if (paysPerJob && share <= 0) return
   // Label reads "Kitchen Cleaning · #HH10234" — the service name is what makes a ledger row
   // legible to an admin; the ref alone doesn't say what the worker was paid for.
   const svc = serviceOf(b)
   const ref = b.ref || `#${b.id}`
+  // A ₹0 "Job Earnings" row would read as a job they weren't paid for. Say what it actually is.
+  const category = paysPerJob ? 'Job Earnings' : 'Job Completed'
+  const label = (svc ? `${svc} · ${ref}` : ref) + (paysPerJob ? '' : ' · covered by your salary')
   const ins = await pool.query(
-    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Job Earnings',$2,$3,$4,'available')
+    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,$2,$3,$4,$5,'available')
      ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [b.worker_id, svc ? `${svc} · ${ref}` : ref, share, String(b.id)])
+    [b.worker_id, category, label, share, String(b.id)])
   if (!ins.rowCount) return // already settled
   await adjustBalance(b.worker_id, { balance: share, earnings: share, jobs: 1 })
+
+  // Per Job Incentive — a flat amount from the worker's incentive plan, on top of any share.
+  // Idempotent on its own ref so it can't double-credit with the share.
+  if (perJobIncentive > 0) {
+    const incIns = await pool.query(
+      `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Incentive',$2,$3,$4,'available')
+       ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+      [b.worker_id, `Per-job incentive · ${ref}`, perJobIncentive, `perjob-${b.id}`])
+    if (incIns.rowCount) {
+      await adjustBalance(b.worker_id, { balance: perJobIncentive, earnings: perJobIncentive })
+      await notify(b.worker_id, 'Incentive credited', `+₹${perJobIncentive} for ${ref}`)
+    }
+  }
   await internalPost((process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''), `/api/internal/bookings/${b.id}/settled`, {}).catch(() => {})
-  await notify(b.worker_id, 'Earnings credited', `₹${share} for ${b.ref || b.id}`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: b.worker_id, detail: `Credited ₹${share} for ${b.ref || b.id}`, meta: { amount: share } })
+  if (share > 0) {
+    await notify(b.worker_id, 'Earnings credited', `₹${share} for ${b.ref || b.id}`)
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: b.worker_id, detail: `Credited ₹${share} for ${b.ref || b.id}`, meta: { amount: share } })
+  }
 }
 
 /* ---------- on-time-start incentive / late-start penalty ---------- */
@@ -614,9 +643,40 @@ app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, async (req, re
 app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })
 app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
 
+/**
+ * An APPROVED payroll line. The worker service computes and an admin approves; the wallet only
+ * credits what it's told, keyed on the run so a re-approve or a redelivered event cannot pay twice.
+ * The deductions are recorded alongside so the payslip shows gross, what was taken, and net —
+ * a bare net figure gives a worker no way to check their own pay.
+ */
+async function creditPayroll(d) {
+  if (!d?.workerId || !d?.runId) return
+  const net = Number(d.net) || 0
+  if (net <= 0) return
+  const ref = `payroll-${d.runId}-${d.workerId}`
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
+     VALUES ($1,'Salary',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [d.workerId, d.label || `Salary ${d.month}`, net, ref])
+  if (!ins.rowCount) return // already credited — a re-approve or a redelivered event
+  await adjustBalance(d.workerId, { balance: net, earnings: net })
+  for (const ded of (d.deductions || [])) {
+    if (!ded?.amount) continue
+    await pool.query(
+      `INSERT INTO worker_deductions (worker_id, category, label, amount, source) VALUES ($1,'Statutory',$2,$3,'Payroll')`,
+      [d.workerId, `${ded.label} · ${d.month}`, ded.amount])
+  }
+  await notify(d.workerId, 'Salary credited', `₹${net} for ${d.month} is in your wallet.`)
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'system', actorName: 'Payroll', action: 'wallet.salary', entityType: 'worker', entityId: d.workerId,
+    detail: `Salary ₹${net} credited for ${d.month}`, meta: { amount: net },
+  })
+}
+
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'settings.updated') return invalidateSettings()
+  if (type === 'payroll.credit') return creditPayroll(data)
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
   else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })

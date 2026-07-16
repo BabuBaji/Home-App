@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
-  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -165,7 +165,7 @@ export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; i
 /* per-worker pay (Phase 10). The wallet reads commissionPercent when it settles a job — changing
    it changes what the worker is actually paid, so it isn't a display setting. */
 export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
-export const updateWorkerPay = (id: number, body: { commissionPercent?: number | null; salaryPlanId?: number | null; walletEnabled?: boolean }) =>
+export const updateWorkerPay = (id: number, body: Record<string, unknown>) =>
   req<WorkerPay>(`/workers/${id}/pay`, patch(body))
 
 /* job radius & coverage. Restricting a worker makes their zone a filter in dispatch rather than a
@@ -177,10 +177,23 @@ export const updateWorkerCoverage = (id: number, body: { jobRadiusKm?: number | 
 /* salary plans. Assigning one to a worker sets what the wallet actually pays them — a plan and a
    hand-typed rate are mutually exclusive server-side, so setting either clears the other. */
 export const fetchSalaryPlans = () => req<SalaryPlansState>('/salary-plans')
-export const createSalaryPlan = (body: { name: string; commissionPercent: number; notes?: string }) =>
+export const createSalaryPlan = (body: Partial<SalaryPlan> & { name: string }) =>
   req<{ ok: boolean; plan: SalaryPlan }>('/salary-plans', post('', body))
 export const updateSalaryPlan = (id: number, body: Partial<SalaryPlan>) => req<{ ok: boolean; plan: SalaryPlan }>(`/salary-plans/${id}`, patch(body))
 export const deleteSalaryPlan = (id: number) => req<{ ok: boolean }>(`/salary-plans/${id}`, { method: 'DELETE' })
+
+/* incentive plans. Each component is a rule with a threshold; the payroll run and the wallet apply
+   them. A plan with everything zeroed is refused server-side. */
+export const fetchIncentivePlans = () => req<{ ok: boolean; plans: IncentivePlan[] }>('/incentive-plans')
+export const createIncentivePlan = (body: Partial<IncentivePlan> & { name: string }) => req<{ ok: boolean; plan: IncentivePlan }>('/incentive-plans', post('', body))
+export const updateIncentivePlan = (id: number, body: Partial<IncentivePlan>) => req<{ ok: boolean; plan: IncentivePlan }>(`/incentive-plans/${id}`, patch(body))
+export const deleteIncentivePlan = (id: number) => req<{ ok: boolean }>(`/incentive-plans/${id}`, { method: 'DELETE' })
+
+/* payroll. A run is a draft until approved; only approval moves money. */
+export const fetchPayrollRuns = () => req<{ ok: boolean; workersOnMonthlySalary: number; runs: PayrollRun[] }>('/payroll')
+export const fetchPayrollRun = (id: number) => req<{ ok: boolean; run: PayrollRun }>(`/payroll/${id}`)
+export const buildPayroll = (month: string) => req<{ ok: boolean; run: PayrollRun }>('/payroll', post('', { month }))
+export const approvePayroll = (id: number) => req<{ ok: boolean; run: PayrollRun }>(`/payroll/${id}/approve`, post(''))
 
 /* availability (Phase 11). The worker states a preference; this is where it becomes an assignment.
    Approving adopts what they asked for; modifying assigns something else and requires a reason —

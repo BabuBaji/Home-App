@@ -25,6 +25,8 @@ import Shifts from './screens/Shifts'
 import Training from './screens/Training'
 import Equipment from './screens/Equipment'
 import SalaryPlans from './screens/SalaryPlans'
+import IncentivePlans from './screens/IncentivePlans'
+import Payroll from './screens/Payroll'
 import AddWorker from './screens/AddWorker'
 import Payments from './screens/Payments'
 import Refunds from './screens/Refunds'
@@ -77,6 +79,8 @@ export default function App() {
           <Route path="/training" element={<Page><Training /></Page>} />
           <Route path="/equipment" element={<Page><Equipment /></Page>} />
           <Route path="/salary-plans" element={<Page><SalaryPlans /></Page>} />
+          <Route path="/incentive-plans" element={<Page><IncentivePlans /></Page>} />
+          <Route path="/payroll" element={<Page><Payroll /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
           <Route path="/refunds" element={<Page><Refunds /></Page>} />
           <Route path="/complaints" element={<Page><Complaints /></Page>} />

@@ -185,6 +185,13 @@ export interface WorkerPay {
   commissionSource: 'plan' | 'manual' | 'platform'
   walletEnabled: boolean
   plans?: SalaryPlan[]
+  incentivePlanId: number | null
+  incentivePlan: IncentivePlan | null
+  incentivePlans?: IncentivePlan[]
+  salaryEffectiveFrom: string | null
+  pfApplicable: boolean; esiApplicable: boolean; tdsApplicable: boolean
+  salaryPaymentMode: 'bank' | 'upi'
+  statutory: { pfPercent: number; pfWageCeiling: number; esiPercent: number; esiWageCeiling: number; tdsPercent: number }
 }
 
 /* Job radius & coverage. allowOutsideRadius=true (the default and today's behaviour) leaves zone a
@@ -202,11 +209,36 @@ export interface WorkerCoverage {
    percentage per worker. NOT seeded: "Worker Level 1 = 20%" is the company's payroll policy.
    per_job only; fixed/hybrid need a monthly payroll run that doesn't exist. */
 export interface SalaryPlan {
-  id: number; name: string; salaryType: 'per_job'; commissionPercent: number
+  id: number; name: string; salaryType: 'per_job' | 'fixed' | 'hybrid'; commissionPercent: number
+  monthlyBasic: number; otherAllowance: number; totalFixedPay: number
   notes: string; active: boolean; sort: number
-  /** 100 - commission. The number the worker actually cares about. */
-  workerKeeps: number
+  /** 100 - commission, or null on a fixed plan where there is no per-job share. */
+  workerKeeps: number | null
+  paysPerJob: boolean; paysMonthly: boolean
   workers?: number
+}
+export interface IncentiveComponent { key: string; label: string; detail: string }
+export interface IncentivePlan {
+  id: number; name: string; notes: string; active: boolean; sort: number
+  perJobAmount: number
+  attendanceBonusAmount: number; attendanceMinPct: number
+  qualityBonusAmount: number; qualityMinRating: number
+  /** Only the components actually switched on, for display. */
+  components: IncentiveComponent[]
+  workers?: number
+}
+export interface PayrollLine {
+  workerId: number; name: string; basic: number; allowance: number
+  incentives: { label: string; amount: number }[]
+  deductions: { label: string; amount: number }[]
+  gross: number; totalDeductions: number; net: number; note: string
+}
+export interface PayrollRun {
+  id: number; month: string; status: 'draft' | 'approved'
+  createdBy: string; approvedBy: string; created: string; approvedAt: string | null
+  lines?: PayrollLine[]
+  workers?: number; net?: number
+  totals?: { workers: number; gross: number; deductions: number; net: number }
 }
 export interface SalaryPlansState { ok: boolean; platformCommissionPercent: number; plans: SalaryPlan[] }
 
