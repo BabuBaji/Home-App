@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   UserPlus, Building2, IndianRupee, Send, Check, ChevronRight, Info, Mail, Smartphone, MapPin, Briefcase, BadgeCheck, Gift, Landmark, Layers, Eye,
+  Pencil, Settings as Cog, ShieldCheck, CheckCircle2, Circle, AlertTriangle, MessageSquare, Phone,
 } from 'lucide-react'
 import {
   createWorker, inviteWorker, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdmins, fetchServices, opList,
@@ -181,7 +182,7 @@ export default function AddWorker() {
   const zoneStores = stores.filter((s) => !d.zone_id || s.zone_id == null || String(s.zone_id) === d.zone_id)
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16, alignItems: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: step === 4 ? '1fr' : 'minmax(0, 1fr) 340px', gap: 16, alignItems: 'start' }}>
       <div style={{ display: 'grid', gap: 14 }}>
         {/* Stepper */}
         <Card>
@@ -521,38 +522,170 @@ export default function AddWorker() {
           )
         })()}
 
-        {step === 4 && (
-          <Card>
-            <SectionHead icon={<Send size={16} />} title="Review & Send Invitation" sub="Check this over before inviting them." />
-            <div style={{ display: 'grid', gap: 2 }}>
-              <Review label="Worker Name" value={[d.first_name, d.last_name].filter(Boolean).join(' ') || '--'} icon={<UserPlus size={14} />} />
-              <Review label="Mobile" value={d.phone || '--'} icon={<Smartphone size={14} />} />
-              <Review label="Email" value={d.email || 'Not given'} icon={<Mail size={14} />} />
-              <Review label="Category" value={d.worker_category || '--'} icon={<Briefcase size={14} />} />
-              <Review label="Employment" value={d.employment_type || '--'} icon={<Briefcase size={14} />} />
-              <Review label="City / Zone" value={`${d.city || '--'} / ${zoneName}`} icon={<MapPin size={14} />} />
-              <Review label="Shift" value={shifts.find((s) => String(s.id) === d.shift_def_id)?.name || 'No shift (flexible)'} icon={<Building2 size={14} />} />
-              <Review label="Weekly Off" value={d.weekly_off.length ? d.weekly_off.join(', ') : 'Not set'} icon={<Building2 size={14} />} />
-              <Review label="Services" value={d.services.length ? d.services.join(', ') : 'None yet'} icon={<BadgeCheck size={14} />} />
-              <Review label="Coverage" value={d.allow_outside_radius ? 'Zone preferred; nearby jobs allowed' : `Restricted to zone${d.job_radius_km ? ` + ${d.job_radius_km} km of store` : ''}`} icon={<MapPin size={14} />} />
-              <Review label="Salary Plan" value={planObj ? `${planObj.name} · ${TYPE_LABEL[planObj.salaryType]}${planObj.paysMonthly ? ` · ${rupee(planObj.totalFixedPay)}/mo` : ` · keeps ${planObj.workerKeeps}%`}` : `Platform default (${platformPct}% commission)`} icon={<IndianRupee size={14} />} />
-              <Review label="Incentive Plan" value={incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name || 'None'} icon={<Gift size={14} />} />
-              <Review label="Deductions" value={[d.pf_applicable && 'PF', d.esi_applicable && 'ESI', d.tds_applicable && 'TDS'].filter(Boolean).join(', ') || 'None'} icon={<IndianRupee size={14} />} />
-              <Review label="Wallet" value={d.wallet_enabled ? 'Enabled' : 'Disabled'} icon={<IndianRupee size={14} />} />
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button className="btn line" disabled={busy} onClick={() => save(false)}>Save as Draft</button>
-              <button className="btn" disabled={busy || !step1Ok} onClick={() => save(true)}>
-                <Send size={15} /> {busy ? 'Working…' : 'Save & Send Invitation'}
-              </button>
-            </div>
-            {/* An invite is an SMS to a real person. Say what the button does before it's pressed. */}
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-              <strong>Save as Draft</strong> creates them as Pending — no message is sent and they can't sign in.
-              <strong> Save &amp; Send Invitation</strong> texts them a link and lets them sign in to complete their own profile.
-            </div>
-          </Card>
-        )}
+        {step === 4 && (() => {
+          const inc = incPlans.find((p) => String(p.id) === d.incentive_plan_id)
+          const fullName = [d.first_name, d.last_name].filter(Boolean).join(' ') || 'this worker'
+          const workingDays = DAYS.filter((x) => !d.weekly_off.includes(x))
+          const clusterName = clusters.find((c) => String(c.id) === d.cluster_id)?.name
+          const storeName = stores.find((s) => String(s.id) === d.store_id)?.name
+          const managerName = admins.find((a) => String(a.id) === d.reporting_manager_id)?.name
+          const shiftName = shifts.find((s) => String(s.id) === d.shift_def_id)?.name
+          const estFixed = d.salary_type !== 'per_job' ? salaryTotal : 0
+          const hasEst = inc && (inc.estIncentiveMin > 0 || inc.estIncentiveMax > 0)
+          const DOCS = ['Aadhaar Card', 'PAN Card', 'Address Proof', 'Police Verification', 'Bank Details', 'Medical Certificate', 'Profile Photo']
+          return (
+            <>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Review Worker Details</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, alignItems: 'start' }}>
+                {/* Column 1 */}
+                <div style={{ display: 'grid', gap: 16 }}>
+                  <ReviewCard icon={<UserPlus size={16} />} title="Basic Information" onEdit={() => setStep(1)}>
+                    <KV k="First Name" v={d.first_name || '--'} />
+                    <KV k="Last Name" v={d.last_name || '--'} />
+                    <KV k="Mobile Number" v={d.phone ? `+91 ${d.phone}` : '--'} />
+                    {d.alternate_mobile && <KV k="Alternate Mobile" v={`+91 ${d.alternate_mobile}`} />}
+                    <KV k="Email Address" v={d.email || 'Not given'} />
+                    <KV k="Worker Category" v={d.worker_category || '--'} />
+                    <KV k="Employment Type" v={d.employment_type || '--'} />
+                    <KV k="Joining Date" v={d.joining_date || '--'} />
+                    <div className="muted" style={{ fontSize: 11.5, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line,#eef0f4)' }}>
+                      Date of birth, gender, blood group and personal details are completed by the worker after they sign in.
+                    </div>
+                  </ReviewCard>
+
+                  <ReviewCard icon={<IndianRupee size={16} />} title="Salary & Plan" onEdit={() => setStep(3)}>
+                    <KV k="Salary Type" v={TYPE_LABEL[d.salary_type]} />
+                    <KV k="Salary Plan" v={planObj?.name || 'None (platform default)'} />
+                    {d.salary_type !== 'per_job' && <KV k="Effective From" v={d.salary_effective_from || '--'} />}
+                    {d.salary_type !== 'per_job' && (
+                      <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: '#f8fafc', border: '1px solid var(--line,#eef0f4)' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Salary Details (Monthly)</div>
+                        <KV k="Monthly Basic Salary" v={rupee(Number(d.salary_basic) || 0)} />
+                        <KV k="Attendance Bonus" v={rupee(Number(d.salary_attendance) || 0)} />
+                        <KV k="Other Allowance" v={rupee(Number(d.salary_allowance) || 0)} />
+                        <div className="row" style={{ justifyContent: 'space-between', paddingTop: 6, marginTop: 4, borderTop: '1px solid var(--line,#e5e7eb)' }}>
+                          <strong style={{ fontSize: 12.5 }}>Total Fixed Pay</strong>
+                          <strong style={{ fontSize: 13.5, color: '#4f46e5' }}>{rupee(salaryTotal)}</strong>
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ marginTop: 8 }}>
+                      <KV k="Incentive Plan" v={inc?.name || 'None'} />
+                      {hasEst && <KV k="Average Incentive (Est.)" v={`${rupee(inc!.estIncentiveMin)} – ${rupee(inc!.estIncentiveMax)}`} />}
+                    </div>
+                    {hasEst && (estFixed > 0) && (
+                      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', marginTop: 8, borderRadius: 8, background: '#f0fdf4' }}>
+                        <strong style={{ fontSize: 12.5, color: '#166534' }}>Total Earning Potential (Est.)</strong>
+                        <strong style={{ fontSize: 12.5, color: '#166534' }}>{rupee(estFixed + inc!.estIncentiveMin)} – {rupee(estFixed + inc!.estIncentiveMax)}</strong>
+                      </div>
+                    )}
+                  </ReviewCard>
+                </div>
+
+                {/* Column 2 */}
+                <div style={{ display: 'grid', gap: 16 }}>
+                  <ReviewCard icon={<MapPin size={16} />} title="Operational Assignment" onEdit={() => setStep(2)}>
+                    <KV k="City" v={d.city || '--'} />
+                    <KV k="Zone" v={zoneName} />
+                    {clusterName && <KV k="Cluster" v={clusterName} />}
+                    {storeName && <KV k="Store" v={storeName} />}
+                    {managerName && <KV k="Reporting Manager" v={managerName} />}
+                    <KV k="Initial Shift" v={shiftName || 'Flexible'} />
+                    <KV k="Weekly Off" v={d.weekly_off.length ? d.weekly_off.join(', ') : 'None set'} />
+                    <KV k="Working Days" v={workingDays.length ? workingDays.join(', ') : '--'} />
+                    <KV k="Job Radius" v={d.job_radius_km ? `${d.job_radius_km} KM` : (d.allow_outside_radius ? 'No limit' : 'Zone only')} />
+                  </ReviewCard>
+
+                  <ReviewCard icon={<Cog size={16} />} title="Other Settings" onEdit={() => setStep(3)}>
+                    <KV k="PF Applicable" v={d.pf_applicable ? 'Yes' : 'No'} />
+                    <KV k="ESI Applicable" v={d.esi_applicable ? 'Yes' : 'No'} />
+                    <KV k="TDS Applicable" v={d.tds_applicable ? 'Yes' : 'No'} />
+                    <KV k="Salary Payment Mode" v={d.salary_payment_mode === 'upi' ? 'UPI' : 'Bank Account'} />
+                    <KV k="Wallet Enabled" v={d.wallet_enabled ? 'Yes' : 'No'} />
+                  </ReviewCard>
+
+                  <ReviewCard icon={<ShieldCheck size={16} />} title="Documents & Verification" info>
+                    <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>Documents are uploaded by the worker after they register.</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px' }}>
+                      {DOCS.map((doc) => (
+                        <div key={doc} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#64748b' }}>
+                          <Circle size={13} color="#cbd5e1" /> {doc}
+                        </div>
+                      ))}
+                    </div>
+                  </ReviewCard>
+                </div>
+
+                {/* Column 3 */}
+                <div style={{ display: 'grid', gap: 16 }}>
+                  <ReviewCard icon={<BadgeCheck size={16} />} title="Service Assignment" onEdit={() => setStep(2)}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted,#667085)' }}>Assigned Services</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+                      {services.map((s) => {
+                        const on = d.services.includes(s.name)
+                        return (
+                          <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: on ? 'inherit' : '#cbd5e1' }}>
+                            {on ? <CheckCircle2 size={14} color="#16a34a" /> : <Circle size={14} color="#cbd5e1" />} {s.name}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {d.services.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>No services assigned — the worker can claim skills in the app, which you approve later.</div>}
+                  </ReviewCard>
+
+                  <ReviewCard icon={<Send size={16} />} title="Onboarding Summary">
+                    <div style={{ fontSize: 12, color: 'var(--muted,#667085)' }}>Invitation will be sent to</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, margin: '4px 0' }}><Phone size={13} color="#16a34a" /> {d.phone ? `+91 ${d.phone}` : '--'}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--muted,#667085)' }}><MessageSquare size={13} /> SMS / WhatsApp with an app download link</div>
+                    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+                      <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Onboarding Status</span>
+                      <Badge tone="amber" dot={false}>Pending Invitation</Badge>
+                    </div>
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line,#eef0f4)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Next steps for the worker</div>
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: 'var(--muted,#667085)', lineHeight: 1.7 }}>
+                        <li>Download the app using the link</li>
+                        <li>Complete their profile and upload documents</li>
+                        <li>Finish training and the assessment</li>
+                        <li>You verify and activate them</li>
+                      </ul>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10, padding: 10, borderRadius: 10, background: '#fffbeb', color: '#92400e' }}>
+                      <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <span style={{ fontSize: 11.5 }}>Review everything before sending — you can edit any section with its Edit button.</span>
+                    </div>
+                  </ReviewCard>
+                </div>
+              </div>
+
+              {/* Invite bar */}
+              <Card>
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <span style={{ width: 46, height: 46, borderRadius: 12, background: '#eef2ff', color: '#4f46e5', display: 'grid', placeItems: 'center', flexShrink: 0 }}><Send size={20} /></span>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700 }}>Ready to invite {fullName}?</div>
+                      <div className="muted" style={{ fontSize: 12.5 }}>An invitation with an app download link goes to their mobile number. They can then sign in to complete their profile.</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="btn line" disabled={busy} onClick={() => save(false)}>Save as Draft</button>
+                    <button className="btn line" disabled title="Email invitations aren't set up — use SMS / WhatsApp" style={{ opacity: 0.5 }}>
+                      <Mail size={15} /> Send Invite via Email
+                    </button>
+                    <button className="btn" disabled={busy || !step1Ok} onClick={() => save(true)}>
+                      <Send size={15} /> {busy ? 'Sending…' : 'Send Invitation via SMS / WhatsApp'}
+                    </button>
+                  </div>
+                </div>
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
+                  Email invitations aren't set up yet, so the link is sent by SMS/WhatsApp. <strong>Save as Draft</strong> creates
+                  the worker as Pending without sending anything — you can invite them later from their profile.
+                </div>
+              </Card>
+            </>
+          )
+        })()}
 
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <button className="btn line" onClick={() => (step === 1 ? nav('/workers') : setStep((step - 1) as Step))}>
@@ -566,7 +699,8 @@ export default function AddWorker() {
         </div>
       </div>
 
-      {/* Summary rail. Step 3 swaps to a Salary Summary, matching the mockup. */}
+      {/* Summary rail — steps 1–3 only. Step 4 is a full-width review with no rail. */}
+      {step !== 4 && (
       <div style={{ display: 'grid', gap: 14, position: 'sticky', top: 12 }}>
         {step === 3 ? (
           <>
@@ -675,11 +809,41 @@ export default function AddWorker() {
           </>
         )}
       </div>
+      )}
     </div>
   )
 }
 
 const grid4: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 4 }
+
+function ReviewCard({ icon, title, onEdit, info, children }: { icon: React.ReactNode; title: string; onEdit?: () => void; info?: boolean; children: React.ReactNode }) {
+  return (
+    <Card>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ width: 30, height: 30, borderRadius: 8, background: '#eef2ff', color: '#4f46e5', display: 'grid', placeItems: 'center' }}>{icon}</span>
+          <strong style={{ fontSize: 14 }}>{title}</strong>
+        </div>
+        {onEdit && (
+          <button className="btn line" style={{ padding: '4px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={onEdit}>
+            <Pencil size={13} /> Edit
+          </button>
+        )}
+        {info && <span className="muted" style={{ fontSize: 11.5 }}>Info</span>}
+      </div>
+      {children}
+    </Card>
+  )
+}
+
+function KV({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', padding: '3px 0', gap: 12 }}>
+      <span className="muted" style={{ fontSize: 12.5, flexShrink: 0 }}>{k}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 500, textAlign: 'right' }}>{v}</span>
+    </div>
+  )
+}
 
 function SectionHead({ icon, title, sub, n }: { icon: React.ReactNode; title: string; sub: string; n?: number }) {
   return (
