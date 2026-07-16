@@ -548,8 +548,13 @@ export default function AddWorker() {
                     <KV k="Worker Category" v={d.worker_category || '--'} />
                     <KV k="Employment Type" v={d.employment_type || '--'} />
                     <KV k="Joining Date" v={d.joining_date || '--'} />
-                    <div className="muted" style={{ fontSize: 11.5, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line,#eef0f4)' }}>
-                      Date of birth, gender, blood group and personal details are completed by the worker after they sign in.
+                    {/* Worker-filled fields — shown as empty rows (like the mock). They have no value
+                        at review-before-invite; the worker completes them after signing in. */}
+                    <KV k="Date of Birth" v="—" muted />
+                    <KV k="Gender" v="—" muted />
+                    <KV k="Blood Group" v="—" muted />
+                    <div className="muted" style={{ fontSize: 11, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line,#eef0f4)' }}>
+                      The worker completes these after they sign in.
                     </div>
                   </ReviewCard>
 
@@ -836,11 +841,11 @@ function ReviewCard({ icon, title, onEdit, info, children }: { icon: React.React
   )
 }
 
-function KV({ k, v }: { k: string; v: string }) {
+function KV({ k, v, muted }: { k: string; v: string; muted?: boolean }) {
   return (
     <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', padding: '3px 0', gap: 12 }}>
       <span className="muted" style={{ fontSize: 12.5, flexShrink: 0 }}>{k}</span>
-      <span style={{ fontSize: 12.5, fontWeight: 500, textAlign: 'right' }}>{v}</span>
+      <span style={{ fontSize: 12.5, fontWeight: muted ? 400 : 500, textAlign: 'right', color: muted ? '#cbd5e1' : 'inherit' }}>{v}</span>
     </div>
   )
 }
