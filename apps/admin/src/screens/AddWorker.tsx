@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  UserPlus, Building2, IndianRupee, Send, Check, ChevronRight, Info, Mail, Smartphone, MapPin, Briefcase, BadgeCheck, Gift, Landmark, Layers,
+  UserPlus, Building2, IndianRupee, Send, Check, ChevronRight, Info, Mail, Smartphone, MapPin, Briefcase, BadgeCheck, Gift, Landmark, Layers, Eye,
 } from 'lucide-react'
 import {
   createWorker, inviteWorker, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdmins, fetchServices, opList,
@@ -452,7 +452,14 @@ export default function AddWorker() {
               </Card>
 
               <Card>
-                <SectionHead icon={<Gift size={16} />} title="Incentive Plan" sub="Select the incentive / bonus plan for this worker." />
+                <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                  <SectionHead icon={<Gift size={16} />} title="Incentive Plan" sub="Select the incentive / bonus plan for this worker." />
+                  {inc && (
+                    <button onClick={() => nav('/incentive-plans')} className="btn line" style={{ marginLeft: 'auto', padding: '6px 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Eye size={14} /> View Plan Details
+                    </button>
+                  )}
+                </div>
                 {incPlans.length === 0 ? (
                   <div className="muted" style={{ fontSize: 12.5 }}>
                     No incentive plans yet. Create one under <em>Incentive Plans</em> to add per-job, attendance or quality bonuses.
