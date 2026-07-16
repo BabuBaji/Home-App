@@ -2814,12 +2814,16 @@ app.get('/api/admin/incentive-rules/meta', adminAuth, async (_q, res) => {
 })
 
 app.get('/api/admin/incentive-rules', adminAuth, async (_q, res) => {
-  const { rows } = await pool.query(
-    `SELECT r.*, v.* , r.id AS rule_id,
-            (SELECT COALESCE(SUM(p.amount),0)::int FROM incentive_payouts p WHERE p.rule_id=r.id AND p.month=to_char(now(),'YYYY-MM')) spent_this_month
-     FROM incentive_rules r LEFT JOIN incentive_rule_versions v ON v.rule_id=r.id AND v.is_current=true
-     ORDER BY r.priority ASC, r.id ASC`)
-  res.json({ ok: true, rules: rows.map((row) => ruleDto(row, row.trigger ? row : null, { spentThisMonth: row.spent_this_month })) })
+  // Two-step, not a wide join: `SELECT r.*, v.*` collides on `id` (rule vs version) and the version
+  // clobbers the rule id, so the list would hand back version ids as rule ids.
+  const rules = (await pool.query('SELECT * FROM incentive_rules ORDER BY priority ASC, id ASC')).rows
+  const out = []
+  for (const r of rules) {
+    const v = (await pool.query('SELECT * FROM incentive_rule_versions WHERE rule_id=$1 AND is_current=true', [r.id])).rows[0]
+    const spent = (await pool.query("SELECT COALESCE(SUM(amount),0)::int n FROM incentive_payouts WHERE rule_id=$1 AND month=to_char(now(),'YYYY-MM')", [r.id])).rows[0].n
+    out.push(ruleDto(r, v, { spentThisMonth: spent }))
+  }
+  res.json({ ok: true, rules: out })
 })
 
 app.get('/api/admin/incentive-rules/:id', adminAuth, async (req, res) => {

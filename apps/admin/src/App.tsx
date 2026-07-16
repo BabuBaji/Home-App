@@ -27,6 +27,7 @@ import Equipment from './screens/Equipment'
 import SalaryPlans from './screens/SalaryPlans'
 import IncentivePlans from './screens/IncentivePlans'
 import Payroll from './screens/Payroll'
+import CompensationRules from './screens/CompensationRules'
 import AddWorker from './screens/AddWorker'
 import Payments from './screens/Payments'
 import Refunds from './screens/Refunds'
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/salary-plans" element={<Page><SalaryPlans /></Page>} />
           <Route path="/incentive-plans" element={<Page><IncentivePlans /></Page>} />
           <Route path="/payroll" element={<Page><Payroll /></Page>} />
+          <Route path="/compensation-rules" element={<Page><CompensationRules /></Page>} />
           <Route path="/payments" element={<Page><Payments /></Page>} />
           <Route path="/refunds" element={<Page><Refunds /></Page>} />
           <Route path="/complaints" element={<Page><Complaints /></Page>} />

@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
-  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -188,6 +188,14 @@ export const fetchIncentivePlans = () => req<{ ok: boolean; plans: IncentivePlan
 export const createIncentivePlan = (body: Partial<IncentivePlan> & { name: string }) => req<{ ok: boolean; plan: IncentivePlan }>('/incentive-plans', post('', body))
 export const updateIncentivePlan = (id: number, body: Partial<IncentivePlan>) => req<{ ok: boolean; plan: IncentivePlan }>(`/incentive-plans/${id}`, patch(body))
 export const deleteIncentivePlan = (id: number) => req<{ ok: boolean }>(`/incentive-plans/${id}`, { method: 'DELETE' })
+
+/* compensation rule engine. Author incentives as config; editing creates a new immutable version. */
+export const fetchRuleMeta = () => req<{ ok: boolean } & RuleMeta>('/incentive-rules/meta')
+export const fetchIncentiveRules = () => req<{ ok: boolean; rules: IncentiveRule[] }>('/incentive-rules')
+export const fetchIncentiveRule = (id: number) => req<{ ok: boolean; rule: IncentiveRule }>(`/incentive-rules/${id}`)
+export const createIncentiveRule = (body: Record<string, unknown>) => req<{ ok: boolean; rule: IncentiveRule }>('/incentive-rules', post('', body))
+export const versionIncentiveRule = (id: number, body: Record<string, unknown>) => req<{ ok: boolean; rule: IncentiveRule }>(`/incentive-rules/${id}/version`, post('', body))
+export const patchIncentiveRule = (id: number, body: Record<string, unknown>) => req<{ ok: boolean; rule: IncentiveRule }>(`/incentive-rules/${id}`, patch(body))
 
 /* payroll. A run is a draft until approved; only approval moves money. */
 export const fetchPayrollRuns = () => req<{ ok: boolean; workersOnMonthlySalary: number; runs: PayrollRun[] }>('/payroll')

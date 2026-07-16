@@ -304,6 +304,31 @@ export interface GoLiveChecklist {
   history: ApprovalRecord[]
 }
 
+/* Compensation Rule Engine. A rule is authored as config (scope + conditions + calculation) and
+   the engine pays it. Editing creates a new immutable version; payouts pin the version that paid. */
+export interface RuleField { key: string; label: string; type: 'number' | 'string' | 'enum'; triggers: string[] }
+export interface RuleMeta { triggers: string[]; scopeTypes: string[]; calcTypes: string[]; operators: string[]; fields: RuleField[]; categories: string[] }
+export interface RuleCondition { field: string; op: string; value: string }
+export interface RuleSlab { from: number; to: number; amount: number }
+export interface RuleCalc { amount?: number; percent?: number; base?: string; perUnit?: number; maxUnits?: number; slabMetric?: string; slabs?: RuleSlab[] }
+export interface RuleVersion {
+  id: number; ruleId: number; version: number; isCurrent: boolean; trigger: string
+  effectiveFrom: string | null; effectiveTo: string | null
+  scopeType: string; scopeValues: string[]; matchMode: 'all' | 'any'
+  conditions: RuleCondition[]; calcType: string; calc: RuleCalc
+  stack: string; budgetMonth: number; notes: string; createdBy: string; created: string
+}
+export interface RulePayout { id: number; workerId: number; amount: number; month: string; ref: string; detail: string; versionId: number; created: string }
+export interface IncentiveRule {
+  id: number; code: string; name: string; description: string; category: string
+  priority: number; active: boolean; created: string
+  current: RuleVersion | null
+  spentThisMonth?: number
+  versions?: RuleVersion[]
+  payouts?: RulePayout[]
+  audit?: { action: string; detail: string; by: string; created: string }[]
+}
+
 export interface AdminBooking {
   id: number; ref: string; customer: string; service: string; pro: string
   date?: string; time?: string; type: string; total: number
