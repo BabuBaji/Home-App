@@ -106,25 +106,28 @@ export default function AddWorker() {
       setLoaded(true)
     })
   }, [])
+
+  // Picking a plan pre-fills the Salary Details amounts (the admin can then adjust them for this
+  // worker). Runs only on a plan change, so hand-edits aren't clobbered on re-render. MUST sit
+  // above the early return below — every hook has to run in the same order on every render, and a
+  // hook after a conditional `return` violates that and crashes ("rendered more hooks…").
+  useEffect(() => {
+    const p = plans.find((x) => String(x.id) === d.salary_plan_id)
+    if (!p) return
+    setD((prev) => ({
+      ...prev,
+      salary_basic: p.monthlyBasic ? String(p.monthlyBasic) : '',
+      salary_attendance: p.attendanceAllowance ? String(p.attendanceAllowance) : '',
+      salary_allowance: p.otherAllowance ? String(p.otherAllowance) : '',
+    }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.salary_plan_id])
+
   if (!loaded) return <Loading />
 
   const set = (k: keyof Draft, v: unknown) => setD((p) => ({ ...p, [k]: v }))
   const zoneName = zones.find((z) => String(z.id) === d.zone_id)?.name || '--'
   const planObj = plans.find((p) => String(p.id) === d.salary_plan_id)
-
-  // Picking a plan pre-fills the Salary Details amounts (the admin can then adjust them for this
-  // worker). Runs only on a plan change, so hand-edits aren't clobbered on re-render.
-  useEffect(() => {
-    if (!planObj) return
-    setD((p) => ({
-      ...p,
-      salary_basic: planObj.monthlyBasic ? String(planObj.monthlyBasic) : '',
-      salary_attendance: planObj.attendanceAllowance ? String(planObj.attendanceAllowance) : '',
-      salary_allowance: planObj.otherAllowance ? String(planObj.otherAllowance) : '',
-    }))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d.salary_plan_id])
-
   const salaryTotal = (Number(d.salary_basic) || 0) + (Number(d.salary_attendance) || 0) + (Number(d.salary_allowance) || 0)
 
   // Only what the server actually requires. Everything else the worker supplies later.
