@@ -210,7 +210,7 @@ export interface WorkerCoverage {
    per_job only; fixed/hybrid need a monthly payroll run that doesn't exist. */
 export interface SalaryPlan {
   id: number; name: string; salaryType: 'per_job' | 'fixed' | 'hybrid'; commissionPercent: number
-  monthlyBasic: number; otherAllowance: number; totalFixedPay: number
+  monthlyBasic: number; attendanceAllowance: number; otherAllowance: number; totalFixedPay: number
   notes: string; active: boolean; sort: number
   /** 100 - commission, or null on a fixed plan where there is no per-job share. */
   workerKeeps: number | null

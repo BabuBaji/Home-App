@@ -385,11 +385,14 @@ export default function AddWorker() {
 
                 {/* Plan + effective-from */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <Field label="Salary Plan *">
-                    <Dropdown value={d.salary_plan_id} width="100%" placeholder={typePlans.length ? 'Select salary plan' : 'No plans of this type'}
-                      options={typePlans.map((p) => ({ value: String(p.id), label: p.name }))}
-                      onChange={(v) => set('salary_plan_id', v)} />
-                  </Field>
+                  <div>
+                    <Field label="Salary Plan *">
+                      <Dropdown value={d.salary_plan_id} width="100%" placeholder={typePlans.length ? 'Select salary plan' : 'No plans of this type'}
+                        options={typePlans.map((p) => ({ value: String(p.id), label: p.name }))}
+                        onChange={(v) => set('salary_plan_id', v)} />
+                    </Field>
+                    <button onClick={() => nav('/salary-plans')} style={{ background: 'none', border: 0, color: '#4f46e5', fontSize: 12, cursor: 'pointer', padding: '4px 0 0' }}>+ Create New Plan</button>
+                  </div>
                   {plan?.paysMonthly && (
                     <Field label="Effective From *">
                       <input type="date" value={d.salary_effective_from} onChange={(e) => set('salary_effective_from', e.target.value)} />
@@ -409,8 +412,9 @@ export default function AddWorker() {
                     <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>Salary Details <span className="muted" style={{ fontWeight: 400 }}>({TYPE_LABEL[plan.salaryType]} — from the plan)</span></div>
                     <div style={{ display: 'grid', gridTemplateColumns: plan.paysMonthly ? 'repeat(4, 1fr)' : '1fr', gap: 10 }}>
                       {plan.paysMonthly && <Metric label="Monthly Basic Salary" value={rupee(plan.monthlyBasic)} />}
-                      {plan.paysMonthly && <Metric label="Other Allowance" value={rupee(plan.otherAllowance)} />}
-                      {plan.paysPerJob && <Metric label="Per-Job Share" value={`keeps ${plan.workerKeeps}%`} />}
+                      {plan.paysMonthly && <Metric label="Attendance Bonus (Monthly)" value={rupee(plan.attendanceAllowance)} />}
+                      {plan.paysMonthly && <Metric label="Other Allowance (Monthly)" value={rupee(plan.otherAllowance)} />}
+                      {plan.paysPerJob && !plan.paysMonthly && <Metric label="Per-Job Share" value={`keeps ${plan.workerKeeps}%`} />}
                       {plan.paysMonthly && <Metric label="Total Fixed Pay (Monthly)" value={rupee(plan.totalFixedPay)} accent />}
                     </div>
                     <div style={{ display: 'flex', gap: 8, fontSize: 12, background: '#eff6ff', color: '#1e40af', padding: 10, borderRadius: 10, marginTop: 10 }}>
@@ -439,11 +443,14 @@ export default function AddWorker() {
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20 }}>
-                    <Field label="Incentive Plan">
-                      <Dropdown value={d.incentive_plan_id} width="100%" placeholder="None"
-                        options={[{ value: '', label: 'None' }, ...incPlans.map((p) => ({ value: String(p.id), label: p.name }))]}
-                        onChange={(v) => set('incentive_plan_id', v)} />
-                    </Field>
+                    <div>
+                      <Field label="Incentive Plan">
+                        <Dropdown value={d.incentive_plan_id} width="100%" placeholder="None"
+                          options={[{ value: '', label: 'None' }, ...incPlans.map((p) => ({ value: String(p.id), label: p.name }))]}
+                          onChange={(v) => set('incentive_plan_id', v)} />
+                      </Field>
+                      <button onClick={() => nav('/incentive-plans')} style={{ background: 'none', border: 0, color: '#4f46e5', fontSize: 12, cursor: 'pointer', padding: '4px 0 0' }}>+ Create New Plan</button>
+                    </div>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted,#667085)', marginBottom: 6 }}>
                         {inc ? 'Incentive Components (Included in Plan)' : 'Pick a plan to see its components'}
@@ -548,7 +555,8 @@ export default function AddWorker() {
               <strong style={{ fontSize: 14 }}>Salary Summary</strong>
               <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
                 <Summary label="Salary Type" value={planObj ? TYPE_LABEL[planObj.salaryType] : TYPE_LABEL[d.salary_type]} />
-                {planObj?.paysMonthly && <Summary label="Monthly Basic" value={rupee(planObj.monthlyBasic)} />}
+                {planObj?.paysMonthly && <Summary label="Monthly Basic Salary" value={rupee(planObj.monthlyBasic)} />}
+                {planObj?.paysMonthly && planObj.attendanceAllowance > 0 && <Summary label="Attendance Bonus" value={rupee(planObj.attendanceAllowance)} />}
                 {planObj?.paysMonthly && planObj.otherAllowance > 0 && <Summary label="Other Allowance" value={rupee(planObj.otherAllowance)} />}
                 {planObj?.paysMonthly && (
                   <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', paddingTop: 6, borderTop: '1px solid var(--line,#eef0f4)' }}>

@@ -16,8 +16,8 @@ import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, use
  * server notifies everyone affected.
  */
 
-type Draft = { name: string; salaryType: 'per_job' | 'fixed' | 'hybrid'; commissionPercent: string; monthlyBasic: string; otherAllowance: string; notes: string }
-const EMPTY: Draft = { name: '', salaryType: 'per_job', commissionPercent: '20', monthlyBasic: '', otherAllowance: '', notes: '' }
+type Draft = { name: string; salaryType: 'per_job' | 'fixed' | 'hybrid'; commissionPercent: string; monthlyBasic: string; attendanceAllowance: string; otherAllowance: string; notes: string }
+const EMPTY: Draft = { name: '', salaryType: 'per_job', commissionPercent: '20', monthlyBasic: '', attendanceAllowance: '', otherAllowance: '', notes: '' }
 
 const TYPE_LABEL = { per_job: 'Per job', fixed: 'Fixed', hybrid: 'Hybrid' }
 
@@ -50,6 +50,7 @@ export default function SalaryPlans() {
       salaryType: draft.salaryType,
       commissionPercent: isPerJob ? Number(draft.commissionPercent || 0) : 0,
       monthlyBasic: isMonthly ? Number(draft.monthlyBasic || 0) : 0,
+      attendanceAllowance: isMonthly ? Number(draft.attendanceAllowance || 0) : 0,
       otherAllowance: isMonthly ? Number(draft.otherAllowance || 0) : 0,
       notes: draft.notes,
     }
@@ -67,12 +68,12 @@ export default function SalaryPlans() {
   }
 
   const open = (p?: SalaryPlan) => {
-    if (p) { setEditing(p); setDraft({ name: p.name, salaryType: p.salaryType, commissionPercent: String(p.commissionPercent), monthlyBasic: p.monthlyBasic ? String(p.monthlyBasic) : '', otherAllowance: p.otherAllowance ? String(p.otherAllowance) : '', notes: p.notes }); setModal('edit') }
+    if (p) { setEditing(p); setDraft({ name: p.name, salaryType: p.salaryType, commissionPercent: String(p.commissionPercent), monthlyBasic: p.monthlyBasic ? String(p.monthlyBasic) : '', attendanceAllowance: p.attendanceAllowance ? String(p.attendanceAllowance) : '', otherAllowance: p.otherAllowance ? String(p.otherAllowance) : '', notes: p.notes }); setModal('edit') }
     else { setEditing(null); setDraft(EMPTY); setModal('add') }
   }
 
   const rupees = (n: number) => '₹' + n.toLocaleString('en-IN')
-  const total = (Number(draft.monthlyBasic) || 0) + (Number(draft.otherAllowance) || 0)
+  const total = (Number(draft.monthlyBasic) || 0) + (Number(draft.attendanceAllowance) || 0) + (Number(draft.otherAllowance) || 0)
 
   return (
     <>
@@ -142,6 +143,7 @@ export default function SalaryPlans() {
           {isMonthly && (
             <div style={{ display: 'flex', gap: 12 }}>
               <Field label="Monthly basic (₹)"><input value={draft.monthlyBasic} onChange={(e) => setDraft({ ...draft, monthlyBasic: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="12000" /></Field>
+              <Field label="Attendance bonus (₹/mo)"><input value={draft.attendanceAllowance} onChange={(e) => setDraft({ ...draft, attendanceAllowance: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="1000" /></Field>
               <Field label="Other allowance (₹)"><input value={draft.otherAllowance} onChange={(e) => setDraft({ ...draft, otherAllowance: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="500" /></Field>
             </div>
           )}

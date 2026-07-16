@@ -198,6 +198,10 @@ async function init() {
      * on different money. */
     `ALTER TABLE salary_plans ADD COLUMN IF NOT EXISTS monthly_basic INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE salary_plans ADD COLUMN IF NOT EXISTS other_allowance INTEGER NOT NULL DEFAULT 0`,
+    // A GUARANTEED monthly attendance allowance, part of fixed pay (distinct from the incentive
+    // plan's CONDITIONAL attendance bonus, which only pays above a threshold). Total fixed pay =
+    // basic + attendance + allowance.
+    `ALTER TABLE salary_plans ADD COLUMN IF NOT EXISTS attendance_allowance INTEGER NOT NULL DEFAULT 0`,
 
     /* Incentive plans. Each component is a RULE with a threshold the admin sets — not a named
      * policy that does nothing. Amount 0 = that component is off for this plan.
@@ -1907,8 +1911,9 @@ const planDto = (p) => p && ({
   id: p.id, name: p.name, salaryType: p.salary_type,
   commissionPercent: p.commission_percent,
   monthlyBasic: p.monthly_basic || 0,
+  attendanceAllowance: p.attendance_allowance || 0,
   otherAllowance: p.other_allowance || 0,
-  totalFixedPay: (p.monthly_basic || 0) + (p.other_allowance || 0),
+  totalFixedPay: (p.monthly_basic || 0) + (p.attendance_allowance || 0) + (p.other_allowance || 0),
   notes: p.notes || '', active: p.active, sort: p.sort,
   // Meaningless on a fixed plan — the worker keeps no share because there is no share.
   workerKeeps: paysPerJob(p.salary_type) ? 100 - p.commission_percent : null,
@@ -1958,8 +1963,9 @@ function readPlan(b) {
 
   const money = (v) => (v === '' || v === null || v === undefined ? 0 : Number(v))
   const monthlyBasic = money(b?.monthlyBasic)
+  const attendanceAllowance = money(b?.attendanceAllowance)
   const otherAllowance = money(b?.otherAllowance)
-  for (const [v, label] of [[monthlyBasic, 'Monthly basic salary'], [otherAllowance, 'Other allowance']]) {
+  for (const [v, label] of [[monthlyBasic, 'Monthly basic salary'], [attendanceAllowance, 'Attendance bonus'], [otherAllowance, 'Other allowance']]) {
     if (!Number.isInteger(v) || v < 0 || v > 10_000_000) return { error: `${label} must be a whole rupee amount` }
   }
   // A fixed/hybrid plan with no salary would quietly pay nothing every month.
@@ -1975,7 +1981,7 @@ function readPlan(b) {
   } else if (!Number.isInteger(pct) || pct < 0 || pct > 100) {
     return { error: 'Commission must be a whole number between 0 and 100' }
   }
-  return { name, commissionPercent: pct, salaryType, monthlyBasic, otherAllowance, notes: String(b?.notes || '').trim().slice(0, 200) }
+  return { name, commissionPercent: pct, salaryType, monthlyBasic, attendanceAllowance, otherAllowance, notes: String(b?.notes || '').trim().slice(0, 200) }
 }
 
 app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
@@ -1984,9 +1990,9 @@ app.post('/api/admin/salary-plans', adminAuth, async (req, res) => {
   const sort = (await pool.query('SELECT COALESCE(MAX(sort), 0) + 1 n FROM salary_plans')).rows[0].n
   try {
     const r = await pool.query(
-      `INSERT INTO salary_plans (name, salary_type, commission_percent, monthly_basic, other_allowance, notes, sort)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [v.name, v.salaryType, v.commissionPercent, v.monthlyBasic, v.otherAllowance, v.notes, sort])
+      `INSERT INTO salary_plans (name, salary_type, commission_percent, monthly_basic, attendance_allowance, other_allowance, notes, sort)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [v.name, v.salaryType, v.commissionPercent, v.monthlyBasic, v.attendanceAllowance, v.otherAllowance, v.notes, sort])
     const who = req.admin?.name || req.admin?.email || 'Admin'
     publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'salaryplan.create', entityType: 'salary_plan', entityId: r.rows[0].id, detail: `Created salary plan ${v.name} (${v.commissionPercent}% commission)` })
     res.status(201).json({ ok: true, plan: planDto(r.rows[0]) })
@@ -2009,14 +2015,15 @@ app.patch('/api/admin/salary-plans/:id', adminAuth, async (req, res) => {
     commissionPercent: req.body?.commissionPercent ?? cur.commission_percent,
     salaryType: req.body?.salaryType ?? cur.salary_type,
     monthlyBasic: req.body?.monthlyBasic ?? cur.monthly_basic,
+    attendanceAllowance: req.body?.attendanceAllowance ?? cur.attendance_allowance,
     otherAllowance: req.body?.otherAllowance ?? cur.other_allowance,
     notes: req.body?.notes ?? cur.notes,
   })
   if (v.error) return res.status(400).json({ error: v.error })
   const r = await pool.query(
-    `UPDATE salary_plans SET name=$1, salary_type=$2, commission_percent=$3, monthly_basic=$4, other_allowance=$5, notes=$6, active=$7
-     WHERE id=$8 RETURNING *`,
-    [v.name, v.salaryType, v.commissionPercent, v.monthlyBasic, v.otherAllowance, v.notes,
+    `UPDATE salary_plans SET name=$1, salary_type=$2, commission_percent=$3, monthly_basic=$4, attendance_allowance=$5, other_allowance=$6, notes=$7, active=$8
+     WHERE id=$9 RETURNING *`,
+    [v.name, v.salaryType, v.commissionPercent, v.monthlyBasic, v.attendanceAllowance, v.otherAllowance, v.notes,
       req.body?.active !== undefined ? !!req.body.active : cur.active, id])
 
   // Changing a plan's rate changes what everyone on it takes home. Say so out loud, and tell them.
@@ -2188,7 +2195,8 @@ async function payrollLine(w, month) {
   if (w.salary_effective_from && monthKey(new Date(w.salary_effective_from)) > month) return null
 
   const basic = plan.monthly_basic || 0
-  const allowance = plan.other_allowance || 0
+  // The guaranteed monthly attendance allowance rides with the allowance line on the payslip.
+  const allowance = (plan.other_allowance || 0) + (plan.attendance_allowance || 0)
   const incentives = []
 
   const inc = await incentivePlanFor(w)
