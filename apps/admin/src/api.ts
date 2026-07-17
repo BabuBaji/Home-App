@@ -136,6 +136,12 @@ export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/worke
 export const inviteWorker = (id: number) => req<{ ok: boolean; delivery: string; worker: Worker }>(`/workers/${id}/invite`, post(''))
 /* Approving a skill ADDS the service to the worker's live set (what dispatch matches on);
    rejecting removes it. `level` may differ from what the worker claimed — that's the review. */
+export const toggleWorkerService = (id: number, name: string, active: boolean) =>
+  req<{ ok: boolean }>(`/workers/${id}/services/toggle`, post('', { name, active }))
+export const addWorkerCertification = (id: number, body: { name: string; issuer?: string; issuedOn?: string | null; status?: string }) =>
+  req<{ ok: boolean; id: number }>(`/workers/${id}/certifications`, post('', body))
+export const deleteWorkerCertification = (id: number, cid: number) =>
+  req<{ ok: boolean }>(`/workers/${id}/certifications/${cid}`, { method: 'DELETE' })
 export const reviewWorkerSkill = (id: number, service: string, approve: boolean, level?: string, reason?: string) =>
   req<WorkerDetail>(`/workers/${id}/skills/review`, post('', { service, approve, level, reason }))
 export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)

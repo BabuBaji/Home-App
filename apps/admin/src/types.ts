@@ -148,7 +148,18 @@ export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; documentTypes?: WorkerDocType[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
   activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice; health?: WorkerHealth
-  jobsPerformance?: JobsPerformance
+  jobsPerformance?: JobsPerformance; skillsServices?: SkillsServices
+}
+
+/* Skills & Services tab. Everything here is real: skills/services from the worker's profile + live
+   dispatch set, job counts from bookings, certifications/equipment/history from their own tables. */
+export interface SkillsServices {
+  skills: { name: string; level: string; status: string }[]
+  services: { name: string; category: string; level: string; jobsCompleted: number; active: boolean }[]
+  certifications: { id: number; name: string; issuer: string; issuedOn: string | null; status: string }[]
+  equipment: { name: string; status: string }[]
+  skillHistory: { skill: string; oldLevel: string; newLevel: string; verifiedBy: string; verifiedAt: string; remarks: string }[]
+  summary: { totalSkills: number; expert: number; advanced: number; intermediate: number; basic: number; inactiveServices: number }
 }
 
 /* Training & assessment (Phase 7). Content is admin-authored: a module starts as an empty

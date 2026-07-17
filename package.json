@@ -21,6 +21,7 @@
     "down": "docker compose -f infra/docker-compose.yml down",
     "migrate": "node infra/migrate/index.js",
     "seed:earnings": "sh infra/seed/run-in-container.sh worker-earnings.js",
-    "seed:documents": "sh infra/seed/run-in-container.sh worker-documents.js"
+    "seed:documents": "sh infra/seed/run-in-container.sh worker-documents.js",
+    "seed:skills": "sh infra/seed/run-in-container.sh worker-skills.js"
   }
 }

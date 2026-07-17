@@ -190,6 +190,23 @@ async function init() {
     )`,
     `CREATE INDEX IF NOT EXISTS ix_worker_equipment_worker ON worker_equipment(worker_id, status)`,
 
+    /* ---- Skills & Services: professional certifications and the skill-level audit trail ---- */
+    `CREATE TABLE IF NOT EXISTS worker_certifications (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, name TEXT NOT NULL,
+      issuer TEXT NOT NULL DEFAULT '', issued_on DATE, status TEXT NOT NULL DEFAULT 'Verified',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_cert_worker ON worker_certifications(worker_id)`,
+    // Every skill-level change (admin review that changes the level) appends a row here, so the
+    // "Skill Verification History" panel shows a real old->new trail rather than an invented one.
+    `CREATE TABLE IF NOT EXISTS worker_skill_history (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, skill TEXT NOT NULL,
+      old_level TEXT NOT NULL DEFAULT '', new_level TEXT NOT NULL DEFAULT '',
+      verified_by TEXT NOT NULL DEFAULT '', remarks TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_skillhist_worker ON worker_skill_history(worker_id)`,
+
     /* ---- Phase 10: per-worker pay ----
      * commission_percent is NULL by default, meaning "use the platform-wide commission_percent
      * setting" — the behaviour every existing worker already has. Only an explicit per-worker
@@ -4156,9 +4173,42 @@ app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
     : 'Rating dipping — coaching / a check-in is recommended.'
   const health = { riskScore, level, attendanceRisk, burnoutRisk, lateProbability, complaintProbability, suggestion }
 
+  /* ---- Skills & Services tab ----
+   * Skills come from the worker's own skill map + claims; services are the LIVE dispatch set,
+   * enriched with the catalogue category and the worker's real all-time completed-job count per
+   * service. Certifications, equipment issuance and the skill-level history are real rows. */
+  const fmtDate = (v) => { if (!v) return null; if (v instanceof Date) { const p = (n) => String(n).padStart(2, '0'); return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}` } return String(v).slice(0, 10) }
+  const dispLevel = (l) => (l === 'Beginner' ? 'Basic' : (l || 'Basic'))
+  const catSvc = await tryGet(CATALOG_URL, '/api/services', [])
+  const catByName = new Map((Array.isArray(catSvc) ? catSvc : (catSvc?.services || [])).map((s) => [String(s.name || '').trim(), String(s.category || '').trim()]))
+  const skillLevels = (w.profile && w.profile.skillLevels) || {}
+  const claims = (w.profile && w.profile.skills) || {}
+  const serviceStatus = (w.profile && w.profile.serviceStatus) || {}
+  const jobsBySvc = {}
+  for (const b of completed) { const s = svcOf(b); jobsBySvc[s] = (jobsBySvc[s] || 0) + 1 }
+  const skillNames = [...new Set([...Object.keys(skillLevels), ...Object.keys(claims)])]
+  const skillsList = skillNames.map((name) => ({ name, level: dispLevel(skillLevels[name] || claims[name]?.level), status: claims[name]?.status || 'Verified' }))
+  const liveSvc = Array.isArray(w.services) ? w.services : []
+  const servicesList = liveSvc.map((name) => ({
+    name, category: catByName.get(name) || '—', level: dispLevel(skillLevels[name] || claims[name]?.level),
+    jobsCompleted: jobsBySvc[name] || 0, active: serviceStatus[name] !== 'inactive',
+  }))
+  const [certRows, eqJoin, histRows] = await Promise.all([
+    pool.query('SELECT * FROM worker_certifications WHERE worker_id=$1 ORDER BY issued_on DESC NULLS LAST, id DESC', [w.id]),
+    pool.query(`SELECT t.name, e.status FROM equipment_types t LEFT JOIN worker_equipment e ON e.type_id=t.id AND e.worker_id=$1 AND e.status='issued' WHERE t.active=true ORDER BY t.sort, t.id`, [w.id]),
+    pool.query('SELECT * FROM worker_skill_history WHERE worker_id=$1 ORDER BY created DESC LIMIT 30', [w.id]),
+  ])
+  const certifications = certRows.rows.map((c) => ({ id: c.id, name: c.name, issuer: c.issuer || '', issuedOn: fmtDate(c.issued_on), status: c.status || 'Verified' }))
+  const equipment = eqJoin.rows.map((r) => ({ name: r.name, status: r.status === 'issued' ? 'Issued' : 'Not Issued' }))
+  const skillHistory = histRows.rows.map((h) => ({ skill: h.skill, oldLevel: h.old_level, newLevel: h.new_level, verifiedBy: h.verified_by, verifiedAt: h.created, remarks: h.remarks }))
+  const byLevel = { Expert: 0, Advanced: 0, Intermediate: 0, Basic: 0 }
+  for (const s of skillsList) if (byLevel[s.level] != null) byLevel[s.level]++
+  const summary = { totalSkills: skillsList.length, expert: byLevel.Expert, advanced: byLevel.Advanced, intermediate: byLevel.Intermediate, basic: byLevel.Basic, inactiveServices: servicesList.filter((s) => !s.active).length }
+  const skillsServices = { skills: skillsList, services: servicesList, certifications, equipment, skillHistory, summary }
+
   // documentTypes travels with the detail so the admin can show what's still MISSING, not just
   // what happened to be uploaded — an absent Police Verification is the thing they need to chase.
-  res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
+  res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance, skillsServices })
 })
 app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), scopeWorker, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), scopeWorker, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
@@ -4426,6 +4476,7 @@ app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, async (
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const skills = w.profile?.skills || {}
   if (!skills[service]) return res.status(404).json({ error: 'That skill was not claimed' })
+  const prevLevel = skills[service].level || ''
 
   skills[service] = {
     ...skills[service],
@@ -4448,8 +4499,51 @@ app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, async (
     body: approve ? `You can now be assigned ${service} jobs (${skills[service].level}).` : `${service} was not approved: ${reason}`,
   })
   const who = req.admin?.name || req.admin?.email || 'Admin'
+  // Append to the skill-level audit trail whenever an approval sets a level different from before.
+  if (approve && level && level !== prevLevel) {
+    await pool.query('INSERT INTO worker_skill_history (worker_id,skill,old_level,new_level,verified_by,remarks) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id, service, prevLevel || 'New', level, who, String(req.body?.remarks || '').trim()])
+  }
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'skills.review', entityType: 'worker', entityId: id, detail: `${approve ? 'Approved' : 'Rejected'} ${service} for ${w.name}${approve ? ` (${skills[service].level})` : ` — ${reason}`}` })
   res.json({ ok: true, ...rowToWorker(await getWorker(id)) })
+})
+
+/* Toggle a LIVE service Active/Inactive without removing the capability. Stored in
+ * profile.serviceStatus; an inactive service still exists but shows as paused on the panel. */
+app.post('/api/admin/workers/:id/services/toggle', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const name = String(req.body?.name || '').trim()
+  const active = req.body?.active !== false
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  if (!(w.services || []).includes(name)) return res.status(404).json({ error: 'That service is not offered by this worker' })
+  const serviceStatus = { ...(w.profile?.serviceStatus || {}) }
+  if (active) delete serviceStatus[name]; else serviceStatus[name] = 'inactive'
+  await mergeProfile(id, { serviceStatus })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'services.toggle', entityType: 'worker', entityId: id, detail: `${active ? 'Activated' : 'Paused'} ${name} for ${w.name}` })
+  res.json({ ok: true })
+})
+
+/* Professional certifications the admin records against the worker. */
+app.post('/api/admin/workers/:id/certifications', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Certification name is required' })
+  const issuer = String(req.body?.issuer || '').trim()
+  const issuedOn = req.body?.issuedOn ? String(req.body.issuedOn).slice(0, 10) : null
+  const status = ['Verified', 'Pending', 'Expired'].includes(String(req.body?.status)) ? String(req.body.status) : 'Verified'
+  const { rows } = await pool.query(
+    'INSERT INTO worker_certifications (worker_id,name,issuer,issued_on,status) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [id, name, issuer, issuedOn, status])
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'certification.add', entityType: 'worker', entityId: id, detail: `Added certification "${name}"` })
+  res.json({ ok: true, id: rows[0].id })
+})
+app.delete('/api/admin/workers/:id/certifications/:cid', adminAuth, scopeWorker, async (req, res) => {
+  const r = await pool.query('DELETE FROM worker_certifications WHERE id=$1 AND worker_id=$2', [Number(req.params.cid), Number(req.params.id)])
+  if (!r.rowCount) return res.status(404).json({ error: 'Certification not found' })
+  res.json({ ok: true })
 })
 
 /* ---------- admin KYC document review ----------
