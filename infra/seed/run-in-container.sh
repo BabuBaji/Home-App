@@ -13,6 +13,9 @@ export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 C=${WALLET_CONTAINER:-infra-wallet-1}
 SCRIPT=worker-earnings.js
 case "$1" in *.js) SCRIPT="$1"; shift;; esac
+# The documents seed also writes placeholder files to object storage, so run it in the worker
+# container, which carries the S3_* env the shared storage module needs.
+case "$SCRIPT" in worker-documents.js) C=${WORKER_CONTAINER:-infra-worker-1};; esac
 docker cp "$(dirname "$0")/$SCRIPT" "$C:/app/seed-$SCRIPT" >/dev/null
 exec docker exec \
   -e WALLET_DB_URL="postgres://homehelp:change-me@wallet-db:5432/wallet" \

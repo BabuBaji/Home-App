@@ -666,7 +666,7 @@ export default function WorkerDetail() {
     </div>
   )
   const actionBtn = (title: string, tone: string, icon: ReactNode, onClick: () => void, enabled: boolean) => (
-    <button className="iconbtn" title={enabled ? title : 'No file uploaded'} style={{ width: 30, height: 30, color: enabled ? tone : 'var(--line,#cbd2dc)', cursor: enabled ? 'pointer' : 'not-allowed' }} disabled={!enabled} onClick={onClick}>{icon}</button>
+    <button className="iconbtn" title={enabled ? title : 'No file uploaded'} style={{ width: 30, height: 30, color: enabled ? tone : '#b6bcc6', cursor: enabled ? 'pointer' : 'not-allowed' }} disabled={!enabled} onClick={onClick}>{icon}</button>
   )
   const documentsTab = (
     <Card>
@@ -751,8 +751,8 @@ export default function WorkerDetail() {
                     <td style={dtd}>{d.reviewedAt ? shortDate(String(d.reviewedAt).slice(0, 10)) : <span className="muted">—</span>}</td>
                     <td style={{ ...dtd, whiteSpace: 'nowrap' }}>
                       <span className="row" style={{ gap: 2 }}>
-                        {actionBtn('View document', 'var(--violet,#5b51e8)', <Eye size={15} />, () => openDoc(d.id), !!d.hasFile && docBusy !== d.id)}
-                        {d.status === 'Verified' && actionBtn('Download document', 'var(--ink-2,#475467)', <Download size={15} />, () => downloadDoc(d.id, d.name), !!d.hasFile && docBusy !== d.id)}
+                        {actionBtn('View document', '#5b51e8', <Eye size={15} />, () => openDoc(d.id), !!d.hasFile && docBusy !== d.id)}
+                        {d.status === 'Verified' && actionBtn('Download document', '#5b51e8', <Download size={15} />, () => downloadDoc(d.id, d.name), !!d.hasFile && docBusy !== d.id)}
                       </span>
                     </td>
                   </tr>
