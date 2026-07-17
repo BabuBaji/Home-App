@@ -164,7 +164,11 @@ export default function AddWorker() {
   const salaryTotal = (Number(d.salary_basic) || 0) + (Number(d.salary_attendance) || 0) + (Number(d.salary_allowance) || 0)
 
   // Only what the server actually requires. Everything else the worker supplies later.
-  const step1Ok = !!(d.first_name.trim() && d.phone.trim().length >= 10 && d.worker_category && d.employment_type && d.joining_date)
+  // Editing an existing worker only needs the identity basics — category/employment/joining date may
+  // legitimately be blank on older records, so don't block a save on them. Add still requires them.
+  const step1Ok = isEdit
+    ? !!(d.first_name.trim() && d.phone.trim().length >= 10)
+    : !!(d.first_name.trim() && d.phone.trim().length >= 10 && d.worker_category && d.employment_type && d.joining_date)
   const step2Ok = !!(d.city && d.zone_id)
   const canAdvance = step === 1 ? step1Ok : step === 2 ? step2Ok : true
 
@@ -273,10 +277,10 @@ export default function AddWorker() {
             </div>
             <div style={grid4}>
               <Field label="Email Address"><input value={d.email} onChange={(e) => set('email', e.target.value)} placeholder="Optional" /></Field>
-              <Field label="Worker Category *">
+              <Field label={`Worker Category${isEdit ? '' : ' *'}`}>
                 <Dropdown value={d.worker_category} width="100%" placeholder="Select category" options={CATEGORIES.map((c) => ({ value: c, label: c }))} onChange={(v) => set('worker_category', v)} />
               </Field>
-              <Field label="Employment Type *">
+              <Field label={`Employment Type${isEdit ? '' : ' *'}`}>
                 <Dropdown value={d.employment_type} width="100%" placeholder="Select type" options={EMPLOYMENT.map((c) => ({ value: c, label: c }))} onChange={(v) => set('employment_type', v)} />
               </Field>
               <Field label="Worker ID">
@@ -284,7 +288,7 @@ export default function AddWorker() {
               </Field>
             </div>
             <div style={grid4}>
-              <Field label="Joining Date *"><input type="date" value={d.joining_date} onChange={(e) => set('joining_date', e.target.value)} /></Field>
+              <Field label={`Joining Date${isEdit ? '' : ' *'}`}><input type="date" value={d.joining_date} onChange={(e) => set('joining_date', e.target.value)} /></Field>
               <Field label="Recruiter / Added By">
                 <input value="You" disabled style={{ background: '#f8fafc', color: '#94a3b8' }} />
               </Field>
