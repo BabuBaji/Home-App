@@ -864,9 +864,10 @@ export default function WorkerDetail() {
       { level: 'Intermediate', count: ss.summary.intermediate }, { level: 'Basic', count: ss.summary.basic },
     ].filter((s) => s.count > 0)
     const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
-    const row3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 10, alignItems: 'start' }
+    // Equal-height panels per row (stretch) so the three cards align top and bottom.
+    const row3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 10, alignItems: 'stretch' }
     // Row 2 gives the wide history table more room and keeps the compact Skill Summary narrow.
-    const row3b: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.8fr) minmax(0,0.7fr)', gap: 10, alignItems: 'start' }
+    const row3b: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.8fr) minmax(0,0.7fr)', gap: 10, alignItems: 'stretch' }
     const hth: CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
     const htd: CSSProperties = { padding: '8px 10px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
     const workerSkillsPanel = (
