@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -229,6 +229,13 @@ export const approvePayroll = (id: number) => req<ActionResult & { run?: Payroll
 export const fetchWorkerAvailability = (id: number) => req<WorkerAvailabilityState>(`/workers/${id}/availability`)
 export const reviewWorkerAvailability = (id: number, body: { approve: boolean; shiftDefId?: number | null; zoneId?: number | null; reason?: string }) =>
   req<{ ok: boolean; availability: WorkerAvailabilityState['availability']; assigned: WorkerAvailabilityState['assigned'] }>(`/workers/${id}/availability/review`, post('', body))
+/* Availability tab — consolidated overview + leave actions. */
+export const fetchAvailabilityOverview = (id: number, month?: string) =>
+  req<AvailabilityOverview>(`/workers/${id}/availability-overview${month ? `?month=${month}` : ''}`)
+export const createWorkerLeave = (id: number, body: { fromDate: string; toDate?: string; leaveType?: string; reason?: string; status?: string }) =>
+  req<{ ok: boolean; id: number }>(`/workers/${id}/leave`, post('', body))
+export const reviewWorkerLeave = (id: number, lid: number, approve: boolean) =>
+  req<{ ok: boolean }>(`/workers/${id}/leave/${lid}/review`, post('', { approve }))
 
 /* background verification (Phase 8). The five document-backed points are DERIVED from the document
    review — verify a document once, on the Documents tab, and this follows. Only the previous

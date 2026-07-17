@@ -487,6 +487,16 @@ async function init() {
       from_date DATE, to_date DATE, reason TEXT,
       status TEXT NOT NULL DEFAULT 'Pending', created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Leave type (Personal / Medical / …) — the admin panel shows it; default keeps old rows valid.
+    `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS leave_type TEXT NOT NULL DEFAULT 'Personal'`,
+    // Availability change trail — shift changes, leave decisions, half-days — for the "Recent
+    // Availability Changes" panel. Appended by the admin availability/leave actions and the seed.
+    `CREATE TABLE IF NOT EXISTS worker_availability_log (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      type TEXT NOT NULL, from_val TEXT NOT NULL DEFAULT '', to_val TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Approved'
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_avail_log ON worker_availability_log(worker_id, at DESC)`,
     // Support tickets raised by the worker (ops resolves — status Open|Resolved).
     `CREATE TABLE IF NOT EXISTS support_tickets (
       id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, subject TEXT, message TEXT,
@@ -3561,8 +3571,141 @@ app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, a
     actorType: 'admin', actorName: who, action: 'availability.review', entityType: 'worker', entityId: id,
     detail: `${approve ? 'Approved' : 'Modified'} availability for ${w.name} — ${sd ? sd.name : 'no'} shift${approve ? '' : ` (${reason})`}`,
   })
+  // Record the shift change in the availability trail.
+  const oldSd = await getShiftDef(w.shift_def_id)
+  const shiftLabel = (s) => (s ? `${toHHMM(s.start_min)} - ${toHHMM(s.end_min)}` : 'Flexible')
+  await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, 'Shift Change', shiftLabel(oldSd), shiftLabel(sd), approve ? '' : reason, who, 'Approved'])
   const after = await getWorker(id)
   res.json({ ok: true, availability: availabilityDto(after), assigned: { shiftDefId: after.shift_def_id || null, zoneId: after.zone_id ?? null } })
+})
+
+/* ================= Availability tab — consolidated overview =================
+ * One call powers the whole tab: today's status + shift, this-week summary, the month calendar,
+ * upcoming leaves, derived insights, and the recent-change trail. Everything is DERIVED from real
+ * rows — attendance (hours/lateness), the assigned shift_def, leave_requests, and the change log. */
+const minsToHM = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(Math.round(mins % 60)).padStart(2, '0')}`
+const hoursToHM = (h) => minsToHM(Math.round(h * 60))
+const DOW_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] // JS getUTCDay index -> key
+app.get('/api/admin/workers/:id/availability-overview', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const sd = await getShiftDef(w.shift_def_id)
+  const av = availabilityDto(w)
+  const weeklyOff = av.weeklyOff && av.weeklyOff.length ? av.weeklyOff : ['Sun']
+  const shiftMins = sd ? { s: sd.start_min, e: sd.end_min } : { s: toMin(av.shiftStart || '09:00'), e: toMin(av.shiftEnd || '18:00') }
+  const shiftHours = Math.max(0, (shiftMins.e - shiftMins.s) / 60)
+  const shift = { start: minsToHM(shiftMins.s), end: minsToHM(shiftMins.e), hours: Math.round(shiftHours * 10) / 10, name: sd ? sd.name : 'Flexible' }
+  const isOff = (dateStr) => weeklyOff.includes(DOW_KEYS[new Date(dateStr + 'T00:00:00Z').getUTCDay()])
+
+  // Month window (?month=YYYY-MM, default current IST month).
+  const istToday = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
+  const monthStr = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : istToday.slice(0, 7)
+  const [my, mm] = monthStr.split('-').map(Number)
+  const daysInMonth = new Date(Date.UTC(my, mm, 0)).getUTCDate()
+  const monthStart = `${monthStr}-01`, monthEnd = `${monthStr}-${String(daysInMonth).padStart(2, '0')}`
+
+  // Pull attendance + leaves spanning the month AND the current week.
+  const weekAnchor = istToday
+  const [attAll, leaves, logRows] = await Promise.all([
+    pool.query(`SELECT day, check_in, check_out, late_minutes, on_time FROM attendance WHERE worker_id=$1 AND day >= $2::date - 14 AND day <= $3::date + 1`, [id, monthStart, monthEnd]),
+    pool.query('SELECT id, from_date, to_date, reason, status, leave_type FROM leave_requests WHERE worker_id=$1 ORDER BY from_date DESC NULLS LAST, id DESC', [id]),
+    pool.query('SELECT * FROM worker_availability_log WHERE worker_id=$1 ORDER BY at DESC LIMIT 10', [id]),
+  ])
+  const ymd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10))
+  const attByDay = new Map(attAll.rows.map((a) => [ymd(a.day), a]))
+  const leaveRows = leaves.rows.map((l) => ({ id: l.id, from: ymd(l.from_date), to: ymd(l.to_date || l.from_date), reason: l.reason || '', status: l.status, type: l.leave_type || 'Personal' }))
+  const leaveOn = (dateStr) => leaveRows.find((l) => l.from && dateStr >= l.from && dateStr <= l.to)
+  const attHours = (a) => (a && a.check_in ? Math.max(0, ((a.check_out ? new Date(a.check_out) : new Date()) - new Date(a.check_in)) / 3600000) : 0)
+
+  // Calendar: one entry per day of the month.
+  const calendar = []
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${monthStr}-${String(d).padStart(2, '0')}`
+    const a = attByDay.get(ds), lv = leaveOn(ds)
+    let status = 'Off'
+    if (lv) status = /half/i.test(lv.reason) ? 'Half Day' : /train/i.test(lv.reason) ? 'Training' : 'Leave'
+    else if (isOff(ds)) status = 'Weekly Off'
+    else if (a && a.check_in) status = 'On Duty'
+    else if (ds >= istToday) status = 'On Duty' // scheduled ahead
+    else status = 'Absent'
+    calendar.push({ date: ds, status, start: status === 'On Duty' ? shift.start : '', end: status === 'On Duty' ? shift.end : '', hours: a ? Math.round(attHours(a) * 10) / 10 : 0 })
+  }
+
+  // Current IST week (Mon..Sun).
+  const jsDow = new Date(weekAnchor + 'T00:00:00Z').getUTCDay()
+  const monday = new Date(weekAnchor + 'T00:00:00Z'); monday.setUTCDate(monday.getUTCDate() - ((jsDow + 6) % 7))
+  const weekDays = Array.from({ length: 7 }, (_, i) => { const x = new Date(monday); x.setUTCDate(x.getUTCDate() + i); return x.toISOString().slice(0, 10) })
+  let completed = 0, lateArrivals = 0, leaveDays = 0
+  for (const ds of weekDays) {
+    const a = attByDay.get(ds)
+    if (a && a.check_in) { completed += attHours(a); if (a.on_time === false || (a.late_minutes || 0) > 0) lateArrivals++ }
+    if (leaveOn(ds)) leaveDays++
+  }
+  const workingDays = weekDays.filter((ds) => !isOff(ds) && !leaveOn(ds)).length
+  const scheduled = workingDays * shiftHours
+  const overtime = Math.max(0, completed - scheduled)
+  const weekSummary = {
+    rangeLabel: `${new Date(weekDays[0] + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })} – ${new Date(weekDays[6] + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`,
+    scheduledHours: hoursToHM(scheduled), completedHours: hoursToHM(completed), overtime: hoursToHM(overtime),
+    lateArrivals, leaveDays, weeklyOff: weekDays.filter(isOff).length,
+  }
+
+  // Today + next shift.
+  const todayOff = isOff(istToday), todayLeave = leaveOn(istToday)
+  const todayStatus = todayLeave ? 'On Leave' : todayOff ? 'Weekly Off' : 'On Duty'
+  let nextShiftDate = null
+  for (let i = 1; i <= 7; i++) { const x = new Date(istToday + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + i); const ds = x.toISOString().slice(0, 10); if (!isOff(ds) && !leaveOn(ds)) { nextShiftDate = ds; break } }
+
+  const upcomingLeaves = leaveRows.filter((l) => l.to >= istToday).sort((a, b) => a.from.localeCompare(b.from)).slice(0, 6)
+  const recentChanges = logRows.rows.map((r) => ({ at: r.at, type: r.type, from: r.from_val, to: r.to_val, reason: r.reason, updatedBy: r.updated_by, status: r.status }))
+
+  const insights = []
+  if (lateArrivals === 0) insights.push({ tone: 'good', text: 'Perfect punctuality this week — no late arrivals.' })
+  else insights.push({ tone: 'warn', text: `${lateArrivals} late arrival${lateArrivals === 1 ? '' : 's'} this week. Keep an eye on start times.` })
+  if (overtime > 0) insights.push({ tone: 'info', text: `Worked ${hoursToHM(overtime)} overtime this week.` })
+  if (leaveDays === 0) insights.push({ tone: 'good', text: 'No leave taken this week — full attendance.' })
+
+  res.json({
+    month: monthStr,
+    today: { status: todayStatus, shiftEnd: shift.end, shift, nextShift: nextShiftDate ? { date: nextShiftDate, start: shift.start, end: shift.end } : null },
+    weeklyOff, overtimeWeek: weekSummary.overtime, lateArrivalsWeek: lateArrivals,
+    weekSummary, calendar, upcomingLeaves, recentChanges, insights,
+  })
+})
+
+/* Admin records a leave for the worker (Create Leave Request). */
+app.post('/api/admin/workers/:id/leave', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const from = req.body?.fromDate ? String(req.body.fromDate).slice(0, 10) : null
+  const to = req.body?.toDate ? String(req.body.toDate).slice(0, 10) : from
+  if (!from) return res.status(400).json({ error: 'A start date is required' })
+  if (to && to < from) return res.status(400).json({ error: 'End date cannot be before the start date' })
+  const type = String(req.body?.leaveType || 'Personal').trim() || 'Personal'
+  const reason = String(req.body?.reason || '').trim()
+  const status = ['Approved', 'Pending', 'Rejected'].includes(String(req.body?.status)) ? String(req.body.status) : 'Pending'
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const { rows } = await pool.query('INSERT INTO leave_requests (worker_id,from_date,to_date,reason,status,leave_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [id, from, to, reason, status, type])
+  await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, 'Leave Request', from, to === from ? from : to, reason || type, who, status])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'leave.create', entityType: 'worker', entityId: id, detail: `Recorded ${type} leave for ${w.name} (${from}${to && to !== from ? ` → ${to}` : ''})` })
+  res.json({ ok: true, id: rows[0].id })
+})
+/* Approve / reject a leave request. */
+app.post('/api/admin/workers/:id/leave/:lid/review', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id), lid = Number(req.params.lid)
+  const approve = !!req.body?.approve
+  const { rows } = await pool.query('UPDATE leave_requests SET status=$3 WHERE id=$1 AND worker_id=$2 RETURNING from_date, to_date, leave_type', [lid, id, approve ? 'Approved' : 'Rejected'])
+  if (!rows.length) return res.status(404).json({ error: 'Leave request not found' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const f = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10))
+  await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, 'Leave Request', f(rows[0].from_date), f(rows[0].to_date), rows[0].leave_type || '', who, approve ? 'Approved' : 'Rejected'])
+  res.json({ ok: true })
 })
 
 /* ---------- Phase 8: background verification ----------

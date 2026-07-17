@@ -11,7 +11,7 @@ import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
 import WorkerApproval from './WorkerApproval'
-import WorkerAvailability from './WorkerAvailability'
+import WorkerAvailabilityTab from './WorkerAvailabilityTab'
 import WorkerOnboarding from './WorkerOnboarding'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
@@ -1791,8 +1791,8 @@ export default function WorkerDetail() {
         </>
       )}
 
-      {tab === 'avail' && <WorkerAvailability workerId={Number(id)} />}
-      {(show('avail')) && <div style={grid3}>{availabilityPanel}
+      {tab === 'avail' && <WorkerAvailabilityTab workerId={Number(id)} />}
+      {tab === 'overview' && <div style={grid3}>{availabilityPanel}
         <Panel title="Attendance & Shift">
           <Info label="On Shift" value={<Badge tone={w.on_shift ? 'green' : 'gray'} dot={false}>{w.on_shift ? 'On shift' : 'Off'}</Badge>} />
           <Info label="Shift Assigned" value={w.shift_def_id ? `Shift #${w.shift_def_id}` : '—'} />

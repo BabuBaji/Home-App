@@ -151,6 +151,19 @@ export interface WorkerDetail extends Worker {
   jobsPerformance?: JobsPerformance; skillsServices?: SkillsServices
 }
 
+/* Availability tab — derived from real attendance, the assigned shift, leaves and the change log. */
+export interface AvailabilityOverview {
+  month: string
+  today: { status: string; shiftEnd: string; shift: { start: string; end: string; hours: number; name: string }; nextShift: { date: string; start: string; end: string } | null }
+  weeklyOff: string[]
+  overtimeWeek: string; lateArrivalsWeek: number
+  weekSummary: { rangeLabel: string; scheduledHours: string; completedHours: string; overtime: string; lateArrivals: number; leaveDays: number; weeklyOff: number }
+  calendar: { date: string; status: string; start: string; end: string; hours: number }[]
+  upcomingLeaves: { id: number; from: string; to: string; reason: string; status: string; type: string }[]
+  recentChanges: { at: string; type: string; from: string; to: string; reason: string; updatedBy: string; status: string }[]
+  insights: { tone: string; text: string }[]
+}
+
 /* Skills & Services tab. Everything here is real: skills/services from the worker's profile + live
    dispatch set, job counts from bookings, certifications/equipment/history from their own tables. */
 export interface SkillsServices {
