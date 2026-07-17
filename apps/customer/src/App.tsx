@@ -125,8 +125,8 @@ export default function App() {
   const [booted, setBooted] = useState(() => !(getToken() && !loadUser()))
 
   useEffect(() => {
-    const t = setTimeout(() => setMinTime(true), 1700)       // let the welcome animation play fully
-    const cap = setTimeout(() => setBooted(true), 2500)      // never hang on a slow network
+    const t = setTimeout(() => setMinTime(true), 2000)       // poster splash shows ~2s
+    const cap = setTimeout(() => setBooted(true), 2600)      // never hang on a slow network
     if (getToken()) fetchMe().then(({ user }) => { signIn(getToken(), user); setUser(user) }).catch(() => {}).finally(() => setBooted(true))
     return () => { clearTimeout(t); clearTimeout(cap) }
   }, [])

@@ -16,6 +16,8 @@ public class MainActivity extends BridgeActivity implements PaymentResultWithDat
         registerPlugin(UpiPlugin.class);
         registerPlugin(RazorpayPlugin.class);
         super.onCreate(savedInstanceState);
+        // Allow the launch chime to autoplay without a user gesture (WebView blocks it by default).
+        try { getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false); } catch (Exception ignored) {}
         // Warm up the Razorpay SDK at launch so the checkout opens instantly on first tap.
         try { Checkout.preload(getApplicationContext()); } catch (Exception ignored) {}
     }
