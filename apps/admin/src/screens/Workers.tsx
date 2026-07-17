@@ -1,33 +1,13 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
-import { fetchWorkers, updateWorker, deleteWorker, inviteWorker, fetchServices, fetchZones, type Zone } from '../api'
+import { fetchWorkers, updateWorker, deleteWorker, inviteWorker, fetchServices } from '../api'
 import type { Worker } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
+import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, useToast, useConfirm, shortDate } from '../components/UI'
 import { useStore, has } from '../store'
 import { CITIES } from '../cities'
 
 type Stats = { total: number; active: number; onboarding: number; pending: number; inactive: number }
-
-type Personal = { gender: string; dob: string; fatherName: string; address: string; aadhaar: string; pan: string; whatsapp: string; emergencyName: string; emergencyPhone: string; languages: string }
-const EMPTY_PERSONAL: Personal = { gender: '', dob: '', fatherName: '', address: '', aadhaar: '', pan: '', whatsapp: '', emergencyName: '', emergencyPhone: '', languages: '' }
-type Draft = {
-  name: string; first_name: string; last_name: string; phone: string; alternate_mobile: string
-  email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string
-  worker_category: string; employment_type: string; joining_date: string; recruiter: string; referral_source: string
-  personal: Personal; skillLevels: Record<string, string>
-}
-const EMPTY_DRAFT: Draft = {
-  name: '', first_name: '', last_name: '', phone: '', alternate_mobile: '',
-  email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker',
-  worker_category: '', employment_type: '', joining_date: '', recruiter: '', referral_source: '',
-  personal: { ...EMPTY_PERSONAL }, skillLevels: {},
-}
-// Phase 1 pick-lists. Kept here (not in the DB) because they're presentation choices, not data
-// the backend branches on — it stores whatever string the admin picked.
-const WORKER_CATEGORIES = ['Regular', 'Premium', 'Expert', 'Senior']
-const EMPLOYMENT_TYPES = ['Full Time', 'Part Time', 'Contract', 'Freelance']
-const REFERRAL_SOURCES = ['Walk-in', 'Employee Referral', 'Job Portal', 'Agency', 'Social Media', 'Field Recruitment', 'Other']
 
 export default function Workers() {
   const { admin } = useStore()
@@ -43,19 +23,13 @@ export default function Workers() {
   const pageSize = 10
 
   const [menuId, setMenuId] = useState<number | null>(null)
-  const [editing, setEditing] = useState<Worker | null>(null)
-  const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
   const nav = useNavigate()
-  const [busy, setBusy] = useState(false)
   const [allServices, setAllServices] = useState<string[]>([])
-  const [zones, setZones] = useState<Zone[]>([])
 
   const load = () => { setErr(''); fetchWorkers(q, status, city).then(setData).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [q, status, city])
-  // All bookable services → checkbox options for assigning a worker.
+  // All bookable services → options for the service filter.
   useEffect(() => { fetchServices().then((s) => setAllServices(s.map((x) => x.name))).catch(() => {}) }, [])
-  // Zones → the "assign worker to a service area" dropdown.
-  useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
 
   useEffect(() => {
     if (menuId == null) return
@@ -74,16 +48,6 @@ export default function Workers() {
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
   const rated = data.workers.filter((w) => w.rating > 0)
   const avgRating = rated.length ? (rated.reduce((a, w) => a + w.rating, 0) / rated.length).toFixed(1) : '—'
-
-  const saveEdit = async () => {
-    if (!editing) return
-    setBusy(true)
-    try {
-      await updateWorker(editing.id, { name: editDraft.name, phone: editDraft.phone, email: editDraft.email, city: editDraft.city, services: editDraft.services, status: editDraft.status, zone_id: editDraft.zone_id, designation: editDraft.designation, personal: editDraft.personal, skillLevels: editDraft.skillLevels })
-      toast('Worker updated')
-      setEditing(null); load()
-    } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
-  }
 
   const doUpdate = async (id: number, body: Record<string, unknown>, msg: string) => {
     try { await updateWorker(id, body); toast(msg); load() } catch (e) { toast((e as Error).message, 'err') }
@@ -225,16 +189,6 @@ export default function Workers() {
         <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="workers" onPage={setPage} />
       </Card>
 
-      {editing && (
-        <Modal title="Edit Worker" onClose={() => setEditing(null)} footer={
-          <>
-            <button className="btn line" onClick={() => setEditing(null)}>Cancel</button>
-            <button className="btn" disabled={busy || !editDraft.name.trim()} onClick={saveEdit}>Save Changes</button>
-          </>
-        }>
-          <WorkerForm draft={editDraft} onChange={setEditDraft} services={allServices} zones={zones} employeeId={editing.employee_id} />
-        </Modal>
-      )}
 
     </div>
   )
@@ -242,141 +196,3 @@ export default function Workers() {
 
 const MENU_ITEM: CSSProperties = { display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }
 
-// Every string-valued field on the draft, so `set` covers the Phase 1 additions without listing
-// each one by hand.
-type DraftStringKey = { [K in keyof Draft]: Draft[K] extends string ? K : never }[keyof Draft]
-
-function WorkerForm({ draft, onChange, services, zones, employeeId }: { draft: Draft; onChange: (d: Draft) => void; services: string[]; zones: Zone[]; employeeId?: string }) {
-  const set = (k: DraftStringKey, v: string) => onChange({ ...draft, [k]: v })
-  const setP = (k: keyof Personal, v: string) => onChange({ ...draft, personal: { ...draft.personal, [k]: v } })
-  const toggleService = (name: string) => {
-    const has = draft.services.includes(name)
-    onChange({ ...draft, services: has ? draft.services.filter((s) => s !== name) : [...draft.services, name] })
-  }
-  return (
-    <div className="grid" style={{ gap: 12 }}>
-      {/* Employee ID is assigned by the server from the row id (WKR1001…) — showing an input the
-          admin can't meaningfully fill would just invite collisions. */}
-      {employeeId && <Field label="Employee ID"><input value={employeeId} disabled /></Field>}
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="First Name"><input value={draft.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="First name" /></Field>
-        <Field label="Last Name"><input value={draft.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Last name" /></Field>
-      </div>
-      {/* The mobile is the worker's login identity (OTP by number), so it isn't just contact info. */}
-      <Field label="Mobile Number"><input value={draft.phone} onChange={(e) => set('phone', e.target.value)} placeholder="10-digit mobile — this is their login" /></Field>
-      <Field label="Alternate Mobile"><input value={draft.alternate_mobile} onChange={(e) => set('alternate_mobile', e.target.value)} placeholder="Optional" /></Field>
-      <Field label="Email"><input value={draft.email} onChange={(e) => set('email', e.target.value)} placeholder="Email" /></Field>
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="Worker Category">
-          <select value={draft.worker_category} onChange={(e) => set('worker_category', e.target.value)}>
-            <option value="">— Select —</option>
-            {WORKER_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </Field>
-        <Field label="Employment Type">
-          <select value={draft.employment_type} onChange={(e) => set('employment_type', e.target.value)}>
-            <option value="">— Select —</option>
-            {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </Field>
-      </div>
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="Joining Date"><input type="date" value={draft.joining_date} onChange={(e) => set('joining_date', e.target.value)} /></Field>
-        <Field label="Recruiter"><input value={draft.recruiter} onChange={(e) => set('recruiter', e.target.value)} placeholder="Who hired them" /></Field>
-      </div>
-      <Field label="Referral Source">
-        <select value={draft.referral_source} onChange={(e) => set('referral_source', e.target.value)}>
-          <option value="">— Select —</option>
-          {REFERRAL_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </Field>
-      <Field label="City">
-        <select value={draft.city} onChange={(e) => set('city', e.target.value)}>
-          <option value="">— Select city —</option>
-          {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city} · {c.state}</option>)}
-          {draft.city && !CITIES.some((c) => c.city === draft.city) && <option value={draft.city}>{draft.city}</option>}
-        </select>
-      </Field>
-      <Field label="Role / Designation">
-        <select value={draft.designation} onChange={(e) => set('designation', e.target.value)}>
-          <option value="Worker">Worker</option>
-          <option value="Team Leader">Team Leader</option>
-          <option value="Zone Manager">Zone Manager</option>
-        </select>
-      </Field>
-      <Field label="Service Zone (home area)">
-        <select value={draft.zone_id ?? ''} onChange={(e) => onChange({ ...draft, zone_id: e.target.value ? Number(e.target.value) : null })}>
-          <option value="">— Unassigned —</option>
-          {zones.map((z) => <option key={z.id} value={z.id}>{z.name}{z.city ? ` · ${z.city}` : ''} ({z.status})</option>)}
-        </select>
-      </Field>
-      <div className="field">
-        <span>Services{draft.services.length > 0 ? ` · ${draft.services.length} selected` : ''}</span>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
-          {services.length === 0
-            ? <span className="muted" style={{ fontSize: 13 }}>Loading services…</span>
-            : services.map((name) => (
-                <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={draft.services.includes(name)} onChange={() => toggleService(name)} />
-                  <span>{name}</span>
-                </label>
-              ))}
-        </div>
-      </div>
-
-      {draft.services.length > 0 && (
-        <div className="field">
-          <span>Skill Levels</span>
-          <div className="grid" style={{ gap: 6, border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
-            {draft.services.map((s) => (
-              <div key={s} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 13 }}>{s}</span>
-                <select value={draft.skillLevels[s] || ''} onChange={(e) => onChange({ ...draft, skillLevels: { ...draft.skillLevels, [s]: e.target.value } })} style={{ width: 160 }}>
-                  <option value="">— Level —</option>
-                  <option value="Basic">Basic</option>
-                  <option value="Intermediate">Intermediate</option>
-                  <option value="Advanced">Advanced</option>
-                  <option value="Expert">Expert</option>
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Personal & KYC details (optional — stored on the worker profile) */}
-      <div className="field"><span style={{ fontWeight: 600 }}>Personal & KYC details</span></div>
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="Gender">
-          <select value={draft.personal.gender} onChange={(e) => setP('gender', e.target.value)}>
-            <option value="">—</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
-          </select>
-        </Field>
-        <Field label="Date of Birth"><input type="date" value={draft.personal.dob} onChange={(e) => setP('dob', e.target.value)} /></Field>
-      </div>
-      <Field label="Father's Name"><input value={draft.personal.fatherName} onChange={(e) => setP('fatherName', e.target.value)} placeholder="Father's name" /></Field>
-      <Field label="Home Address"><textarea value={draft.personal.address} onChange={(e) => setP('address', e.target.value)} placeholder="Residential address" rows={2} /></Field>
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="Aadhaar Number"><input value={draft.personal.aadhaar} onChange={(e) => setP('aadhaar', e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="12-digit Aadhaar" /></Field>
-        <Field label="PAN Number"><input value={draft.personal.pan} onChange={(e) => setP('pan', e.target.value.toUpperCase().slice(0, 10))} placeholder="ABCDE1234F" /></Field>
-      </div>
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="WhatsApp Number"><input value={draft.personal.whatsapp} onChange={(e) => setP('whatsapp', e.target.value)} placeholder="WhatsApp (if different)" /></Field>
-        <Field label="Languages Known"><input value={draft.personal.languages} onChange={(e) => setP('languages', e.target.value)} placeholder="e.g. Telugu, Hindi, English" /></Field>
-      </div>
-      <div className="row" style={{ gap: 12 }}>
-        <Field label="Emergency Contact Name"><input value={draft.personal.emergencyName} onChange={(e) => setP('emergencyName', e.target.value)} placeholder="Contact name" /></Field>
-        <Field label="Emergency Contact Phone"><input value={draft.personal.emergencyPhone} onChange={(e) => setP('emergencyPhone', e.target.value)} placeholder="Contact phone" /></Field>
-      </div>
-
-      <Field label="Status">
-        <select value={draft.status} onChange={(e) => set('status', e.target.value)}>
-          <option value="pending">Pending</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-          <option value="suspended">Suspended</option>
-        </select>
-      </Field>
-    </div>
-  )
-}
