@@ -866,8 +866,8 @@ export default function WorkerDetail() {
     const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
     const outer: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 8, alignItems: 'start' }
     const colStack: CSSProperties = { display: 'grid', gap: 8 }
-    const hth: CSSProperties = { padding: '7px 8px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
-    const htd: CSSProperties = { padding: '8px 8px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
+    const hth: CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
+    const htd: CSSProperties = { padding: '8px 10px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
     const workerSkillsPanel = (
       <Panel title={`Worker Skills (${ss.summary.totalSkills})`} action={<span className="muted" style={{ fontSize: 11 }}>verified by admin</span>}>
         <div className="row" style={{ gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -921,14 +921,14 @@ export default function WorkerDetail() {
         {ss.skillHistory.length ? (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, tableLayout: 'fixed' }}>
             <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
-              <th style={{ ...hth, width: '20%' }}>Skill</th><th style={{ ...hth, width: '26%' }}>Level Change</th><th style={{ ...hth, width: '20%' }}>Verified By</th><th style={{ ...hth, width: '14%' }}>On</th><th style={{ ...hth, width: '20%', whiteSpace: 'normal' }}>Remarks</th>
+              <th style={{ ...hth, width: '16%' }}>Skill</th><th style={{ ...hth, width: '25%' }}>Level Change</th><th style={{ ...hth, width: '18%' }}>Verified By</th><th style={{ ...hth, width: '17%' }}>On</th><th style={{ ...hth, width: '24%', whiteSpace: 'normal' }}>Remarks</th>
             </tr></thead>
             <tbody>{ss.skillHistory.map((h, i) => (
               <tr key={i}>
                 <td style={{ ...htd, fontWeight: 600, whiteSpace: 'normal' }}>{h.skill}</td>
                 <td style={htd}><span className="muted">{h.oldLevel || '—'}</span> → {levelBadge(h.newLevel)}</td>
                 <td style={{ ...htd, whiteSpace: 'normal' }}>{h.verifiedBy || '—'}</td>
-                <td style={htd}>{h.verifiedAt ? shortDate(String(h.verifiedAt).slice(0, 10)) : '—'}</td>
+                <td style={{ ...htd, overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.verifiedAt ? shortDate(String(h.verifiedAt).slice(0, 10)) : '—'}</td>
                 <td style={{ ...htd, whiteSpace: 'normal' }}>{h.remarks || '—'}</td>
               </tr>
             ))}</tbody>
