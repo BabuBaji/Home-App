@@ -4537,6 +4537,20 @@ async function patchWorker(id, b, res) {
       first ?? null, last ?? null, b.alternate_mobile ?? w.alternate_mobile,
       b.worker_category ?? w.worker_category, b.employment_type ?? w.employment_type,
       b.joining_date ?? w.joining_date, b.recruiter ?? w.recruiter, b.referral_source ?? w.referral_source, id])
+  // Operational assignment (Edit wizard, step 2) — coalesce so an unset field keeps its value.
+  // Salary/pay money columns are deliberately NOT updated here: pay changes go through the approval
+  // matrix, never a direct worker edit.
+  if (b.shift_def_id) { if (!(await getShiftDef(Number(b.shift_def_id)))) { res.status(400); return { error: 'Unknown shift' } } }
+  const numOrKeep = (v, cur) => v === undefined ? cur : (v === null || v === '' ? null : Number(v))
+  await pool.query(
+    `UPDATE workers SET cluster_id=$1, store_id=$2, reporting_manager_id=$3, shift_def_id=$4,
+       incentive_plan_id=$5, wallet_enabled=$6, job_radius_km=$7, allow_outside_radius=$8 WHERE id=$9`,
+    [numOrKeep(b.cluster_id, w.cluster_id), numOrKeep(b.store_id, w.store_id),
+      numOrKeep(b.reporting_manager_id, w.reporting_manager_id), numOrKeep(b.shift_def_id, w.shift_def_id),
+      numOrKeep(b.incentive_plan_id, w.incentive_plan_id),
+      b.wallet_enabled === undefined ? w.wallet_enabled : !!b.wallet_enabled,
+      numOrKeep(b.job_radius_km, w.job_radius_km),
+      b.allow_outside_radius === undefined ? w.allow_outside_radius : !!b.allow_outside_radius, id])
   const profPatch = {}
   if (b.personal && typeof b.personal === 'object') profPatch.personal = { ...(w.profile?.personal || {}), ...b.personal }
   if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = { ...(w.profile?.skillLevels || {}), ...b.skillLevels }

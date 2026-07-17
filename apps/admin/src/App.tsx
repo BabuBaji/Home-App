@@ -67,6 +67,7 @@ export default function App() {
           <Route path="/customers" element={<Page perm="customers.view"><Customers /></Page>} />
           <Route path="/workers" element={<Page perm="workers.view"><Workers /></Page>} />
           <Route path="/workers/new" element={<Page perm="workers.create"><AddWorker /></Page>} />
+          <Route path="/workers/:id/edit" element={<Page perm="workers.edit"><AddWorker /></Page>} />
           <Route path="/workers/:id" element={<Page perm="workers.view"><WorkerDetail /></Page>} />
           <Route path="/worker-wallet" element={<Page perm="wallet.view"><WorkerWallet /></Page>} />
           <Route path="/bookings" element={<Page perm="bookings.view"><Bookings /></Page>} />

@@ -107,24 +107,8 @@ export default function Workers() {
     try { await deleteWorker(w.id); toast('Worker deleted'); load() } catch (e) { toast((e as Error).message, 'err') }
   }
 
-  const openEdit = (w: Worker) => {
-    setEditDraft({
-      name: w.name,
-      // Older workers predate the split and have only `name` — fall back to splitting it once so
-      // the form isn't blank, rather than losing what's there.
-      first_name: w.first_name || w.name.split(' ')[0] || '',
-      last_name: w.last_name || w.name.split(' ').slice(1).join(' ') || '',
-      phone: w.phone || '', alternate_mobile: w.alternate_mobile || '',
-      email: w.email || '', city: w.city || '', services: w.services || [], status: w.status,
-      zone_id: w.zone_id ?? null, designation: w.designation || 'Worker',
-      worker_category: w.worker_category || '', employment_type: w.employment_type || '',
-      joining_date: w.joining_date ? String(w.joining_date).slice(0, 10) : '',
-      recruiter: w.recruiter || '', referral_source: w.referral_source || '',
-      personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) },
-      skillLevels: { ...((w as { profile?: { skillLevels?: Record<string, string> } }).profile?.skillLevels || {}) },
-    })
-    setEditing(w)
-  }
+  // Edit opens the same full wizard as Add (prefilled), not a thin modal.
+  const openEdit = (w: Worker) => nav(`/workers/${w.id}/edit`)
 
   return (
     <div className="grid" style={{ gap: 16 }}>
