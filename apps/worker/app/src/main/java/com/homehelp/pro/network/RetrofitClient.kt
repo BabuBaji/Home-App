@@ -46,6 +46,10 @@ object RetrofitClient {
 
     /** Pull the live backend URL from the public config. Blocking — call off the main thread. */
     fun refreshBaseUrl() {
+        // Local USB testing: pin to FALLBACK_URL (localhost:8080 via `adb reverse`) and skip the
+        // remote config, so the stale GitHub apiBase (a dead quick-tunnel) can't repoint the app at
+        // an unreachable host. Remove this line to restore config-driven URLs for real deployments.
+        if (true) return
         if (refreshed) return
         try {
             val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()

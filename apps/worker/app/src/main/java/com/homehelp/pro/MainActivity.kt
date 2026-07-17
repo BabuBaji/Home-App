@@ -33,9 +33,34 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
 
+/**
+ * DEBUG ONLY — lets `adb shell am start --es debug_route <route>` drive the app to any screen when
+ * touch injection is blocked by the OS (e.g. HyperOS SELinux). `am start` is permitted where `input`
+ * is not, so this is the only way to screenshot deep screens headlessly. Inert in release builds.
+ */
+object DebugNav {
+    var route: String? = null
+    var login: Boolean = false
+    var amount: Int = 0
+    var consumed: Boolean = false
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (BuildConfig.DEBUG) {
+            DebugNav.route = intent?.getStringExtra("debug_route")
+            DebugNav.login = intent?.getBooleanExtra("debug_login", false) == true
+            DebugNav.amount = intent?.getIntExtra("debug_amount", 0) ?: 0
+            DebugNav.consumed = false
+            // When driving the app headlessly via `am start` (touch injection blocked by the OS),
+            // turn the screen on and keep it lit so automated screenshots aren't black frames.
+            if (DebugNav.route != null) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
         // Restore any persisted login so the worker stays signed in across app restarts.
         Session.init(applicationContext)
         // osmdroid requires a unique user-agent or OSM tile servers return 403.
@@ -151,6 +176,25 @@ fun AppRoot() {
 
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
+
+    // DEBUG ONLY — drive to a deep screen from `am start --es debug_route <route> [--ez debug_login true]`
+    // for headless UI verification when touch injection is blocked. No-op in release / without the extra.
+    if (BuildConfig.DEBUG) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            val target = DebugNav.route
+            if (target != null && !DebugNav.consumed) {
+                DebugNav.consumed = true
+                if (DebugNav.amount > 0) WithdrawDraft.amount = DebugNav.amount
+                if (DebugNav.login && !vm.isLoggedIn) {
+                    vm.debugLogin("9988776655", "1234") { ok ->
+                        if (ok) nav.navigate(target)
+                    }
+                } else {
+                    nav.navigate(target)
+                }
+            }
+        }
+    }
     // Re-pull backend data every time the app comes to the foreground, so a completed job /
     // updated earnings appear immediately instead of only after a full relaunch.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current

@@ -652,6 +652,27 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    /**
+     * DEBUG ONLY — headless auto-login for on-device UI verification when ADB input injection is
+     * blocked (e.g. HyperOS). Does the two-step demo auth (request-otp → verify) so `am start` can
+     * drive the app without anyone tapping. Never called outside a BuildConfig.DEBUG intent path.
+     */
+    fun debugLogin(phone: String, otp: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.requestOtp(AuthRequest(phone = phone))
+                val b = api.verify(AuthRequest(phone = phone, otp = otp))
+                Session.phone = phone
+                applyBootstrap(b)
+                loadDailyGoal()
+                backendConnected = true
+                isLoggedIn = true
+                onDone(true)
+            } catch (e: Exception) { onDone(false) }
+        }
+    }
+
     private fun httpErrorMessage(e: retrofit2.HttpException): String =
         try {
             val body = e.response()?.errorBody()?.string()
