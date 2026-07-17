@@ -87,6 +87,33 @@ export const fetchQuote = (items: { id: string; durationId: string }[], coupon?:
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
 export const updateMe = (patch: Partial<User>) => req<{ user: User }>('/api/me', { method: 'PATCH', body: JSON.stringify(patch) })
+export const deleteAccount = () => req<{ ok: boolean }>('/api/me', { method: 'DELETE' })
+
+/* profile · notifications */
+export interface NotifPrefs {
+  all: boolean; bookingConfirm: boolean; bookingReminder: boolean; serviceUpdates: boolean
+  offers: boolean; walletTxn: boolean; payments: boolean; marketing: boolean
+}
+export const fetchNotifPrefs = () => req<NotifPrefs>('/api/profile/notifications')
+export const updateNotifPrefs = (patch: Partial<NotifPrefs>) => req<NotifPrefs>('/api/profile/notifications', { method: 'PATCH', body: JSON.stringify(patch) })
+
+/* profile · language */
+export const fetchLanguage = () => req<{ language: string }>('/api/profile/language')
+export const updateLanguage = (language: string) => req<{ language: string }>('/api/profile/language', { method: 'PATCH', body: JSON.stringify({ language }) })
+
+/* profile · family members */
+export interface FamilyMember { id: number; name: string; relation: string | null; phone: string | null; is_primary: boolean }
+export const fetchFamily = () => req<FamilyMember[]>('/api/family')
+export const addFamily = (m: { name: string; relation?: string; phone?: string; is_primary?: boolean }) => req<FamilyMember>('/api/family', { method: 'POST', body: JSON.stringify(m) })
+export const updateFamily = (id: number, m: Partial<FamilyMember>) => req<FamilyMember>(`/api/family/${id}`, { method: 'PATCH', body: JSON.stringify(m) })
+export const removeFamily = (id: number) => req<{ ok: boolean }>(`/api/family/${id}`, { method: 'DELETE' })
+
+/* profile · saved payment methods (display data only — never full card numbers) */
+export interface SavedMethod { id: number; kind: string; label: string; detail: string | null; is_primary: boolean }
+export const fetchSavedMethods = () => req<SavedMethod[]>('/api/payment-methods')
+export const addSavedMethod = (m: { kind: string; label: string; detail?: string; is_primary?: boolean }) => req<SavedMethod>('/api/payment-methods', { method: 'POST', body: JSON.stringify(m) })
+export const setPrimaryMethod = (id: number) => req<SavedMethod>(`/api/payment-methods/${id}`, { method: 'PATCH', body: JSON.stringify({ is_primary: true }) })
+export const removeSavedMethod = (id: number) => req<{ ok: boolean }>(`/api/payment-methods/${id}`, { method: 'DELETE' })
 export const fetchAddresses = () => req<Address[]>('/api/addresses')
 export const addAddressApi = (a: Partial<Address>) => req<Address>('/api/addresses', { method: 'POST', body: JSON.stringify(a) })
 export const updateAddressApi = (id: number, a: Partial<Address>) => req<Address>(`/api/addresses/${id}`, { method: 'PATCH', body: JSON.stringify(a) })
@@ -104,8 +131,45 @@ export const verifyPayment = (p: { razorpay_order_id: string; razorpay_payment_i
 export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
 
 /* wallet */
-export const fetchWallet = () => req<{ balance: number; cash: number; promo: number; points: number; total: number; status: string; cashback: number; transactions: Transaction[] }>('/api/wallet')
+export interface WalletSummary {
+  balance: number; cash: number; promo: number; points: number; total: number
+  status: string; cashback: number; transactions: Transaction[]
+  // Cash spends anywhere; Promo is locked to bookings — that is the available/locked split.
+  available: number; locked: number; hideBalance: boolean
+  // Add Money amount chips, configured by admin (`wallet_topup_presets`). Empty = no chips.
+  topupPresets: number[]
+}
+export const fetchWallet = () => req<WalletSummary>('/api/wallet')
 export const addMoney = (amount: number) => req<{ balance: number }>('/api/wallet/add', { method: 'POST', body: JSON.stringify({ amount }) })
+
+/* wallet · cashback (Promo is the cashback purse: credits earned, debits spent) */
+export interface CashbackEntry { id: number; title: string; amount: number; created: string; kind: string | null; state: 'earned' | 'used' | 'expired' }
+export interface CashbackInfo { lifetime: number; usable: number; expired: number; history: CashbackEntry[] }
+export const fetchCashback = () => req<CashbackInfo>('/api/wallet/cashback')
+
+/* wallet · referral earnings */
+export interface ReferralEntry { id: number; title: string; amount: number; created: string; ref?: string }
+export interface ReferralInfo { code: string; reward: number; total: number; successful: number; earned: number; history: ReferralEntry[] }
+export const fetchReferralEarnings = () => req<ReferralInfo>('/api/wallet/referrals')
+
+/* wallet · gift cards */
+export interface GiftCard { id: number; code: string; label: string | null; amount: number; balance: number; expires: string | null; created: string }
+export interface GiftCardInfo { balance: number; active: number; cards: GiftCard[] }
+export const fetchGiftCards = () => req<GiftCardInfo>('/api/wallet/gift-cards')
+export const redeemGiftCard = (code: string) => req<{ ok: boolean; card: GiftCard }>('/api/wallet/gift-cards', { method: 'POST', body: JSON.stringify({ code }) })
+
+/* wallet · refund history (booking side of a refund; the ledger has the money side) */
+export interface RefundEntry { id: number; ref: string; amount: number; status: 'completed' | 'pending' | 'failed'; title: string; serviceId: string | null; reason: string | null; created: string }
+export const fetchRefunds = () => req<RefundEntry[]>('/api/refunds')
+
+/* wallet · settings */
+export interface WalletSettings {
+  autoTopup: boolean; autoTopupAmount: number; autoTopupThreshold: number
+  notifyTxn: boolean; notifyLowBalance: boolean; hideBalance: boolean
+}
+export const fetchWalletSettings = () => req<WalletSettings>('/api/wallet/settings')
+export const updateWalletSettings = (patch: Partial<WalletSettings>) =>
+  req<WalletSettings>('/api/wallet/settings', { method: 'PATCH', body: JSON.stringify(patch) })
 // Credit the wallet after a verified gateway payment (server checks the signature before crediting).
 export const walletTopup = (paymentId: string, amount: number) =>
   req<{ ok: boolean; balance: number | null; duplicate?: boolean }>('/api/payment/wallet/topup', { method: 'POST', body: JSON.stringify({ paymentId, amount }) })
@@ -115,7 +179,22 @@ export const applyReferral = (code: string) =>
 
 /* support */
 export const fetchTickets = () => req<Ticket[]>('/api/tickets')
-export const createTicket = (category: string, message: string) => req<Ticket>('/api/tickets', { method: 'POST', body: JSON.stringify({ category, message }) })
+export const createTicket = (category: string, message: string, extra?: { subcategory?: string; subject?: string }) =>
+  req<Ticket>('/api/tickets', { method: 'POST', body: JSON.stringify({ category, message, ...extra }) })
+export const escalateTicket = (id: number, reason: string, contact: string) =>
+  req<Ticket>(`/api/tickets/${id}/escalate`, { method: 'POST', body: JSON.stringify({ reason, contact }) })
+
+/* AI Home (Module 13) · reminders + cleaning plans */
+export interface HomeReminder { id: number; kind: string; next_date: string | null; frequency_days: number | null; enabled: boolean; config: Record<string, unknown> }
+export const fetchReminders = () => req<HomeReminder[]>('/api/reminders')
+export const saveReminder = (kind: string, r: { next_date?: string | null; frequency_days?: number | null; enabled?: boolean; config?: Record<string, unknown> }) =>
+  req<HomeReminder>(`/api/reminders/${kind}`, { method: 'PUT', body: JSON.stringify(r) })
+
+export interface CleaningPlan { id: number; service_id: string; name: string; frequency: string; next_date: string | null; active: boolean }
+export const fetchPlans = () => req<CleaningPlan[]>('/api/plans')
+export const addPlan = (p: { service_id: string; name: string; frequency: string; next_date?: string | null }) => req<CleaningPlan>('/api/plans', { method: 'POST', body: JSON.stringify(p) })
+export const updatePlan = (id: number, patch: { active?: boolean }) => req<CleaningPlan>(`/api/plans/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+export const removePlan = (id: number) => req<{ ok: boolean }>(`/api/plans/${id}`, { method: 'DELETE' })
 
 /* live location — captured once when the app opens, cached so bookings/maps use it
    instantly without re-prompting, and persisted to the user's profile so the assigned
@@ -151,6 +230,13 @@ export const createBookingApi = async (payload: any) => {
   return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
 }
 export const fetchBookings = () => req<Booking[]>('/api/bookings')
+// Real customer reviews for a service (from reviewed bookings). Public/read-only.
+export const fetchServiceReviews = (serviceId: string) =>
+  req<{ name: string; rating: number; text: string; date: string; pro: string }[]>(`/api/bookings/service-reviews?serviceId=${encodeURIComponent(serviceId)}`)
+// Real workers offering a service (from the worker service), with distance from the customer.
+export const fetchServiceWorkers = (service: string, lat?: number, lng?: number) =>
+  req<{ id: number; name: string; rating: number; jobs: number; online: boolean; km: number | null }[]>(
+    `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })

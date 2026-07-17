@@ -45,6 +45,9 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -690,6 +693,9 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 MenuItem(Icons.Filled.Person, "Personal Information") { nav.navigate(Routes.P_PERSONAL) }
                 MenuItem(Icons.Filled.Description, "Documents") { nav.navigate(Routes.P_DOCUMENTS) }
+                MenuItem(Icons.Filled.WorkspacePremium, "Skills & Services") { nav.navigate(Routes.P_SKILLS) }
+                MenuItem(Icons.Filled.MenuBook, "Training") { nav.navigate(Routes.P_TRAINING) }
+                MenuItem(Icons.Filled.Inventory2, "My Equipment") { nav.navigate(Routes.P_EQUIPMENT) }
                 MenuItem(Icons.Filled.AccountBalance, "Bank Details") { nav.navigate(Routes.P_BANK) }
                 MenuItem(Icons.Filled.Schedule, "Availability & Shifts") { nav.navigate(Routes.P_AVAILABILITY) }
             }

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { fetchSettings, updateSettings } from '../api'
 import { Card, Field, Loading, ErrorState, useToast } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 
 // Left vertical nav. Only "general" maps to live fields; others are placeholders.
 const NAV = [
@@ -30,7 +30,9 @@ const KEYS = [
   { k: 'payout_mode', label: 'Payout Mode', hint: 'IMPS / NEFT / UPI (default IMPS)', secret: false },
   { k: 'payout_webhook_secret', label: 'Payout Webhook Secret', hint: 'Verifies RazorpayX payout & fund-account-validation webhooks', secret: true },
   { k: 'google_maps_key', label: 'Google Maps API Key', hint: 'Geocoding & live tracking maps', secret: true },
-  { k: 'msg91_key', label: 'MSG91 / SMS Key', hint: 'OTP & transactional SMS', secret: true },
+  { k: 'msg91_key', label: 'MSG91 / SMS Key', hint: 'Sends login OTPs. While this is empty, codes are returned in the API response instead (dev only).', secret: true },
+  { k: 'msg91_otp_template_id', label: 'MSG91 OTP Template ID', hint: 'Required once the key is set — India needs a DLT-registered template or MSG91 rejects the send.', secret: false },
+  { k: 'msg91_sender_id', label: 'MSG91 Sender ID', hint: '6-character DLT-approved sender, e.g. HHELP', secret: false },
   { k: 'firebase_server_key', label: 'Firebase Server Key', hint: 'Push notifications (FCM)', secret: true },
   { k: 'smtp_host', label: 'SMTP Host', hint: 'e.g. smtp.gmail.com', secret: false },
   { k: 'smtp_user', label: 'SMTP Username', hint: 'Email sender address', secret: false },
@@ -44,7 +46,7 @@ export default function SettingsScreen() {
   const [err, setErr] = useState('')
   const [nav, setNav] = useState<string>('general')
   const [busy, setBusy] = useState(false)
-  const editable = can(admin?.role, 'admin')
+  const editable = has(admin, 'settings.edit')
 
   const load = () => { setErr(''); fetchSettings().then(setS).catch((e) => setErr(e.message)) }
   useEffect(load, [])
@@ -148,6 +150,43 @@ export default function SettingsScreen() {
           <ToggleRow label="Enable Review & Ratings" on={s.enable_reviews !== 'false'} onClick={() => toggle('enable_reviews')} disabled={!editable} />
           <ToggleRow label="Show GST-inclusive prices to customers" on={s.gst_inclusive !== 'false'} onClick={() => toggle('gst_inclusive')} disabled={!editable} />
         </div>
+
+        {/* Worker Payout Policy — read by the wallet service. min_payout_limit is enforced on every
+            withdrawal request; frequency/day only drive the estimated next-payout date shown to
+            workers and admins. Nothing pays automatically — payouts stay worker-requested and
+            admin-approved — so 'On demand' is the honest setting when there is no stated cycle. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Worker Payout Policy</h4>
+        <div className="form-grid">
+          <Field label="Minimum payout (₹)">
+            <input disabled={!editable} type="number" min={0} value={s.min_payout_limit || ''} onChange={(e) => set('min_payout_limit', e.target.value)} placeholder="500" />
+          </Field>
+          <Field label="Payout frequency">
+            <select disabled={!editable} value={s.payout_frequency || 'weekly'} onChange={(e) => set('payout_frequency', e.target.value)}>
+              <option value="weekly">Weekly</option>
+              <option value="fortnightly">Fortnightly</option>
+              <option value="monthly">Monthly</option>
+              <option value="daily">Daily</option>
+              <option value="on_demand">On demand (no schedule)</option>
+            </select>
+          </Field>
+          {s.payout_frequency !== 'on_demand' && s.payout_frequency !== 'daily' && (
+            s.payout_frequency === 'monthly' ? (
+              <Field label="Payout day of month">
+                <input disabled={!editable} type="number" min={1} max={28} value={s.payout_day || ''} onChange={(e) => set('payout_day', e.target.value)} placeholder="1" />
+              </Field>
+            ) : (
+              <Field label="Payout day">
+                <select disabled={!editable} value={s.payout_day || '4'} onChange={(e) => set('payout_day', e.target.value)}>
+                  {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
+                </select>
+              </Field>
+            )
+          )}
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          The minimum is enforced on every withdrawal request. Frequency sets the payout date estimated for
+          workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
+        </p>
 
         {/* Session & Security */}
         <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Session &amp; Security</h4>

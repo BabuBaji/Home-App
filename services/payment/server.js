@@ -10,9 +10,14 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import {
-  makePool, migrate, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, internalOnly, subscribeEvents, invalidateSettings,
   publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('payment') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4008)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5438/payment'
@@ -73,7 +78,12 @@ app.get('/health', (_q, res) => res.json({ service: 'payment', ok: true }))
 async function rzp() {
   const keyId = await getSetting(ADMIN_URL, 'razorpay_key_id', '')
   const keySecret = await getSetting(ADMIN_URL, 'razorpay_key_secret', '')
-  return { keyId, keySecret, live: !!(keyId && keySecret) }
+  // `payment_gateway=mock` forces demo mode (no real gateway) — used when the Razorpay keys are
+  // absent/invalid so bookings can still complete in testing. Set it to 'razorpay' (or clear it)
+  // once valid keys are in Admin ▸ Settings to go back to real (test-mode) Razorpay.
+  const mode = (await getSetting(ADMIN_URL, 'payment_gateway', '')).trim().toLowerCase()
+  const live = mode === 'mock' ? false : (mode === 'razorpay' || !!(keyId && keySecret))
+  return { keyId, keySecret, live }
 }
 
 /* ---------- RazorpayX payouts (worker withdrawals -> bank) ----------
@@ -115,6 +125,13 @@ async function rzpxGet(cfg, path) {
 const PAYOUT_DONE = new Set(['processed'])
 const PAYOUT_FAILED = new Set(['reversed', 'failed', 'rejected', 'cancelled'])
 
+// RazorpayX accepts bank_account.account_type as 'savings' | 'current'. Send it only when the
+// worker actually chose one — an empty/unknown value would be rejected by the API.
+const bankAccountType = (bank) => {
+  const t = String(bank?.bankAccountType || '').toLowerCase()
+  return t === 'savings' || t === 'current' ? { account_type: t } : {}
+}
+
 // Initiate a single worker payout. Idempotent per withdrawal via the unique index; safe to re-run.
 async function initiatePayout({ withdrawalId, workerId, amount, method }) {
   if (!withdrawalId || !amount || amount <= 0) return
@@ -126,9 +143,10 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
 
   // MOCK mode — no real gateway configured. Complete instantly so the ledger reconciles.
   if (!cfg.live) {
+    const reference = 'MOCK-' + withdrawalId
     await pool.query("INSERT INTO payouts (worker_id,withdrawal_id,amount,status,provider,mode,reference) VALUES ($1,$2,$3,'paid','mock',$4,$5) ON CONFLICT (withdrawal_id) WHERE withdrawal_id IS NOT NULL DO NOTHING",
-      [workerId, withdrawalId, amount, method || 'bank', 'MOCK-' + withdrawalId])
-    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId })
+      [workerId, withdrawalId, amount, method || 'bank', reference])
+    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId, reference })
     console.log(`[payment] payout ${withdrawalId} completed (MOCK — RazorpayX not configured)`)
     return
   }
@@ -147,9 +165,11 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
       name: holder, type: 'employee', reference_id: `worker_${workerId}`,
       ...(worker?.phone ? { contact: String(worker.phone) } : {}),
     })
+    // NB: the outer account_type is RazorpayX's vpa/bank_account discriminator; bank_account.account_type
+    // is the worker's actual savings/current selection. Omitted entirely when not on file.
     const fundAccount = await rzpxCall(cfg, '/v1/fund_accounts', useUpi
       ? { contact_id: contact.id, account_type: 'vpa', vpa: { address: bank.bankUpi } }
-      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount } })
+      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount, ...bankAccountType(bank) } })
 
     const payout = await rzpxCall(cfg, '/v1/payouts', {
       account_number: cfg.account,
@@ -165,9 +185,13 @@ async function initiatePayout({ withdrawalId, workerId, amount, method }) {
     await pool.query("INSERT INTO payouts (worker_id,withdrawal_id,amount,status,provider,mode,reference) VALUES ($1,$2,$3,$4,'razorpayx',$5,$6) ON CONFLICT (withdrawal_id) WHERE withdrawal_id IS NOT NULL DO NOTHING",
       [workerId, withdrawalId, amount, status, useUpi ? 'UPI' : cfg.mode, payout.id])
 
-    if (status === 'paid') publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId })
-    else if (status === 'failed') publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: 'Payout rejected' })
-    // else: queued/processing — the payout webhook will finalize it.
+    // payout.utr is the bank transfer number — usually null until the rail actually settles, so the
+    // webhook is where it normally arrives.
+    if (status === 'paid') publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId, reference: payout.id, utr: payout.utr || '' })
+    else if (status === 'failed') publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: 'Payout rejected', reference: payout.id, utr: payout.utr || '' })
+    // else: queued/processing — the webhook will finalize it, but hand the ledger the gateway
+    // reference now so support can trace an in-flight payout instead of waiting for the webhook.
+    else publishEvent(REDIS_URL, 'payout.processing', { withdrawalId, workerId, reference: payout.id })
     console.log(`[payment] payout ${withdrawalId} -> RazorpayX ${payout.id} (${payout.status})`)
   } catch (e) {
     await pool.query("INSERT INTO payouts (worker_id,withdrawal_id,amount,status,provider,failure_reason) VALUES ($1,$2,$3,'failed','razorpayx',$4) ON CONFLICT (withdrawal_id) WHERE withdrawal_id IS NOT NULL DO NOTHING",
@@ -211,7 +235,7 @@ async function initiateBankVerification({ workerId, bank, name }) {
     const contact = await rzpxCall(cfg, '/v1/contacts', { name: holder, type: 'employee', reference_id: `worker_${workerId}` })
     const fa = await rzpxCall(cfg, '/v1/fund_accounts', useUpi
       ? { contact_id: contact.id, account_type: 'vpa', vpa: { address: bank.bankUpi } }
-      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount } })
+      : { contact_id: contact.id, account_type: 'bank_account', bank_account: { name: holder, ifsc: bank.bankIfsc, account_number: bank.bankAccount, ...bankAccountType(bank) } })
     const val = await rzpxCall(cfg, '/v1/fund_accounts/validations', {
       account_number: cfg.account, fund_account: { id: fa.id }, amount: 100, currency: 'INR',
       notes: { workerId: String(workerId), holder },
@@ -303,7 +327,7 @@ app.post('/api/payment/wallet/topup', auth, async (req, res) => {
   if (dup.rowCount) return res.json({ ok: true, duplicate: true })
   let balance = null
   try {
-    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: 'Added to wallet', amount, ref: paymentId })
+    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'ADD_MONEY', title: 'Added to wallet', amount, ref: paymentId })
     balance = credited?.balance ?? null
   } catch { return res.status(502).json({ error: 'Could not credit wallet' }) }
   await pool.query("INSERT INTO payments (customer_id,amount,mode,gateway,payment_id,status) VALUES ($1,$2,'wallet_topup','razorpay',$3,'SUCCESS')", [req.user.id, amount, paymentId])
@@ -366,12 +390,16 @@ app.post('/api/payments/payout/webhook', async (req, res) => {
   if (!dup.rowCount) return res.json({ ok: true, duplicate: true })
 
   const type = evt.event || 'payout.processed'
+  // entity.id is the gateway payout id (pout_…). Keep whatever we stored at initiation if the
+  // webhook body doesn't carry one, so a sparse payload can't blank an existing reference.
+  const reference = entity.id || null
+  const utr = entity.utr || '' // the bank's transfer number — what the worker sees on their statement
   if (type === 'payout.processed' || (!evt.event && evt.withdrawalId)) {
-    await pool.query("UPDATE payouts SET status='paid' WHERE withdrawal_id=$1", [withdrawalId])
-    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId })
+    await pool.query("UPDATE payouts SET status='paid', reference=COALESCE($2, reference) WHERE withdrawal_id=$1", [withdrawalId, reference])
+    publishEvent(REDIS_URL, 'payout.completed', { withdrawalId, workerId, reference, utr })
   } else if (type === 'payout.reversed' || type === 'payout.failed' || type === 'payout.rejected') {
-    await pool.query("UPDATE payouts SET status='failed', failure_reason=$2 WHERE withdrawal_id=$1", [withdrawalId, entity.status_details?.description || type])
-    publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: entity.status_details?.description || type })
+    await pool.query("UPDATE payouts SET status='failed', failure_reason=$2, reference=COALESCE($3, reference) WHERE withdrawal_id=$1", [withdrawalId, entity.status_details?.description || type, reference])
+    publishEvent(REDIS_URL, 'payout.failed', { withdrawalId, workerId, reason: entity.status_details?.description || type, reference, utr })
   }
   res.json({ ok: true })
 })
@@ -447,9 +475,20 @@ app.get('/api/admin/refunds', adminAuth, async (_q, res) => {
     payment_status: b.payment_status ?? null, created: b.created,
   })))
 })
-app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => {
-  await internalPost(BOOKING_URL, `/api/internal/bookings/${Number(req.params.id)}/refund`, {})
-  res.json({ ok: true })
+// Legacy refund path. Rather than refunding directly, forward to the approval matrix (admin service)
+// with the caller's session, so this endpoint can't bypass an approval rule any more than the panel's
+// /api/admin/actions/refund can. The admin service decides: execute now, or queue for sign-off, and
+// its response (200 executed / 202 pending / 4xx) is relayed back unchanged.
+app.post('/api/admin/refunds/:id', adminAuth, requirePerm('refunds.approve'), async (req, res) => {
+  try {
+    const r = await fetch(`${ADMIN_URL}/api/admin/actions/refund`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: req.headers.authorization || '' },
+      body: JSON.stringify({ bookingId: Number(req.params.id) }),
+    })
+    const body = await r.json().catch(() => ({}))
+    res.status(r.status).json(body)
+  } catch { res.status(502).json({ error: 'Approval service unavailable' }) }
 })
 
 /* ---------- event consumers ---------- */

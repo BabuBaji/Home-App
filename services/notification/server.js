@@ -11,8 +11,13 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents, tryGet,
+  makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('notification') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4003)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5434/notification'
@@ -50,6 +55,12 @@ async function init() {
       audience TEXT NOT NULL DEFAULT 'all', channel TEXT NOT NULL DEFAULT 'in-app', sent INTEGER NOT NULL DEFAULT 0,
       admin TEXT, created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Module 14 (Support): richer ticket fields + escalation.
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subcategory TEXT`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subject TEXT`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS escalate_reason TEXT`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS escalate_contact TEXT`,
   ])
   console.log('[notification] Postgres ready (activity_log, tickets, complaints, broadcasts)')
 }
@@ -108,10 +119,23 @@ app.get('/api/tickets', auth, async (req, res) => res.json((await pool.query('SE
 app.post('/api/tickets', auth, async (req, res) => {
   if (!req.body?.message) return res.status(400).json({ error: 'Describe your issue' })
   const ref = '#TK' + Math.floor(1000 + Math.random() * 8999)
-  const { rows } = await pool.query('INSERT INTO tickets (user_id,category,message,status,ref) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-    [req.user.id, req.body.category || 'General', req.body.message, 'Open', ref])
+  const { rows } = await pool.query(
+    'INSERT INTO tickets (user_id,category,subcategory,subject,message,status,ref) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+    [req.user.id, req.body.category || 'General', req.body.subcategory || null, req.body.subject || null, req.body.message, 'Open', ref])
   await logEvent({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'support.ticket', entityType: 'ticket', entityId: rows[0].id, ref, detail: `Raised ticket: ${req.body.category || 'General'}` })
   res.status(201).json(rows[0])
+})
+
+// Escalate a ticket to the senior team — records the reason + preferred contact.
+app.post('/api/tickets/:id/escalate', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const own = await pool.query('SELECT id FROM tickets WHERE id=$1 AND user_id=$2', [id, req.user.id])
+  if (!own.rowCount) return res.status(404).json({ error: 'Ticket not found' })
+  const { rows } = await pool.query(
+    "UPDATE tickets SET escalated=true, status='Escalated', escalate_reason=$1, escalate_contact=$2 WHERE id=$3 RETURNING *",
+    [String(req.body?.reason || '').slice(0, 500) || null, String(req.body?.contact || 'call').slice(0, 20), id])
+  await logEvent({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'support.escalate', entityType: 'ticket', entityId: id, ref: rows[0].ref, detail: 'Escalated ticket' })
+  res.json(rows[0])
 })
 app.get('/api/admin/tickets', adminAuth, async (_q, res) => {
   const rows = (await pool.query('SELECT * FROM tickets ORDER BY id DESC')).rows

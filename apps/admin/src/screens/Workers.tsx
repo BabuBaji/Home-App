@@ -1,18 +1,33 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
-import { fetchWorkers, createWorker, updateWorker, deleteWorker, fetchServices, fetchZones, type Zone } from '../api'
+import { fetchWorkers, updateWorker, deleteWorker, inviteWorker, fetchServices, fetchZones, type Zone } from '../api'
 import type { Worker } from '../types'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, shortDate } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 import { CITIES } from '../cities'
 
-type Stats = { total: number; active: number; pending: number; inactive: number }
+type Stats = { total: number; active: number; onboarding: number; pending: number; inactive: number }
 
 type Personal = { gender: string; dob: string; fatherName: string; address: string; aadhaar: string; pan: string; whatsapp: string; emergencyName: string; emergencyPhone: string; languages: string }
 const EMPTY_PERSONAL: Personal = { gender: '', dob: '', fatherName: '', address: '', aadhaar: '', pan: '', whatsapp: '', emergencyName: '', emergencyPhone: '', languages: '' }
-type Draft = { name: string; phone: string; email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string; personal: Personal; skillLevels: Record<string, string> }
-const EMPTY_DRAFT: Draft = { name: '', phone: '', email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker', personal: { ...EMPTY_PERSONAL }, skillLevels: {} }
+type Draft = {
+  name: string; first_name: string; last_name: string; phone: string; alternate_mobile: string
+  email: string; city: string; services: string[]; status: string; zone_id: number | null; designation: string
+  worker_category: string; employment_type: string; joining_date: string; recruiter: string; referral_source: string
+  personal: Personal; skillLevels: Record<string, string>
+}
+const EMPTY_DRAFT: Draft = {
+  name: '', first_name: '', last_name: '', phone: '', alternate_mobile: '',
+  email: '', city: '', services: [], status: 'pending', zone_id: null, designation: 'Worker',
+  worker_category: '', employment_type: '', joining_date: '', recruiter: '', referral_source: '',
+  personal: { ...EMPTY_PERSONAL }, skillLevels: {},
+}
+// Phase 1 pick-lists. Kept here (not in the DB) because they're presentation choices, not data
+// the backend branches on — it stores whatever string the admin picked.
+const WORKER_CATEGORIES = ['Regular', 'Premium', 'Expert', 'Senior']
+const EMPLOYMENT_TYPES = ['Full Time', 'Part Time', 'Contract', 'Freelance']
+const REFERRAL_SOURCES = ['Walk-in', 'Employee Referral', 'Job Portal', 'Agency', 'Social Media', 'Field Recruitment', 'Other']
 
 export default function Workers() {
   const { admin } = useStore()
@@ -28,8 +43,6 @@ export default function Workers() {
   const pageSize = 10
 
   const [menuId, setMenuId] = useState<number | null>(null)
-  const [addOpen, setAddOpen] = useState(false)
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<Worker | null>(null)
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT)
   const nav = useNavigate()
@@ -62,15 +75,6 @@ export default function Workers() {
   const rated = data.workers.filter((w) => w.rating > 0)
   const avgRating = rated.length ? (rated.reduce((a, w) => a + w.rating, 0) / rated.length).toFixed(1) : '—'
 
-  const addWorker = async () => {
-    setBusy(true)
-    try {
-      await createWorker({ name: draft.name, phone: draft.phone, email: draft.email, city: draft.city, services: draft.services, status: draft.status, zone_id: draft.zone_id, designation: draft.designation, personal: draft.personal, skillLevels: draft.skillLevels })
-      toast('Worker added')
-      setAddOpen(false); setDraft(EMPTY_DRAFT); load()
-    } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
-  }
-
   const saveEdit = async () => {
     if (!editing) return
     setBusy(true)
@@ -85,13 +89,40 @@ export default function Workers() {
     try { await updateWorker(id, body); toast(msg); load() } catch (e) { toast((e as Error).message, 'err') }
   }
 
+  // The invite always flips them to 'onboarding' (so they can sign in); the SMS may or may not go
+  // out. Report which — otherwise an admin assumes the worker was texted and waits for nothing.
+  const doInvite = async (w: Worker) => {
+    try {
+      const r = await inviteWorker(w.id)
+      toast(r.delivery === 'sent'
+        ? `Invite sent to ${w.name}`
+        : `${w.name} can now sign in — but no SMS went out (${r.delivery}). Tell them to log in with ${w.phone}.`,
+      r.delivery === 'sent' ? undefined : 'err')
+      load()
+    } catch (e) { toast((e as Error).message, 'err') }
+  }
+
   const doDelete = async (w: Worker) => {
     if (!(await confirm({ title: `Delete worker "${w.name}"?`, message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return
     try { await deleteWorker(w.id); toast('Worker deleted'); load() } catch (e) { toast((e as Error).message, 'err') }
   }
 
   const openEdit = (w: Worker) => {
-    setEditDraft({ name: w.name, phone: w.phone || '', email: w.email || '', city: w.city || '', services: w.services || [], status: w.status, zone_id: w.zone_id ?? null, designation: w.designation || 'Worker', personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) }, skillLevels: { ...((w as { profile?: { skillLevels?: Record<string, string> } }).profile?.skillLevels || {}) } })
+    setEditDraft({
+      name: w.name,
+      // Older workers predate the split and have only `name` — fall back to splitting it once so
+      // the form isn't blank, rather than losing what's there.
+      first_name: w.first_name || w.name.split(' ')[0] || '',
+      last_name: w.last_name || w.name.split(' ').slice(1).join(' ') || '',
+      phone: w.phone || '', alternate_mobile: w.alternate_mobile || '',
+      email: w.email || '', city: w.city || '', services: w.services || [], status: w.status,
+      zone_id: w.zone_id ?? null, designation: w.designation || 'Worker',
+      worker_category: w.worker_category || '', employment_type: w.employment_type || '',
+      joining_date: w.joining_date ? String(w.joining_date).slice(0, 10) : '',
+      recruiter: w.recruiter || '', referral_source: w.referral_source || '',
+      personal: { ...EMPTY_PERSONAL, ...((w as { profile?: { personal?: Personal } }).profile?.personal || {}) },
+      skillLevels: { ...((w as { profile?: { skillLevels?: Record<string, string> } }).profile?.skillLevels || {}) },
+    })
     setEditing(w)
   }
 
@@ -123,7 +154,9 @@ export default function Workers() {
             {allServices.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <button className="btn line"><Funnel size={16} /> Filters</button>
-          <button className="btn" onClick={() => { setDraft(EMPTY_DRAFT); setAddOpen(true) }}><Plus size={17} /> Add Worker</button>
+          {/* The wizard, not the old modal: it captures category, employment type, joining date,
+              zone, shift and salary plan — the fields the go-live checklist actually gates on. */}
+          <button className="btn" onClick={() => nav('/workers/new')}><Plus size={17} /> Add Worker</button>
         </div>
 
         <div className="tablewrap">
@@ -174,7 +207,8 @@ export default function Workers() {
                         <Star size={13} fill="#f59e0b" stroke="#f59e0b" /> {w.rating}
                       </span>
                     </td>
-                    <td><Badge tone={w.status === 'active' ? 'green' : w.status === 'pending' ? 'amber' : 'red'}>{w.status}</Badge></td>
+                    {/* 'onboarding' is in-progress, not a failure — red would read as suspended. */}
+                    <td><Badge tone={w.status === 'active' ? 'green' : w.status === 'onboarding' ? 'blue' : w.status === 'pending' ? 'amber' : 'red'}>{w.status}</Badge></td>
                     <td className="muted">{shortDate(w.joined)}</td>
                     <td>
                       <div className="actions" style={{ position: 'relative' }}>
@@ -183,9 +217,14 @@ export default function Workers() {
                           <div className="menu" style={{ position: 'absolute', right: 0, top: 34, zIndex: 20, background: 'var(--card, #fff)', border: '1px solid var(--line, #e4e7ec)', borderRadius: 8, boxShadow: '0 8px 24px rgba(16,24,40,.12)', minWidth: 150, padding: 4 }} onClick={(e) => e.stopPropagation()}>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); nav(`/workers/${w.id}`) }}>View</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); openEdit(w) }}>Edit</button>
+                            {/* Only offered while they can't get in yet — an invite is what lets a
+                                pending worker sign in and complete their own profile. */}
+                            {w.status === 'pending' && (
+                              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doInvite(w) }}>Send invite</button>
+                            )}
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'active', verified: true }, 'Worker approved') }}>Approve</button>
                             <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); doUpdate(w.id, { status: 'suspended' }, 'Worker suspended') }}>Suspend</button>
-                            {can(admin?.role, 'admin') && (
+                            {has(admin, 'workers.delete') && (
                               <button className="menu-item" style={{ ...MENU_ITEM, color: '#d92d20' }} onClick={() => { setMenuId(null); doDelete(w) }}>Delete</button>
                             )}
                           </div>
@@ -202,17 +241,6 @@ export default function Workers() {
         <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="workers" onPage={setPage} />
       </Card>
 
-      {addOpen && (
-        <Modal title="Add Worker" onClose={() => setAddOpen(false)} footer={
-          <>
-            <button className="btn line" onClick={() => setAddOpen(false)}>Cancel</button>
-            <button className="btn" disabled={busy || !draft.name.trim()} onClick={addWorker}>Add Worker</button>
-          </>
-        }>
-          <WorkerForm draft={draft} onChange={setDraft} services={allServices} zones={zones} />
-        </Modal>
-      )}
-
       {editing && (
         <Modal title="Edit Worker" onClose={() => setEditing(null)} footer={
           <>
@@ -220,7 +248,7 @@ export default function Workers() {
             <button className="btn" disabled={busy || !editDraft.name.trim()} onClick={saveEdit}>Save Changes</button>
           </>
         }>
-          <WorkerForm draft={editDraft} onChange={setEditDraft} services={allServices} zones={zones} />
+          <WorkerForm draft={editDraft} onChange={setEditDraft} services={allServices} zones={zones} employeeId={editing.employee_id} />
         </Modal>
       )}
 
@@ -230,8 +258,12 @@ export default function Workers() {
 
 const MENU_ITEM: CSSProperties = { display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }
 
-function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChange: (d: Draft) => void; services: string[]; zones: Zone[] }) {
-  const set = (k: 'name' | 'phone' | 'email' | 'city' | 'status' | 'designation', v: string) => onChange({ ...draft, [k]: v })
+// Every string-valued field on the draft, so `set` covers the Phase 1 additions without listing
+// each one by hand.
+type DraftStringKey = { [K in keyof Draft]: Draft[K] extends string ? K : never }[keyof Draft]
+
+function WorkerForm({ draft, onChange, services, zones, employeeId }: { draft: Draft; onChange: (d: Draft) => void; services: string[]; zones: Zone[]; employeeId?: string }) {
+  const set = (k: DraftStringKey, v: string) => onChange({ ...draft, [k]: v })
   const setP = (k: keyof Personal, v: string) => onChange({ ...draft, personal: { ...draft.personal, [k]: v } })
   const toggleService = (name: string) => {
     const has = draft.services.includes(name)
@@ -239,9 +271,41 @@ function WorkerForm({ draft, onChange, services, zones }: { draft: Draft; onChan
   }
   return (
     <div className="grid" style={{ gap: 12 }}>
-      <Field label="Name"><input value={draft.name} onChange={(e) => set('name', e.target.value)} placeholder="Full name" /></Field>
-      <Field label="Mobile Number"><input value={draft.phone} onChange={(e) => set('phone', e.target.value)} placeholder="Phone" /></Field>
+      {/* Employee ID is assigned by the server from the row id (WKR1001…) — showing an input the
+          admin can't meaningfully fill would just invite collisions. */}
+      {employeeId && <Field label="Employee ID"><input value={employeeId} disabled /></Field>}
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="First Name"><input value={draft.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="First name" /></Field>
+        <Field label="Last Name"><input value={draft.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Last name" /></Field>
+      </div>
+      {/* The mobile is the worker's login identity (OTP by number), so it isn't just contact info. */}
+      <Field label="Mobile Number"><input value={draft.phone} onChange={(e) => set('phone', e.target.value)} placeholder="10-digit mobile — this is their login" /></Field>
+      <Field label="Alternate Mobile"><input value={draft.alternate_mobile} onChange={(e) => set('alternate_mobile', e.target.value)} placeholder="Optional" /></Field>
       <Field label="Email"><input value={draft.email} onChange={(e) => set('email', e.target.value)} placeholder="Email" /></Field>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Worker Category">
+          <select value={draft.worker_category} onChange={(e) => set('worker_category', e.target.value)}>
+            <option value="">— Select —</option>
+            {WORKER_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label="Employment Type">
+          <select value={draft.employment_type} onChange={(e) => set('employment_type', e.target.value)}>
+            <option value="">— Select —</option>
+            {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <Field label="Joining Date"><input type="date" value={draft.joining_date} onChange={(e) => set('joining_date', e.target.value)} /></Field>
+        <Field label="Recruiter"><input value={draft.recruiter} onChange={(e) => set('recruiter', e.target.value)} placeholder="Who hired them" /></Field>
+      </div>
+      <Field label="Referral Source">
+        <select value={draft.referral_source} onChange={(e) => set('referral_source', e.target.value)}>
+          <option value="">— Select —</option>
+          {REFERRAL_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </Field>
       <Field label="City">
         <select value={draft.city} onChange={(e) => set('city', e.target.value)}>
           <option value="">— Select city —</option>

@@ -9,10 +9,15 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly,
+  makePool, migrate, nowIso, makeAdminAuth, inScope, internalOnly,
   internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
 import { quoteCancellation, scheduledStartMs } from './cancellation.js'
+
+assertJwtSecret('booking') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4006)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5436/booking'
@@ -223,11 +228,73 @@ app.get('/api/bookings', auth, async (req, res) => {
   res.json(rows.map((r) => publicBooking(rowTo(r))))
 })
 
+// Refund history — every booking that produced a refund, newest first. The wallet ledger has the
+// money side (kind='REFUND'); this is the booking side, which is what the customer recognises.
+// status: 'completed' (credited) | 'failed' (credit did not go through) | 'pending' (owed, not yet run).
+app.get('/api/refunds', auth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, ref, items, refund, refund_status, cancel_time, cancel_reason, created
+     FROM bookings WHERE user_id=$1 AND coalesce(refund,0) > 0
+     ORDER BY coalesce(cancel_time, created) DESC`, [req.user.id])
+  res.json(rows.map((r) => {
+    const items = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : (r.items || [])
+    const st = r.refund_status === 'refunded' ? 'completed' : r.refund_status === 'failed' ? 'failed' : 'pending'
+    return {
+      id: r.id, ref: r.ref, amount: r.refund, status: st,
+      title: items.map((i) => i.name).join(', ') || 'Booking refund',
+      serviceId: items[0]?.id || null,
+      reason: r.cancel_reason || null,
+      created: r.cancel_time || r.created,
+    }
+  }))
+})
+
+// Public: real customer reviews for a service — pulled from completed/reviewed bookings that
+// included this service. Read-only; defined before /api/bookings/:id so "service-reviews" isn't
+// treated as an id. Enriches with the reviewer's name from auth (best-effort).
+app.get('/api/bookings/service-reviews', async (req, res) => {
+  const sid = String(req.query.serviceId || '').trim()
+  if (!sid) return res.json([])
+  const { rows } = await pool.query(
+    `SELECT user_id, rating, review, pro_name, created FROM bookings
+     WHERE rating IS NOT NULL AND review IS NOT NULL AND review <> '' AND items LIKE $1
+     ORDER BY id DESC LIMIT 30`, ['%"id":"' + sid + '"%'])
+  const ids = [...new Set(rows.map((r) => r.user_id))]
+  const names = {}
+  await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name }))
+  res.json(rows.map((r) => ({ name: names[r.user_id] || 'Customer', rating: r.rating, text: r.review, date: r.created, pro: r.pro_name || '' })))
+})
+
+// Public: active workers offering a service (for the customer "Worker Assignment" screen).
+// Enriched with distance from the customer's lat/lng when provided. Read-only.
+app.get('/api/bookings/service-workers', async (req, res) => {
+  const service = String(req.query.service || '').trim()
+  if (!service) return res.json([])
+  const lat = parseFloat(String(req.query.lat)), lng = parseFloat(String(req.query.lng))
+  const workers = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(service)}`, [])
+  const km = (aLat, aLng, bLat, bLng) => {
+    const R = 6371, toRad = (d) => d * Math.PI / 180
+    const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng)
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2
+    return 2 * R * Math.asin(Math.sqrt(s))
+  }
+  res.json((workers || []).map((w) => ({
+    id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, online: w.online,
+    km: (w.lat != null && !isNaN(lat) && !isNaN(lng)) ? Math.round(km(lat, lng, w.lat, w.lng) * 10) / 10 : null,
+  })))
+})
+
 app.get('/api/bookings/:id', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   const serviceAvailable = await anyActiveWorker((b.items || []).map((i) => i.name))
-  const pro = b.worker_id ? { id: b.worker_id, name: b.pro_name, rating: b.pro_rating } : null
+  let pro = b.worker_id ? { id: b.worker_id, name: b.pro_name, rating: b.pro_rating } : null
+  // Enrich the assigned worker with real public profile fields (read-only) so the tracking
+  // screens show live data (jobs done, avatar, verified, phone, skills) instead of placeholders.
+  if (pro) {
+    const wp = await tryGet(WORKER_URL, `/internal/workers/${b.worker_id}/public-profile`, null)
+    if (wp) pro = { ...pro, name: wp.name || pro.name, rating: wp.rating ?? pro.rating, servicesDone: wp.jobs ?? 0, jobs: wp.jobs ?? 0, avatar: wp.avatar || null, verified: !!wp.verified, phone: wp.phone || null, city: wp.city || null, skills: Array.isArray(wp.services) ? wp.services : [] }
+  }
   let travel = {}
   const d = distanceKm(b.worker_lat, b.worker_lng, b.cust_lat, b.cust_lng)
   if (d != null) travel = { pos: { lat: b.worker_lat, lng: b.worker_lng }, dist: +d.toFixed(1), eta: Math.max(1, Math.round(d * 2.5)) }
@@ -318,7 +385,42 @@ app.post('/api/bookings', auth, async (req, res) => {
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
       body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
-  const booking = rowTo(ins.rows[0])
+  let booking = rowTo(ins.rows[0])
+
+  // Assign an expert immediately: the customer's chosen worker, else the nearest ONLINE worker
+  // offering the service (demo auto-assign). Additive — if none is found the booking stays
+  // 'confirmed' and normal dispatch can still pick it up. Never double-assigns (worker_id IS NULL).
+  async function assignWorker(id, name, rating) {
+    const upd = await pool.query(
+      "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned' WHERE id=$4 AND worker_id IS NULL RETURNING *",
+      [id, name, rating ?? 4.7, booking.id])
+    if (upd.rows[0]) { booking = rowTo(upd.rows[0]); internalPost(WORKER_URL, `/internal/workers/${id}/offered`, { bookingId: booking.id }).catch(() => {}) }
+  }
+
+  const chosenId = Number(body.workerId)
+  if (chosenId) {
+    const wp = await tryGet(WORKER_URL, `/internal/workers/${chosenId}/public-profile`, null)
+    if (wp && wp.name) await assignWorker(chosenId, wp.name, wp.rating)
+  } else {
+    // "Any available worker" → pick the nearest online expert for this service.
+    const svc = priced.items.map((i) => i.name).join(',')
+    const cand = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(svc)}`, [])
+    if (Array.isArray(cand) && cand.length) {
+      const cl = booking.cust_lat, cn = booking.cust_lng
+      const dist = (w) => (w.lat != null && cl != null && cn != null) ? distanceKm(cl, cn, w.lat, w.lng) : null
+      const online = cand.filter((w) => w.online)
+      const list = online.length ? online : cand
+      list.sort((a, b2) => {
+        const da = dist(a), db = dist(b2)
+        if (da != null && db != null) return da - db
+        if (da != null) return -1
+        if (db != null) return 1
+        return (b2.jobs || 0) - (a.jobs || 0) // no GPS → most-experienced first
+      })
+      const pick = list[0]
+      if (pick) await assignWorker(pick.id, pick.name, pick.rating)
+    }
+  }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
   // usage-write failure must never fail the booking.
@@ -403,7 +505,14 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
        payment_status=CASE WHEN $3 > 0 THEN 'refunded' ELSE payment_status END WHERE id=$7`,
     [req.body?.reason || 'Not specified', q.fee, refundable, nowIso(), q.workerComp, refundable > 0 ? 'refunded' : 'none', b.id])
   if (refundable > 0) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref }) } catch { /* refund best-effort */ }
+    // The credit is best-effort, so record what actually happened: claiming 'refunded' when the
+    // wallet call failed would tell the customer they were paid when they were not.
+    try {
+      await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref })
+    } catch (e) {
+      console.error('[booking] refund credit failed:', e?.message || e)
+      await pool.query("UPDATE bookings SET refund_status='failed' WHERE id=$1", [b.id])
+    }
   }
   await emitBookingUpdate(b.id)
   publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(b.id), quote: q })
@@ -450,7 +559,13 @@ app.get('/api/policy/cancellation', async (_q, res) => {
 
 /* ================= admin ================= */
 app.get('/api/admin/bookings', adminAuth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
+  // Data scope: bookings are zone-tagged (no city), so a scoped admin filters by their zone ids.
+  // Filter in SQL, before the LIMIT, so they get their full 500 rather than 500-then-filtered.
+  const scope = req.admin?.scope
+  const zids = scope && scope.type !== 'all' && Array.isArray(scope.zoneIds) ? scope.zoneIds : null
+  const { rows } = zids
+    ? await pool.query('SELECT * FROM bookings WHERE zone_id = ANY($1) ORDER BY id DESC LIMIT 500', [zids])
+    : await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
   const bookings = rows.map(rowTo)
   // Enrich with customer name from the auth service (best-effort).
   const ids = [...new Set(bookings.map((b) => b.user_id))]
@@ -459,15 +574,18 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
   // Admin Bookings list reads `pro` (worker name) and `service` (joined item names) directly.
   res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer', pro: b.pro_name || '', service: (b.items || []).map((i) => i.name).join(', ') })))
 })
+// Data scope: bookings are zone-tagged; a scoped admin can't touch one outside their zones. 404
+// (not 403) so they can't probe which booking ids exist outside their scope.
+const bookingInScope = (req, b) => inScope(req.admin?.scope, { zoneId: b.zone_id })
 app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
-  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   res.json({ ...b, customer: u?.user?.name || 'Customer' })
 })
 app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
-  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   if (req.body?.status) { await pool.query('UPDATE bookings SET status=$1 WHERE id=$2', [req.body.status, b.id]); await emitBookingUpdate(b.id) }
   res.json(await getBooking(b.id))
 })
@@ -677,7 +795,7 @@ async function sweepUnacceptedBookings() {
         ['No expert accepted the booking in time', nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
       if (!upd.rowCount) continue
       if (refund > 0) {
-        try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
+        try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
         catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
       }
       await emitBookingUpdate(r.id)

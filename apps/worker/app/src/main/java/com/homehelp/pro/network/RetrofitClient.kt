@@ -46,9 +46,6 @@ object RetrofitClient {
 
     /** Pull the live backend URL from the public config. Blocking — call off the main thread. */
     fun refreshBaseUrl() {
-        // Local testing: pin to FALLBACK_URL (the Cloudflare tunnel) and skip the remote config
-        // so the stale GitHub apiBase can't repoint the app at an unreachable host.
-        if (true) return
         if (refreshed) return
         try {
             val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()

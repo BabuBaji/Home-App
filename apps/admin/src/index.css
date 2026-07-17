@@ -178,6 +178,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 .searchbox { display: flex; align-items: center; gap: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; color: var(--muted); flex: 1; min-width: 180px; transition: .15s; }
 .searchbox:focus-within { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(91,81,232,.12); }
 .searchbox input { border: none; outline: none; background: none; flex: 1; font-size: 13.5px; color: var(--ink); }
+/* compact variant — matches .dd-trigger's metrics so a search sits flush beside a Dropdown */
+.searchbox.sm { padding: 8px 10px; border-radius: 9px; gap: 7px; flex: 0 1 250px; min-width: 150px; }
+.searchbox.sm input { font-size: 12.5px; }
+.searchbox.sm svg { width: 15px; height: 15px; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
 .select { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; font-size: 13.5px; color: var(--ink); outline: none; cursor: pointer; }
 .select:focus { border-color: var(--violet); }

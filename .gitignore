@@ -16,7 +16,7 @@ local.properties
 *.apk
 HomeHelp-debug.apk
 
-# Keystore / secrets
+# Keystore / secrets — must never be committed
 *.jks
 *.keystore
 

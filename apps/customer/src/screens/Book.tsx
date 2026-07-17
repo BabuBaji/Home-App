@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { Tag, Check, X } from 'lucide-react'
 import { Loading, useToast } from '../components/UI'
 import PaymentSheet from '../components/PaymentSheet'
@@ -14,6 +14,7 @@ export default function Book() {
   const nav = useNavigate()
   const toast = useToast()
   const { bookingType, setBookingType, pincode } = useStore()
+  const preDurationId = (useLocation().state as { durationId?: string } | null)?.durationId
   const instant = bookingType !== 'schedule'
 
   const [s, setS] = useState<ServiceDetail | null>(null)
@@ -28,7 +29,7 @@ export default function Book() {
   const [placing, setPlacing] = useState(false)
 
   useEffect(() => {
-    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations[0]) }).catch(() => toast('Could not load service'))
+    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations.find((x) => x.id === preDurationId) || d.durations[0]) }).catch(() => toast('Could not load service'))
     fetchHome().then((h) => setEta(h.instantEta)).catch(() => {})
   }, [id, pincode])
 

@@ -1,7 +1,9 @@
 import { io, type Socket } from 'socket.io-client'
 import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
-  Complaint, Ticket, Settings,
+  Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
+  EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -40,7 +42,18 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     ...opts,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
   })
-  if (res.status === 401) { clearToken(); clearAdmin() }
+  // A 401 means the session is gone (expired, or the signing secret rotated). Clearing the token
+  // isn't enough: the route guard reads `admin` from the store, so without telling it, the panel
+  // keeps rendering a logged-in shell while every request 401s — which looks like the app is broken
+  // rather than like you need to sign in again.
+  // A window event rather than an import: store.tsx already imports this module.
+  if (res.status === 401) {
+    const hadSession = !!token
+    clearToken(); clearAdmin()
+    // Only when we actually had a session — a 401 from the login form is a wrong password,
+    // not an expiry, and shouldn't be reported as one.
+    if (hadSession) window.dispatchEvent(new Event('hha:unauthorized'))
+  }
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Request failed (${res.status})`) }
   return res.json()
 }
@@ -88,7 +101,8 @@ export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/cust
 export const fetchCustomer = (id: number) => req<any>(`/customers/${id}`)
 export const createCustomer = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/customers', post('', body))
 export const updateCustomer = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/customers/${id}`, patch(body))
-export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<{ balance: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
+// May execute immediately or be queued for approval — returns { executed | pending, ... } (+ balance when executed).
+export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<ActionResult & { balance?: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
 export const setWalletStatus = (id: number, status: 'active' | 'frozen' | 'blocked' | 'inactive') => req<{ ok: boolean; status: string }>(`/customers/${id}/wallet/status`, post('', { status }))
 
 /* workers */
@@ -114,6 +128,104 @@ export const rejectAdvance = (id: number, adv: number, reason: string) => req<an
 export const generateWorkerPayslip = (id: number, month?: string) => req<any>(`/workers/${id}/wallet/payslip`, post('', { month }))
 export const approveWorkerBank = (id: number) => req<any>(`/workers/${id}/bank/approve`, post(''))
 export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/workers/${id}/bank/reject`, post('', { reason }))
+/* KYC documents. The URL is short-lived and signed — fetch it when the admin clicks View, never
+   store it. A rejection must carry a reason: the worker is told why so they can re-upload. */
+/* Invite: moves a created worker from 'pending' (can't log in) to 'onboarding' (can log in to
+   complete their profile, still not dispatchable) and texts them. `delivery` reports what actually
+   happened to the SMS — the status change succeeds even when sending doesn't. */
+export const inviteWorker = (id: number) => req<{ ok: boolean; delivery: string; worker: Worker }>(`/workers/${id}/invite`, post(''))
+/* Approving a skill ADDS the service to the worker's live set (what dispatch matches on);
+   rejecting removes it. `level` may differ from what the worker claimed — that's the review. */
+export const reviewWorkerSkill = (id: number, service: string, approve: boolean, level?: string, reason?: string) =>
+  req<WorkerDetail>(`/workers/${id}/skills/review`, post('', { service, approve, level, reason }))
+export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)
+export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, reason?: string) =>
+  req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))
+/* training & assessment (Phase 7). Modules ship as empty unpublished drafts — the content is the
+   company's own policy, so an admin writes it here. A module can't be published until it has a
+   body, and the quiz needs `quizSize` active questions in the bank before a worker can sit it. */
+export const fetchTraining = () => req<TrainingAdminState>('/training')
+export const createTrainingModule = (title: string, body = '') => req<{ ok: boolean; module: TrainingModule }>('/training/modules', post('', { title, body }))
+export const updateTrainingModule = (id: number, body: Partial<TrainingModule>) => req<{ ok: boolean; module: TrainingModule }>(`/training/modules/${id}`, patch(body))
+export const deleteTrainingModule = (id: number) => req<{ ok: boolean }>(`/training/modules/${id}`, { method: 'DELETE' })
+export const createTrainingQuestion = (body: Partial<TrainingQuestion>) => req<{ ok: boolean; question: TrainingQuestion }>('/training/questions', post('', body))
+export const updateTrainingQuestion = (id: number, body: Partial<TrainingQuestion>) => req<{ ok: boolean; question: TrainingQuestion }>(`/training/questions/${id}`, patch(body))
+export const deleteTrainingQuestion = (id: number) => req<{ ok: boolean }>(`/training/questions/${id}`, { method: 'DELETE' })
+/** One worker's progress — for the detail screen and Phase 12's checklist. */
+export const fetchWorkerTraining = (id: number) => req<WorkerTrainingState>(`/workers/${id}/training`)
+
+/* equipment (Phase 9) */
+export const fetchEquipmentTypes = () => req<{ ok: boolean; types: EquipmentType[] }>('/equipment')
+export const createEquipmentType = (name: string, required = false) => req<{ ok: boolean; type: EquipmentType }>('/equipment', post('', { name, required }))
+export const updateEquipmentType = (id: number, body: Partial<EquipmentType>) => req<{ ok: boolean; type: EquipmentType }>(`/equipment/${id}`, patch(body))
+export const deleteEquipmentType = (id: number) => req<{ ok: boolean }>(`/equipment/${id}`, { method: 'DELETE' })
+export const fetchWorkerEquipment = (id: number) => req<WorkerEquipmentState>(`/workers/${id}/equipment`)
+export const issueEquipment = (id: number, body: { typeId: number; serial?: string; notes?: string }) =>
+  req<{ ok: boolean; issued: IssuedEquipment[] }>(`/workers/${id}/equipment`, post('', body))
+export const returnEquipment = (id: number, eid: number) => req<{ ok: boolean; issued: IssuedEquipment[] }>(`/workers/${id}/equipment/${eid}/return`, post(''))
+
+/* per-worker pay (Phase 10). The wallet reads commissionPercent when it settles a job — changing
+   it changes what the worker is actually paid, so it isn't a display setting. */
+export const fetchWorkerPay = (id: number) => req<WorkerPay>(`/workers/${id}/pay`)
+// Routed through the approval matrix — executes now or is queued for a second admin's sign-off.
+export const updateWorkerPay = (id: number, body: Record<string, unknown>) =>
+  req<ActionResult>(`/workers/${id}/pay`, patch(body))
+
+/* job radius & coverage. Restricting a worker makes their zone a filter in dispatch rather than a
+   ranking preference — this is the setting that makes "only jobs in your zone" actually true. */
+export const fetchWorkerCoverage = (id: number) => req<WorkerCoverage>(`/workers/${id}/coverage`)
+export const updateWorkerCoverage = (id: number, body: { jobRadiusKm?: number | null; allowOutsideRadius?: boolean }) =>
+  req<WorkerCoverage>(`/workers/${id}/coverage`, patch(body))
+
+/* salary plans. Assigning one to a worker sets what the wallet actually pays them — a plan and a
+   hand-typed rate are mutually exclusive server-side, so setting either clears the other. */
+export const fetchSalaryPlans = () => req<SalaryPlansState>('/salary-plans')
+export const createSalaryPlan = (body: Partial<SalaryPlan> & { name: string }) =>
+  req<{ ok: boolean; plan: SalaryPlan }>('/salary-plans', post('', body))
+export const updateSalaryPlan = (id: number, body: Partial<SalaryPlan>) => req<{ ok: boolean; plan: SalaryPlan }>(`/salary-plans/${id}`, patch(body))
+export const deleteSalaryPlan = (id: number) => req<{ ok: boolean }>(`/salary-plans/${id}`, { method: 'DELETE' })
+
+/* incentive plans. Each component is a rule with a threshold; the payroll run and the wallet apply
+   them. A plan with everything zeroed is refused server-side. */
+export const fetchIncentivePlans = () => req<{ ok: boolean; plans: IncentivePlan[] }>('/incentive-plans')
+export const createIncentivePlan = (body: Partial<IncentivePlan> & { name: string }) => req<{ ok: boolean; plan: IncentivePlan }>('/incentive-plans', post('', body))
+export const updateIncentivePlan = (id: number, body: Partial<IncentivePlan>) => req<{ ok: boolean; plan: IncentivePlan }>(`/incentive-plans/${id}`, patch(body))
+export const deleteIncentivePlan = (id: number) => req<{ ok: boolean }>(`/incentive-plans/${id}`, { method: 'DELETE' })
+
+/* compensation rule engine. Author incentives as config; editing creates a new immutable version. */
+export const fetchRuleMeta = () => req<{ ok: boolean } & RuleMeta>('/incentive-rules/meta')
+export const fetchIncentiveRules = () => req<{ ok: boolean; rules: IncentiveRule[] }>('/incentive-rules')
+export const fetchIncentiveRule = (id: number) => req<{ ok: boolean; rule: IncentiveRule }>(`/incentive-rules/${id}`)
+export const createIncentiveRule = (body: Record<string, unknown>) => req<{ ok: boolean; rule: IncentiveRule }>('/incentive-rules', post('', body))
+export const versionIncentiveRule = (id: number, body: Record<string, unknown>) => req<{ ok: boolean; rule: IncentiveRule }>(`/incentive-rules/${id}/version`, post('', body))
+export const patchIncentiveRule = (id: number, body: Record<string, unknown>) => req<{ ok: boolean; rule: IncentiveRule }>(`/incentive-rules/${id}`, patch(body))
+
+/* payroll. A run is a draft until approved; only approval moves money. */
+export const fetchPayrollRuns = () => req<{ ok: boolean; workersOnMonthlySalary: number; runs: PayrollRun[] }>('/payroll')
+export const fetchPayrollRun = (id: number) => req<{ ok: boolean; run: PayrollRun }>(`/payroll/${id}`)
+export const buildPayroll = (month: string) => req<{ ok: boolean; run: PayrollRun }>('/payroll', post('', { month }))
+// Routed through the approval matrix — approves now, or queues for a second admin's sign-off.
+export const approvePayroll = (id: number) => req<ActionResult & { run?: PayrollRun }>(`/payroll/${id}/approve`, post(''))
+
+/* availability (Phase 11). The worker states a preference; this is where it becomes an assignment.
+   Approving adopts what they asked for; modifying assigns something else and requires a reason —
+   the worker is notified either way. */
+export const fetchWorkerAvailability = (id: number) => req<WorkerAvailabilityState>(`/workers/${id}/availability`)
+export const reviewWorkerAvailability = (id: number, body: { approve: boolean; shiftDefId?: number | null; zoneId?: number | null; reason?: string }) =>
+  req<{ ok: boolean; availability: WorkerAvailabilityState['availability']; assigned: WorkerAvailabilityState['assigned'] }>(`/workers/${id}/availability/review`, post('', body))
+
+/* background verification (Phase 8). The five document-backed points are DERIVED from the document
+   review — verify a document once, on the Documents tab, and this follows. Only the previous
+   employer and criminal check are recorded here; a flag must carry findings. */
+export const fetchBackground = (id: number) => req<BackgroundState>(`/workers/${id}/background`)
+export const recordBackgroundCheck = (id: number, key: string, body: { status: BgStatus; reference?: string; notes?: string }) =>
+  req<BackgroundState>(`/workers/${id}/background/${key}`, post('', body))
+
+/* final approval (Phase 12). goLiveWorker without a reason fails while checks are outstanding and
+   returns needsOverride; pass a reason to waive them — it's recorded against the admin. */
+export const fetchChecklist = (id: number) => req<GoLiveChecklist>(`/workers/${id}/checklist`)
+export const goLiveWorker = (id: number, reason?: string) => req<GoLiveChecklist>(`/workers/${id}/go-live`, post('', { reason }))
+
 export async function downloadWalletReport() {
   const res = await fetch(API_BASE + '/api/admin/wallet/report.csv', { headers: token ? { Authorization: 'Bearer ' + token } : {} })
   if (!res.ok) throw new Error('Could not export report')
@@ -231,7 +343,18 @@ export const campaignUsage = (id: number) => req<{ total: number; customers: num
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')
 export const fetchRefunds = () => req<any[]>('/refunds')
-export const issueRefund = (id: number, amount?: number) => req<{ ok: boolean; amount: number }>(`/refunds/${id}`, post('', { amount }))
+// Routed through the approval matrix (id is the booking id). May execute now or queue for sign-off.
+export const issueRefund = (bookingId: number) => req<ActionResult>('/actions/refund', post('', { bookingId }))
+
+/* operations command center — live network operating picture */
+export const fetchCommandCenter = () => req<CommandCenter>('/command-center')
+
+/* approvals (maker-checker) */
+export const fetchApprovals = (status: 'pending' | 'all' = 'pending') => req<{ ok: boolean; requests: ApprovalRequest[]; meId: number }>(`/approvals?status=${status}`)
+export const approveRequest = (id: number) => req<{ ok: boolean; request?: ApprovalRequest }>(`/approvals/${id}/approve`, post(''))
+export const rejectRequest = (id: number, reason: string) => req<{ ok: boolean }>(`/approvals/${id}/reject`, post('', { reason }))
+export const fetchApprovalRules = () => req<{ ok: boolean; actions: ApprovalRuleRow[]; reviewerPerms: string[] }>('/approval-rules')
+export const updateApprovalRule = (action: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/approval-rules/${action}`, patch(body))
 
 /* complaints */
 export const fetchComplaints = (status = 'all', priority = 'all') => req<Complaint[]>(`/complaints?status=${status}&priority=${priority}`)
@@ -254,6 +377,13 @@ export const fetchAdmins = () => req<Admin[]>('/admins')
 export const createAdminUser = (body: Record<string, unknown>) => req<Admin>('/admins', post('', body))
 export const updateAdminUser = (id: number, body: Record<string, unknown>) => req<Admin>(`/admins/${id}`, patch(body))
 export const deleteAdminUser = (id: number) => req<{ ok: boolean }>(`/admins/${id}`, { method: 'DELETE' })
+
+/* RBAC — roles are named permission bundles; the catalog drives the matrix editor. */
+export const fetchPermissionCatalog = () => req<{ ok: boolean; catalog: PermGroup[] }>('/permissions')
+export const fetchRoles = () => req<{ ok: boolean; roles: Role[] }>('/roles')
+export const createRole = (body: Record<string, unknown>) => req<{ ok: boolean; role: Role }>('/roles', post('', body))
+export const updateRole = (key: string, body: Record<string, unknown>) => req<{ ok: boolean; role: Role }>(`/roles/${key}`, patch(body))
+export const deleteRole = (key: string) => req<{ ok: boolean }>(`/roles/${key}`, { method: 'DELETE' })
 
 export const runShaktiSettlement = (month?: string) =>
   req<{ ok: boolean; month: string; qualified: number; error?: string }>('/shakti/settle', post('/shakti/settle', { month }))

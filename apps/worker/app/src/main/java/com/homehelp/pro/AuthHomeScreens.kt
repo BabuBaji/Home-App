@@ -55,6 +55,9 @@ import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.foundation.layout.offset
@@ -213,8 +216,32 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                     if (vm.isLoggedIn) nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
                 }
             } else {
+                // Surface a failed/rate-limited request too — otherwise "Get OTP" looks like it worked.
+                if (vm.loginError != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        shape = RoundedCornerShape(Radius.field),
+                        color = RedLight,
+                    ) {
+                        Text(
+                            vm.loginError!!,
+                            color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
-                PrimaryButton("Get OTP", enabled = phone.length == 10) { otpSent = true }
+                // Must round-trip to the server: it issues and stores the code we later verify against.
+                PrimaryButton("Get OTP", enabled = phone.length == 10 && !vm.requestingOtp, loading = vm.requestingOtp) {
+                    vm.requestLoginOtp(phone)
+                }
+            }
+            // The field appears only once the backend confirms a code was actually issued.
+            LaunchedEffect(vm.otpRequested) {
+                if (vm.otpRequested) {
+                    otpSent = true
+                    vm.devOtp?.let { otp = it }   // demo mode (WORKER_DEV_OTP) pre-fills it
+                }
             }
 
             Spacer(Modifier.height(28.dp))
@@ -783,6 +810,9 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerSection("Account")
             DrawerRow(Icons.Filled.Person, "My Profile", Purple) { go(Routes.PROFILE) }
             DrawerRow(Icons.Filled.Description, "Documents", Color(0xFF0EA5E9)) { go(Routes.P_DOCUMENTS) }
+            DrawerRow(Icons.Filled.WorkspacePremium, "Skills & Services", Color(0xFF7C3AED)) { go(Routes.P_SKILLS) }
+            DrawerRow(Icons.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
+            DrawerRow(Icons.Filled.Inventory2, "My Equipment", Color(0xFF0891B2)) { go(Routes.P_EQUIPMENT) }
             DrawerRow(Icons.Filled.AccountBalance, "Bank Details", Color(0xFF14B8A6)) { go(Routes.P_BANK) }
             DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
             DrawerRow(Icons.Filled.Notifications, "Notifications", PurpleMid) { go(Routes.P_NOTIFICATIONS) }

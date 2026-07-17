@@ -11,6 +11,10 @@ import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, tryGet, publishEvent, getSettingInt,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: it carries the jsonwebtoken dep.
+import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('dispatch') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4007)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5437/dispatch'
@@ -200,12 +204,38 @@ async function matchingBookings(w) {
     const r = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?zoneId=${zid}`, null)
     const cap = r?.capacity || null; capCache.set(zid, cap); return cap
   }
+  /* Coverage. When a worker is RESTRICTED (allowOutsideRadius === false) their zone stops being a
+   * preference and becomes a filter, and their job radius is measured from their assigned store —
+   * which is what makes the admin screen's "only jobs within the assigned zone" true rather than a
+   * hopeful label. Left open (the default), the old soft-preference behaviour stands and nobody in
+   * a quiet zone sits idle next to work they could do.
+   */
+  const wz = w.zone_id ?? null
+  const restricted = w.allowOutsideRadius === false && wz != null
+  const radiusKm = Number(w.jobRadiusKm) || 0
+  // The store's location, fetched at most once per call — the radius is measured from it, not from
+  // the worker's live GPS, because that is what the admin drew a circle around.
+  let store = null
+  if (restricted && radiusKm > 0 && w.storeId) {
+    const r = await tryGet(CATALOG_URL, `/api/internal/stores/${w.storeId}`, null)
+    if (r && r.lat != null && r.lng != null) store = { lat: Number(r.lat), lng: Number(r.lng) }
+    else console.error(`[dispatch] worker ${w.id} has a ${radiusKm}km radius but store ${w.storeId} has no location — radius not applied`)
+  }
+
   for (const b of pool_) {
     if (skip.has(b.id)) continue
     const names = (b.items || []).map((i) => String(i.name || '').toLowerCase().trim())
     if (!names.some((n) => svc.has(n))) continue
+    // Restricted: own zone only.
+    if (restricted && b.zone_id !== wz) continue
+    // Restricted: within their radius of their store. Only when we actually know where the store
+    // is — a radius we cannot measure must not silently drop every job.
+    if (restricted && store && radiusKm > 0) {
+      if (distanceKm(store.lat, store.lng, b.cust_lat, b.cust_lng) > radiusKm) continue
+    }
     const dist = w.last ? distanceKm(w.last.lat, w.last.lng, b.cust_lat, b.cust_lng) : null
     // Max Travel Distance: don't offer a job to a worker farther than the job's zone allows.
+    // Independent of the per-worker radius — whichever is tighter wins.
     if (dist != null) {
       const maxKm = Number((await capFor(b.zone_id))?.maxTravelKm) || 0
       if (maxKm > 0 && dist > maxKm) continue
@@ -213,8 +243,8 @@ async function matchingBookings(w) {
     cands.push({ b, dist })
   }
   // Zone-first: a worker's own-zone jobs rank ahead of out-of-zone ones; then nearest by GPS.
-  // (Soft preference — out-of-zone jobs are still offered if no in-zone work, to avoid starvation.)
-  const wz = w.zone_id ?? null
+  // (For an unrestricted worker this stays a soft preference — out-of-zone jobs are still offered
+  // if there is no in-zone work, to avoid starvation.)
   cands.sort((a, c) => {
     const az = wz != null && a.b.zone_id === wz ? 0 : 1
     const cz = wz != null && c.b.zone_id === wz ? 0 : 1
@@ -234,10 +264,11 @@ const app = express()
 app.use(express.json({ limit: '6mb' }))
 app.get('/health', (_q, res) => res.json({ service: 'dispatch', ok: true }))
 
-// Worker auth: decode worker-<id>, load the worker's service-set/location from the worker svc.
+// Worker auth: verify the SIGNED token, then load the worker's service-set/location from the
+// worker svc. This used to parse the id straight out of `worker-<id>`, so `Bearer worker-6`
+// exposed another worker's job offers — the same hole the worker/auth/admin services had.
 async function auth(req, res, next) {
-  const token = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = token.startsWith('worker-') ? Number(token.slice(7)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'worker')
   if (!Number.isFinite(id)) return res.status(401).json({ ok: false, error: 'Not authenticated' })
   const w = await tryGet(WORKER_URL, `/internal/workers/${id}/service-set`, null)
   if (!w || w.status !== 'active') return res.status(401).json({ ok: false, error: 'Not authenticated' })
@@ -245,12 +276,24 @@ async function auth(req, res, next) {
   next()
 }
 
+/* Phase 11: the worker's own stated weekly hours cap.
+ * Enforced here rather than in the app, because the app isn't the only thing that can call this.
+ * It's the ONE availability preference that gates: jobs are pull-based, so refusing a worker who
+ * is actively asking for work because they'd marked the day off would be absurd — but a cap they
+ * set on themselves is a boundary worth holding when they're tired enough to ignore it.
+ */
+const cappedMsg = (wl) => `You've reached the ${wl.maxWeeklyHours}h weekly limit you set (${wl.hoursThisWeek}h worked). Raise it in Availability if you want more work.`
+
 app.get('/api/worker/jobs/available', auth, async (req, res) => {
+  const wl = req.worker.workLimit
+  if (wl?.capped) return res.json({ available: false, count: 0, capped: true, reason: cappedMsg(wl) })
   const n = (await matchingBookings(req.worker)).length
   res.json({ available: n > 0, count: n })
 })
 
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
+  const wl = req.worker.workLimit
+  if (wl?.capped) return res.json({ job: null, jobStatus: 'NONE', capped: true, error: cappedMsg(wl) })
   const match = (await matchingBookings(req.worker))[0]
   if (!match) return res.json({ job: null, jobStatus: 'NONE' })
   await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: match.id })

@@ -62,8 +62,17 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -79,6 +88,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.homehelp.pro.network.SkillClaim
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared scaffolding & small building blocks for the profile detail screens.
@@ -86,7 +96,7 @@ import androidx.navigation.NavHostController
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
+internal fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(title, onBack = { nav.popBackStack() })
         Column(
@@ -236,7 +246,7 @@ private fun BankPickerField(selected: String, onSelect: (BankOption) -> Unit) {
 
 /** Tinted rounded icon chip used as the leading element of list/toggle/nav rows. */
 @Composable
-private fun IconChip(icon: ImageVector, tint: Color, bg: Color, size: Int = 38) {
+internal fun IconChip(icon: ImageVector, tint: Color, bg: Color, size: Int = 38) {
     Box(
         Modifier.size(size.dp).clip(RoundedCornerShape(Radius.field)).background(bg),
         contentAlignment = Alignment.Center,
@@ -297,14 +307,67 @@ private fun NavRow(
     }
 }
 
+/** A labelled pick-one row. Used where the value is a small fixed set (gender, blood group…) — a
+ *  free-text field there just produces data nobody can group by. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChoiceRow(label: String, options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column {
+        SectionLabel(label)
+        Spacer(Modifier.height(Space.xs))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            options.forEach { opt ->
+                val on = selected.equals(opt, ignoreCase = true)
+                Text(
+                    opt, fontSize = 13.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (on) Purple else TextGray,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Radius.field))
+                        .background(if (on) PurpleLight else FieldFill)
+                        .clickable { onSelect(if (on) "" else opt) }
+                        .padding(horizontal = Space.m, vertical = Space.s),
+                )
+            }
+        }
+    }
+}
+
+private val GENDERS = listOf("Male", "Female", "Other")
+private val BLOOD_GROUPS = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-")
+private val MARITAL = listOf("Single", "Married", "Other")
+private val QUALIFICATIONS = listOf("Below 10th", "10th", "12th", "Diploma", "Graduate", "Post Graduate")
+
 @Composable
 fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
+    var sameAsCurrent by remember { mutableStateOf(false) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) vm.uploadPhoto(ctx, uri)
+    }
+    LaunchedEffect(vm.profileError) { vm.profileError?.let { toast(ctx, it); vm.clearProfileError() } }
+
     DetailScaffold("Personal Information", nav) {
-        // Identity hero — avatar, name, rating and earned tier.
+        // Identity hero — photo, name, rating and earned tier.
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    if (vm.avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = vm.avatarUrl, contentDescription = "Profile photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(60.dp).clip(CircleShape).clickable { photoPicker.launch("image/*") },
+                        )
+                    } else {
+                        Box(Modifier.clickable { photoPicker.launch("image/*") }) {
+                            Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
+                        }
+                    }
+                    Icon(
+                        Icons.Filled.PhotoCamera, contentDescription = null, tint = Color.White,
+                        modifier = Modifier.size(20.dp).clip(CircleShape).background(Purple).padding(3.dp),
+                    )
+                }
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(vm.workerName, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
@@ -320,19 +383,185 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
                     TierBadge(vm.tier)
                 }
             }
+            Spacer(Modifier.height(Space.s))
+            Text("Tap your photo to change it. Customers see this on their booking.", fontSize = 11.5.sp, color = TextGray)
         }
-        // Editable contact details.
+
+        // Phase 2 — registration details.
         Card {
             SectionLabel("Contact Details")
             Spacer(Modifier.height(Space.m))
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Field("Full Name", vm.workerName) { vm.workerName = it }
-                Field("Mobile Number", vm.workerPhone) { vm.workerPhone = it }
+                // The mobile is the login identity — changing it here would lock them out of their
+                // own account, so it's shown but not editable.
+                Field("Mobile Number", vm.workerPhone) { }
+                Text("Your mobile is your login — contact the admin to change it.", fontSize = 11.sp, color = TextGray)
                 Field("Email", vm.workerEmail) { vm.workerEmail = it }
                 Field("City", vm.workerCity) { vm.workerCity = it }
+                Field("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
+                ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
+                ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
+                ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
             }
         }
-        PrimaryButton("Save Changes") { vm.saveProfile(); toast(ctx, "Profile updated") }
+
+        // Phase 3 — personal profile.
+        Card {
+            SectionLabel("Family & Emergency")
+            Spacer(Modifier.height(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Field("Father's Name", vm.fatherName) { vm.fatherName = it }
+                Field("Mother's Name", vm.motherName) { vm.motherName = it }
+                Field("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
+                Field("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
+            }
+        }
+
+        Card {
+            SectionLabel("Address")
+            Spacer(Modifier.height(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Field("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = sameAsCurrent, onCheckedChange = {
+                        sameAsCurrent = it
+                        if (it) vm.permanentAddress = vm.currentAddress
+                    })
+                    Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
+                }
+                if (!sameAsCurrent) Field("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it }
+            }
+        }
+
+        Card {
+            SectionLabel("Experience")
+            Spacer(Modifier.height(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
+                Field("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
+                Field("Previous Company", vm.previousCompany) { vm.previousCompany = it }
+                Field("Languages Known", vm.languages) { vm.languages = it }
+                Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextGray)
+            }
+        }
+
+        PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
+            // Only claim it saved once the server says so — the old code toasted immediately and
+            // fired the request into the background.
+            vm.saveProfile { toast(ctx, "Profile updated") }
+        }
+    }
+}
+
+/**
+ * Phase 6 — the worker picks the services they can do, at what level, with how much experience.
+ *
+ * A claim is NOT a capability: only an admin approval puts a service into the set dispatch matches
+ * on. The screen says so plainly, because "I ticked Deep Cleaning and got no deep-cleaning jobs"
+ * is otherwise an invisible rule.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SkillsScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    var certFor by remember { mutableStateOf<String?>(null) }
+    val certPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val svc = certFor
+        if (uri != null && svc != null) vm.uploadSkillCertificate(ctx, svc, uri)
+        certFor = null
+    }
+    LaunchedEffect(Unit) { vm.loadSkills() }
+    LaunchedEffect(vm.skillsError) { vm.skillsError?.let { toast(ctx, it); vm.clearSkillsError() } }
+
+    // Local edits; only sent on Save.
+    val claims = remember { mutableStateMapOf<String, SkillClaim>() }
+    LaunchedEffect(vm.skills.size) {
+        claims.clear()
+        vm.skills.forEach { (svc, s) -> claims[svc] = SkillClaim(s.level, s.years) }
+    }
+
+    DetailScaffold("Skills & Services", nav) {
+        Card(padding = Dp16.S) {
+            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                IconChip(Icons.Filled.Info, Purple, PurpleLight)
+                Spacer(Modifier.width(Space.m))
+                Text(
+                    "Pick the services you can do and your level. An admin reviews each one — you'll only be sent jobs for skills they approve.",
+                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                )
+            }
+        }
+
+        vm.serviceCatalogue.forEach { svc ->
+            val claim = claims[svc]
+            val saved = vm.skills[svc]
+            val picked = claim != null
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = picked, onCheckedChange = { on ->
+                        if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
+                        else claims.remove(svc)
+                    })
+                    Text(svc, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    // The status of the CLAIM — what the admin decided, not what the worker typed.
+                    when (saved?.status) {
+                        "Approved" -> StatusPill("Approved", GreenLight, GreenSuccess)
+                        "Rejected" -> StatusPill("Rejected", RedLight, RedCancel)
+                        "Pending" -> StatusPill("In review", GoldLight, Amber)
+                        else -> {}
+                    }
+                }
+                if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
+                    Spacer(Modifier.height(Space.xs))
+                    Text("Not approved: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
+                }
+                if (picked) {
+                    Spacer(Modifier.height(Space.s))
+                    HairlineDivider()
+                    Spacer(Modifier.height(Space.s))
+                    Text("Your level", fontSize = 12.sp, color = TextGray)
+                    Spacer(Modifier.height(Space.xs))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        vm.skillLevels.forEach { lvl ->
+                            val on = claim?.level == lvl
+                            Text(
+                                lvl, fontSize = 12.5.sp,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (on) Purple else TextGray,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(Radius.field))
+                                    .background(if (on) PurpleLight else FieldFill)
+                                    .clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }
+                                    .padding(horizontal = Space.m, vertical = Space.s),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Space.m))
+                    Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
+                        claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
+                    }
+                    Spacer(Modifier.height(Space.s))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
+                            .clickable { certFor = svc; certPicker.launch("*/*") }.padding(Space.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.CheckCircle, null, tint = if (saved?.certificate != null) GreenSuccess else TextMuted, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(Space.s))
+                        Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 13.sp, color = TextDark)
+                    }
+                    if (saved?.status == "Approved") {
+                        Spacer(Modifier.height(Space.xs))
+                        Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                    }
+                }
+            }
+        }
+
+        PrimaryButton("Save Skills", enabled = !vm.savingSkills, loading = vm.savingSkills) {
+            vm.saveSkills(claims.toMap()) { toast(ctx, "Skills sent for review") }
+        }
     }
 }
 
@@ -358,30 +587,50 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         val docName = pendingDoc
         if (uri != null && docName != null) {
-            val fileName = pickedFileName(ctx, uri)
-            vm.uploadDocument(docName, fileName)
-            toast(ctx, "$docName uploaded: $fileName")
+            // Hand the Uri over so the BYTES get uploaded. Previously only the display name was
+            // taken and the Uri discarded, so nothing was ever actually sent — and it toasted
+            // "uploaded" before the request had even been made.
+            vm.uploadDocument(ctx, docName, pickedFileName(ctx, uri), uri)
         } else if (docName != null) {
             toast(ctx, "Upload cancelled")
         }
         pendingDoc = null
     }
+    // Report the real outcome (wrong file type, too large, storage unreachable).
+    LaunchedEffect(vm.uploadError) { vm.uploadError?.let { toast(ctx, it); vm.clearUploadError() } }
+    // The server owns the document set — fetch it rather than trusting the seeded placeholder.
+    LaunchedEffect(Unit) { vm.loadDocumentTypes() }
 
     DetailScaffold("Documents", nav) {
+        val required = vm.documents.filter { vm.documentRequired[it.name] != false }
+        val done = required.count { it.status == "Verified" }
         Card(padding = Dp16.S) {
             Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
                 IconChip(Icons.Filled.Info, Purple, PurpleLight)
                 Spacer(Modifier.width(Space.m))
-                Text(
-                    "Upload a clear photo or PDF scan for each document. Files are reviewed within 24–48 hours.",
-                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
-                )
+                Column {
+                    Text(
+                        // Only claim a review window we can actually keep: an admin approves these
+                        // by hand, so promise the mechanism, not a deadline nobody owns.
+                        "Upload a clear photo or PDF scan of each document. An admin checks each one and you'll be told if any needs re-doing.",
+                        fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                    )
+                    if (required.isNotEmpty()) {
+                        Spacer(Modifier.height(Space.s))
+                        Text(
+                            "$done of ${required.size} required documents verified",
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (done == required.size) GreenSuccess else TextDark,
+                        )
+                    }
+                }
             }
         }
         // One tap-through row per document — status colour tells verified / pending / missing
         // at a glance, and tapping the row opens the picker (upload / replace) as before.
         vm.documents.forEach { doc ->
             val hasFile = doc.fileName.isNotBlank()
+            val isRequired = vm.documentRequired[doc.name] != false
             val icon: ImageVector
             val tint: Color
             val bg: Color
@@ -391,32 +640,41 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
                     icon = Icons.Filled.CheckCircle; tint = GreenSuccess; bg = GreenLight
                     subtitle = doc.fileName.ifBlank { "Verified" }
                 }
-                doc.status == "Under Review" -> {
-                    icon = Icons.Filled.Schedule; tint = Purple; bg = PurpleLight
-                    subtitle = "Under review • ${doc.fileName.ifBlank { "submitted" }}"
+                // An admin sent it back. Without this branch a rejection rendered as amber
+                // "pending" and the worker had no idea anything was wrong.
+                doc.status == "Rejected" -> {
+                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
+                    subtitle = doc.rejectReason.ifBlank { "Rejected — please upload a new copy" }
                 }
                 hasFile -> {
                     icon = Icons.Filled.Schedule; tint = Amber; bg = GoldLight
-                    subtitle = doc.fileName
+                    subtitle = "Waiting for review • ${doc.fileName}"
                 }
                 else -> {
-                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
-                    subtitle = "Not uploaded yet — tap to add"
+                    icon = if (isRequired) Icons.Filled.Close else Icons.Filled.Add
+                    tint = if (isRequired) RedCancel else TextGray
+                    bg = if (isRequired) RedLight else FieldFill
+                    subtitle = vm.documentHints[doc.name]?.takeIf { it.isNotBlank() } ?: "Tap to add"
                 }
             }
-            StatusListRow(
-                icon = icon,
-                iconTint = tint,
-                iconBg = bg,
-                title = doc.name,
-                subtitle = subtitle,
-                subtitleColor = tint,
-                value = if (doc.status == "Verified") "Replace" else "Upload",
-                valueColor = tint,
-            ) {
-                pendingDoc = doc.name
-                // Accept images and PDFs; system picker honours the mime hint.
-                picker.launch("*/*")
+            Column {
+                StatusListRow(
+                    icon = icon,
+                    iconTint = tint,
+                    iconBg = bg,
+                    title = doc.name + if (isRequired) "" else "  (optional)",
+                    subtitle = subtitle,
+                    subtitleColor = tint,
+                    value = if (hasFile || doc.status == "Verified") "Replace" else "Upload",
+                    valueColor = if (doc.status == "Verified") GreenSuccess else Purple,
+                ) {
+                    pendingDoc = doc.name
+                    // Accept images and PDFs; system picker honours the mime hint.
+                    picker.launch("*/*")
+                }
+                if (vm.uploadingDoc == doc.name) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = Space.m), color = Purple)
+                }
             }
         }
     }
@@ -436,6 +694,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     var fAccount by remember { mutableStateOf(vm.bankAccount) }
     var fIfsc by remember { mutableStateOf(vm.bankIfsc) }
     var fUpi by remember { mutableStateOf(vm.bankUpi) }
+    var fAccType by remember { mutableStateOf(vm.bankAccountType.ifBlank { "savings" }) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) { chequeName = pickedFileName(ctx, uri); toast(ctx, "Attached: $chequeName") }
     }
@@ -495,7 +754,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             PrimaryButton("Verify & Submit") {
                 if (otp.length < 4) toast(ctx, "Enter the 4-digit OTP")
                 else {
-                    vm.saveBank(fName, fAccount, fIfsc, fUpi, chequeName)
+                    vm.saveBank(fName, fAccount, fIfsc, fUpi, chequeName, fAccType)
                     toast(ctx, "Bank submitted — verifying…")
                     otpStep = false; otp = ""; reenter = ""; editing = false
                 }
@@ -509,6 +768,7 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                         "Edit", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
                         modifier = Modifier.clickable {
                             fName = vm.bankName; fAccount = vm.bankAccount; fIfsc = vm.bankIfsc; fUpi = vm.bankUpi
+                            fAccType = vm.bankAccountType.ifBlank { "savings" }
                             reenter = ""; editing = true
                         },
                     )
@@ -519,7 +779,11 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                     if (bopt != null) { BankBadge(bopt.code, bopt.color); Spacer(Modifier.width(Space.m)) }
                     Column(Modifier.weight(1f)) {
                         Text(vm.bankName.ifBlank { "Bank account" }, fontWeight = FontWeight.SemiBold, color = TextDark)
-                        Text("A/C ••••${vm.bankAccount.takeLast(4)}   •   ${vm.bankIfsc}", fontSize = 12.sp, color = TextGray)
+                        Text(
+                            "A/C ••••${vm.bankAccount.takeLast(4)}   •   ${vm.bankIfsc}" +
+                                (if (vm.bankAccountType.isNotBlank()) "   •   ${vm.bankAccountType.replaceFirstChar(Char::uppercase)}" else ""),
+                            fontSize = 12.sp, color = TextGray,
+                        )
                     }
                 }
                 if (vm.bankUpi.isNotBlank()) {
@@ -536,6 +800,22 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                     // Account number: digits only — non-numeric input is stripped as it's typed.
                     Field("Account Number", fAccount, KeyboardType.Number) { fAccount = it.filter(Char::isDigit).take(18) }
                     Field("Confirm Account Number", reenter, KeyboardType.Number) { reenter = it.filter(Char::isDigit).take(18) }
+                    // Savings / Current — passed to the payout gateway, which validates it against the account.
+                    SectionLabel("Account Type")
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        listOf("savings" to "Savings", "current" to "Current").forEach { (v, label) ->
+                            val on = fAccType == v
+                            Text(
+                                label, fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (on) Purple else TextGray,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(Radius.field))
+                                    .background(if (on) PurpleLight else FieldFill)
+                                    .clickable { fAccType = v }
+                                    .padding(horizontal = Space.m, vertical = Space.s),
+                            )
+                        }
+                    }
                     Field("IFSC Code", fIfsc) { fIfsc = it.uppercase(); vm.lookupIfsc(it) }
                     // Confirm the IFSC is real + which bank/branch it belongs to (cross-checks the selected bank).
                     when {
@@ -592,7 +872,29 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
 fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    LaunchedEffect(Unit) { vm.loadAvailability() }
+    LaunchedEffect(vm.availabilityError) { vm.availabilityError?.let { toast(ctx, it); vm.clearAvailabilityError() } }
     DetailScaffold("Availability", nav) {
+        // What the admin decided. Without this the worker assumes what they picked is what they got.
+        Card(padding = Dp16.S) {
+            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                val (tint, bg) = when (vm.availabilityStatus) {
+                    "Approved" -> GreenSuccess to GreenLight
+                    "Modified" -> Amber to GoldLight
+                    else -> Purple to PurpleLight
+                }
+                IconChip(Icons.Filled.Info, tint, bg)
+                Spacer(Modifier.width(Space.m))
+                Text(
+                    when (vm.availabilityStatus) {
+                        "Approved" -> "Your admin approved these preferences."
+                        "Modified" -> "Your admin changed this: ${vm.availabilityReason}"
+                        else -> "These are your preferences — an admin confirms them. Only the hours limit applies straight away."
+                    },
+                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                )
+            }
+        }
         Card {
             SectionLabel("Working Days")
             Text("Tap the days you want to work.", fontSize = 12.sp, color = TextGray)
@@ -637,11 +939,28 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             HairlineDivider()
             LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
         }
+
+        // The one preference that binds: past this, no more jobs are offered until the worker
+        // raises it themselves. Everything else on this screen guides the admin's assignment.
+        Card {
+            SectionLabel("Maximum Working Hours")
+            Text(
+                "The most you want to work in a week. Once you hit it you won't be offered more jobs until you raise it. Leave blank for no limit.",
+                fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.m))
+            Field("Hours per week", vm.maxWeeklyHours, KeyboardType.Number) {
+                vm.maxWeeklyHours = it.filter(Char::isDigit).take(2)
+            }
+            Spacer(Modifier.height(Space.s))
+            LabeledRow("Worked so far this week", "${vm.hoursThisWeek} h")
+        }
+
         PrimaryButton("Save Availability") {
-            vm.saveAvailability()
-            val active = vm.availableDays.count { it.value }
-            val shift = if (vm.shiftStart.isNotBlank()) " • ${vm.shiftStart}–${vm.shiftEnd}" else ""
-            toast(ctx, "Saved • $active days/week$shift")
+            vm.saveAvailability {
+                val active = vm.availableDays.count { it.value }
+                toast(ctx, "Sent for approval • $active days/week")
+            }
         }
     }
 }
@@ -866,7 +1185,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             SectionLabel("Your Shift Plan")
             Text(
-                "Pick one shift. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
+                "Ask for a shift — an admin confirms it. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
                 fontSize = 12.sp, color = TextGray,
             )
             Spacer(Modifier.height(Space.m))
@@ -875,10 +1194,28 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     vm.shifts.forEach { s ->
+                        // Only the ASSIGNED shift shows as selected. A request in flight is marked
+                        // as such — the earnings guarantee follows the assignment, and showing a
+                        // pending request as chosen would have workers counting on one they lack.
                         ShiftOption(s, vm.selectedShiftId == s.id) {
-                            vm.selectShift(s.id) { toast(ctx, "Shift set: ${s.name}") }
+                            vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} — awaiting approval") }
                         }
                     }
+                }
+                val requested = vm.requestedShiftId
+                if (requested != null && requested != vm.selectedShiftId) {
+                    Spacer(Modifier.height(Space.s))
+                    val name = vm.shifts.firstOrNull { it.id == requested }?.name ?: "that shift"
+                    Text(
+                        "You've asked for $name — waiting for an admin to confirm it. " +
+                            (if (vm.selectedShiftId == null) "You're not on a shift yet." else "Until then your current shift stands."),
+                        fontSize = 12.sp, color = Amber, lineHeight = 17.sp,
+                    )
+                }
+                if (vm.shiftStatus == "Modified" && vm.selectedShiftId != null) {
+                    Spacer(Modifier.height(Space.s))
+                    val name = vm.shifts.firstOrNull { it.id == vm.selectedShiftId }?.name ?: "a different shift"
+                    Text("An admin put you on $name.", fontSize = 12.sp, color = TextGray)
                 }
             }
         }

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers } from '../api'
 import type { AdminBooking } from '../types'
 import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 
 const ONGOING = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 const UPCOMING = ['confirmed', 'worker_assigned']
@@ -39,9 +40,10 @@ export default function Bookings() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
+  const [params] = useSearchParams()
   const [status, setStatus] = useState('all')
   const [service, setService] = useState('all')
-  const [worker, setWorker] = useState('all')
+  const [worker, setWorker] = useState(params.get('worker') || 'all')
   const [city, setCity] = useState('all')
 
   const [modal, setModal] = useState<null | 'view' | 'more'>(null)
@@ -276,16 +278,16 @@ export default function Bookings() {
               {workerList.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
           </Field>
-          <button className="btn" onClick={assignWorker} disabled={saving || !can(admin?.role, 'manager')} style={{ marginBottom: 12 }}>Assign</button>
+          <button className="btn" onClick={assignWorker} disabled={saving || !has(admin, 'bookings.assign')} style={{ marginBottom: 12 }}>Assign</button>
 
           <Field label="Change Status">
             <select className="select" value={changeStatus} onChange={(e) => setChangeStatus(e.target.value)}>
               {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
           </Field>
-          <button className="btn" onClick={applyStatus} disabled={saving || !can(admin?.role, 'manager')} style={{ marginBottom: 12 }}>Update Status</button>
+          <button className="btn" onClick={applyStatus} disabled={saving || !has(admin, 'bookings.update_status')} style={{ marginBottom: 12 }}>Update Status</button>
 
-          <button className="btn line" onClick={cancelBooking} disabled={saving || !can(admin?.role, 'manager')} style={{ color: 'var(--red)' }}>Cancel Booking</button>
+          <button className="btn line" onClick={cancelBooking} disabled={saving || !has(admin, 'bookings.cancel')} style={{ color: 'var(--red)' }}>Cancel Booking</button>
         </Modal>
       )}
     </div>

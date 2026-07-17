@@ -1,115 +1,152 @@
+// 66 · Wallet Dashboard — balances, quick actions, overview, invite.
+// Same route/tab as before; Add Money now lives on its own screen (68) but still runs through the
+// existing PaymentSheet + walletTopup. The referral-code apply card is kept.
 import { useEffect, useState } from 'react'
-import { Header, BottomNav, Loading, useToast } from '../components/UI'
-import PaymentSheet from '../components/PaymentSheet'
-import { fetchWallet, walletTopup, applyReferral } from '../api'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Receipt, Gift, Settings, Wallet as WalletIcon, HelpCircle, Users, RotateCcw, ChevronRight, Eye, ArrowLeft } from 'lucide-react'
+import { BottomNav, Loading, useToast } from '../components/UI'
+import { fetchWallet, fetchCashback, fetchReferralEarnings, fetchRefunds, applyReferral } from '../api'
 import { useStore } from '../store'
-import type { Transaction } from '../types'
-
-const PRESETS = [100, 250, 500, 1000]
+import { money, money2 } from '../wallet'
 
 export default function Wallet() {
+  const nav = useNavigate()
   const toast = useToast()
   const { user, setUser } = useStore()
-  const [balance, setBalance] = useState<number | null>(null)
-  const [promo, setPromo] = useState(0)
-  const [points, setPoints] = useState(0)
-  const [status, setStatus] = useState('active')
-  const [txns, setTxns] = useState<Transaction[]>([])
-  const [picker, setPicker] = useState(false)
-  const [amount, setAmount] = useState(500)
-  const [custom, setCustom] = useState('')
-  const [payOpen, setPayOpen] = useState(false)
+  const [w, setW] = useState<{ cash: number; promo: number; total: number; available: number; locked: number; status: string; hideBalance: boolean } | null>(null)
+  // "Hide Wallet Balance" (Settings) — masked until tapped, so the toggle actually does something.
+  const [reveal, setReveal] = useState(false)
+  const [cashback, setCashback] = useState<number | null>(null)
+  const [referral, setReferral] = useState<number | null>(null)
+  const [pendingRefunds, setPendingRefunds] = useState<number | null>(null)
   const [refCode, setRefCode] = useState('')
   const [refBusy, setRefBusy] = useState(false)
   const [refDone, setRefDone] = useState(false)
+
+  function load() {
+    fetchWallet().then((r) => setW(r)).catch(() => {})
+    fetchCashback().then((c) => setCashback(c.usable)).catch(() => setCashback(0))
+    fetchReferralEarnings().then((r) => setReferral(r.earned)).catch(() => setReferral(0))
+    // "Pending refunds" is money owed but not yet in the wallet — anything not completed.
+    fetchRefunds().then((rs) => setPendingRefunds(rs.filter((r) => r.status !== 'completed').reduce((s, r) => s + r.amount, 0))).catch(() => setPendingRefunds(0))
+  }
+  useEffect(load, [])
 
   async function applyRef() {
     const code = refCode.trim().toUpperCase()
     if (!code) return
     setRefBusy(true)
-    try { const r = await applyReferral(code); setRefDone(true); if (user) setUser({ ...user, referredBy: -1 }); toast(`Code applied! ${r.referrer} earns ₹${r.reward} when you finish your first booking.`) }
-    catch (e) { toast((e as Error).message) } finally { setRefBusy(false) }
-  }
-
-  function load() { fetchWallet().then((w) => { setBalance(w.cash); setPromo(w.promo); setPoints(w.points); setStatus(w.status); setTxns(w.transactions) }).catch(() => {}) }
-  useEffect(load, [])
-
-  function openPicker() { setAmount(500); setCustom(''); setPicker(true) }
-  function continueToPay() {
-    if (!amount || amount < 1) return toast('Choose an amount')
-    setPicker(false); setPayOpen(true)
-  }
-  async function onPaid(_method: string, paymentId: string) {
-    setPayOpen(false)
     try {
-      const { balance: bal } = await walletTopup(paymentId, amount)
-      if (typeof bal === 'number') { setBalance(bal); if (user) setUser({ ...user, wallet: bal }) }
-      toast(`₹${amount} added to your wallet`)
-    } catch (e) { toast((e as Error).message) }
-    load()
+      const r = await applyReferral(code)
+      setRefDone(true)
+      if (user) setUser({ ...user, referredBy: -1 })
+      toast(`Code applied! ${r.referrer} earns ${money(r.reward)} when you finish your first booking.`)
+    } catch (e) { toast((e as Error).message) } finally { setRefBusy(false) }
   }
 
-  if (balance === null) return <div className="screen has-nav"><Header title="Wallet" back={false} /><Loading /><BottomNav /></div>
+  const head = (
+    <header className="appbar ord-appbar">
+      {/* Wallet is a bottom-nav tab but is also reached from the Home wallet icon, so offer a back
+          button; fall back to Home when there's no in-app history to pop. */}
+      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label="Back"><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>Wallet</h1></div>
+      <button className="iconbtn" onClick={() => nav('/support')} aria-label="Help"><HelpCircle size={18} /></button>
+    </header>
+  )
+  if (!w) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
+
+  const hidden = w.hideBalance && !reveal
+  const show = (n: number) => (hidden ? '••••••' : money2(n))
+
+  const ACTIONS = [
+    { k: 'Add Money', icon: <Plus size={17} />, to: '/wallet/add' },
+    { k: 'Transactions', icon: <Receipt size={17} />, to: '/wallet/transactions' },
+    { k: 'Gift Cards', icon: <Gift size={17} />, to: '/wallet/gift-cards' },
+    { k: 'Settings', icon: <Settings size={17} />, to: '/wallet/settings' },
+  ]
+  const OVERVIEW = [
+    { k: 'Cashback', icon: <Gift size={15} />, cls: 'cb', v: cashback, to: '/wallet/cashback' },
+    { k: 'Referral Earnings', icon: <Users size={15} />, cls: 'rf', v: referral, to: '/wallet/referrals' },
+    { k: 'Pending Refunds', icon: <RotateCcw size={15} />, cls: 'rd', v: pendingRefunds, to: '/wallet/refunds' },
+  ]
 
   return (
     <div className="screen has-nav">
-      <Header title="Wallet" back={false} right={<span>?</span>} />
+      {head}
       <div className="content">
-        <div className="wallet-card">
-          <div className="wc-top"><div><div className="lbl">Total Usable Balance</div><div className="bal">₹{(balance + promo).toLocaleString('en-IN')}</div><div className="sub">Cash + Promo</div></div>
-            {status === 'active'
-              ? <button className="add-money" onClick={openPicker}>+ Add Money</button>
-              : <span className="add-money" style={{ opacity: .8 }}>{status === 'frozen' ? 'Frozen' : 'Blocked'}</span>}</div>
-          <div className="wc-splits">
-            <div><div className="wc-s-l">💵 Cash</div><div className="wc-s-v">₹{balance.toLocaleString('en-IN')}</div></div>
-            <div><div className="wc-s-l">🎁 Promo</div><div className="wc-s-v">₹{promo.toLocaleString('en-IN')}</div></div>
-            <div><div className="wc-s-l">⭐ Points</div><div className="wc-s-v">{points.toLocaleString('en-IN')}</div></div>
+        <div className="w-hero">
+          <div className="w-hero-top">
+            <div>
+              <div className="w-hero-k">Total Wallet Balance</div>
+              <button className="w-hero-v as-text" onClick={() => hidden && setReveal((r) => !r)}>
+                {show(w.total)}
+                {hidden && <Eye size={15} className="w-hero-eye" />}
+              </button>
+            </div>
+            <WalletIcon size={22} className="w-hero-ico" />
+          </div>
+          <div className="w-hero-split">
+            {/* Cash spends anywhere; Promo is locked to bookings — that is the split. */}
+            <div><div className="w-hero-sk">Available Balance</div><div className="w-hero-sv">{show(w.available)}</div></div>
+            <div><div className="w-hero-sk">Locked Balance</div><div className="w-hero-sv">{show(w.locked)}</div></div>
           </div>
         </div>
-        {status !== 'active' && <div className="card offer" style={{ background: '#fff4de' }}><span className="oi">⚠️</span><div><div className="ot">Wallet {status}</div><div className="od">You can’t add or use your wallet right now. Contact support.</div></div></div>}
-        {promo > 0 && <div className="card offer"><span className="oi">🏷</span><div><div className="ot">You have ₹{promo} promo credit</div><div className="od">Used first on your next booking</div></div></div>}
+
+        {w.status !== 'active' && (
+          <div className="card offer" style={{ background: '#fff4de' }}>
+            <span className="oi">⚠️</span>
+            <div><div className="ot">Wallet {w.status}</div><div className="od">You can't add or use your wallet right now. Contact support.</div></div>
+          </div>
+        )}
+
+        <div className="w-actions">
+          {ACTIONS.map((a) => (
+            <button key={a.k} className="w-act" onClick={() => nav(a.to)}>
+              <span className="w-act-ico">{a.icon}</span>
+              <span className="w-act-k">{a.k}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="ws-card">
+          <div className="w-ov-h">Quick Overview</div>
+          {OVERVIEW.map((o) => (
+            <button key={o.k} className="w-ov" onClick={() => nav(o.to)}>
+              <span className={`w-ov-ico ${o.cls}`}>{o.icon}</span>
+              <span className="w-ov-k">{o.k}</span>
+              <span className="w-ov-v">{o.v === null ? '—' : money(o.v)}</span>
+              <ChevronRight size={15} className="ws-chev" />
+            </button>
+          ))}
+        </div>
+
+        <div className="w-invite">
+          <div className="w-invite-main">
+            <div className="w-invite-t">Invite &amp; Earn</div>
+            <div className="w-invite-d">Invite friends and earn on their first booking.</div>
+            <button className="w-invite-btn" onClick={() => nav('/refer')}>Refer Now</button>
+          </div>
+          <div className="w-invite-art" aria-hidden="true">🎁</div>
+        </div>
 
         {!user?.referredBy && !refDone && (
           <div className="card pad ref-apply">
             <div className="ra-t">🎁 Have a referral code?</div>
-            <div className="ra-d">Apply a friend’s code — they earn ₹150 when you complete your first booking.</div>
+            <div className="ra-d">Apply a friend's code — they earn when you complete your first booking.</div>
             <div className="ra-row">
-              <div className="field ra-input"><input value={refCode} onChange={(e) => setRefCode(e.target.value.toUpperCase())} placeholder="e.g. HH1A2B3C" maxLength={12} /></div>
+              <div className="field ra-input">
+                <input value={refCode} onChange={(e) => setRefCode(e.target.value.toUpperCase())} placeholder="e.g. HH1A2B3C" maxLength={12} />
+              </div>
               <button className="btn ra-btn" onClick={applyRef} disabled={refBusy || !refCode.trim()}>{refBusy ? '…' : 'Apply'}</button>
             </div>
           </div>
         )}
 
-        <h3 className="section-title">Transactions</h3>
-        <div className="card pad tight">
-          {txns.map((t) => (
-            <div key={t.id} className="txn"><span className={`ti ${t.type === 'credit' ? 'cr' : 'db'}`}>{t.type === 'credit' ? '+' : '💳'}</span>
-              <div><div className="tt">{t.title}</div><div className="td">{new Date(t.created).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}{t.ref ? ` · ${t.ref}` : ''}</div></div>
-              <div className="amt"><div className={`a ${t.type}`}>{t.type === 'credit' ? '+' : '-'}₹{t.amount}</div><div className="b">Bal: ₹{t.balance.toLocaleString('en-IN')}</div></div></div>
-          ))}
-          {txns.length === 0 && <p className="muted center-text" style={{ padding: 16 }}>No transactions yet.</p>}
+        <div className="banner-soft">
+          <span className="bi">🛡</span>
+          <div className="grow"><div className="bt">100% Secure Transactions</div><div className="bd">Wallet is credited only after your payment is verified.</div></div>
         </div>
-        <div className="banner-soft"><span className="bi">🛡</span><div className="grow"><div className="bt">100% Secure Transactions</div><div className="bd">Wallet is credited only after your payment is verified.</div></div></div>
       </div>
-
-      {picker && (
-        <div className="sheet-backdrop" onClick={() => setPicker(false)}>
-          <div className="amt-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="amt-grab" />
-            <div className="amt-title">Add money to wallet</div>
-            <div className="amt-grid">
-              {PRESETS.map((v) => (
-                <button key={v} className={`amt-chip ${amount === v && !custom ? 'sel' : ''}`} onClick={() => { setAmount(v); setCustom('') }}>₹{v.toLocaleString('en-IN')}</button>
-              ))}
-            </div>
-            <div className="field amt-custom"><span className="cc">₹</span><input inputMode="numeric" placeholder="Enter custom amount" value={custom}
-              onChange={(e) => { const n = e.target.value.replace(/[^0-9]/g, '').slice(0, 6); setCustom(n); setAmount(Number(n) || 0) }} /></div>
-            <button className="btn full" style={{ marginTop: 6 }} disabled={!amount || amount < 1} onClick={continueToPay}>Continue{amount ? ` · ₹${amount.toLocaleString('en-IN')}` : ''}</button>
-          </div>
-        </div>
-      )}
-
-      <PaymentSheet open={payOpen} amount={amount} onClose={() => setPayOpen(false)} onPaid={onPaid} />
       <BottomNav />
     </div>
   )

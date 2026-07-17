@@ -95,7 +95,7 @@ export default function Refunds() {
   const doIssue = (r: Refund) => {
     setIssuing(true)
     issueRefund(r.id)
-      .then(() => { toast('Refund issued', 'ok'); setActive(null); setIssuing(false); load() })
+      .then((res) => { toast(res.pending ? 'Sent for approval — a second admin must sign off' : 'Refund issued', 'ok'); setActive(null); setIssuing(false); load() })
       .catch((e: Error) => { toast(e.message, 'err'); setIssuing(false) })
   }
 

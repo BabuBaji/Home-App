@@ -153,10 +153,11 @@ export interface Booking {
   pos?: { lat: number; lng: number }
   serviceAvailable?: boolean
   pro?: {
-    id: number; name: string; phone?: string; avatar?: string | null
-    rating: number; servicesDone: number; reviewsCount: number
-    services: string[]
-    reviews: { rating: number; review: string; customer: string; created: string }[]
+    id: number; name: string; phone?: string | null; avatar?: string | null
+    rating: number; servicesDone?: number; jobs?: number; reviewsCount?: number
+    verified?: boolean; city?: string | null
+    services?: string[]; skills?: string[]
+    reviews?: { rating: number; review: string; customer: string; created: string }[]
   }
 }
 
@@ -168,6 +169,11 @@ export interface Transaction {
   balance: number
   ref?: string
   created: string
+  // Typed reason (ADD_MONEY, BOOKING_PAYMENT, CASHBACK, REFUND, REFERRAL_BONUS, GIFT_CARD…).
+  // Null on rows written before the ledger was typed.
+  kind?: string | null
+  // Which purse the row touched: 'cash' (spendable) or 'promo' (locked to bookings).
+  balance_type?: 'cash' | 'promo' | 'points'
 }
 
-export interface Ticket { id: number; category: string; message: string; status: string; ref: string; created: string }
+export interface Ticket { id: number; category: string; subcategory?: string | null; subject?: string | null; message: string; status: string; ref: string; created: string; escalated?: boolean; escalate_reason?: string | null }
