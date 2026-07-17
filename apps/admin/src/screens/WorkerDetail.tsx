@@ -865,6 +865,8 @@ export default function WorkerDetail() {
     ].filter((s) => s.count > 0)
     const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
     const row3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 8, alignItems: 'start' }
+    // Row 2 gives the wide history table more room and keeps the compact Skill Summary narrow.
+    const row3b: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.8fr) minmax(0,0.7fr)', gap: 8, alignItems: 'start' }
     const hth: CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
     const htd: CSSProperties = { padding: '8px 10px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
     const workerSkillsPanel = (
@@ -969,7 +971,7 @@ export default function WorkerDetail() {
     return (
       <div className="tab-dense grid" style={{ gap: 8 }}>
         <div style={row3}>{workerSkillsPanel}{servicesPanel}{certPanel}</div>
-        <div style={row3}>{toolsPanel}{historyPanel}{summaryPanel}</div>
+        <div style={row3b}>{toolsPanel}{historyPanel}{summaryPanel}</div>
       </div>
     )
   })()
