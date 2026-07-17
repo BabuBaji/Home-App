@@ -8,8 +8,9 @@
 //   npm run seed:skills -- 4            # seeds worker 4
 //   npm run seed:skills -- --all        # seeds every ACTIVE worker
 //
-// DESTRUCTIVE FOR THE TARGET WORKER: it rewrites that worker's profile.skillLevels, and rebuilds its
-// worker_certifications / worker_skill_history / worker_equipment rows — a DEMO/QA tool. Levels,
+// DESTRUCTIVE FOR THE TARGET WORKER: it rewrites that worker's profile.skillLevels + profile.skills
+// (claims), and rebuilds its worker_certifications / worker_skill_history / worker_equipment rows —
+// a DEMO/QA tool. Levels,
 // certs and history are demo values; services themselves and their real completed-job counts are NOT
 // touched (those stay live from the worker's actual bookings).
 import pg from 'pg'
@@ -52,7 +53,13 @@ async function seedWorker(id) {
   // A couple of extra claimed (non-service) skills, so Worker Skills is broader than Services Offered.
   for (const s of EXTRA_SKILLS.slice(0, between(2, 3))) if (!skillLevels[s]) skillLevels[s] = pick(['Basic', 'Intermediate'])
 
-  await worker.query(`UPDATE workers SET profile = COALESCE(profile,'{}'::jsonb) || jsonb_build_object('skillLevels', $2::jsonb) WHERE id=$1`, [id, JSON.stringify(skillLevels)])
+  // Claimed skills (profile.skills) — every skill is recorded as an approved claim, so the admin
+  // skill-review flow can act on it (and appending to the level-change history works end to end).
+  const claims = {}
+  for (const [s, level] of Object.entries(skillLevels)) {
+    claims[s] = { level, years: String(between(1, 6)), status: 'Approved', reason: '', reviewedBy: pick(REVIEWERS), reviewedAt: new Date(now - between(30, 300) * DAY).toISOString() }
+  }
+  await worker.query(`UPDATE workers SET profile = COALESCE(profile,'{}'::jsonb) || jsonb_build_object('skillLevels', $2::jsonb, 'skills', $3::jsonb) WHERE id=$1`, [id, JSON.stringify(skillLevels), JSON.stringify(claims)])
 
   // Certifications — 2 to 4, issued over the last ~2 years.
   await worker.query('DELETE FROM worker_certifications WHERE worker_id=$1', [id])
