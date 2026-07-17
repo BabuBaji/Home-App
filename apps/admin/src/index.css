@@ -130,10 +130,9 @@ input, select, textarea { font-family: inherit; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; transition: box-shadow .18s, transform .18s; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .card-head h3 { font-size: 13.5px; font-weight: 800; }
-/* Dense tab: minimal card inset so the six panels sit close together. Borders are COLLAPSED — the
-   cards drop their own border/shadow/radius, and 1px grid gaps over a line-coloured container
-   become the single shared hairlines (see the grid wrappers in WorkerDetail). */
-.tab-dense .card { padding: 6px 10px; box-shadow: none; border: none; border-radius: 0; }
+/* Dense tab: tighter card inset so the panels sit closer together, but they stay distinct rounded
+   cards (border + radius kept) rather than a hard boxed grid. */
+.tab-dense .card { padding: 10px 12px; }
 .tab-dense .card-head { margin-bottom: 6px; }
 .grid { display: grid; gap: 14px; }
 /* let grid/flex children shrink below their content width so tables & charts scroll

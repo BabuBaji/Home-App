@@ -864,11 +864,9 @@ export default function WorkerDetail() {
       { level: 'Intermediate', count: ss.summary.intermediate }, { level: 'Basic', count: ss.summary.basic },
     ].filter((s) => s.count > 0)
     const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
-    // Collapsed borders: 1px gaps over a line-coloured background are the shared hairlines; cells
-    // stretch so no background shows through below a shorter panel.
-    const row3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 1, background: 'var(--line)', alignItems: 'stretch' }
+    const row3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 10, alignItems: 'start' }
     // Row 2 gives the wide history table more room and keeps the compact Skill Summary narrow.
-    const row3b: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.8fr) minmax(0,0.7fr)', gap: 1, background: 'var(--line)', alignItems: 'stretch' }
+    const row3b: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.8fr) minmax(0,0.7fr)', gap: 10, alignItems: 'start' }
     const hth: CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
     const htd: CSSProperties = { padding: '8px 10px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
     const workerSkillsPanel = (
@@ -971,7 +969,7 @@ export default function WorkerDetail() {
       </Panel>
     )
     return (
-      <div className="tab-dense" style={{ display: 'grid', gap: 1, background: 'var(--line)', border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }}>
+      <div className="tab-dense grid" style={{ gap: 10 }}>
         <div style={row3}>{workerSkillsPanel}{servicesPanel}{certPanel}</div>
         <div style={row3b}>{toolsPanel}{historyPanel}{summaryPanel}</div>
       </div>
