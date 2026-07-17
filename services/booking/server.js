@@ -306,7 +306,9 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
 })
 
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
-app.get('/api/slots', auth, async (req, res) => {
+// Public: slot availability is not user-specific (uses only date/pincode/services), and gating it
+// behind a token meant a stale/invalid session silently showed "no slots" instead of the grid.
+app.get('/api/slots', async (req, res) => {
   const date = String(req.query.date || ''), pincode = String(req.query.pincode || ''), services = String(req.query.services || '')
   const srv = pincode ? await tryGet(CATALOG_URL, `/api/serviceable?pincode=${encodeURIComponent(pincode)}`, { serviceable: true }) : { serviceable: true }
   const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent(services)}`, { count: 0 })
