@@ -864,9 +864,9 @@ export default function WorkerDetail() {
       { level: 'Intermediate', count: ss.summary.intermediate }, { level: 'Basic', count: ss.summary.basic },
     ].filter((s) => s.count > 0)
     const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
-    const col3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 16 }
+    const col3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 12, alignItems: 'start' }
     return (
-      <div className="grid" style={{ gap: 16 }}>
+      <div className="grid" style={{ gap: 12 }}>
         <div style={col3}>
           <Panel title={`Worker Skills (${ss.summary.totalSkills})`} action={<span className="muted" style={{ fontSize: 11 }}>verified by admin</span>}>
             <div className="row" style={{ gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
