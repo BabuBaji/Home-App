@@ -947,6 +947,19 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
   transition: opacity .5s ease, transform .5s ease, filter .5s ease; will-change: opacity, transform; }
 .splashx--hide { opacity: 0; transform: scale(1.06); filter: blur(6px); pointer-events: none; }
 
+/* two-phase launch splash: white brand screen -> full-bleed poster */
+.splashx--launch { background: #ffffff; }
+.spx-brand { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; background: #ffffff; transition: opacity .45s ease; }
+.spx-brand--out { opacity: 0; }
+.spx-brand .spx-mark { width: 112px; height: 112px; margin: 0; border-radius: 30px; background: #f3effe;
+  display: grid; place-items: center; box-shadow: 0 12px 30px rgba(109,78,230,.18); animation: spxUp .5s ease both; }
+.spx-brand-name { font-size: 30px; font-weight: 700; color: #1c2033; letter-spacing: -0.3px; animation: spxUp .5s ease .1s both; }
+.spx-brand-sub { font-size: 12.5px; font-weight: 600; letter-spacing: 2px; color: #6d4ee6; animation: spxUp .5s ease .18s both; }
+.spx-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; }
+.spx-poster--in { animation: spxPosterIn .5s ease both; }
+@keyframes spxPosterIn { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: scale(1); } }
+
 /* photo hero */
 .spx-hero { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .spx-hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%;
