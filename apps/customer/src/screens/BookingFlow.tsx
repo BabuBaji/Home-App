@@ -63,8 +63,11 @@ export default function BookingFlow() {
 
   const dateStr = fmtDate(date)
   useEffect(() => {
-    if (!pincode || !s) return
-    fetchSlots(dateStr, pincode, s.name).then((r) => setSlotData(r.slots)).catch(() => setSlotData([]))
+    // Wait only for the service to load — the pincode is optional. Without one the backend returns
+    // the default slot grid, so we must NOT gate on pincode or slotData stays null forever ("Loading
+    // slots…"). Any failure resolves to an empty list rather than an infinite spinner.
+    if (!s) return
+    fetchSlots(dateStr, pincode || '', s.name).then((r) => setSlotData(r.slots)).catch(() => setSlotData([]))
   }, [dateStr, pincode, s])
 
   // Real workers offering this service (from the worker service), nearest first.
