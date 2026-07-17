@@ -1155,6 +1155,16 @@ const DOC_TYPES = [
   { name: 'Medical Certificate', required: true, hint: 'Fitness certificate from a doctor' },
   { name: 'Driving License', required: false, hint: 'Only if you drive to jobs' },
   { name: 'Passport', required: false, hint: 'Optional' },
+  // Optional supporting documents an admin may hold on file. Additive — they never gate go-live
+  // (required:false), so onboarding is unchanged, but they ARE accepted by the upload endpoint and
+  // offered in the admin upload dialog, keeping the displayed set and the uploadable set in sync.
+  { name: 'Aadhaar Card', required: false, hint: 'Combined Aadhaar (front & back)' },
+  { name: 'Bank Passbook', required: false, hint: 'Passbook or cancelled cheque' },
+  { name: 'Profile Photo', required: false, hint: 'Passport-size photograph' },
+  { name: 'ESIC Card', required: false, hint: 'Employee State Insurance card' },
+  { name: 'PF Account Proof', required: false, hint: 'Provident Fund account proof' },
+  { name: 'Vaccination Certificate', required: false, hint: 'COVID / other vaccination proof' },
+  { name: 'Resume / Bio Data', required: false, hint: 'Résumé or bio-data' },
 ]
 const DOC_NAMES = new Set(DOC_TYPES.map((d) => d.name))
 
