@@ -235,7 +235,10 @@ export default function AddWorker() {
         {/* Stepper */}
         <Card>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {STEPS.map(([n, label, sub], i) => (
+            {STEPS.map(([n, rawLabel, rawSub], i) => {
+              const label = isEdit && n === 4 ? 'Review & Save' : rawLabel
+              const sub = isEdit && n === 4 ? 'Review the changes' : rawSub
+              return (
               <div key={n} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                 <button onClick={() => setStep(n)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 0, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
                   <span style={{
@@ -250,13 +253,14 @@ export default function AddWorker() {
                 </button>
                 {i < STEPS.length - 1 && <div style={{ flex: 1, height: 1, background: 'var(--line,#e5e7eb)', margin: '0 8px' }} />}
               </div>
-            ))}
+              )
+            })}
           </div>
         </Card>
 
         {step === 1 && (
           <Card>
-            <SectionHead icon={<UserPlus size={16} />} title="Basic Information" sub="Enter basic details to create the worker profile." />
+            <SectionHead icon={<UserPlus size={16} />} title="Basic Information" sub={isEdit ? "Update the worker's basic details." : 'Enter basic details to create the worker profile.'} />
             <div style={grid4}>
               <Field label="First Name *"><input value={d.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="Enter first name" /></Field>
               <Field label="Last Name"><input value={d.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Enter last name" /></Field>
@@ -855,7 +859,7 @@ export default function AddWorker() {
         ) : (
           <>
             <Card>
-              <strong style={{ fontSize: 14 }}>Onboarding Summary</strong>
+              <strong style={{ fontSize: 14 }}>{isEdit ? 'Worker Summary' : 'Onboarding Summary'}</strong>
               <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
                 <Summary label="Worker Name" value={[d.first_name, d.last_name].filter(Boolean).join(' ')} />
                 <Summary label="Mobile Number" value={d.phone} />
@@ -869,28 +873,34 @@ export default function AddWorker() {
                 <Summary label="Salary Plan" value={planObj ? `${planObj.name} (${TYPE_LABEL[planObj.salaryType]})` : undefined} />
                 {planObj?.paysMonthly && <Summary label="Monthly Pay" value={rupee(planObj.totalFixedPay)} />}
                 <Summary label="Incentive Plan" value={incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name} />
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="muted" style={{ fontSize: 12.5 }}>Status</span>
-                  <Badge tone="amber" dot={false}>Pending Onboarding</Badge>
-                </div>
+                {!isEdit && (
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 12.5 }}>Status</span>
+                    <Badge tone="amber" dot={false}>Pending Onboarding</Badge>
+                  </div>
+                )}
               </div>
             </Card>
 
-            <Card>
-              <strong style={{ fontSize: 14 }}>What happens next?</strong>
-              <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
-                <Next n={1} title="Invitation is sent" body="They get an SMS with a link to the app." />
-                <Next n={2} title="Worker completes registration" body="They fill in their personal details, documents, bank and skills themselves." />
-                <Next n={3} title="You verify and approve" body="Documents, background, skills, training — all on their profile." />
-                <Next n={4} title="Worker goes live" body="Once the checklist is clear, they can be assigned jobs." />
-              </div>
-            </Card>
+            {!isEdit && (
+              <Card>
+                <strong style={{ fontSize: 14 }}>What happens next?</strong>
+                <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
+                  <Next n={1} title="Invitation is sent" body="They get an SMS with a link to the app." />
+                  <Next n={2} title="Worker completes registration" body="They fill in their personal details, documents, bank and skills themselves." />
+                  <Next n={3} title="You verify and approve" body="Documents, background, skills, training — all on their profile." />
+                  <Next n={4} title="Worker goes live" body="Once the checklist is clear, they can be assigned jobs." />
+                </div>
+              </Card>
+            )}
 
             <Card>
               <strong style={{ fontSize: 13 }}>Worth knowing</strong>
               <ul style={{ fontSize: 12, color: 'var(--muted,#667085)', paddingLeft: 16, margin: '6px 0 0' }}>
                 <li>The mobile number is their login — make sure it's right. It can't be shared with another worker.</li>
-                <li>They complete their own personal details, so you don't need them here.</li>
+                {isEdit
+                  ? <li>Salary &amp; plan changes are made separately and go through approval — they're read-only here.</li>
+                  : <li>They complete their own personal details, so you don't need them here.</li>}
               </ul>
             </Card>
           </>
