@@ -4,9 +4,9 @@ import {
   ChevronLeft, ChevronRight, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
-  FileText, Pencil, AlertTriangle,
+  FileText, AlertTriangle,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, saveWorkerDocDetails, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -215,9 +215,7 @@ export default function WorkerDetail() {
   const [payView, setPayView] = useState<WalletWithdrawal | null>(null)
   const [docBusy, setDocBusy] = useState<number | null>(null)
   const [skillBusy, setSkillBusy] = useState<string | null>(null)
-  // Documents tab: the edit dialog (capture number/dates) and the three list filters.
-  const [docEdit, setDocEdit] = useState<import('../types').WorkerDoc | null>(null)
-  const [docForm, setDocForm] = useState({ documentNumber: '', issueDate: '', expiryDate: '' })
+  // Documents tab: the three list filters.
   const [docType, setDocType] = useState('all')
   const [docStatus, setDocStatus] = useState('all')
   const [docQuery, setDocQuery] = useState('')
@@ -265,6 +263,16 @@ export default function WorkerDetail() {
     try { const r = await workerDocUrl(w.id, docId); window.open(r.url, '_blank', 'noopener,noreferrer') }
     catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
   }
+  // Download uses the same short-lived signed URL, but as an anchor download rather than a new tab.
+  const downloadDoc = async (docId: number, name: string) => {
+    setDocBusy(docId)
+    try {
+      const r = await workerDocUrl(w.id, docId)
+      const a = document.createElement('a')
+      a.href = r.url; a.download = name || `document-${docId}`; a.rel = 'noopener'
+      document.body.appendChild(a); a.click(); a.remove()
+    } catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
+  }
   /* Approving a skill is what makes the worker dispatchable for it — the claim alone never does.
      `level` lets the admin approve at a different level than claimed; that's the point of a review. */
   const reviewSkill = async (service: string, approve: boolean, level?: string) => {
@@ -295,16 +303,6 @@ export default function WorkerDetail() {
     }
     setDocBusy(docId)
     try { await reviewWorkerDoc(w.id, docId, approve, reason); toast(approve ? 'Document verified' : 'Document rejected'); load() }
-    catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
-  }
-  const openDocEdit = (d: import('../types').WorkerDoc) => {
-    setDocForm({ documentNumber: d.documentNumber || '', issueDate: d.issueDate || '', expiryDate: d.expiryDate || '' })
-    setDocEdit(d)
-  }
-  const saveDocDetails = async () => {
-    if (!docEdit || !w) return
-    setDocBusy(docEdit.id)
-    try { await saveWorkerDocDetails(w.id, docEdit.id, docForm); toast('Document details saved'); setDocEdit(null); load() }
     catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
   }
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }
@@ -712,12 +710,12 @@ export default function WorkerDetail() {
                     <td style={dtd}>{d.reviewedBy || <span className="muted">—</span>}</td>
                     <td style={dtd}>{d.reviewedAt ? shortDate(String(d.reviewedAt).slice(0, 10)) : <span className="muted">—</span>}</td>
                     <td style={{ ...dtd, whiteSpace: 'nowrap' }}>
-                      <span className="row" style={{ gap: 4 }}>
-                        {d.hasFile && (
+                      {d.hasFile ? (
+                        <span className="row" style={{ gap: 4 }}>
                           <button className="iconbtn" title="View document" style={{ width: 30, height: 30, color: 'var(--violet,#5b51e8)' }} disabled={docBusy === d.id} onClick={() => openDoc(d.id)}><Eye size={15} /></button>
-                        )}
-                        <button className="iconbtn" title="Edit particulars" style={{ width: 30, height: 30, color: 'var(--ink-2,#475467)' }} onClick={() => openDocEdit(d)}><Pencil size={14} /></button>
-                      </span>
+                          <button className="iconbtn" title="Download document" style={{ width: 30, height: 30, color: 'var(--ink-2,#475467)' }} disabled={docBusy === d.id} onClick={() => downloadDoc(d.id, d.name)}><Download size={15} /></button>
+                        </span>
+                      ) : <span className="muted">—</span>}
                     </td>
                   </tr>
                 ))}
@@ -1608,42 +1606,6 @@ export default function WorkerDetail() {
       </div>}
 
       {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
-
-      {docEdit && (
-        <Modal
-          title={docEdit.name}
-          onClose={() => setDocEdit(null)}
-          footer={<>
-            <button className="btn line" onClick={() => setDocEdit(null)}>Cancel</button>
-            <button className="btn" disabled={docBusy === docEdit.id} onClick={saveDocDetails}>{docBusy === docEdit.id ? 'Saving…' : 'Save details'}</button>
-          </>}
-        >
-          <div className="grid" style={{ gap: 12 }}>
-            <label style={{ display: 'grid', gap: 5 }}>
-              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Document Number</span>
-              <input value={docForm.documentNumber} onChange={(e) => setDocForm({ ...docForm, documentNumber: e.target.value })} placeholder="As printed on the document" />
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <label style={{ display: 'grid', gap: 5 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Issue Date</span>
-                <input type="date" value={docForm.issueDate} onChange={(e) => setDocForm({ ...docForm, issueDate: e.target.value })} />
-              </label>
-              <label style={{ display: 'grid', gap: 5 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Expiry Date</span>
-                <input type="date" value={docForm.expiryDate} onChange={(e) => setDocForm({ ...docForm, expiryDate: e.target.value })} />
-              </label>
-            </div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Leave a field blank to clear it. Expiry alerts are driven by the expiry date.</div>
-            {docEdit.hasFile && docEdit.status !== 'Verified' && (
-              <div className="row" style={{ gap: 8, marginTop: 4, paddingTop: 12, borderTop: '1px solid var(--line-2,#f1f2f6)' }}>
-                <button className="btn line" style={{ padding: '6px 12px', fontSize: 12.5 }} disabled={docBusy === docEdit.id} onClick={() => reviewDoc(docEdit.id, true).then(() => setDocEdit(null))}>Approve</button>
-                <button className="btn line" style={{ padding: '6px 12px', fontSize: 12.5, color: '#dc2626' }} disabled={docBusy === docEdit.id} onClick={() => reviewDoc(docEdit.id, false).then(() => setDocEdit(null))}>Reject</button>
-                <span className="muted" style={{ fontSize: 11.5, alignSelf: 'center' }}>Verification is separate from these particulars.</span>
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }
