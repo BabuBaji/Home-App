@@ -867,7 +867,7 @@ app.get('/api/admin/control-tower', admin, async (req, res) => {
         escalated: !!b.escalated, escalateReason: b.escalate_reason || '', adminNote: b.admin_note || '',
       }
     })
-    .sort((a, b) => (Number(b.escalated) - Number(a.escalated)) || (b.ageMin - a.ageMin))
+    .sort((a, b) => (Number(b.escalated) - Number(a.escalated)) || (b.id - a.id))
   const pros = (wres.workers || [])
     .filter((w) => w.status === 'active' && inScope(scope, { zoneId: w.zone_id, city: w.city }))
     .map((w) => ({ id: w.id, name: w.name, zoneId: w.zone_id, available: !!w.available }))

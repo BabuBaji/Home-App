@@ -141,6 +141,8 @@ export const reviewWorkerSkill = (id: number, service: string, approve: boolean,
 export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)
 export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, reason?: string) =>
   req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))
+export const saveWorkerDocDetails = (id: number, docId: number, body: { documentNumber?: string; issueDate?: string | null; expiryDate?: string | null }) =>
+  req<{ ok: boolean }>(`/workers/${id}/documents/${docId}/details`, post('', body))
 /* training & assessment (Phase 7). Modules ship as empty unpublished drafts — the content is the
    company's own policy, so an admin writes it here. A module can't be published until it has a
    body, and the quiz needs `quizSize` active questions in the bank before a worker can sit it. */

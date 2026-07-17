@@ -76,6 +76,8 @@ export interface WorkerDoc {
   // hasFile is false for rows predating the storage pipeline — they have no object to preview.
   hasFile?: boolean; mime?: string; sizeBytes?: number
   reviewedBy?: string; reviewedAt?: string | null; rejectReason?: string
+  // Admin-captured KYC particulars — null/empty until an admin fills them in.
+  documentNumber?: string; issueDate?: string | null; expiryDate?: string | null
 }
 export interface WorkerJob { id: number; ref: string; service: string; status: string; total: number; date?: string; time?: string }
 export interface WorkerMetrics {

@@ -164,6 +164,12 @@ async function init() {
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reject_reason TEXT`,
+    // Admin-captured KYC particulars: the number printed on the document and its issue/expiry dates.
+    // Nullable — a document has none of these until an admin fills them in, and expiry alerts derive
+    // from expiry_date, so a blank date simply never alerts (rather than inventing one).
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS document_number TEXT`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS issue_date DATE`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS expiry_date DATE`,
     /* ---- Phase 9: equipment allocation ----
      * `required` drives Phase 12's "Equipment Issued" check and defaults to FALSE for everything:
      * which kit a worker must hold before going live is the company's call, not ours. The admin
@@ -3950,10 +3956,14 @@ app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
   }))
   // hasFile drives the admin's View link — rows predating the storage pipeline have no object
   // behind them, and offering a preview that 404s is worse than offering none.
+  // pg parses a DATE column into a JS Date at LOCAL midnight, so local Y/M/D reads back the exact
+  // stored day with no timezone drift — safer than toISOString(), which can roll back a day.
+  const ymd = (v) => { if (!v) return null; if (v instanceof Date) { const p = (n) => String(n).padStart(2, '0'); return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}` } return String(v).slice(0, 10) }
   const documentsOut = (docs || []).map((d) => ({
     id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created,
     hasFile: !!d.storage_key, mime: d.mime || '', sizeBytes: d.size_bytes || 0,
     reviewedBy: d.reviewed_by || '', reviewedAt: d.reviewed_at || null, rejectReason: d.reject_reason || '',
+    documentNumber: d.document_number || '', issueDate: ymd(d.issue_date), expiryDate: ymd(d.expiry_date),
   }))
 
   // KPIs computed from the worker's bookings.
@@ -4465,6 +4475,23 @@ app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, scopeWorke
   res.json({ ok: true, documents: (await documents(wid)).map((d) => ({ id: d.id, name: d.name, status: d.status })) })
 })
 
+// Admin captures/edits a document's printed number and its issue/expiry dates. Purely additive to
+// the review flow — it never changes verification status. Empty strings clear the field to NULL.
+app.post('/api/admin/workers/:id/documents/:docId/details', adminAuth, scopeWorker, async (req, res) => {
+  const wid = Number(req.params.id), docId = Number(req.params.docId)
+  const number = String(req.body?.documentNumber ?? '').trim() || null
+  const issue = req.body?.issueDate ? String(req.body.issueDate).slice(0, 10) : null
+  const expiry = req.body?.expiryDate ? String(req.body.expiryDate).slice(0, 10) : null
+  if (issue && expiry && expiry < issue) return res.status(400).json({ ok: false, error: 'Expiry date cannot be before the issue date' })
+  const { rows } = await pool.query(
+    `UPDATE worker_documents SET document_number=$3, issue_date=$4, expiry_date=$5
+     WHERE id=$1 AND worker_id=$2 RETURNING name`,
+    [docId, wid, number, issue, expiry])
+  if (!rows.length) return res.status(404).json({ ok: false, error: 'Document not found' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.details', entityType: 'worker', entityId: wid, detail: `Updated ${rows[0].name} particulars` })
+  res.json({ ok: true })
+})
 app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 

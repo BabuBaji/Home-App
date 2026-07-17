@@ -4,8 +4,9 @@ import {
   ChevronLeft, ChevronRight, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
+  FileText, Pencil, AlertTriangle,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, saveWorkerDocDetails, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -214,6 +215,12 @@ export default function WorkerDetail() {
   const [payView, setPayView] = useState<WalletWithdrawal | null>(null)
   const [docBusy, setDocBusy] = useState<number | null>(null)
   const [skillBusy, setSkillBusy] = useState<string | null>(null)
+  // Documents tab: the edit dialog (capture number/dates) and the three list filters.
+  const [docEdit, setDocEdit] = useState<import('../types').WorkerDoc | null>(null)
+  const [docForm, setDocForm] = useState({ documentNumber: '', issueDate: '', expiryDate: '' })
+  const [docType, setDocType] = useState('all')
+  const [docStatus, setDocStatus] = useState('all')
+  const [docQuery, setDocQuery] = useState('')
   // Advanced filters, behind the "Filters" toggle.
   const [showFilters, setShowFilters] = useState(false)
   const [earnMin, setEarnMin] = useState('')
@@ -288,6 +295,16 @@ export default function WorkerDetail() {
     }
     setDocBusy(docId)
     try { await reviewWorkerDoc(w.id, docId, approve, reason); toast(approve ? 'Document verified' : 'Document rejected'); load() }
+    catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
+  }
+  const openDocEdit = (d: import('../types').WorkerDoc) => {
+    setDocForm({ documentNumber: d.documentNumber || '', issueDate: d.issueDate || '', expiryDate: d.expiryDate || '' })
+    setDocEdit(d)
+  }
+  const saveDocDetails = async () => {
+    if (!docEdit || !w) return
+    setDocBusy(docEdit.id)
+    try { await saveWorkerDocDetails(w.id, docEdit.id, docForm); toast('Document details saved'); setDocEdit(null); load() }
     catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
   }
   const grid3: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }
@@ -571,6 +588,146 @@ export default function WorkerDetail() {
         </div>
       ))}
     </Panel>
+  )
+
+  /* ===== Documents tab — the full KYC console. Every figure below is derived from the real
+     document rows: statuses drive the count cards, and expiry_date (admin-entered) drives the
+     expiring/expired cards and the alerts panel. A document with no expiry_date simply never
+     alerts — nothing here is invented. ===== */
+  const docs = w.documents || []
+  const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0)
+  const daysUntil = (iso: string) => Math.round((new Date(iso + 'T00:00:00').getTime() - todayMid.getTime()) / 86400000)
+  const expiryState = (d: import('../types').WorkerDoc): '' | 'Expiring' | 'Expired' => {
+    if (!d.expiryDate) return ''
+    const n = daysUntil(d.expiryDate)
+    return n < 0 ? 'Expired' : n <= 30 ? 'Expiring' : ''
+  }
+  const docStat = {
+    total: docs.length,
+    verified: docs.filter((d) => d.status === 'Verified').length,
+    pending: docs.filter((d) => !d.status || d.status === 'Pending').length,
+    rejected: docs.filter((d) => d.status === 'Rejected').length,
+    expiring: docs.filter((d) => expiryState(d) === 'Expiring').length,
+    expired: docs.filter((d) => expiryState(d) === 'Expired').length,
+  }
+  // Alerts: everything already expired or expiring within 30 days, soonest first.
+  const docAlerts = docs.filter((d) => expiryState(d)).sort((a, b) => daysUntil(a.expiryDate!) - daysUntil(b.expiryDate!))
+  const docTypeOpts = [...new Set(docs.map((d) => d.name))].sort()
+  const dq = docQuery.trim().toLowerCase()
+  const docRows = docs.filter((d) =>
+    (docType === 'all' || d.name === docType)
+    && (docStatus === 'all'
+      || (docStatus === 'Expiring' || docStatus === 'Expired' ? expiryState(d) === docStatus : (d.status || 'Pending') === docStatus))
+    && (!dq || `${d.name} ${d.documentNumber || ''}`.toLowerCase().includes(dq)))
+  const docFilterOn = docType !== 'all' || docStatus !== 'all' || !!dq
+  const dtd: CSSProperties = { padding: '11px 12px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 13 }
+  const DocStatCard = ({ label, value, tone }: { label: string; value: number; tone?: string }) => (
+    <div style={{ border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px 14px', minWidth: 0, background: 'var(--card,#fff)' }}>
+      <div style={{ fontSize: 11.5, color: 'var(--muted,#667085)', marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: value ? (tone || 'var(--ink,#101828)') : 'var(--muted,#98a2b3)' }}>{value}</div>
+    </div>
+  )
+  const expiryChip = (d: import('../types').WorkerDoc) => {
+    const st = expiryState(d); if (!st) return null
+    const n = daysUntil(d.expiryDate!)
+    return <Badge tone={st === 'Expired' ? 'red' : 'amber'} dot={false}>{st === 'Expired' ? 'Expired' : `${n} day${n === 1 ? '' : 's'} left`}</Badge>
+  }
+  const documentsTab = (
+    <div className="grid" style={{ gap: 16 }}>
+      <Card>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+          <div>
+            <strong style={{ fontSize: 15 }}>Worker Documents</strong>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>KYC documents uploaded by the worker and verified by admin.</div>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+          <DocStatCard label="Total Documents" value={docStat.total} />
+          <DocStatCard label="Verified" value={docStat.verified} tone="#16a34a" />
+          <DocStatCard label="Pending Verification" value={docStat.pending} tone="#d97706" />
+          <DocStatCard label="Rejected" value={docStat.rejected} tone="#dc2626" />
+          <DocStatCard label="Expiring in 30 Days" value={docStat.expiring} tone="#d97706" />
+          <DocStatCard label="Expired" value={docStat.expired} tone="#dc2626" />
+        </div>
+      </Card>
+
+      {docAlerts.length > 0 && (
+        <Card>
+          <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <AlertTriangle size={16} color="#d97706" />
+            <strong style={{ fontSize: 13 }}>Document Expiry Alerts</strong>
+          </div>
+          {docAlerts.map((d) => (
+            <div key={d.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+              <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                <FileText size={14} style={{ color: 'var(--muted,#98a2b3)', flexShrink: 0 }} />
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{d.name}</span>
+              </span>
+              <span className="row" style={{ gap: 12, alignItems: 'center', flexShrink: 0 }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>Expires {shortDate(d.expiryDate!)}</span>
+                {expiryChip(d)}
+              </span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <Card>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          <Dropdown value={docType} onChange={setDocType} width={180}
+            options={[{ value: 'all', label: 'All Document Types' }, ...docTypeOpts.map((t) => ({ value: t, label: t }))]} />
+          <Dropdown value={docStatus} onChange={setDocStatus} width={170}
+            options={[{ value: 'all', label: 'All Status' }, { value: 'Verified', label: 'Verified' }, { value: 'Pending', label: 'Pending' }, { value: 'Rejected', label: 'Rejected' }, { value: 'Expiring', label: 'Expiring Soon' }, { value: 'Expired', label: 'Expired' }]} />
+          <SearchBox value={docQuery} onChange={setDocQuery} placeholder="Search documents…" />
+          {docFilterOn && <button className="btn line" style={{ padding: '8px 12px', fontSize: 12.5 }} onClick={() => { setDocType('all'); setDocStatus('all'); setDocQuery('') }}>Clear</button>}
+        </div>
+        {docs.length === 0 ? (
+          <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No documents uploaded yet.</div>
+        ) : docRows.length === 0 ? (
+          <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No documents match these filters.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 900 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                  {['Document Type', 'Document Number', 'Issue Date', 'Expiry Date', 'Status', 'Verified By', 'Verified On', 'Actions'].map((h) => (
+                    <th key={h} style={{ padding: '8px 12px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {docRows.map((d) => (
+                  <tr key={d.id}>
+                    <td style={{ ...dtd, fontWeight: 600 }}>
+                      <span className="row" style={{ gap: 8, alignItems: 'center' }}><FileText size={14} style={{ color: 'var(--muted,#98a2b3)', flexShrink: 0 }} />{d.name}</span>
+                    </td>
+                    <td style={dtd}>{d.documentNumber || <span className="muted">—</span>}</td>
+                    <td style={dtd}>{d.issueDate ? shortDate(d.issueDate) : <span className="muted">—</span>}</td>
+                    <td style={dtd}>
+                      {d.expiryDate
+                        ? <span className="row" style={{ gap: 8, alignItems: 'center' }}>{shortDate(d.expiryDate)}{expiryChip(d)}</span>
+                        : <span className="muted">—</span>}
+                    </td>
+                    <td style={dtd}><Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge></td>
+                    <td style={dtd}>{d.reviewedBy || <span className="muted">—</span>}</td>
+                    <td style={dtd}>{d.reviewedAt ? shortDate(String(d.reviewedAt).slice(0, 10)) : <span className="muted">—</span>}</td>
+                    <td style={{ ...dtd, whiteSpace: 'nowrap' }}>
+                      <span className="row" style={{ gap: 4 }}>
+                        {d.hasFile && (
+                          <button className="iconbtn" title="View document" style={{ width: 30, height: 30, color: 'var(--violet,#5b51e8)' }} disabled={docBusy === d.id} onClick={() => openDoc(d.id)}><Eye size={15} /></button>
+                        )}
+                        <button className="iconbtn" title="Edit particulars" style={{ width: 30, height: 30, color: 'var(--ink-2,#475467)' }} onClick={() => openDocEdit(d)}><Pencil size={14} /></button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>Showing {docRows.length} of {docs.length} document{docs.length === 1 ? '' : 's'}</div>
+      </Card>
+    </div>
   )
   /* Skills the worker CLAIMED (profile.skills) vs services they're actually approved for
      (w.services — what dispatch matches on). Approving is what promotes one into the other, so the
@@ -894,12 +1051,16 @@ export default function WorkerDetail() {
         </div>
       )}
 
-      {(show('docs') || show('skills')) && (
+      {/* Overview shows the compact document + skills panels side by side; the dedicated Documents
+          tab gets the full KYC console, and Skills its own panel. */}
+      {tab === 'overview' && (
         <div style={grid3}>
-          {(show('docs')) && documentsPanel}
-          {(show('skills')) && skillsPanel}
+          {documentsPanel}
+          {skillsPanel}
         </div>
       )}
+      {tab === 'docs' && documentsTab}
+      {tab === 'skills' && <div style={grid3}>{skillsPanel}</div>}
 
       {/* Phase 12. Reloads the worker on success so the header's status pill follows the go-live. */}
       {tab === 'onboarding' && <WorkerOnboarding w={w} onTab={setTab} onChanged={load} />}
@@ -1447,6 +1608,42 @@ export default function WorkerDetail() {
       </div>}
 
       {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
+
+      {docEdit && (
+        <Modal
+          title={docEdit.name}
+          onClose={() => setDocEdit(null)}
+          footer={<>
+            <button className="btn line" onClick={() => setDocEdit(null)}>Cancel</button>
+            <button className="btn" disabled={docBusy === docEdit.id} onClick={saveDocDetails}>{docBusy === docEdit.id ? 'Saving…' : 'Save details'}</button>
+          </>}
+        >
+          <div className="grid" style={{ gap: 12 }}>
+            <label style={{ display: 'grid', gap: 5 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Document Number</span>
+              <input value={docForm.documentNumber} onChange={(e) => setDocForm({ ...docForm, documentNumber: e.target.value })} placeholder="As printed on the document" />
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Issue Date</span>
+                <input type="date" value={docForm.issueDate} onChange={(e) => setDocForm({ ...docForm, issueDate: e.target.value })} />
+              </label>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Expiry Date</span>
+                <input type="date" value={docForm.expiryDate} onChange={(e) => setDocForm({ ...docForm, expiryDate: e.target.value })} />
+              </label>
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>Leave a field blank to clear it. Expiry alerts are driven by the expiry date.</div>
+            {docEdit.hasFile && docEdit.status !== 'Verified' && (
+              <div className="row" style={{ gap: 8, marginTop: 4, paddingTop: 12, borderTop: '1px solid var(--line-2,#f1f2f6)' }}>
+                <button className="btn line" style={{ padding: '6px 12px', fontSize: 12.5 }} disabled={docBusy === docEdit.id} onClick={() => reviewDoc(docEdit.id, true).then(() => setDocEdit(null))}>Approve</button>
+                <button className="btn line" style={{ padding: '6px 12px', fontSize: 12.5, color: '#dc2626' }} disabled={docBusy === docEdit.id} onClick={() => reviewDoc(docEdit.id, false).then(() => setDocEdit(null))}>Reject</button>
+                <span className="muted" style={{ fontSize: 11.5, alignSelf: 'center' }}>Verification is separate from these particulars.</span>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
