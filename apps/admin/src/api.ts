@@ -143,6 +143,14 @@ export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, rea
   req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))
 export const saveWorkerDocDetails = (id: number, docId: number, body: { documentNumber?: string; issueDate?: string | null; expiryDate?: string | null }) =>
   req<{ ok: boolean }>(`/workers/${id}/documents/${docId}/details`, post('', body))
+// Multipart upload — must NOT set Content-Type, so the browser writes the multipart boundary itself.
+export async function uploadWorkerDoc(id: number, form: FormData): Promise<{ ok: boolean }> {
+  const res = await fetch(API_BASE + `/api/admin/workers/${id}/documents/upload`, {
+    method: 'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: form,
+  })
+  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || 'Upload failed')
+  return res.json()
+}
 /* training & assessment (Phase 7). Modules ship as empty unpublished drafts — the content is the
    company's own policy, so an admin writes it here. A module can't be published until it has a
    body, and the quiz needs `quizSize` active questions in the bank before a worker can sit it. */

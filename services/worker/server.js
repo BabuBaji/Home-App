@@ -4492,6 +4492,36 @@ app.post('/api/admin/workers/:id/documents/:docId/details', adminAuth, scopeWork
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.details', entityType: 'worker', entityId: wid, detail: `Updated ${rows[0].name} particulars` })
   res.json({ ok: true })
 })
+// Admin uploads a document on the worker's behalf: same private-storage pipeline as the worker's own
+// upload, plus the particulars (number/issue/expiry) in one shot. Admin-uploaded => Verified by that
+// admin, since the admin is the one vouching for it. Supersedes any existing doc of the same type.
+app.post('/api/admin/workers/:id/documents/upload', adminAuth, scopeWorker, upload.single('file'), async (req, res) => {
+  const wid = Number(req.params.id)
+  const name = String(req.body?.name || '').trim()
+  if (!DOC_NAMES.has(name)) return res.status(400).json({ ok: false, error: `Unknown document type: ${name}` })
+  if (!storageConfigured()) return res.status(503).json({ ok: false, error: 'Document storage is not configured. Contact support.' })
+  if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: 'Attach a photo or PDF of the document' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind) return res.status(415).json({ ok: false, error: 'Only JPG, PNG, WebP or PDF files are accepted' })
+  const number = String(req.body?.documentNumber || '').trim() || null
+  const issue = req.body?.issueDate ? String(req.body.issueDate).slice(0, 10) : null
+  const expiry = req.body?.expiryDate ? String(req.body.expiryDate).slice(0, 10) : null
+  if (issue && expiry && expiry < issue) return res.status(400).json({ ok: false, error: 'Expiry date cannot be before the issue date' })
+  const key = storageKey(`workers/${wid}/kyc`, kind.ext)
+  try { await putObject(key, req.file.buffer, kind.mime) }
+  catch (e) { console.error('[worker] admin document upload failed:', e.message); return res.status(502).json({ ok: false, error: 'Could not store the document. Please try again.' }) }
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const fileName = String(req.body?.fileName || req.file.originalname || `${name}.${kind.ext}`).slice(0, 180)
+  const old = (await pool.query('SELECT storage_key FROM worker_documents WHERE worker_id=$1 AND name=$2', [wid, name])).rows
+  await pool.query('DELETE FROM worker_documents WHERE worker_id=$1 AND name=$2', [wid, name])
+  await pool.query(
+    `INSERT INTO worker_documents (worker_id,name,file_name,status,storage_key,mime,size_bytes,checksum,reviewed_by,reviewed_at,document_number,issue_date,expiry_date)
+     VALUES ($1,$2,$3,'Verified',$4,$5,$6,$7,$8,now(),$9,$10,$11)`,
+    [wid, name, fileName, key, kind.mime, req.file.size, checksum(req.file.buffer), who, number, issue, expiry])
+  for (const o of old) if (o.storage_key) await deleteObject(o.storage_key).catch(() => {})
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.upload', entityType: 'worker', entityId: wid, detail: `Uploaded ${name}` })
+  res.json({ ok: true })
+})
 app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 
