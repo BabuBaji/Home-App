@@ -864,99 +864,114 @@ export default function WorkerDetail() {
       { level: 'Intermediate', count: ss.summary.intermediate }, { level: 'Basic', count: ss.summary.basic },
     ].filter((s) => s.count > 0)
     const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
-    const col3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 12, alignItems: 'start' }
-    return (
-      <div className="grid" style={{ gap: 12 }}>
-        <div style={col3}>
-          <Panel title={`Worker Skills (${ss.summary.totalSkills})`} action={<span className="muted" style={{ fontSize: 11 }}>verified by admin</span>}>
-            <div className="row" style={{ gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-              <DonutChart segments={donutSegs} total={ss.summary.totalSkills} colorFor={(i) => LEVEL_HEX[donutSegs[i].level]} centerValue={String(ss.summary.totalSkills)} centerLabel="Total Skills" />
-              <div style={{ minWidth: 120, flex: 1 }}>
-                {ss.skills.length ? ss.skills.map((s) => (
-                  <div key={s.name} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-                    <span className="row" style={{ gap: 7, alignItems: 'center', minWidth: 0 }}><span style={{ width: 8, height: 8, borderRadius: 8, background: LEVEL_HEX[s.level] || '#94a3b8', flexShrink: 0 }} /><span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span></span>
-                    {levelBadge(s.level)}
-                  </div>
-                )) : <div className="muted" style={{ fontSize: 12.5 }}>No skills recorded yet.</div>}
+    const outer: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 8, alignItems: 'start' }
+    const colStack: CSSProperties = { display: 'grid', gap: 8 }
+    const hth: CSSProperties = { padding: '7px 8px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
+    const htd: CSSProperties = { padding: '8px 8px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
+    const workerSkillsPanel = (
+      <Panel title={`Worker Skills (${ss.summary.totalSkills})`} action={<span className="muted" style={{ fontSize: 11 }}>verified by admin</span>}>
+        <div className="row" style={{ gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <DonutChart segments={donutSegs} total={ss.summary.totalSkills} colorFor={(i) => LEVEL_HEX[donutSegs[i].level]} centerValue={String(ss.summary.totalSkills)} centerLabel="Total Skills" />
+          <div style={{ minWidth: 120, flex: 1 }}>
+            {ss.skills.length ? ss.skills.map((s) => (
+              <div key={s.name} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                <span className="row" style={{ gap: 7, alignItems: 'center', minWidth: 0 }}><span style={{ width: 8, height: 8, borderRadius: 8, background: LEVEL_HEX[s.level] || '#94a3b8', flexShrink: 0 }} /><span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span></span>
+                {levelBadge(s.level)}
               </div>
-            </div>
-          </Panel>
-
-          <Panel title="Services Offered">
-            {ss.services.length ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
-                  <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 }}>
-                    {['Service', 'Category', 'Level', 'Jobs', 'Status', 'Action'].map((h) => <th key={h} style={{ padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>{ss.services.map((s) => (
-                    <tr key={s.name}>
-                      <td style={{ ...sstd, fontWeight: 600 }}>{s.name}</td>
-                      <td style={sstd}>{s.category}</td>
-                      <td style={sstd}>{levelBadge(s.level)}</td>
-                      <td style={sstd}>{s.jobsCompleted}</td>
-                      <td style={sstd}><Badge tone={s.active ? 'green' : 'red'} dot={false}>{s.active ? 'Active' : 'Inactive'}</Badge></td>
-                      <td style={sstd}><button className={'switch' + (s.active ? ' on' : '')} disabled={svcBusy === s.name} onClick={() => toggleSvc(s.name, !s.active)} title={s.active ? 'Pause service' : 'Activate service'} /></td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            ) : <div className="muted" style={{ fontSize: 12.5 }}>No approved services yet.</div>}
-          </Panel>
-
-          <Panel title="Certifications" action={<button className="btn line" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setCertOpen(true)}><Plus size={13} /> Add</button>}>
-            {ss.certifications.length ? (<>
-              {certs.map((c) => (
-                <div key={c.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
-                  <span className="row" style={{ gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
-                    <Award size={15} style={{ color: '#5b51e8', flexShrink: 0, marginTop: 1 }} />
-                    <span style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.name}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>{c.issuer ? `${c.issuer} · ` : ''}{c.issuedOn ? `Issued ${shortDate(c.issuedOn)}` : '—'}</div>
-                    </span>
-                  </span>
-                  <span className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                    <Badge tone={c.status === 'Verified' ? 'green' : c.status === 'Expired' ? 'red' : 'amber'} dot={false}>{c.status}</Badge>
-                    <button className="iconbtn" title="Remove" style={{ width: 26, height: 26, color: '#dc2626' }} onClick={() => delCert(c.id, c.name)}><Trash2 size={13} /></button>
-                  </span>
-                </div>
-              ))}
-              {ss.certifications.length > 5 && <button className="btn line" style={{ width: '100%', marginTop: 10, justifyContent: 'center', fontSize: 12.5 }} onClick={() => setCertAll(!certAll)}>{certAll ? 'Show less' : `View All Certifications (${ss.certifications.length})`}</button>}
-            </>) : <div className="muted" style={{ fontSize: 12.5 }}>No certifications on file.</div>}
-          </Panel>
+            )) : <div className="muted" style={{ fontSize: 12.5 }}>No skills recorded yet.</div>}
+          </div>
         </div>
-
-        <div style={col3}>
-          <Panel title="Tools & Equipment">
+      </Panel>
+    )
+    const toolsPanel = (
+      <Panel title="Tools & Equipment">
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase' }}><th style={hth}>Item</th><th style={hth}>Status</th></tr></thead>
+          <tbody>{ss.equipment.map((e) => (
+            <tr key={e.name}><td style={sstd}><span className="row" style={{ gap: 7, alignItems: 'center' }}><Wrench size={13} style={{ color: 'var(--muted,#98a2b3)' }} />{e.name}</span></td><td style={sstd}><Badge tone={e.status === 'Issued' ? 'green' : 'gray'} dot={false}>{e.status}</Badge></td></tr>
+          ))}</tbody>
+        </table>
+      </Panel>
+    )
+    const servicesPanel = (
+      <Panel title="Services Offered">
+        {ss.services.length ? (
+          <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase' }}><th style={{ padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', fontWeight: 600 }}>Item</th><th style={{ padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', fontWeight: 600 }}>Status</th></tr></thead>
-              <tbody>{ss.equipment.map((e) => (
-                <tr key={e.name}><td style={sstd}><span className="row" style={{ gap: 7, alignItems: 'center' }}><Wrench size={13} style={{ color: 'var(--muted,#98a2b3)' }} />{e.name}</span></td><td style={sstd}><Badge tone={e.status === 'Issued' ? 'green' : 'gray'} dot={false}>{e.status}</Badge></td></tr>
+              <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                {['Service', 'Category', 'Level', 'Jobs', 'Status', 'Action'].map((h) => <th key={h} style={hth}>{h}</th>)}
+              </tr></thead>
+              <tbody>{ss.services.map((s) => (
+                <tr key={s.name}>
+                  <td style={{ ...htd, fontWeight: 600 }}>{s.name}</td>
+                  <td style={htd}>{s.category}</td>
+                  <td style={htd}>{levelBadge(s.level)}</td>
+                  <td style={htd}>{s.jobsCompleted}</td>
+                  <td style={htd}><Badge tone={s.active ? 'green' : 'red'} dot={false}>{s.active ? 'Active' : 'Inactive'}</Badge></td>
+                  <td style={htd}><button className={'switch' + (s.active ? ' on' : '')} disabled={svcBusy === s.name} onClick={() => toggleSvc(s.name, !s.active)} title={s.active ? 'Pause service' : 'Activate service'} /></td>
+                </tr>
               ))}</tbody>
             </table>
-          </Panel>
-
-          <Panel title="Skill Verification History">
-            {ss.skillHistory.length ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 560 }}>
-                  <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 }}>{['Skill', 'Old Level', 'New Level', 'Verified By', 'Verified On', 'Remarks'].map((h) => <th key={h} style={{ padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>)}</tr></thead>
-                  <tbody>{ss.skillHistory.map((h, i) => (
-                    <tr key={i}><td style={{ ...sstd, fontWeight: 600 }}>{h.skill}</td><td style={sstd}>{h.oldLevel || '—'}</td><td style={sstd}>{levelBadge(h.newLevel)}</td><td style={sstd}>{h.verifiedBy || '—'}</td><td style={sstd}>{h.verifiedAt ? shortDate(String(h.verifiedAt).slice(0, 10)) : '—'}</td><td style={{ ...sstd, whiteSpace: 'normal' }}>{h.remarks || '—'}</td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            ) : <div className="muted" style={{ fontSize: 12.5 }}>No skill-level changes recorded yet.</div>}
-          </Panel>
-
-          <Panel title="Skill Summary">
-            {([['Total Skills', ss.summary.totalSkills], ['Expert Level', ss.summary.expert], ['Advanced Level', ss.summary.advanced], ['Intermediate Level', ss.summary.intermediate], ['Basic Level', ss.summary.basic], ['Inactive Services', ss.summary.inactiveServices]] as [string, number][]).map(([l, v], i, arr) => (
-              <div key={l} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line-2,#f4f4fa)' : 'none' }}>
-                <span style={{ fontSize: 13, color: 'var(--muted,#667085)' }}>{l}</span><strong style={{ fontSize: 15 }}>{v}</strong>
-              </div>
-            ))}
-          </Panel>
-        </div>
+          </div>
+        ) : <div className="muted" style={{ fontSize: 12.5 }}>No approved services yet.</div>}
+      </Panel>
+    )
+    const historyPanel = (
+      <Panel title="Skill Verification History">
+        {ss.skillHistory.length ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, tableLayout: 'fixed' }}>
+            <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+              <th style={{ ...hth, width: '20%' }}>Skill</th><th style={{ ...hth, width: '26%' }}>Level Change</th><th style={{ ...hth, width: '20%' }}>Verified By</th><th style={{ ...hth, width: '14%' }}>On</th><th style={{ ...hth, width: '20%', whiteSpace: 'normal' }}>Remarks</th>
+            </tr></thead>
+            <tbody>{ss.skillHistory.map((h, i) => (
+              <tr key={i}>
+                <td style={{ ...htd, fontWeight: 600, whiteSpace: 'normal' }}>{h.skill}</td>
+                <td style={htd}><span className="muted">{h.oldLevel || '—'}</span> → {levelBadge(h.newLevel)}</td>
+                <td style={{ ...htd, whiteSpace: 'normal' }}>{h.verifiedBy || '—'}</td>
+                <td style={htd}>{h.verifiedAt ? shortDate(String(h.verifiedAt).slice(0, 10)) : '—'}</td>
+                <td style={{ ...htd, whiteSpace: 'normal' }}>{h.remarks || '—'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        ) : <div className="muted" style={{ fontSize: 12.5 }}>No skill-level changes recorded yet.</div>}
+      </Panel>
+    )
+    const certPanel = (
+      <Panel title="Certifications" action={<button className="btn line" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setCertOpen(true)}><Plus size={13} /> Add</button>}>
+        {ss.certifications.length ? (<>
+          {certs.map((c) => (
+            <div key={c.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+              <span className="row" style={{ gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+                <Award size={15} style={{ color: '#5b51e8', flexShrink: 0, marginTop: 1 }} />
+                <span style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.name}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{c.issuer ? `${c.issuer} · ` : ''}{c.issuedOn ? `Issued ${shortDate(c.issuedOn)}` : '—'}</div>
+                </span>
+              </span>
+              <span className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                <Badge tone={c.status === 'Verified' ? 'green' : c.status === 'Expired' ? 'red' : 'amber'} dot={false}>{c.status}</Badge>
+                <button className="iconbtn" title="Remove" style={{ width: 26, height: 26, color: '#dc2626' }} onClick={() => delCert(c.id, c.name)}><Trash2 size={13} /></button>
+              </span>
+            </div>
+          ))}
+          {ss.certifications.length > 5 && <button className="btn line" style={{ width: '100%', marginTop: 10, justifyContent: 'center', fontSize: 12.5 }} onClick={() => setCertAll(!certAll)}>{certAll ? 'Show less' : `View All Certifications (${ss.certifications.length})`}</button>}
+        </>) : <div className="muted" style={{ fontSize: 12.5 }}>No certifications on file.</div>}
+      </Panel>
+    )
+    const summaryPanel = (
+      <Panel title="Skill Summary">
+        {([['Total Skills', ss.summary.totalSkills], ['Expert Level', ss.summary.expert], ['Advanced Level', ss.summary.advanced], ['Intermediate Level', ss.summary.intermediate], ['Basic Level', ss.summary.basic], ['Inactive Services', ss.summary.inactiveServices]] as [string, number][]).map(([l, v], i, arr) => (
+          <div key={l} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line-2,#f4f4fa)' : 'none' }}>
+            <span style={{ fontSize: 13, color: 'var(--muted,#667085)' }}>{l}</span><strong style={{ fontSize: 15 }}>{v}</strong>
+          </div>
+        ))}
+      </Panel>
+    )
+    return (
+      <div className="tab-dense" style={outer}>
+        <div style={colStack}>{workerSkillsPanel}{toolsPanel}</div>
+        <div style={colStack}>{servicesPanel}{historyPanel}</div>
+        <div style={colStack}>{certPanel}{summaryPanel}</div>
       </div>
     )
   })()
