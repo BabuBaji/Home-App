@@ -4364,15 +4364,38 @@ app.post('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res
   res.status(201).json(rows[0])
 })
 // System logs — the full audit stream for this worker from the activity service (every recorded
-// event: reviews, availability/leave changes, dispatch, status changes, notes, SOS, …).
+// event: reviews, availability/leave changes, dispatch, status changes, notes, SOS, …). Each entry
+// is categorised (Job Updates / Attendance / Leave & Shift / Earnings & Payouts / Feedback / System)
+// and the source (Worker App / Web Portal / System) is derived from who acted. Also returns the
+// per-category summary and the latest device/session telemetry from the worker's heartbeat.
+const LOG_CATS = ['Job Updates', 'Attendance', 'Leave & Shift', 'Earnings & Payouts', 'Feedback', 'System']
+const logCategory = (action) => {
+  const a = String(action || '').toLowerCase()
+  if (a.includes('job') || a.startsWith('booking') || a.startsWith('dispatch')) return 'Job Updates'
+  if (a.startsWith('attendance') || a.includes('checkin') || a.includes('checkout')) return 'Attendance'
+  if (a.startsWith('availability') || a.startsWith('leave') || a.startsWith('shift') || a.startsWith('roster')) return 'Leave & Shift'
+  if (a.startsWith('incentive') || a.startsWith('wallet') || a.startsWith('payroll') || a.startsWith('salary') || a.includes('earning') || a.includes('payout')) return 'Earnings & Payouts'
+  if (a.startsWith('rating') || a.startsWith('review') || a.startsWith('feedback') || a.startsWith('complaint')) return 'Feedback'
+  return 'System'
+}
+const logSource = (actorType) => actorType === 'worker' ? 'Worker App' : actorType === 'admin' ? 'Web Portal' : actorType === 'customer' ? 'Customer App' : 'System'
 app.get('/api/admin/workers/:id/logs', adminAuth, scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
-  const r = await tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=200`, { items: [] })
+  const [r, w] = await Promise.all([
+    tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=300`, { items: [] }),
+    getWorker(id),
+  ])
   const items = (r.items || []).map((a) => ({
-    id: a.id, actorType: a.actor_type || 'system', actorName: a.actor_name || '',
-    action: a.action || 'event', ref: a.ref || '', detail: a.detail || '', created: a.created,
+    id: a.id, date: a.created, logType: logCategory(a.action), action: a.action || 'event',
+    description: a.detail || '', source: logSource(a.actor_type || 'system'),
+    performedBy: a.actor_name || (a.actor_type && a.actor_type !== 'system' ? '' : 'System'), actorType: a.actor_type || 'system', ref: a.ref || '',
   }))
-  res.json({ items })
+  const counts = Object.fromEntries(LOG_CATS.map((c) => [c, 0]))
+  for (const it of items) counts[it.logType] = (counts[it.logType] || 0) + 1
+  const summary = { total: items.length, categories: LOG_CATS.map((c) => ({ label: c, count: counts[c] })) }
+  const dev = (w && w.profile && w.profile.device) || {}
+  const device = { network: dev.network || null, battery: dev.battery ?? null, lastSeen: dev.at || null, online: !!(w && w.available) }
+  res.json({ items, summary, device })
 })
 
 /* ---------- shifts / roster (admin) ---------- */
