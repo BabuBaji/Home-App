@@ -23,7 +23,7 @@ function OverviewCard({ icon, label, value, sub, tone }: { icon: React.ReactNode
   return (
     <div style={{ border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px 14px', minWidth: 0 }}>
       <div className="row" style={{ gap: 6, alignItems: 'center', marginBottom: 8 }}><span style={{ color: 'var(--muted,#98a2b3)', display: 'flex' }}>{icon}</span><span className="muted" style={{ fontSize: 11.5 }}>{label}</span></div>
-      <div style={{ fontSize: 15.5, fontWeight: 700, color: tone, lineHeight: 1.25, wordBreak: 'break-word' }}>{value}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: tone, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
       {sub && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{sub}</div>}
     </div>
   )
