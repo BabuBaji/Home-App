@@ -66,6 +66,18 @@ object Routes {
     const val DEDUCTIONS = "wallet_deductions"
     const val PAYSLIP = "wallet_payslip"
     const val WITHDRAW_RECEIPT = "wallet_receipt"
+    // Wallet module (3_wallet_Follow.png)
+    const val WITHDRAW_PIN = "wallet_withdraw_pin"
+    const val WITHDRAW_CONFIRM = "wallet_withdraw_confirm"
+    const val WITHDRAW_SUCCESS = "wallet_withdraw_success"
+    const val WITHDRAW_HISTORY = "wallet_withdraw_history"
+    const val WALLET_PIN_SET = "wallet_pin_set"
+    const val BANK_ACCOUNTS = "wallet_bank_accounts"
+    const val BANK_ADD = "wallet_bank_add"
+    const val BANK_MANAGE = "wallet_bank_manage"
+    const val PAYOUT_SETTINGS = "wallet_payout_settings"
+    const val PAYOUT_SCHEDULE = "wallet_payout_schedule"
+    const val WALLET_HELP = "wallet_help"
     const val PROFILE = "profile"
     const val NEW_JOB = "newjob"
     const val JOB_DETAILS = "jobdetails"
@@ -192,7 +204,18 @@ fun AppRoot() {
             composable(Routes.PERFORMANCE) { PerformanceScreen(vm, nav) }
             composable(Routes.EARNINGS) { EarningsScreen(vm, nav) }
             composable(Routes.WALLET) { WalletDashboardScreen(vm, nav) }
-            composable(Routes.WITHDRAW) { WithdrawScreen(vm, nav) }
+            composable(Routes.WITHDRAW) { WithdrawMoneyScreen(vm, nav) }
+            composable(Routes.WITHDRAW_PIN) { WithdrawPinScreen(vm, nav) }
+            composable(Routes.WITHDRAW_CONFIRM) { ConfirmWithdrawalScreen(vm, nav) }
+            composable(Routes.WITHDRAW_SUCCESS) { WithdrawalSuccessScreen(vm, nav) }
+            composable(Routes.WITHDRAW_HISTORY) { WithdrawalHistoryScreen(vm, nav) }
+            composable(Routes.WALLET_PIN_SET) { WalletPinSetScreen(vm, nav) }
+            composable(Routes.BANK_ACCOUNTS) { BankAccountsScreen(vm, nav) }
+            composable(Routes.BANK_ADD) { AddBankAccountScreen(vm, nav) }
+            composable(Routes.BANK_MANAGE) { ManageBankAccountScreen(vm, nav) }
+            composable(Routes.PAYOUT_SETTINGS) { PayoutSettingsScreen(vm, nav) }
+            composable(Routes.PAYOUT_SCHEDULE) { PayoutScheduleScreen(vm, nav) }
+            composable(Routes.WALLET_HELP) { WalletHelpScreen(vm, nav) }
             composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
             composable(Routes.WALLET_HISTORY) { WalletHistoryScreen(vm, nav) }
             composable(Routes.EARNINGS_BREAKUP) { EarningsBreakupScreen(vm, nav) }

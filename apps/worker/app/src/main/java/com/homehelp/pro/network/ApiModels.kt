@@ -186,9 +186,12 @@ data class ServiceWiseDto(val total: Int = 0, val services: List<ServiceEarning>
 /** Payout rules + where the money goes. [bankAccount] is already masked server-side. */
 data class SettlementDto(
     val dailyTime: String = "",
+    val frequency: String = "",
     val minPayout: Int = 0,
+    val autoWithdraw: Boolean = false,
     val mode: String = "",
     val bankAccount: String = "",
+    val bankName: String = "",
     val bankVerified: Boolean = false,
     val bankStatus: String = "",
 )
@@ -202,6 +205,81 @@ data class WalletAnalyticsResponse(
     val serviceWise: ServiceWiseDto? = null,
     val settlement: SettlementDto? = null,
     val leaderboard: LeaderboardDto? = null,
+)
+
+/* ---------- wallet module: bank accounts · PIN · payout settings ---------- */
+
+/** A payout destination. [accountMasked] is masked server-side; [account] is the raw number. */
+data class BankAccount(
+    val id: Int = 0,
+    val holder: String = "",
+    val bankName: String = "",
+    val account: String = "",
+    val accountMasked: String = "",
+    val ifsc: String = "",
+    val upi: String = "",
+    val accountType: String = "Savings",
+    val branch: String = "",
+    val status: String = "Pending",
+    val verified: Boolean = false,
+    val isDefault: Boolean = false,
+)
+
+data class BankAccountsResponse(
+    val ok: Boolean = true,
+    val error: String? = null,
+    val accounts: List<BankAccount> = emptyList(),
+)
+
+data class BankAccountBody(
+    val holder: String? = null,
+    val bankName: String? = null,
+    val account: String? = null,
+    val ifsc: String? = null,
+    val upi: String? = null,
+    val accountType: String? = null,
+)
+
+data class PayoutSettingsDto(
+    val dailySettlement: Boolean = true,
+    val weeklySettlement: Boolean = false,
+    val minPayout: Int = 200,
+    val settlementTime: String = "07:00 AM",
+    val autoWithdraw: Boolean = false,
+    val smsNotify: Boolean = true,
+    val emailNotify: Boolean = false,
+)
+
+data class PayoutSettingsResponse(val ok: Boolean = true, val settings: PayoutSettingsDto? = null)
+
+data class PinStatusResponse(val ok: Boolean = true, val isSet: Boolean = false, val locked: Boolean = false)
+data class PinBody(val pin: String, val otp: String? = null)
+data class PinResult(
+    val ok: Boolean = false,
+    val error: String? = null,
+    val isSet: Boolean = false,
+    val attemptsLeft: Int? = null,
+    val lockedFor: Int? = null,
+)
+
+/** Withdrawal request body — the PIN is checked again server-side at this endpoint. */
+data class WithdrawRequestBody(
+    val amount: Int,
+    val pin: String,
+    val bankAccountId: Int? = null,
+    val method: String = "bank",
+)
+
+data class WithdrawResult(
+    val ok: Boolean = false,
+    val error: String? = null,
+    val withdrawalId: Int = 0,
+    val reference: String = "",
+    val status: String = "",
+    val destination: String = "",
+    val expectedCredit: String = "",
+    val walletSummary: WalletSummaryDto? = null,
+    val withdrawals: List<WithdrawalEntry> = emptyList(),
 )
 
 data class OtpResponse(val ok: Boolean = true, val devOtp: String = "")

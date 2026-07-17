@@ -47,6 +47,23 @@ async function init() {
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS bank_status TEXT DEFAULT 'Pending'`,
+    // Wallet module: a worker can hold several payout accounts and pick a default. The old
+    // single profile.bank blob is migrated into this table on first read (see bankAccounts()).
+    `CREATE TABLE IF NOT EXISTS worker_bank_accounts (
+       id SERIAL PRIMARY KEY,
+       worker_id INTEGER NOT NULL,
+       holder TEXT NOT NULL DEFAULT '',
+       bank_name TEXT NOT NULL DEFAULT '',
+       account TEXT NOT NULL DEFAULT '',
+       ifsc TEXT NOT NULL DEFAULT '',
+       upi TEXT NOT NULL DEFAULT '',
+       acct_type TEXT NOT NULL DEFAULT 'Savings',
+       branch TEXT NOT NULL DEFAULT '',
+       status TEXT NOT NULL DEFAULT 'Pending',
+       is_default BOOLEAN NOT NULL DEFAULT false,
+       created TIMESTAMPTZ DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS ux_bank_worker ON worker_bank_accounts (worker_id)`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS designation TEXT`,   // Zone Manager / Team Leader / Worker — drives zone Assign-Team role lookups
     // Shifts (WFM roster): a worker is "on shift" in a zone during weekly time windows.
@@ -639,6 +656,149 @@ app.put('/api/worker/bank', auth, async (req, res) => { await mergeProfile(req.w
 app.put('/api/worker/availability', auth, async (req, res) => { if (req.body?.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!req.body.available, req.worker.id]); await mergeProfile(req.worker.id, { availability: req.body || {} }); res.json(workerDto(await getWorker(req.worker.id))) })
 
 /* ---------- shift plans (min-guarantee) ---------- */
+// ─── Wallet module: bank accounts · payout settings ───────────────────────────────────────
+
+const maskAcct = (a) => { const v = String(a || ''); return v.length > 4 ? `••••••${v.slice(-4)}` : v }
+
+const bankDto = (r) => ({
+  id: r.id,
+  holder: r.holder || '',
+  bankName: r.bank_name || '',
+  account: r.account || '',
+  accountMasked: maskAcct(r.account),
+  ifsc: r.ifsc || '',
+  upi: r.upi || '',
+  accountType: r.acct_type || 'Savings',
+  branch: r.branch || '',
+  status: r.status || 'Pending',
+  verified: (r.status || '') === 'Verified',
+  isDefault: !!r.is_default,
+})
+
+/**
+ * A worker's payout accounts. On first read, any account already captured in the legacy
+ * profile.bank blob is migrated in as the default, so nobody loses the account they onboarded
+ * with when the app moves to multi-bank.
+ */
+async function bankAccounts(wid) {
+  let rows = (await pool.query('SELECT * FROM worker_bank_accounts WHERE worker_id=$1 ORDER BY is_default DESC, id', [wid])).rows
+  if (rows.length === 0) {
+    const w = await getWorker(wid)
+    const b = w?.profile?.bank || {}
+    const acct = String(b.account || b.accountNumber || '')
+    if (acct || b.upi) {
+      await pool.query(
+        `INSERT INTO worker_bank_accounts (worker_id, holder, bank_name, account, ifsc, upi, acct_type, status, is_default)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)`,
+        [wid, b.holder || w?.name || '', b.bankName || b.name || '', acct, b.ifsc || '', b.upi || '',
+         b.accountType || 'Savings', w?.bank_status || 'Pending'])
+      rows = (await pool.query('SELECT * FROM worker_bank_accounts WHERE worker_id=$1 ORDER BY is_default DESC, id', [wid])).rows
+    }
+  }
+  return rows.map(bankDto)
+}
+
+/** Exactly one default per worker — set here rather than trusting the caller to unset the others. */
+async function setDefaultBank(wid, id) {
+  await pool.query('UPDATE worker_bank_accounts SET is_default=(id=$2) WHERE worker_id=$1', [wid, id])
+}
+
+const PAYOUT_DEFAULTS = {
+  dailySettlement: true,
+  weeklySettlement: false,
+  minPayout: 200,
+  settlementTime: '07:00 AM',
+  autoWithdraw: false,
+  smsNotify: true,
+  emailNotify: false,
+}
+const payoutSettings = async (wid) => ({ ...PAYOUT_DEFAULTS, ...((await getWorker(wid))?.profile?.payout || {}) })
+
+app.get('/api/worker/bank-accounts', auth, async (req, res) => res.json({ ok: true, accounts: await bankAccounts(req.worker.id) }))
+
+app.post('/api/worker/bank-accounts', auth, async (req, res) => {
+  const b = req.body || {}
+  const account = String(b.account || '').replace(/\s+/g, '')
+  const ifsc = String(b.ifsc || '').trim().toUpperCase()
+  if (!account || !ifsc) return res.status(400).json({ ok: false, error: 'Account number and IFSC are required' })
+  const existing = await bankAccounts(req.worker.id)
+  if (existing.some((a) => a.account === account)) return res.status(409).json({ ok: false, error: 'That account is already added' })
+  // Resolve the branch from the IFSC so the app can show it back for confirmation.
+  const br = await tryGet(`https://ifsc.razorpay.com`, `/${ifsc}`, null)
+  const ins = await pool.query(
+    `INSERT INTO worker_bank_accounts (worker_id, holder, bank_name, account, ifsc, upi, acct_type, branch, status, is_default)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Pending',$9) RETURNING *`,
+    [req.worker.id, String(b.holder || req.worker.name || ''), String(b.bankName || br?.BANK || ''), account, ifsc,
+     String(b.upi || ''), String(b.accountType || 'Savings'), br ? `${br.BRANCH || ''}, ${br.CITY || ''}` : '',
+     existing.length === 0])
+  await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id])
+  publishEvent(REDIS_URL, 'bank.verify.requested', { workerId: req.worker.id, bank: bankDto(ins.rows[0]), name: req.worker.name })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: `Added payout account ${maskAcct(account)} (verifying)` })
+  res.json({ ok: true, accounts: await bankAccounts(req.worker.id) })
+})
+
+app.put('/api/worker/bank-accounts/:id', auth, async (req, res) => {
+  const b = req.body || {}
+  const id = Number(req.params.id)
+  const own = (await pool.query('SELECT id FROM worker_bank_accounts WHERE id=$1 AND worker_id=$2', [id, req.worker.id])).rowCount
+  if (!own) return res.status(404).json({ ok: false, error: 'Account not found' })
+  await pool.query(
+    `UPDATE worker_bank_accounts SET holder=COALESCE($2,holder), bank_name=COALESCE($3,bank_name),
+       upi=COALESCE($4,upi), acct_type=COALESCE($5,acct_type) WHERE id=$1`,
+    [id, b.holder ?? null, b.bankName ?? null, b.upi ?? null, b.accountType ?? null])
+  res.json({ ok: true, accounts: await bankAccounts(req.worker.id) })
+})
+
+app.post('/api/worker/bank-accounts/:id/default', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const row = (await pool.query('SELECT * FROM worker_bank_accounts WHERE id=$1 AND worker_id=$2', [id, req.worker.id])).rows[0]
+  if (!row) return res.status(404).json({ ok: false, error: 'Account not found' })
+  if (row.status !== 'Verified') return res.status(409).json({ ok: false, error: 'Verify the account before making it default' })
+  await setDefaultBank(req.worker.id, id)
+  res.json({ ok: true, accounts: await bankAccounts(req.worker.id) })
+})
+
+app.delete('/api/worker/bank-accounts/:id', auth, async (req, res) => {
+  const id = Number(req.params.id)
+  const rows = (await pool.query('SELECT * FROM worker_bank_accounts WHERE worker_id=$1', [req.worker.id])).rows
+  const row = rows.find((r) => r.id === id)
+  if (!row) return res.status(404).json({ ok: false, error: 'Account not found' })
+  // Never leave a worker with a default-less set: promote another account first.
+  await pool.query('DELETE FROM worker_bank_accounts WHERE id=$1', [id])
+  const rest = rows.filter((r) => r.id !== id)
+  if (row.is_default && rest.length) await setDefaultBank(req.worker.id, (rest.find((r) => r.status === 'Verified') || rest[0]).id)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: `Removed payout account ${maskAcct(row.account)}` })
+  res.json({ ok: true, accounts: await bankAccounts(req.worker.id) })
+})
+
+app.get('/api/worker/payout-settings', auth, async (req, res) => res.json({ ok: true, settings: await payoutSettings(req.worker.id) }))
+
+app.put('/api/worker/payout-settings', auth, async (req, res) => {
+  const cur = await payoutSettings(req.worker.id)
+  const b = req.body || {}
+  const next = {
+    dailySettlement: b.dailySettlement ?? cur.dailySettlement,
+    weeklySettlement: b.weeklySettlement ?? cur.weeklySettlement,
+    minPayout: Math.max(100, Math.round(Number(b.minPayout ?? cur.minPayout) || 200)),
+    settlementTime: String(b.settlementTime ?? cur.settlementTime),
+    autoWithdraw: b.autoWithdraw ?? cur.autoWithdraw,
+    smsNotify: b.smsNotify ?? cur.smsNotify,
+    emailNotify: b.emailNotify ?? cur.emailNotify,
+  }
+  // Daily and weekly are one choice, not two switches: honouring both would double-settle.
+  if (b.dailySettlement === true) next.weeklySettlement = false
+  if (b.weeklySettlement === true) next.dailySettlement = false
+  await mergeProfile(req.worker.id, { payout: next })
+  res.json({ ok: true, settings: next })
+})
+
+/** Internal: the wallet service asks who to pay and under what rules. */
+app.get('/internal/workers/:id/payout', internalOnly, async (req, res) => {
+  const wid = Number(req.params.id)
+  const accounts = await bankAccounts(wid)
+  res.json({ settings: await payoutSettings(wid), accounts, default: accounts.find((a) => a.isDefault) || null })
+})
+
 app.get('/api/worker/shifts', auth, async (req, res) => {
   const { weekday } = istNow()
   const { rows } = await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')

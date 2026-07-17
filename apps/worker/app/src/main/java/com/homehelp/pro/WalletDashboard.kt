@@ -28,7 +28,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.CardGiftcard
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
@@ -86,7 +87,7 @@ fun WalletDashboardScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             Text("Wallet", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Row(
-                Modifier.clip(RoundedCornerShape(Radius.pill)).clickable { nav.navigate(Routes.WALLET_HISTORY) }
+                Modifier.clip(RoundedCornerShape(Radius.pill)).clickable { nav.navigate(Routes.PAYOUT_SCHEDULE) }
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -107,7 +108,7 @@ fun WalletDashboardScreen(vm: AppViewModel, nav: NavHostController) {
             EarningsBreakdownCard(vm) { nav.navigate(Routes.EARNINGS_BREAKUP) }
             EarningsTrendCard(vm) { nav.navigate(Routes.EARNINGS) }
             ServiceWiseCard(vm)
-            SettlementCard(vm) { nav.navigate(Routes.P_BANK) }
+            SettlementCard(vm) { nav.navigate(Routes.PAYOUT_SETTINGS) }
             LeaderboardBanner(vm) { nav.navigateApp(Routes.REWARDS) }
             WalletQuickActions(nav)
         }
@@ -412,7 +413,8 @@ private fun SettlementCard(vm: AppViewModel, onPayoutSettings: () -> Unit) {
     Card(padding = Dp16.S) {
         Text("SETTLEMENT INFO", color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
         Spacer(Modifier.height(Space.s))
-        SettlementRow("Daily Settlement Time", st?.dailyTime ?: "—")
+        SettlementRow("Settlement Time", st?.dailyTime ?: "—")
+        SettlementRow("Frequency", st?.frequency ?: "—")
         SettlementRow("Minimum Payout", st?.minPayout?.let { money(it) } ?: "—")
         SettlementRow("Settlement Mode", st?.mode ?: "—")
         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -481,10 +483,10 @@ private fun WalletQuickActions(nav: NavHostController) {
         Spacer(Modifier.height(Space.s))
         Row(Modifier.fillMaxWidth()) {
             WalletAction(Modifier.weight(1f), Icons.Filled.ArrowUpward, "Withdraw") { nav.navigate(Routes.WITHDRAW) }
-            WalletAction(Modifier.weight(1f), Icons.Filled.Receipt, "Earnings") { nav.navigate(Routes.EARNINGS_BREAKUP) }
-            WalletAction(Modifier.weight(1f), Icons.Filled.CardGiftcard, "Incentives") { nav.navigateApp(Routes.REWARDS) }
+            WalletAction(Modifier.weight(1f), Icons.Filled.Settings, "Payout") { nav.navigate(Routes.PAYOUT_SETTINGS) }
+            WalletAction(Modifier.weight(1f), Icons.Filled.AccountBalance, "Banks") { nav.navigate(Routes.BANK_ACCOUNTS) }
             WalletAction(Modifier.weight(1f), Icons.Filled.Description, "Payslips") { nav.navigate(Routes.PAYSLIP) }
-            WalletAction(Modifier.weight(1f), Icons.Filled.Schedule, "History") { nav.navigate(Routes.WALLET_HISTORY) }
+            WalletAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, "Help") { nav.navigate(Routes.WALLET_HELP) }
         }
     }
 }

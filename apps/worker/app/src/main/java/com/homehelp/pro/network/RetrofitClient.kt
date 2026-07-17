@@ -23,7 +23,11 @@ object RetrofitClient {
     // Public tunnel testing: the PC gateway is exposed via a Cloudflare quick tunnel, so the
     // app works on any network (mobile data / different Wi-Fi) with no LAN dependency.
     // NOTE: quick-tunnel URLs are ephemeral — if the tunnel restarts, rebuild with the new URL.
-    private const val FALLBACK_URL = "https://biotechnology-okay-solid-pays.trycloudflare.com/"
+    // Over USB: `adb reverse tcp:8080 tcp:8080` maps the phone's localhost:8080 to the PC's
+    // gateway, so the app reaches the backend through the cable. Stable across sessions, unlike a
+    // cloudflared quick tunnel whose URL changes every restart. Needs the cable (or a re-run of
+    // adb reverse) — swap in a tunnel URL here when testing off-desk.
+    private const val FALLBACK_URL = "http://localhost:8080/"
     private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
 
     /** Current backend base URL — updated by [refreshBaseUrl]. */

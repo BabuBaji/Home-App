@@ -1,6 +1,7 @@
 package com.homehelp.pro.network
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -109,6 +110,40 @@ interface ApiService {
     suspend fun endService(@Body body: EndBody): StatusResponse
 
     // ---- in-service job state (checklist · photos · extras · pause · chat) ----
+    // ---- wallet module: bank accounts · PIN · payout settings ----
+    @GET("api/worker/bank-accounts")
+    suspend fun bankAccounts(): BankAccountsResponse
+
+    @POST("api/worker/bank-accounts")
+    suspend fun addBankAccount(@Body body: BankAccountBody): BankAccountsResponse
+
+    @PUT("api/worker/bank-accounts/{id}")
+    suspend fun updateBankAccount(@Path("id") id: Int, @Body body: BankAccountBody): BankAccountsResponse
+
+    @POST("api/worker/bank-accounts/{id}/default")
+    suspend fun makeBankDefault(@Path("id") id: Int): BankAccountsResponse
+
+    @DELETE("api/worker/bank-accounts/{id}")
+    suspend fun deleteBankAccount(@Path("id") id: Int): BankAccountsResponse
+
+    @GET("api/worker/payout-settings")
+    suspend fun payoutSettings(): PayoutSettingsResponse
+
+    @PUT("api/worker/payout-settings")
+    suspend fun savePayoutSettings(@Body body: PayoutSettingsDto): PayoutSettingsResponse
+
+    @GET("api/worker/wallet/pin/status")
+    suspend fun pinStatus(): PinStatusResponse
+
+    @POST("api/worker/wallet/pin/set")
+    suspend fun setPin(@Body body: PinBody): PinResult
+
+    @POST("api/worker/wallet/pin/verify")
+    suspend fun verifyPin(@Body body: PinBody): PinResult
+
+    @POST("api/worker/wallet/withdraw/request")
+    suspend fun requestWithdrawalPin(@Body body: WithdrawRequestBody): WithdrawResult
+
     @GET("api/worker/wallet/analytics")
     suspend fun walletAnalytics(): WalletAnalyticsResponse
 
