@@ -12,6 +12,7 @@ import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown
 import { useStore } from '../store'
 import WorkerApproval from './WorkerApproval'
 import WorkerAvailabilityTab from './WorkerAvailabilityTab'
+import WorkerLogs from './WorkerLogs'
 import WorkerOnboarding from './WorkerOnboarding'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
@@ -189,7 +190,7 @@ function PerfTile({ label, value, sub, subTone }: { label: string; value: ReactN
 }
 
 const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
-const TABS = [['overview', 'Overview'], ['onboarding', 'Onboarding'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity']] as const
+const TABS = [['overview', 'Overview'], ['onboarding', 'Onboarding'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity'], ['logs', 'Logs']] as const
 
 export default function WorkerDetail() {
   const { id } = useParams()
@@ -1801,6 +1802,7 @@ export default function WorkerDetail() {
       </div>}
 
       {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
+      {tab === 'logs' && <WorkerLogs workerId={Number(id)} />}
 
       {upOpen && (
         <Modal

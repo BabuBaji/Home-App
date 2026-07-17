@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -230,6 +230,7 @@ export const fetchWorkerAvailability = (id: number) => req<WorkerAvailabilitySta
 export const reviewWorkerAvailability = (id: number, body: { approve: boolean; shiftDefId?: number | null; zoneId?: number | null; reason?: string }) =>
   req<{ ok: boolean; availability: WorkerAvailabilityState['availability']; assigned: WorkerAvailabilityState['assigned'] }>(`/workers/${id}/availability/review`, post('', body))
 /* Availability tab — consolidated overview + leave actions. */
+export const fetchWorkerLogs = (id: number) => req<{ items: WorkerLog[] }>(`/workers/${id}/logs`)
 export const fetchAvailabilityOverview = (id: number, month?: string) =>
   req<AvailabilityOverview>(`/workers/${id}/availability-overview${month ? `?month=${month}` : ''}`)
 export const createWorkerLeave = (id: number, body: { fromDate: string; toDate?: string; leaveType?: string; reason?: string; status?: string }) =>

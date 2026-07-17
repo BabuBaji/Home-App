@@ -4363,6 +4363,17 @@ app.post('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res
   const { rows } = await pool.query('INSERT INTO worker_notes (worker_id,note,author) VALUES ($1,$2,$3) RETURNING id, note, author, created', [Number(req.params.id), note, req.body?.author || 'Admin'])
   res.status(201).json(rows[0])
 })
+// System logs — the full audit stream for this worker from the activity service (every recorded
+// event: reviews, availability/leave changes, dispatch, status changes, notes, SOS, …).
+app.get('/api/admin/workers/:id/logs', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const r = await tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=200`, { items: [] })
+  const items = (r.items || []).map((a) => ({
+    id: a.id, actorType: a.actor_type || 'system', actorName: a.actor_name || '',
+    action: a.action || 'event', ref: a.ref || '', detail: a.detail || '', created: a.created,
+  }))
+  res.json({ items })
+})
 
 /* ---------- shifts / roster (admin) ---------- */
 app.get('/api/admin/shifts', adminAuth, async (_q, res) => {

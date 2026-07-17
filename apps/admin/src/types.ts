@@ -151,6 +151,9 @@ export interface WorkerDetail extends Worker {
   jobsPerformance?: JobsPerformance; skillsServices?: SkillsServices
 }
 
+/* Logs tab — the worker's audit stream from the activity service. */
+export interface WorkerLog { id: number; actorType: string; actorName: string; action: string; ref: string; detail: string; created: string }
+
 /* Availability tab — derived from real attendance, the assigned shift, leaves and the change log. */
 export interface AvailabilityOverview {
   month: string
