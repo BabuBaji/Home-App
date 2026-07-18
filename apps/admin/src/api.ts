@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone, MembershipPlan, HomeBanner,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone, MembershipPlan, PricingRules, HomeBanner,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -368,6 +368,10 @@ export const fetchMembershipPlans = () => req<MembershipPlan[]>('/membership-pla
 export const createMembershipPlan = (body: Record<string, unknown>) => req<MembershipPlan>('/membership-plans', post('', body))
 export const updateMembershipPlan = (id: number, body: Record<string, unknown>) => req<MembershipPlan>(`/membership-plans/${id}`, patch(body))
 export const deleteMembershipPlan = (id: number) => req<{ ok: boolean }>(`/membership-plans/${id}`, { method: 'DELETE' })
+
+/* discount stacking policy + margin guard (Module 10 · Phase 3) */
+export const fetchPricingRules = () => req<PricingRules>('/pricing-rules')
+export const savePricingRules = (body: PricingRules) => req<PricingRules>('/pricing-rules', { method: 'PUT', body: JSON.stringify(body) })
 export const campaignUsage = (id: number) => req<{ total: number; customers: number; recent: { customer_id: number; booking_id: number; created: string }[] }>(`/campaigns/${id}/usage`)
 
 /* payments / refunds */

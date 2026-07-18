@@ -42,6 +42,20 @@ const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/
 const pool = makePool(DATABASE_URL)
 const adminAuth = makeAdminAuth(ADMIN_URL)
 
+// A single malformed request must never take the whole service down. Without this, a bad numeric
+// route param that reaches a Postgres int cast rejects unhandled → the process exits → the gateway
+// 502s EVERY catalog route until a manual restart. Log and keep serving instead.
+process.on('unhandledRejection', (err) => console.error('[catalog] unhandledRejection:', err))
+process.on('uncaughtException', (err) => console.error('[catalog] uncaughtException:', err))
+
+// Parse a numeric route id; on a non-number respond 400 and return null so it can't reach SQL.
+// Usage: `const id = intId(req, res); if (id === null) return`
+const intId = (req, res, name = 'id') => {
+  const n = Number(req.params[name])
+  if (!Number.isFinite(n)) { res.status(400).json({ error: 'Invalid id' }); return null }
+  return n
+}
+
 async function init() {
   await migrate(pool, [
     `CREATE TABLE IF NOT EXISTS services (
@@ -108,6 +122,18 @@ async function init() {
       ('gold','Gold','Great for regular users',true,599,'["Up to ₹2,500 off on bookings","Free add-ons every month","Priority support","Exclusive member offers"]',10,30,6,5,20,false,true,2),
       ('platinum','Platinum','Best value for family',false,999,'["Up to ₹5,000 off on bookings","Free add-ons every month","Priority support","Exclusive member offers","No convenience fees"]',12,40,8,5,20,true,true,3)
       ON CONFLICT (plan_key) DO NOTHING`,
+    // Module 10 · Phase 3 — global discount stacking policy + margin guard (single-row config).
+    // `stacking`: 'stack' = membership adds on top of offers; 'exclusive' = membership only applies
+    // when no offer/coupon discount is present. `max_discount_pct`: cap total discount at N% of the
+    // subtotal (0 = off). `min_service_amount`: total discount can't drop the service value below ₹N.
+    `CREATE TABLE IF NOT EXISTS pricing_rules (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      stacking TEXT NOT NULL DEFAULT 'stack',
+      max_discount_pct INTEGER NOT NULL DEFAULT 0,
+      min_service_amount INTEGER NOT NULL DEFAULT 0,
+      updated TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `INSERT INTO pricing_rules (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
     // Stores (dark-stores) inside a zone: a service point with a lat/lng centre + service radius.
     // Overlap/coverage between stores is guarded at create time (only super-admin may override).
     `CREATE TABLE IF NOT EXISTS stores (
@@ -401,6 +427,19 @@ async function memberBenefit(customerId, netBase) {
   } catch { return { discount: 0 } }
 }
 
+// Global pricing rules (stacking policy + margin guard), cached briefly. Falls back to safe defaults.
+let _rulesCache = { at: 0, val: null }
+async function pricingRules() {
+  if (_rulesCache.val && Date.now() - _rulesCache.at < 30000) return _rulesCache.val
+  try {
+    const { rows } = await pool.query('SELECT stacking, max_discount_pct, min_service_amount FROM pricing_rules WHERE id=1')
+    const val = rows[0] || { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 }
+    _rulesCache = { at: Date.now(), val }
+    return val
+  } catch { return { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 } }
+}
+const invalidatePricingRules = () => { _rulesCache = { at: 0, val: null } }
+
 async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const zoneId = await zoneIdForPincode(pincode)
   const q = await priceCart({ items, coupon, zoneId, customerId, applyCoupons: true })
@@ -423,8 +462,23 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const memberBase = Math.max(0, q.subtotal - q.discount)
   const member = await memberBenefit(customerId, memberBase)
   let memberDiscount = member.discount || 0
-  const marginFloor = Math.round(Number(await getSetting(ADMIN_URL, 'membership_min_service_amount', '0')) || 0)
-  if (marginFloor > 0) memberDiscount = Math.max(0, Math.min(memberDiscount, Math.max(0, memberBase - marginFloor)))
+  // Phase 3 — stacking policy + margin guard (admin-configurable).
+  const rules = await pricingRules()
+  // Stacking: 'exclusive' means membership does NOT stack on top of an offer/coupon discount.
+  if (rules.stacking === 'exclusive' && q.discount > 0) memberDiscount = 0
+  // Margin guard: cap the COMBINED discount (offers + membership) so an order can't be over-discounted.
+  // Trim the membership benefit first, then the offer discount if still over the cap.
+  const caps = []
+  if (rules.max_discount_pct > 0) caps.push(Math.round(q.subtotal * rules.max_discount_pct / 100))
+  if (rules.min_service_amount > 0) caps.push(Math.max(0, q.subtotal - rules.min_service_amount))
+  if (caps.length) {
+    const cap = Math.min(...caps)
+    let over = (q.discount + memberDiscount) - cap
+    if (over > 0) {
+      const cutMember = Math.min(memberDiscount, over); memberDiscount -= cutMember; over -= cutMember
+      if (over > 0) q.discount = Math.max(0, q.discount - over)
+    }
+  }
   // Convenience fee stays zone-level; GST rate is per-service; inclusive/exclusive display is platform-wide.
   const ex = (cfg && cfg.pricingExtras) || {}
   const fee = Math.round(Number(ex.convenienceFee) || 0)
@@ -1163,7 +1217,8 @@ app.post('/api/admin/campaigns', adminAuth, requirePerm('campaigns.create'), asy
   res.status(201).json({ ok: true, campaign_id: id })
 })
 app.patch('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
-  const id = Number(req.params.id), b = req.body || {}
+  const id = intId(req, res); if (id === null) return
+  const b = req.body || {}
   const cur = (await pool.query('SELECT 1 FROM campaign_master WHERE campaign_id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Campaign not found' })
   const cols = CM_COLS.filter((c) => b[c] !== undefined)
@@ -1175,7 +1230,7 @@ app.patch('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.edit'), 
   res.json({ ok: true })
 })
 app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
-  const id = Number(req.params.id)
+  const id = intId(req, res); if (id === null) return
   await pool.query('DELETE FROM campaign_zone WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM campaign_customer_rule WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM coupon WHERE campaign_id=$1', [id])
@@ -1183,7 +1238,7 @@ app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'
   res.json({ ok: true })
 })
 app.get('/api/admin/campaigns/:id/usage', adminAuth, async (req, res) => {
-  const id = Number(req.params.id)
+  const id = intId(req, res); if (id === null) return
   const [total, recent] = await Promise.all([
     pool.query('SELECT COUNT(*)::int n, COUNT(DISTINCT customer_id)::int customers FROM customer_campaign_usage WHERE campaign_id=$1', [id]),
     pool.query('SELECT customer_id, booking_id, created FROM customer_campaign_usage WHERE campaign_id=$1 ORDER BY created DESC LIMIT 50', [id]),
@@ -1337,16 +1392,18 @@ function entityRoutes(path, table, perm = 'zones.edit') {
     res.status(201).json(rows[0])
   })
   app.patch(`/api/admin/${path}/:id`, adminAuth, requirePerm(perm), async (req, res) => {
+    const id = intId(req, res); if (id === null) return
     const b = req.body || {}
     const cols = def.cols.filter((c) => b[c] !== undefined)
     if (!cols.length) return res.json({ ok: true })
     const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
-    const { rows } = await pool.query(`UPDATE ${table} SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => b[c]), Number(req.params.id)])
+    const { rows } = await pool.query(`UPDATE ${table} SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => b[c]), id])
     if (!rows.length) return res.status(404).json({ error: 'Not found' })
     res.json(rows[0])
   })
   app.delete(`/api/admin/${path}/:id`, adminAuth, requirePerm(perm), async (req, res) => {
-    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [Number(req.params.id)])
+    const id = intId(req, res); if (id === null) return
+    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [id])
     res.json({ ok: true })
   })
 }
@@ -1394,22 +1451,39 @@ app.post('/api/admin/membership-plans', adminAuth, requirePerm('pricing.edit'), 
   } catch (e) { res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'A plan with that key already exists' : 'Could not create plan' }) }
 })
 app.patch('/api/admin/membership-plans/:id', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const id = intId(req, res); if (id === null) return
   const b = req.body || {}
   const cols = MP_COLS.filter((c) => b[c] !== undefined)
   if (!cols.length) return res.json({ ok: true })
   const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
-  const { rows } = await pool.query(`UPDATE membership_plans SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => mpVal(c, b[c])), Number(req.params.id)])
+  const { rows } = await pool.query(`UPDATE membership_plans SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => mpVal(c, b[c])), id])
   if (!rows.length) return res.status(404).json({ error: 'Not found' })
   res.json(membershipPlanOut(rows[0]))
 })
 app.delete('/api/admin/membership-plans/:id', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
-  await pool.query('DELETE FROM membership_plans WHERE id=$1', [Number(req.params.id)])
+  const id = intId(req, res); if (id === null) return
+  await pool.query('DELETE FROM membership_plans WHERE id=$1', [id])
   res.json({ ok: true })
 })
 // Public catalog: published plans only — the customer app renders these and auth prices from them.
 app.get('/api/membership-plans', async (_q, res) => {
   const { rows } = await pool.query("SELECT * FROM membership_plans WHERE status='published' ORDER BY sort, id")
   res.json(rows.map(membershipPlanOut))
+})
+
+/* Discount stacking policy + margin guard (Phase 3) — global pricing rules. */
+app.get('/api/admin/pricing-rules', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT stacking, max_discount_pct, min_service_amount FROM pricing_rules WHERE id=1')
+  res.json(rows[0] || { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 })
+})
+app.put('/api/admin/pricing-rules', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  const stacking = b.stacking === 'exclusive' ? 'exclusive' : 'stack'
+  const maxPct = Math.max(0, Math.min(100, Math.round(Number(b.max_discount_pct) || 0)))
+  const minSvc = Math.max(0, Math.round(Number(b.min_service_amount) || 0))
+  await pool.query('UPDATE pricing_rules SET stacking=$1, max_discount_pct=$2, min_service_amount=$3, updated=now() WHERE id=1', [stacking, maxPct, minSvc])
+  invalidatePricingRules()
+  res.json({ stacking, max_discount_pct: maxPct, min_service_amount: minSvc })
 })
 
 /* Real per-zone operations metrics, aggregated from live DB (apartments, inventory, workers,

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Crown, Plus, Pencil, Trash2, Star, RefreshCw } from 'lucide-react'
+import { Crown, Plus, Pencil, Trash2, Star, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Card, StatCard, Badge, Loading, ErrorState, Modal, Dropdown, useToast } from '../components/UI'
-import { fetchMembershipPlans, createMembershipPlan, updateMembershipPlan, deleteMembershipPlan } from '../api'
-import type { MembershipPlan } from '../types'
+import { fetchMembershipPlans, createMembershipPlan, updateMembershipPlan, deleteMembershipPlan, fetchPricingRules, savePricingRules } from '../api'
+import type { MembershipPlan, PricingRules } from '../types'
 import { useStore, has } from '../store'
 
 /* Membership Plans (Module 10) — the admin-configurable catalog of paid benefit plans. Prices and
@@ -40,9 +40,19 @@ export default function MembershipPlans() {
   const [err, setErr] = useState('')
   const [edit, setEdit] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false)
+  const [rules, setRules] = useState<PricingRules | null>(null)
+  const [rulesBusy, setRulesBusy] = useState(false)
 
   const load = () => fetchMembershipPlans().then((r) => { setRows(r); setErr('') }).catch((e: Error) => setErr(e.message))
   useEffect(() => { load() }, [])
+  useEffect(() => { fetchPricingRules().then(setRules).catch(() => {}) }, [])
+
+  const saveRules = async () => {
+    if (!rules) return
+    setRulesBusy(true)
+    try { const r = await savePricingRules(rules); setRules(r); toast('Discount rules saved') }
+    catch (e) { toast((e as Error).message, 'err') } finally { setRulesBusy(false) }
+  }
 
   if (err && !rows) return <ErrorState msg={err} onRetry={load} />
   if (!rows) return <Loading />
@@ -129,6 +139,24 @@ export default function MembershipPlans() {
           </div>
         )}
       </Card>
+
+      {rules && (
+        <Card title="Discount & margin rules" right={<span className="muted" style={{ fontSize: 12 }}>applies to every booking</span>}>
+          <div className="grid" style={{ gap: 12 }}>
+            <div className="zo-grid">
+              <label className="zo-f"><span>Discount stacking</span>
+                <Dropdown value={rules.stacking} width="100%" options={[['stack', 'Stack — membership adds on top of offers'], ['exclusive', 'Exclusive — membership only when no offer applies']].map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setRules({ ...rules, stacking: v as PricingRules['stacking'] })} />
+              </label>
+              <label className="zo-f"><span>Max total discount (% of order)</span><input type="number" value={rules.max_discount_pct} onChange={(e) => setRules({ ...rules, max_discount_pct: Number(e.target.value) })} placeholder="0 = no cap" /></label>
+              <label className="zo-f"><span>Min service amount after discount (₹)</span><input type="number" value={rules.min_service_amount} onChange={(e) => setRules({ ...rules, min_service_amount: Number(e.target.value) })} placeholder="0 = off" /></label>
+            </div>
+            <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+              <span className="muted" style={{ fontSize: 11.5, marginRight: 'auto' }}>Margin guard caps the combined discount (offers + membership) so an order can't be over-discounted — the membership benefit is trimmed first.</span>
+              {canEdit && <button className="btn sm" disabled={rulesBusy} onClick={saveRules}><ShieldCheck size={14} /> {rulesBusy ? 'Saving…' : 'Save rules'}</button>}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {edit && (
         <Modal wide title={edit.id ? `Edit ${edit.name || 'plan'}` : 'New membership plan'} onClose={() => setEdit(null)} footer={<>

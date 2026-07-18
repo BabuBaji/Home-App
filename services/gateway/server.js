@@ -41,7 +41,7 @@ function pickTarget(url) {
 
   // ----- membership plan CATALOG (config) lives in catalog, NOT the auth membership-instance API.
   // Checked first: '/api/membership-plans' would otherwise prefix-match the '/api/membership' rule.
-  if (p('/api/admin/membership-plans') || p('/api/membership-plans')) return U.catalog
+  if (p('/api/admin/membership-plans') || p('/api/membership-plans') || p('/api/admin/pricing-rules')) return U.catalog
 
   // ----- admin panel (BFF + per-domain admin routes) -----
   if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/campaigns') || p('/api/admin/ops-overview') || p('/api/admin/stores') || p('/api/admin/surge') || p('/api/admin/banners')) return U.catalog

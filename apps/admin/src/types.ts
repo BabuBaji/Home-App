@@ -25,6 +25,13 @@ export interface MembershipPlan {
   sort: number
 }
 
+// Global discount stacking policy + margin guard (Module 10 · Phase 3).
+export interface PricingRules {
+  stacking: 'stack' | 'exclusive'
+  max_discount_pct: number
+  min_service_amount: number
+}
+
 export interface Admin {
   id: number; name: string; email: string; phone?: string
   // Role is now a free-form key (system role or a custom one). `permissions` is the resolved,
