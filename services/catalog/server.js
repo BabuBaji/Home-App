@@ -447,6 +447,15 @@ app.post('/api/coupons/validate', async (req, res) => {
   res.json(r)
 })
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
+// Live surge for the customer's zone (public, pincode-keyed) — powers the "rain incoming" heads-up
+// on Home so a customer sees it on open, before starting a booking. Silent (no surge) when the
+// pincode isn't in a live zone or there's no active surge.
+app.get('/api/surge', async (req, res) => {
+  const zoneId = await zoneIdForPincode(req.query.pincode)
+  if (!zoneId) return res.json({ active: false, pct: 0, reason: '' })
+  const s = getSurgeForZone(zoneId)
+  res.json({ active: !!s.active, pct: s.pct || 0, reason: s.active ? s.reason : '', prob: s.prob ?? null })
+})
 // Seller details for the customer tax invoice (from admin settings). Public — GSTIN is on every invoice anyway.
 app.get('/api/invoice-info', async (_q, res) => res.json({
   name: await getSetting(ADMIN_URL, 'company_name', 'HomeHelp Services Pvt. Ltd.'),

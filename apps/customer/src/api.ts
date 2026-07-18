@@ -69,6 +69,9 @@ const pinQ = (pincode?: string) => (pincode ? `?pincode=${encodeURIComponent(pin
 export const fetchServices = (pincode?: string) => req<{ categories: string[]; services: Service[] }>(`/api/services${pinQ(pincode)}`)
 export const fetchService = (id: string, pincode?: string) => req<ServiceDetail>(`/api/services/${id}${pinQ(pincode)}`)
 export const fetchHome = () => req<HomeContent>('/api/home')
+// Live surge for the customer's zone — drives the "rain incoming" heads-up on Home.
+export interface ZoneSurge { active: boolean; pct: number; reason: string; prob: number | null }
+export const fetchZoneSurge = (pincode: string) => req<ZoneSurge>(`/api/surge?pincode=${encodeURIComponent(pincode)}`)
 export interface InvoiceInfo { name: string; gstin: string; address: string; state: string; sac: string; prefix: string; gstInclusive: boolean }
 export const fetchInvoiceInfo = () => req<InvoiceInfo>('/api/invoice-info')
 export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ(pincode)}`)

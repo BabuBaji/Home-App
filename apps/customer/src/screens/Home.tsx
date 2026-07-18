@@ -4,7 +4,7 @@ import { MapPin, ChevronDown, Bell, Search, CalendarPlus, Tag, Sparkles, Clipboa
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
-import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet } from '../api'
+import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchZoneSurge, type ZoneSurge } from '../api'
 import type { Service, Booking, Address } from '../types'
 
 // Module 2 · #7 — Home Dashboard. UI redesigned to the mock; all booking data/flow
@@ -25,6 +25,7 @@ export default function Home() {
   const [addr, setAddr] = useState<Address | null>(null)
   const [notifCount, setNotifCount] = useState(0)
   const [walletBal, setWalletBal] = useState<number | null>(null)
+  const [surge, setSurge] = useState<ZoneSurge | null>(null)
 
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
@@ -34,6 +35,9 @@ export default function Home() {
   }, [])
   useEffect(() => {
     fetchServices(pincode || undefined).then((c) => setServices(c.services)).catch(() => {})
+    // Live surge heads-up for the customer's zone — so they see "rain incoming" on open.
+    if (pincode) fetchZoneSurge(pincode).then(setSurge).catch(() => setSurge(null))
+    else setSurge(null)
   }, [pincode])
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
@@ -92,6 +96,18 @@ export default function Home() {
             <img className="hd-hero-img" src="/expert.jpg" alt=""
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
           </div>
+
+          {/* live surge heads-up — shown the moment the app opens when the customer's zone is surging */}
+          {surge?.active && surge.pct > 0 && (
+            <div className="hd-surge">
+              <span className="hd-surge-ic">{surge.reason === 'rain' ? '🌧️' : '⚡'}</span>
+              <span className="hd-surge-txt">
+                {surge.reason === 'rain'
+                  ? <><b>Rain incoming{surge.prob != null ? ` · ${surge.prob}% chance` : ''}</b> — demand is high, so prices are up {surge.pct}% right now. Book soon to lock the best rate.</>
+                  : <><b>High demand right now</b> — prices are up {surge.pct}%. Book soon to lock the best rate.</>}
+              </span>
+            </div>
+          )}
 
           {/* search */}
           <button className="hd-search" onClick={() => nav('/popular-services')}>
