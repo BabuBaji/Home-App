@@ -438,7 +438,12 @@ export const updateComplaint = (id: number, body: Record<string, unknown>) => re
 
 /* tickets */
 export const fetchTickets = () => req<Ticket[]>('/tickets')
-export const updateTicket = (id: number, body: { status?: string; response?: string }) => req<Ticket>(`/tickets/${id}`, patch(body))
+export const updateTicket = (id: number, body: Record<string, unknown>) => req<Ticket>(`/tickets/${id}`, patch(body))
+/* booking-linked complaints (Support & Complaints tab) */
+export const fetchBookingTickets = (bookingId: number) => req<{ tickets: any[]; counts: { total: number; open: number; resolved: number; reopened: number; escalated: number } }>(`/tickets/booking/${bookingId}`)
+export const fetchTicketDetail = (id: number) => req<any>(`/tickets/${id}`)
+export const postTicketMessage = (id: number, body: { body: string; internal?: boolean; senderName?: string }) => req<any>(`/tickets/${id}/messages`, post('', body))
+export const createBookingComplaint = (body: Record<string, unknown>) => req<any>('/tickets', post('', body))
 
 /* notifications */
 export const fetchNotifications = () => req<any[]>('/notifications')

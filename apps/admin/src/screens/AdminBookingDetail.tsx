@@ -6,7 +6,7 @@ import {
   LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle, CalendarCheck, PlayCircle, PauseCircle, Flag, HelpCircle,
 } from 'lucide-react'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, fetchEvidence, issueRefund, updateBooking, API_BASE, type Zone, type Settlement, type Evidence } from '../api'
+import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, fetchEvidence, fetchBookingTickets, fetchTicketDetail, postTicketMessage, updateTicket, createBookingComplaint, issueRefund, updateBooking, API_BASE, type Zone, type Settlement, type Evidence } from '../api'
 
 const REACHED: Record<string, number> = { confirmed: 1, worker_assigned: 2, on_the_way: 3, arrived: 4, in_progress: 6, completed: 8, cancelled: 8 }
 // Job-timeline lifecycle: current level per status (steps below it are done, the matching one is live).
@@ -38,6 +38,11 @@ export default function AdminBookingDetail() {
   const [settle, setSettle] = useState<Settlement | null>(null)
   const [ev, setEv] = useState<Evidence | null>(null)
   const [seller, setSeller] = useState<any>(null)
+  const [tks, setTks] = useState<{ tickets: any[]; counts: any } | null>(null)
+  const [selTk, setSelTk] = useState<number | null>(null)
+  const [tkDetail, setTkDetail] = useState<any>(null)
+  const [tkMsg, setTkMsg] = useState('')
+  const [tkTab, setTkTab] = useState<'conversation' | 'resolution' | 'notes'>('conversation')
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
   const [tab, setTab] = useState<'overview' | 'timeline' | 'payment' | 'evidence' | 'support' | 'activity'>('overview')
@@ -58,11 +63,13 @@ export default function AdminBookingDetail() {
     }).catch((e: Error) => setErr(e.message))
     fetchSettlement(Number(id)).then(setSettle).catch(() => {})
     fetchEvidence(Number(id)).then(setEv).catch(() => {})
+    fetchBookingTickets(Number(id)).then((r) => { setTks(r); setSelTk((cur) => cur ?? (r.tickets[0]?.id ?? null)) }).catch(() => {})
   }
   useEffect(() => {
     load(); fetchZones().then(setZones).catch(() => {})
     fetch(`${API_BASE}/api/invoice-info`).then((r) => r.json()).then(setSeller).catch(() => {})
   }, [id])
+  useEffect(() => { if (selTk) fetchTicketDetail(selTk).then(setTkDetail).catch(() => {}); else setTkDetail(null) }, [selTk])
 
   const derived = useMemo(() => {
     if (!b) return null
@@ -106,6 +113,14 @@ export default function AdminBookingDetail() {
   const escalate = () => doUpdate({ escalated: true, escalateReason: 'Flagged from Booking Details' }, 'Booking escalated')
   const reopen = async () => { if (!(await confirm({ title: 'Reopen this service?', message: 'Moves the booking back to in-progress so the worker can resume/redo it.', confirmLabel: 'Reopen' }))) return; doUpdate({ status: 'in_progress' }, 'Service reopened') }
   const mediaAbs = (u: string) => (!u ? '' : u.startsWith('http') ? u : `${API_BASE}${u}`)
+  const reloadTickets = () => { if (selTk) fetchTicketDetail(selTk).then(setTkDetail).catch(() => {}); fetchBookingTickets(Number(id)).then(setTks).catch(() => {}) }
+  const sendTkMsg = (internal = false) => { const body = tkMsg.trim(); if (!body || !selTk) return; postTicketMessage(selTk, { body, internal }).then(() => { setTkMsg(''); reloadTickets() }).catch((e: Error) => toast(e.message, 'err')) }
+  const setTkStatus = (status: string) => { if (!selTk) return; updateTicket(selTk, { status }).then(() => { toast('Ticket updated', 'ok'); reloadTickets() }).catch((e: Error) => toast(e.message, 'err')) }
+  const escalateTk = () => { if (!selTk) return; updateTicket(selTk, { escalated: true, status: 'Escalated' }).then(() => { toast('Ticket escalated', 'ok'); reloadTickets() }).catch((e: Error) => toast(e.message, 'err')) }
+  const newComplaint = () => {
+    createBookingComplaint({ bookingId: Number(id), bookingRef: b.ref, userId: b.user_id, category: 'General', subject: 'Complaint on this booking', message: 'Complaint raised from admin.', priority: 'medium', raisedBy: 'Admin', source: 'admin' })
+      .then((t) => { toast('Complaint created', 'ok'); fetchBookingTickets(Number(id)).then((r) => { setTks(r); setSelTk(t.id) }) }).catch((e: Error) => toast(e.message, 'err'))
+  }
   const cancel = async () => { if (!(await confirm({ title: 'Cancel this booking?', message: 'The customer is notified and refunded per policy.', confirmLabel: 'Cancel booking', danger: true }))) return; doUpdate({ status: 'cancelled' }, 'Booking cancelled') }
   const doRefund = async () => {
     if (!(await confirm({ title: 'Create a refund for this booking?', message: 'Routed through the approval matrix — it may execute now or queue for sign-off.', confirmLabel: 'Create refund' }))) return
@@ -415,7 +430,138 @@ export default function AdminBookingDetail() {
         </div>
         )
       })())}
-      {tab === 'support' && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>{supportCard()}{notesCard()}</div>}
+      {tab === 'support' && (() => {
+        const cnt = tks?.counts || { total: 0, open: 0, resolved: 0, reopened: 0, escalated: 0 }
+        const t = tkDetail
+        const prTone = (p: string) => (p === 'high' ? 'red' : p === 'low' ? 'gray' : 'amber')
+        const stTone = (s: string) => { const x = (s || '').toLowerCase(); return x === 'resolved' || x === 'closed' ? 'green' : x === 'escalated' ? 'red' : x === 'reopened' ? 'amber' : 'blue' }
+        const steps: [string, string | null][] = t ? [['Raised', t.created], ['Acknowledged', t.acknowledged_at], ['Under Review', t.review_at], ['Resolved', t.resolved_at]] : []
+        return (
+        <div className="grid" style={{ gap: 16 }}>
+          {/* KPI strip */}
+          <div className="stat-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+            {[['Total Tickets', cnt.total, '#5b51e8', 'All Time'], ['Open', cnt.open, cnt.open ? '#f59e0b' : '#16a34a', 'issues'], ['Resolved', cnt.resolved, '#16a34a', 'this booking'], ['Reopened', cnt.reopened, cnt.reopened ? '#f04438' : '#98a2b3', 'this booking'], ['Escalated', cnt.escalated, cnt.escalated ? '#f04438' : '#98a2b3', 'this booking']].map(([l, v, c, sub]) => (
+              <div key={l as string} className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 22, fontWeight: 800, color: c as string }}>{v as number}</div><div className="muted" style={{ fontSize: 11 }}>{sub}</div></div>
+            ))}
+            <div className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>Customer Rating</div><div style={{ fontSize: 18, fontWeight: 800, color: '#f5b301' }}>{b.rating ? `${'★'.repeat(b.rating)} ${b.rating.toFixed(1)}` : '—'}</div></div>
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'minmax(230px, 0.8fr) minmax(0, 2fr) minmax(240px, 1fr)', gap: 16, alignItems: 'start' }}>
+            {/* left: ticket list + quick actions */}
+            <div className="grid" style={{ gap: 16 }}>
+              <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><LifeBuoy size={16} /> Support Tickets ({cnt.total})</span>}>
+                {tks && tks.tickets.length ? tks.tickets.map((tk: any) => (
+                  <button key={tk.id} onClick={() => setSelTk(tk.id)} style={{ display: 'block', width: '100%', textAlign: 'left', border: selTk === tk.id ? '1.5px solid var(--violet,#5b51e8)' : '1px solid var(--line)', background: selTk === tk.id ? '#f6f6fe' : '#fff', borderRadius: 10, padding: '10px 12px', marginBottom: 8, cursor: 'pointer' }}>
+                    <div className="row" style={{ justifyContent: 'space-between' }}><span className="muted" style={{ fontSize: 11 }}>{tk.ref}</span><Badge tone={stTone(tk.status)} dot={false}>{tk.status}</Badge></div>
+                    <div style={{ fontWeight: 700, fontSize: 13, margin: '3px 0' }}>{tk.subject}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{tk.raised_by || 'Customer'} · {fmtDateTime(tk.created)}</div>
+                  </button>
+                )) : <div className="muted" style={{ fontSize: 13, padding: '10px 0' }}>No tickets for this booking.</div>}
+              </Card>
+              <Card title="Quick Actions">
+                <div className="grid" style={{ gap: 6 }}>
+                  <button className="btn" style={{ justifyContent: 'flex-start' }} onClick={newComplaint}><LifeBuoy size={14} /> Create Complaint</button>
+                  <button className="btn line" style={{ justifyContent: 'flex-start' }} disabled={!custPhone} onClick={() => tel(custPhone)}><Phone size={14} /> Call Customer</button>
+                  <button className="btn line" style={{ justifyContent: 'flex-start' }} disabled={!workerPhone} onClick={() => tel(workerPhone)}><Phone size={14} /> Call Worker</button>
+                  <button className="btn line" style={{ justifyContent: 'flex-start' }} disabled={!custPhone} onClick={() => custPhone && window.open(`https://wa.me/${custPhone.replace(/\D/g, '')}`)}><MessageCircle size={14} /> WhatsApp Customer</button>
+                  <button className="btn line" style={{ justifyContent: 'flex-start' }} onClick={() => selTk ? (setTkTab('notes')) : toast('Select a ticket first', 'err')}><StickyNote size={14} /> Add Internal Note</button>
+                </div>
+              </Card>
+            </div>
+
+            {/* center: ticket detail */}
+            {!t ? <Card title="Ticket"><div className="muted" style={{ fontSize: 13, padding: '20px 0' }}>{tks && tks.tickets.length ? 'Select a ticket to view the conversation.' : 'No tickets yet. Create a complaint to start.'}</div></Card> : (
+              <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}>Ticket {t.ref} <Badge tone={stTone(t.status)} dot={false}>{t.status}</Badge></span>}
+                right={<select className="select" style={{ height: 30, fontSize: 12 }} value={t.status} onChange={(e) => setTkStatus(e.target.value)}>{['Open', 'Acknowledged', 'Under Review', 'Resolved', 'Reopened', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}</select>}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>{t.subject}</div>
+                <div className="row" style={{ gap: 20, flexWrap: 'wrap', fontSize: 12.5, marginBottom: 12 }}>
+                  <div><div className="muted" style={{ fontSize: 11 }}>Priority</div><Badge tone={prTone(t.priority)} dot={false}>{t.priority}</Badge></div>
+                  <div><div className="muted" style={{ fontSize: 11 }}>Raised By</div><b>{t.raised_by || 'Customer'}</b></div>
+                  <div><div className="muted" style={{ fontSize: 11 }}>Reported At</div><b>{fmtDateTime(t.created)}</b></div>
+                  {t.resolved_at && <div><div className="muted" style={{ fontSize: 11 }}>Resolved At</div><b>{fmtDateTime(t.resolved_at)}</b></div>}
+                  {t.resolved_by && <div><div className="muted" style={{ fontSize: 11 }}>Resolved By</div><b>{t.resolved_by}</b></div>}
+                </div>
+                {/* stepper */}
+                <div className="row" style={{ gap: 4, marginBottom: 14 }}>
+                  {steps.map(([label, at], i) => (
+                    <div key={label} className="row" style={{ gap: 4, flex: 1, alignItems: 'center' }}>
+                      <div style={{ textAlign: 'center', flex: 'none' }}>
+                        <span style={{ width: 22, height: 22, borderRadius: 50, display: 'grid', placeItems: 'center', margin: '0 auto', background: at ? '#16a34a' : '#eeeef5', color: at ? '#fff' : '#9aa0ad' }}>{at ? <CheckCircle2 size={13} /> : i + 1}</span>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, marginTop: 3 }}>{label}</div>
+                        <div className="muted" style={{ fontSize: 9.5 }}>{at ? fmtDateTime(at).split(',')[1] : ''}</div>
+                      </div>
+                      {i < steps.length - 1 && <div style={{ flex: 1, height: 2, background: steps[i + 1][1] ? '#bfe6cd' : '#eceaf6' }} />}
+                    </div>
+                  ))}
+                </div>
+                {/* sub-tabs */}
+                <div className="tabs" style={{ marginBottom: 10 }}>
+                  {(['conversation', 'resolution', 'notes'] as const).map((st) => <button key={st} className={'tab' + (tkTab === st ? ' active' : '')} onClick={() => setTkTab(st)}>{{ conversation: 'Conversation', resolution: 'Resolution Details', notes: `Internal Notes (${(t.notes || []).length})` }[st]}</button>)}
+                </div>
+                {tkTab === 'conversation' && <>
+                  <div style={{ display: 'grid', gap: 10, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
+                    {(t.messages || []).map((m: any) => {
+                      const mine = m.sender_type === 'admin'
+                      const bg = m.sender_type === 'worker' ? '#eef4ff' : mine ? '#e7f7ee' : '#fdf0f0'
+                      return (
+                        <div key={m.id} className="row" style={{ gap: 8, flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-start' }}>
+                          <Avatar name={m.sender_name} size={30} />
+                          <div style={{ background: bg, borderRadius: 12, padding: '9px 12px', maxWidth: '75%' }}>
+                            <div className="row" style={{ gap: 8, justifyContent: 'space-between', marginBottom: 3 }}><b style={{ fontSize: 12.5 }}>{m.sender_name} <span className="muted" style={{ fontWeight: 400, textTransform: 'capitalize' }}>({m.sender_type})</span></b><span className="muted" style={{ fontSize: 10.5 }}>{fmtDateTime(m.created)}</span></div>
+                            <div style={{ fontSize: 13 }}>{m.body}</div>
+                            <div className="muted" style={{ fontSize: 10, marginTop: 3 }}>Source: {m.source === 'admin' ? 'Admin' : 'In-App'}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {(!t.messages || !t.messages.length) && <div className="muted" style={{ fontSize: 13 }}>No messages yet.</div>}
+                  </div>
+                  <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                    <input className="input" style={{ flex: 1 }} placeholder="Type a message…" value={tkMsg} onChange={(e) => setTkMsg(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendTkMsg(false) }} />
+                    <button className="btn" onClick={() => sendTkMsg(false)} disabled={!tkMsg.trim()}>Send</button>
+                  </div>
+                </>}
+                {tkTab === 'resolution' && <div style={{ fontSize: 13 }}>{t.response || <span className="muted">No resolution summary recorded. Change status to Resolved and add a closing message.</span>}</div>}
+                {tkTab === 'notes' && <>
+                  <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+                    {(t.notes || []).map((n: any) => <div key={n.id} style={{ background: '#f6f6fe', borderRadius: 8, padding: '8px 10px' }}><div className="row" style={{ justifyContent: 'space-between' }}><b style={{ fontSize: 12 }}>{n.sender_name}</b><span className="muted" style={{ fontSize: 10.5 }}>{fmtDateTime(n.created)}</span></div><div style={{ fontSize: 12.5, marginTop: 2 }}>{n.body}</div></div>)}
+                    {(!t.notes || !t.notes.length) && <div className="muted" style={{ fontSize: 13 }}>No internal notes.</div>}
+                  </div>
+                  <div className="row" style={{ gap: 8 }}><input className="input" style={{ flex: 1 }} placeholder="Add an internal note (admin-only)…" value={tkMsg} onChange={(e) => setTkMsg(e.target.value)} /><button className="btn line" onClick={() => sendTkMsg(true)} disabled={!tkMsg.trim()}>Add Note</button></div>
+                </>}
+              </Card>
+            )}
+
+            {/* right: complaint info + related + escalation */}
+            <div className="grid" style={{ gap: 16 }}>
+              {t && <Card title="Complaint Information">
+                <Row label="Issue Category" value={t.category || '—'} />
+                <Row label="Sub Category" value={t.subcategory || '—'} />
+                <Row label="Severity" value={<Badge tone={prTone(t.severity)} dot={false}>{t.severity}</Badge>} />
+                <Row label="Impact" value={<span style={{ textTransform: 'capitalize' }}>{t.impact}</span>} />
+                {b.rating > 0 && <Row label="Customer Satisfaction" value={`${'★'.repeat(b.rating)} ${b.rating.toFixed(1)}`} />}
+                {b.review && <Row label="Feedback" value={b.review} />}
+              </Card>}
+              <Card title="Related Details">
+                <Row label="Worker" value={b.pro_name || '—'} />
+                {b.worker_id && <Row label="Worker ID" value={`WRK-${b.worker_id}`} />}
+                <Row label="Service" value={svcName} />
+                <Row label="Service Date" value={b.date ? shortDate(b.date) : shortDate(b.created)} />
+                {ev?.checkIn.at && <Row label="Start Time" value={`${timeOnly(ev.checkIn.at)} (Actual)`} />}
+                <Row label="Scheduled Time" value={b.time || '—'} />
+                <Row label="Job Duration" value={ev?.durationMin != null ? `${Math.floor(ev.durationMin / 60)}h ${String(ev.durationMin % 60).padStart(2, '0')}m` : '—'} />
+                <Row label="Amount Paid" value={<span>{money(b.total)} <Badge tone={(b.payment_status || '').toLowerCase() === 'paid' ? 'green' : 'amber'}>{b.payment_status || '—'}</Badge></span>} />
+              </Card>
+              {t && <Card title="Escalation & Follow-up">
+                <Row label="Escalated" value={t.escalated ? <Badge tone="red">Yes</Badge> : 'No'} />
+                {t.escalate_reason && <Row label="Reason" value={t.escalate_reason} />}
+                <button className="btn line sm" style={{ marginTop: 8 }} disabled={t.escalated} onClick={escalateTk}><ArrowUpCircle size={13} /> {t.escalated ? 'Escalated' : 'Escalate Ticket'}</button>
+              </Card>}
+            </div>
+          </div>
+        </div>
+        )
+      })()}
       {tab === 'activity' && <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 16 }}>{notesCard()}</div>}
 
       {/* modals */}
