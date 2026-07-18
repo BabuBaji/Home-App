@@ -20,11 +20,14 @@ import java.util.concurrent.TimeUnit
  * same-Wi-Fi testing).
  */
 object RetrofitClient {
-    // Last resort ONLY — used when app-config.json can't be fetched, which usually means no
-    // internet, where a public tunnel would be no help either. The live URL lives in
-    // app-config.json (see refreshBaseUrl) and is picked up at runtime without rebuilding, so
-    // this value should never need editing. It is a same-Wi-Fi convenience, not the real config.
-    private const val FALLBACK_URL = "http://192.168.29.249:8080/"
+    // Public tunnel testing: the PC gateway is exposed via a Cloudflare quick tunnel, so the
+    // app works on any network (mobile data / different Wi-Fi) with no LAN dependency.
+    // NOTE: quick-tunnel URLs are ephemeral — if the tunnel restarts, rebuild with the new URL.
+    // Over USB: `adb reverse tcp:8080 tcp:8080` maps the phone's localhost:8080 to the PC's
+    // gateway, so the app reaches the backend through the cable. Stable across sessions, unlike a
+    // cloudflared quick tunnel whose URL changes every restart. Needs the cable (or a re-run of
+    // adb reverse) — swap in a tunnel URL here when testing off-desk.
+    private const val FALLBACK_URL = "http://localhost:8080/"
     private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
 
     /** Current backend base URL — updated by [refreshBaseUrl]. */
@@ -43,6 +46,10 @@ object RetrofitClient {
 
     /** Pull the live backend URL from the public config. Blocking — call off the main thread. */
     fun refreshBaseUrl() {
+        // Local USB testing: pin to FALLBACK_URL (localhost:8080 via `adb reverse`) and skip the
+        // remote config, so the stale GitHub apiBase (a dead quick-tunnel) can't repoint the app at
+        // an unreachable host. Remove this line to restore config-driven URLs for real deployments.
+        if (true) return
         if (refreshed) return
         try {
             val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()

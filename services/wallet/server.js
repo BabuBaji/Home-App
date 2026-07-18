@@ -51,6 +51,18 @@ async function init() {
     // so `INSERT ... ON CONFLICT (worker_id, ref_id)` can use it as the arbiter for idempotent settlement.
     `DROP INDEX IF EXISTS ux_income_ref`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_income_ref ON worker_income(worker_id, ref_id)`,
+    // Wallet PIN gates withdrawals (step 2 of the withdraw flow). Stored as a salted SHA-256
+    // digest — never the PIN itself — with a lockout counter so a 4-digit space can't be walked.
+    `CREATE TABLE IF NOT EXISTS worker_wallet_pin (
+       worker_id INTEGER PRIMARY KEY,
+       pin_hash TEXT NOT NULL,
+       salt TEXT NOT NULL,
+       fails INTEGER NOT NULL DEFAULT 0,
+       locked_until TIMESTAMPTZ,
+       updated TIMESTAMPTZ DEFAULT now()
+     )`,
+    `ALTER TABLE worker_withdrawals ADD COLUMN IF NOT EXISTS bank_account_id INTEGER`,
+    `ALTER TABLE worker_withdrawals ADD COLUMN IF NOT EXISTS reference TEXT`,
     // Who credited this row: 'System' for the event-driven incentives/earnings the platform calculates
     // itself, or an admin's name for a manually granted bonus. Existing rows are all system-generated.
     `ALTER TABLE worker_income ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'System'`,
@@ -402,27 +414,27 @@ async function serviceWiseEarnings(wid) {
 
 /** Payout rules + the worker's payout destination, as the Settlement Info card shows them. */
 async function settlementInfo(wid) {
-  const w = await tryGet(WORKER_URL, `/internal/workers/${wid}`, {})
-  // Bank details live under the worker's profile JSON (mergeProfile(id, { bank })), not as
-  // top-level columns — the snapshot only exposes bank_status alongside it.
-  const bank = w?.profile?.bank || {}
-  // Field names are bankAccount / bankUpi — see workerDto() in the worker service. `bank.account`
-  // and `bank.upi` do not exist, so reading those made this card always say "Not set".
-  const acct = String(bank.bankAccount || '')
-  const upi = String(bank.bankUpi || '')
-  const status = String(w?.bank_status || w?.bankStatus || '')
-  const freq = await getSetting(ADMIN_URL, 'payout_frequency', 'weekly')
+  // Source of truth is the worker service's payout view: the worker's chosen rules plus their
+  // real payout accounts (worker_bank_accounts). The legacy profile.bank blob is no longer written
+  // by the wallet flow — reading it here is what made the card claim "Settlement Mode: Not set"
+  // while showing a verified account beside it.
+  const payout = await tryGet(WORKER_URL, `/internal/workers/${wid}/payout`, null)
+  const st = payout?.settings || {}
+  const acct = payout?.default || (payout?.accounts || []).find((a) => a.verified) || (payout?.accounts || [])[0] || null
+  // The card MUST show the minimum the withdrawal endpoint actually enforces — the higher of the
+  // admin's global limit and the worker's own setting — or it would promise a smaller minimum than
+  // the server will accept.
+  const adminMin = await minPayoutLimit()
   return {
-    // Derived from the configured payout policy — the same one summary() estimates nextPayout from.
-    // A hardcoded time here would contradict the admin's setting the moment it changed.
-    dailyTime: FREQ_LABEL[freq] || 'On demand',
-    // MUST be the key the withdrawal endpoint actually enforces (min_payout_limit). Reading a
-    // different key told the worker "min ₹200" while the server rejected anything under ₹500.
-    minPayout: await minPayoutLimit(),
-    mode: acct ? 'Bank Transfer' : (upi ? 'UPI' : 'Not set'),
-    bankAccount: acct ? `****${acct.slice(-4)}` : upi,
-    bankVerified: status === 'Verified',
-    bankStatus: status || 'Not Added',
+    dailyTime: st.settlementTime || '07:00 AM',
+    frequency: st.weeklySettlement ? 'Weekly' : (st.dailySettlement ? 'Daily' : 'Manual'),
+    minPayout: Math.max(adminMin, Number(st.minPayout) || 0),
+    autoWithdraw: !!st.autoWithdraw,
+    mode: acct ? (acct.upi && !acct.account ? 'UPI' : 'Bank Transfer') : 'Not set',
+    bankAccount: acct ? acct.accountMasked || acct.upi : '',
+    bankName: acct?.bankName || '',
+    bankVerified: !!acct?.verified,
+    bankStatus: acct ? acct.status : 'Not added',
   }
 }
 
@@ -571,7 +583,10 @@ app.get('/api/worker/wallet/payslip', auth, async (req, res) => { const s = awai
 app.get('/api/worker/wallet/payslips', auth, async (req, res) => res.json(await rowsFor('worker_payslips', req.wid)))
 app.post('/api/worker/wallet/payslip/generate', auth, async (req, res) => { const s = await summary(req.wid); const { rows } = await pool.query('INSERT INTO worker_payslips (worker_id,month,gross,deductions,net) VALUES ($1,$2,$3,0,$3) RETURNING *', [req.wid, req.body?.month || 'This month', s.thisMonth]); res.json(rows[0]) })
 
-app.post('/api/worker/wallet/withdraw/request-otp', auth, (_q, res) => res.json({ ok: true, devOtp: process.env.WORKER_DEV_OTP || '1234' }))
+// Single source for the withdraw/PIN-reset OTP — the endpoint below hands it out in dev, and
+// the PIN reset checks against the same value.
+const WITHDRAW_OTP = process.env.WORKER_DEV_OTP || '1234'
+app.post('/api/worker/wallet/withdraw/request-otp', auth, (_q, res) => res.json({ ok: true, devOtp: WITHDRAW_OTP }))
 app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)
   const avail = (await summary(req.wid)).available
@@ -585,6 +600,19 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   const minAmt = await minPayoutLimit()
   if (amount < minAmt) return res.json({ ok: false, error: `Minimum payout is ₹${minAmt}` })
   if (amount > avail) return res.json({ ok: false, error: 'Amount exceeds available balance' })
+  // The PIN is checked HERE, not just on the PIN screen: a client can always skip a screen, so the
+  // money must not move without it.
+  const pin = await verifyPin(req.wid, String(req.body?.pin || ''))
+  if (!pin.ok) return res.status(403).json(pin)
+  // Payout rules + destination come from the worker service, so the minimum a worker set in Payout
+  // Settings is enforced server-side rather than only in the UI.
+  const payout = await tryGet(WORKER_URL, `/internal/workers/${req.wid}/payout`, null)
+  const minPayout = Number(payout?.settings?.minPayout) || 200
+  if (amount < minPayout) return res.json({ ok: false, error: `Minimum withdrawal is ₹${minPayout}` })
+  const accounts = payout?.accounts || []
+  const wanted = req.body?.bankAccountId ? accounts.find((a) => a.id === Number(req.body.bankAccountId)) : (payout?.default || null)
+  if (accounts.length && !wanted) return res.json({ ok: false, error: 'Choose a payout account' })
+  if (wanted && !wanted.verified) return res.json({ ok: false, error: 'That account is still being verified' })
   const autoBelow = await getSettingInt(ADMIN_URL, 'auto_approve_withdrawal_below', 2000)
   const method = req.body?.method || 'bank'
   // Auto-approved small amounts go straight to payout ('Processing'); larger amounts wait for an
@@ -592,15 +620,97 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   // payout lands (payout.completed) — or refunded to balance if it fails (payout.failed).
   const auto = amount <= autoBelow
   const status = auto ? 'Processing' : 'Pending'
-  // Snapshot the destination account now — this is where the money is going, and the worker may
-  // change their bank details before or after it lands.
-  const snapshot = await workerSnapshot(req.wid)
-  const destination = formatDest((snapshot && snapshot.profile && snapshot.profile.bank) || {}, method)
-  const { rows } = await pool.query('INSERT INTO worker_withdrawals (worker_id,amount,method,status,destination) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.wid, amount, method, status, destination])
+  // Snapshot the destination now — this is where the money is going, and the worker may change
+  // their bank details before or after it lands. The chosen account (from worker_bank_accounts)
+  // is the source of truth; fall back to the legacy profile.bank snapshot if none was selected.
+  const ref = 'WD' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + String(Date.now()).slice(-5)
+  const destination = wanted
+    ? `${wanted.bankName} ${wanted.accountMasked}`.trim()
+    : formatDest(((await workerSnapshot(req.wid))?.profile?.bank) || {}, method)
+  const { rows } = await pool.query(
+    'INSERT INTO worker_withdrawals (worker_id,amount,method,status,bank_account_id,reference,destination) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+    [req.wid, amount, method, status, wanted?.id || null, ref, destination])
   await adjustBalance(req.wid, { balance: -amount, hold: amount })
   if (auto) publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: rows[0].id, workerId: req.wid, amount, method })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'wallet.withdraw', entityType: 'wallet', entityId: req.wid, detail: `Requested withdrawal ₹${amount} (${status})`, meta: { amount } })
-  res.json({ ok: true, ...(await walletState(req.wid)) })
+  res.json({
+    ok: true,
+    withdrawalId: rows[0].id,
+    reference: ref,
+    status,
+    destination: wanted ? `${wanted.bankName} ${wanted.accountMasked}` : '',
+    expectedCredit: auto ? 'Within 30 minutes' : 'After admin approval',
+    ...(await walletState(req.wid)),
+  })
+})
+
+// ─── Wallet PIN ───────────────────────────────────────────────────────────────────────────
+// A 4-digit PIN over a 10k space is brute-forceable in seconds, so: salted digest at rest, and
+// five wrong tries locks the PIN for 15 minutes rather than letting a thief walk the keyspace.
+
+const crypto = require('crypto')
+const pinDigest = (pin, salt) => crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex')
+const PIN_MAX_FAILS = 5
+const PIN_LOCK_MIN = 15
+
+const pinRow = async (wid) => (await pool.query('SELECT * FROM worker_wallet_pin WHERE worker_id=$1', [wid])).rows[0] || null
+
+/** Result: { ok } or { ok:false, error, lockedFor? } — never leaks whether a PIN exists. */
+async function verifyPin(wid, pin) {
+  const row = await pinRow(wid)
+  if (!row) return { ok: false, error: 'Set a wallet PIN first' }
+  if (row.locked_until && new Date(row.locked_until) > new Date()) {
+    const mins = Math.ceil((new Date(row.locked_until) - Date.now()) / 60000)
+    return { ok: false, error: `Too many wrong attempts. Try again in ${mins} min`, lockedFor: mins }
+  }
+  if (pinDigest(String(pin), row.salt) !== row.pin_hash) {
+    const fails = (row.fails || 0) + 1
+    const lock = fails >= PIN_MAX_FAILS ? `now() + interval '${PIN_LOCK_MIN} minutes'` : 'NULL'
+    await pool.query(`UPDATE worker_wallet_pin SET fails=$2, locked_until=${lock} WHERE worker_id=$1`, [wid, fails >= PIN_MAX_FAILS ? 0 : fails])
+    return {
+      ok: false,
+      error: fails >= PIN_MAX_FAILS
+        ? `Too many wrong attempts. Try again in ${PIN_LOCK_MIN} min`
+        : `Incorrect PIN. ${PIN_MAX_FAILS - fails} attempt${PIN_MAX_FAILS - fails === 1 ? '' : 's'} left`,
+      attemptsLeft: Math.max(0, PIN_MAX_FAILS - fails),
+    }
+  }
+  await pool.query('UPDATE worker_wallet_pin SET fails=0, locked_until=NULL WHERE worker_id=$1', [wid])
+  return { ok: true }
+}
+
+app.get('/api/worker/wallet/pin/status', auth, async (req, res) => {
+  const row = await pinRow(req.wid)
+  const locked = !!(row?.locked_until && new Date(row.locked_until) > new Date())
+  res.json({ ok: true, isSet: !!row, locked })
+})
+
+/** Set or reset the PIN. Reset needs the OTP from /wallet/withdraw/request-otp — that OTP is the
+ *  only thing standing between a stolen unlocked phone and the balance. */
+app.post('/api/worker/wallet/pin/set', auth, async (req, res) => {
+  const pin = String(req.body?.pin || '')
+  if (!/^\d{4}$/.test(pin)) return res.status(400).json({ ok: false, error: 'PIN must be 4 digits' })
+  if (/^(\d)\1{3}$/.test(pin) || ['1234', '0123', '4321'].includes(pin)) {
+    return res.status(400).json({ ok: false, error: 'Choose a less guessable PIN' })
+  }
+  const existing = await pinRow(req.wid)
+  if (existing) {
+    const otp = String(req.body?.otp || '')
+    if (otp !== WITHDRAW_OTP) return res.status(403).json({ ok: false, error: 'Enter the OTP sent to your phone to reset the PIN' })
+  }
+  const salt = crypto.randomBytes(8).toString('hex')
+  await pool.query(
+    `INSERT INTO worker_wallet_pin (worker_id, pin_hash, salt, fails, locked_until, updated)
+     VALUES ($1,$2,$3,0,NULL,now())
+     ON CONFLICT (worker_id) DO UPDATE SET pin_hash=$2, salt=$3, fails=0, locked_until=NULL, updated=now()`,
+    [req.wid, pinDigest(pin, salt), salt])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'wallet.pin', entityType: 'wallet', entityId: req.wid, detail: existing ? 'Wallet PIN reset' : 'Wallet PIN set' })
+  res.json({ ok: true, isSet: true })
+})
+
+app.post('/api/worker/wallet/pin/verify', auth, async (req, res) => {
+  const r = await verifyPin(req.wid, String(req.body?.pin || ''))
+  res.status(r.ok ? 200 : 403).json(r)
 })
 
 app.get('/api/worker/wallet/advance/eligibility', auth, async (req, res) => {

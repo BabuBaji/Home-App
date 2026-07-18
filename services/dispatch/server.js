@@ -180,7 +180,8 @@ async function jobFromBooking(b) {
   const c = u?.user || {}
   const initials = String(c.name || 'C').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()
   return {
-    id: b.ref, bookingId: b.id, customerName: c.name || 'Customer', initials, customerPhone: c.phone || '', customerRating: c.rating || 5.0,
+    id: b.ref, bookingId: b.id, customerName: c.name || 'Customer', initials, customerAvatar: c.avatar || '', customerPhone: c.phone || '', customerRating: c.rating || 5.0,
+    customerType: b.type || 'Residential', note: b.note || '',
     services: (b.items || []).map((i) => i.name), dateTime: [b.date, b.time].filter(Boolean).join(', ') || new Date(b.created).toLocaleString(),
     durationHours: Math.max(1, parseInt(b.duration, 10) || 2), durationMinutes: bookingDurationMinutes(b), address: b.address, area: (b.address || '').split(',').slice(-2).join(',').trim() || b.address,
     distanceKm: +(1 + (b.id % 30) / 10).toFixed(1), earnings: await workerShare(b.total), otp: b.service_otp,

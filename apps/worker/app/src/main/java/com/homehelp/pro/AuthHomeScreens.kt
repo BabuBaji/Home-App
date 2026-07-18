@@ -501,7 +501,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     JobStatus.REQUESTED -> Routes.NEW_JOB
                     JobStatus.ACCEPTED -> Routes.JOB_DETAILS
                     JobStatus.ON_THE_WAY -> Routes.ON_THE_WAY
-                    JobStatus.ARRIVED -> Routes.START_SERVICE
+                    JobStatus.ARRIVED -> Routes.ARRIVED
                     JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
                     else -> null
                 }
