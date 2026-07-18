@@ -31,9 +31,11 @@ const manualOverride = new Map()  // zoneId (or '*') -> { pct, until }
 function computeSurge(w) {
   if (!w) return { active: false, pct: 0, reason: '' }
   const mm = Number(w.precipMm) || 0, prob = Number(w.prob) || 0
-  const rainy = mm >= 0.2 || prob >= PROB_THRESHOLD
+  // Surge only when it's ACTUALLY raining now, and hard enough to matter — a mere high forecast
+  // probability or a trace drizzle no longer triggers it, so the app matches on-street conditions.
+  const rainy = mm >= 0.5   // ignore trace/drizzle (grid data reads light rain the street doesn't feel)
   if (!rainy) return { active: false, pct: 0, reason: '', prob, precipMm: mm }
-  let pct = mm >= 7.5 ? 30 : mm >= 2.5 ? 20 : mm >= 0.2 ? 10 : 15  // prob-only-high → 15
+  let pct = mm >= 7.5 ? 30 : mm >= 2.5 ? 20 : 10   // light / moderate / heavy
   pct = Math.min(pct, SURGE_MAX_PCT)
   return { active: pct > 0, pct, reason: 'rain', prob, precipMm: mm }
 }
@@ -72,11 +74,13 @@ async function pollOnce(pool) {
   for (const city of cities) {
     const [lat, lng] = CITY_COORDS[city]
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=precipitation,precipitation_probability&forecast_hours=2&timezone=auto`
+      // `current` = what's falling RIGHT NOW (so surge tracks actual rain, not a 2-hour forecast);
+      // the hourly probability is kept only for display ("73% chance").
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=precipitation,rain&hourly=precipitation_probability&forecast_hours=1&timezone=auto`
       const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const j = await res.json()
-      const precipMm = (j.hourly?.precipitation || [])[0] ?? 0
+      const precipMm = j.current?.precipitation ?? j.current?.rain ?? 0
       const prob = (j.hourly?.precipitation_probability || [])[0] ?? 0
       weatherByCity.set(city, { precipMm, prob, at: Date.now() })
     } catch { /* keep last-known reading on a transient failure */ }

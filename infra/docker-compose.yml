@@ -133,6 +133,14 @@ services:
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
       WORKER_URL: http://worker:4004
+      # object storage for Home-banner background images (public media bucket, like worker avatars)
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9010}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-homehelp}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-minio}
+      S3_BUCKET: ${S3_BUCKET:-homehelp-kyc}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-homehelp-media}
     ports: ["4001:4001"]
     depends_on:
       catalog-db: { condition: service_healthy }

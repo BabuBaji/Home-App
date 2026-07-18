@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone, MembershipPlan,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone, MembershipPlan, HomeBanner,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -40,7 +40,7 @@ export function clearAdmin() { localStorage.removeItem('hha_admin') }
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(API_BASE + '/api/admin' + path, {
     ...opts,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
+    headers: { ...(opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
   })
   // A 401 means the session is gone (expired, or the signing secret rotated). Clearing the token
   // isn't enough: the route guard reads `admin` from the store, so without telling it, the panel
@@ -381,6 +381,19 @@ export const fetchCommandCenter = () => req<CommandCenter>('/command-center')
 /* surge pricing — live per-zone surge + ops manual override */
 export const fetchSurge = () => req<SurgeZone[]>('/surge')
 export const setSurge = (body: { zoneId: number | 'all'; pct: number; minutes?: number }) => req<{ ok: boolean }>('/surge', post('', body))
+/* home hero banners — festival / promo scheduling for the customer app's rotating hero */
+export const fetchBanners = () => req<HomeBanner[]>('/banners')
+export const createBanner = (body: Record<string, unknown>) => req<{ ok: boolean; id: number }>('/banners', post('', body))
+export const updateBanner = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/banners/${id}`, patch(body))
+export const deleteBanner = (id: number) => req<{ ok: boolean }>(`/banners/${id}`, { method: 'DELETE' })
+// Upload a banner background image (multipart) → returns a gateway-relative URL to store on the banner.
+export const uploadBannerImage = (file: File) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return req<{ url: string }>('/banners/image', { method: 'POST', body: fd })
+}
+// Absolute URL for a stored banner image path (so <img> can load it directly).
+export const mediaUrl = (path: string) => (path.startsWith('http') ? path : `${API_BASE}${path}`)
 /* control tower — per-job executive console (actions reuse updateBooking) */
 export const fetchControlTower = () => req<ControlTowerData>('/control-tower')
 

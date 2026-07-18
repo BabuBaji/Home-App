@@ -84,6 +84,16 @@ export const signedGetUrl = (key, expiresIn = 300, bucket = S3_BUCKET) =>
 export const deleteObject = (key, bucket = S3_BUCKET) =>
   s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
 
+/**
+ * Fetch an object's bytes + content type, for services that must PROXY the file to a client that
+ * can't reach the storage host directly (e.g. the phone can't resolve the localhost-bound MinIO
+ * port — the gateway can, so the service streams it through). Returns { body, contentType }.
+ */
+export async function getObjectStream(key, bucket = S3_PUBLIC_BUCKET) {
+  const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+  return { body: out.Body, contentType: out.ContentType || 'application/octet-stream' }
+}
+
 /* ---------- public media (profile photos) ----------
  * A SECOND bucket, public-read, deliberately separate from the KYC one.
  *

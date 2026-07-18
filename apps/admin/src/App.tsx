@@ -22,6 +22,7 @@ import ZoneOnboarding from './screens/ZoneOnboarding'
 import Stores from './screens/Stores'
 import { CitiesPage, ClustersPage, ApartmentsPage, InventoryPage, PricingPage, ServiceCoveragePage } from './screens/ZoneEntities'
 import SurgePricing from './screens/SurgePricing'
+import HomeBanners from './screens/HomeBanners'
 import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
 import Shifts from './screens/Shifts'
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="/services" element={<Page perm="services.view"><Services /></Page>} />
           <Route path="/campaigns" element={<Page perm="campaigns.view"><Campaigns /></Page>} />
           <Route path="/membership" element={<Page perm="pricing.view"><MembershipPlans /></Page>} />
+          <Route path="/home-banners" element={<Page perm="campaigns.view"><HomeBanners /></Page>} />
           <Route path="/service-areas" element={<Page perm="zones.view"><ServiceAreas /></Page>} />
           <Route path="/zones" element={<Page perm="zones.view"><ZoneOnboarding /></Page>} />
           <Route path="/zones/cities" element={<Page perm="zones.view"><CitiesPage /></Page>} />
