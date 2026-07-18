@@ -51,6 +51,12 @@ import com.homehelp.pro.network.PreferencesBody
 import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
+import com.homehelp.pro.network.BankAccount
+import com.homehelp.pro.network.BankAccountBody
+import com.homehelp.pro.network.PayoutSettingsDto
+import com.homehelp.pro.network.PinBody
+import com.homehelp.pro.network.WithdrawRequestBody
+import com.homehelp.pro.network.WithdrawResult
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -109,6 +115,9 @@ data class Job(
     val id: String,
     val customerName: String,
     val initials: String,
+    val customerAvatar: String = "",
+    val customerType: String = "Residential",
+    val note: String = "",
     val customerPhone: String,
     val customerRating: Double,
     val services: List<String>,
@@ -277,6 +286,129 @@ class AppViewModel : ViewModel() {
                 leaderboard = r.leaderboard
                 backendConnected = true
             } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    // ─── Wallet module: bank accounts · payout settings · PIN · withdrawal ───────────────
+    val bankAccounts = mutableStateListOf<BankAccount>()
+    var payoutSettings by mutableStateOf(PayoutSettingsDto())
+        private set
+    var pinIsSet by mutableStateOf(false)
+        private set
+    var walletBusy by mutableStateOf(false)
+        private set
+    var walletError by mutableStateOf<String?>(null)
+        private set
+    /** The result of the last withdrawal — drives the success screen. */
+    var lastWithdrawal by mutableStateOf<WithdrawResult?>(null)
+        private set
+
+    fun clearWalletError() { walletError = null }
+
+    val defaultBank: BankAccount? get() = bankAccounts.firstOrNull { it.isDefault } ?: bankAccounts.firstOrNull()
+
+    private fun bankCall(block: suspend () -> List<BankAccount>) {
+        walletBusy = true; walletError = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val list = block()
+                bankAccounts.clear(); bankAccounts.addAll(list)
+                backendConnected = true
+            } catch (e: Exception) {
+                walletError = httpMessage(e) ?: "Couldn't reach the server"
+                backendConnected = false
+            }
+            walletBusy = false
+        }
+    }
+
+    /** Surfaces the server's own message (e.g. "That account is already added") instead of a generic error. */
+    private fun httpMessage(e: Exception): String? = runCatching {
+        val he = e as? retrofit2.HttpException ?: return@runCatching null
+        val body = he.response()?.errorBody()?.string() ?: return@runCatching null
+        Regex("""\"error\"\s*:\s*\"([^\"]+)\"""").find(body)?.groupValues?.get(1)
+    }.getOrNull()
+
+    fun loadBankAccounts() = bankCall { api.bankAccounts().accounts }
+    fun addBankAccount(holder: String, bankName: String, account: String, ifsc: String, upi: String, type: String) =
+        bankCall { api.addBankAccount(BankAccountBody(holder, bankName, account, ifsc, upi, type)).accounts }
+    fun updateBankAccount(id: Int, holder: String, bankName: String, upi: String, type: String) =
+        bankCall { api.updateBankAccount(id, BankAccountBody(holder = holder, bankName = bankName, upi = upi, accountType = type)).accounts }
+    fun makeBankDefault(id: Int) = bankCall { api.makeBankDefault(id).accounts }
+    fun deleteBankAccount(id: Int) = bankCall { api.deleteBankAccount(id).accounts }
+
+    fun loadPayoutSettings() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.payoutSettings().settings?.let { payoutSettings = it }
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun savePayoutSettings(next: PayoutSettingsDto) {
+        payoutSettings = next            // optimistic; the server reply is adopted below
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.savePayoutSettings(next).settings?.let { payoutSettings = it }
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun loadPinStatus() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                pinIsSet = api.pinStatus().isSet
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    /** Sets or resets the wallet PIN. [otp] is required by the server when a PIN already exists. */
+    fun setWalletPin(pin: String, otp: String? = null, onDone: (Boolean, String?) -> Unit) {
+        walletBusy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.setPin(PinBody(pin, otp))
+                pinIsSet = r.isSet
+                onDone(r.ok, r.error)
+            } catch (e: Exception) { onDone(false, httpMessage(e) ?: "Couldn't reach the server") }
+            walletBusy = false
+        }
+    }
+
+    fun verifyWalletPin(pin: String, onDone: (Boolean, String?) -> Unit) {
+        walletBusy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.verifyPin(PinBody(pin))
+                onDone(r.ok, r.error)
+            } catch (e: Exception) { onDone(false, httpMessage(e) ?: "Couldn't reach the server") }
+            walletBusy = false
+        }
+    }
+
+    fun requestWithdrawalWithPin(amount: Int, pin: String, bankAccountId: Int?, onDone: (Boolean, String?) -> Unit) {
+        walletBusy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.requestWithdrawalPin(WithdrawRequestBody(amount, pin, bankAccountId))
+                if (r.ok) {
+                    lastWithdrawal = r
+                    r.walletSummary?.let { applyWalletSummary(it) }
+                    withdrawals.clear(); withdrawals.addAll(r.withdrawals)
+                }
+                onDone(r.ok, r.error)
+            } catch (e: Exception) { onDone(false, httpMessage(e) ?: "Couldn't reach the server") }
+            walletBusy = false
         }
     }
 
@@ -520,6 +652,27 @@ class AppViewModel : ViewModel() {
             } finally {
                 loggingIn = false
             }
+        }
+    }
+
+    /**
+     * DEBUG ONLY — headless auto-login for on-device UI verification when ADB input injection is
+     * blocked (e.g. HyperOS). Does the two-step demo auth (request-otp → verify) so `am start` can
+     * drive the app without anyone tapping. Never called outside a BuildConfig.DEBUG intent path.
+     */
+    fun debugLogin(phone: String, otp: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.requestOtp(AuthRequest(phone = phone))
+                val b = api.verify(AuthRequest(phone = phone, otp = otp))
+                Session.phone = phone
+                applyBootstrap(b)
+                loadDailyGoal()
+                backendConnected = true
+                isLoggedIn = true
+                onDone(true)
+            } catch (e: Exception) { onDone(false) }
         }
     }
 
@@ -1072,7 +1225,7 @@ class AppViewModel : ViewModel() {
         qualification = w.qualification
         experienceYears = w.experienceYears
         previousCompany = w.previousCompany
-        avatarUrl = w.avatar
+        avatarUrl = w.avatar.orEmpty()
         shiftStart = w.shiftStart
         shiftEnd = w.shiftEnd
         if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState

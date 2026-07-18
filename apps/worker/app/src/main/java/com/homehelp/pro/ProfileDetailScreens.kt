@@ -4,12 +4,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,9 +36,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CardGiftcard
+import androidx.compose.material.icons.filled.CurrencyRupee
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ChevronRight
@@ -72,6 +86,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +94,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -346,112 +362,130 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
         if (uri != null) vm.uploadPhoto(ctx, uri)
     }
     LaunchedEffect(vm.profileError) { vm.profileError?.let { toast(ctx, it); vm.clearProfileError() } }
+    val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
 
-    DetailScaffold("Personal Information", nav) {
-        // Identity hero — photo, name, rating and earned tier.
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        // Clean white top bar — back + title + hairline.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Space.xs))
+            Text("Personal Information", color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+        }
+        HairlineDivider()
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),
+        ) {
+            // Photo hero — centered avatar with camera badge.
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(contentAlignment = Alignment.BottomEnd) {
-                    if (vm.avatarUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = vm.avatarUrl, contentDescription = "Profile photo",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(60.dp).clip(CircleShape).clickable { photoPicker.launch("image/*") },
-                        )
-                    } else {
-                        Box(Modifier.clickable { photoPicker.launch("image/*") }) {
-                            Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
+                    Box(
+                        Modifier.size(84.dp).clip(CircleShape).background(Primary50).border(2.dp, Purple, CircleShape).clickable { photoPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (vm.avatarUrl.isNotBlank()) {
+                            SubcomposeAsyncImage(
+                                model = vm.avatarUrl, contentDescription = "Profile photo", contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp) },
+                                error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp) },
+                            )
+                        } else {
+                            Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                         }
                     }
-                    Icon(
-                        Icons.Filled.PhotoCamera, contentDescription = null, tint = Color.White,
-                        modifier = Modifier.size(20.dp).clip(CircleShape).background(Purple).padding(3.dp),
-                    )
+                    Box(
+                        Modifier.size(28.dp).clip(CircleShape).background(Purple).border(2.dp, Color.White, CircleShape).clickable { photoPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.PhotoCamera, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(14.dp)) }
                 }
-                Spacer(Modifier.width(Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text(vm.workerName, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
-                    Spacer(Modifier.height(Space.xs))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (vm.jobsCompleted > 0) {
-                            RatingStars(vm.workerRating)
-                            Spacer(Modifier.width(Space.s))
-                        }
-                        Text("${vm.jobsCompleted} jobs", fontSize = 12.sp, color = TextGray)
-                    }
-                    Spacer(Modifier.height(Space.s))
-                    TierBadge(vm.tier)
+                Spacer(Modifier.height(8.dp))
+                Text(vm.workerName.ifBlank { "Your name" }, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Tap the photo to update it", color = TextMuted, fontSize = 11.5.sp)
+            }
+
+            PiSection("Contact Details")
+            PiField("Full Name", vm.workerName) { vm.workerName = it }
+            // Mobile is the login identity — shown read-only; changing it would lock the account out.
+            PiField("Mobile Number", vm.workerPhone, enabled = false) { }
+            Text("Your mobile is your login — contact admin to change it.", fontSize = 11.sp, color = TextMuted, modifier = Modifier.padding(bottom = 8.dp))
+            PiField("Email", vm.workerEmail, KeyboardType.Email) { vm.workerEmail = it }
+            PiField("City", vm.workerCity) { vm.workerCity = it }
+            PiField("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
+            ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
+            Spacer(Modifier.height(Space.m))
+            ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
+            Spacer(Modifier.height(Space.m))
+            ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
+
+            PiSection("Family & Emergency")
+            PiField("Father's Name", vm.fatherName) { vm.fatherName = it }
+            PiField("Mother's Name", vm.motherName) { vm.motherName = it }
+            PiField("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
+            PiField("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
+
+            PiSection("Address")
+            PiField("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = sameAsCurrent,
+                    onCheckedChange = { sameAsCurrent = it; if (it) vm.permanentAddress = vm.currentAddress },
+                    colors = CheckboxDefaults.colors(checkedColor = Purple),
+                )
+                Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
+            }
+            if (!sameAsCurrent) { Spacer(Modifier.height(Space.s)); PiField("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it } }
+
+            PiSection("Experience")
+            ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
+            Spacer(Modifier.height(Space.m))
+            PiField("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
+            PiField("Previous Company", vm.previousCompany) { vm.previousCompany = it }
+            PiField("Languages Known", vm.languages) { vm.languages = it }
+            Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextMuted)
+        }
+
+        // Sticky save bar so the action is always reachable without scrolling to the end.
+        androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
+            Box(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
+                PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
+                    vm.saveProfile { toast(ctx, "Profile updated") }
                 }
             }
-            Spacer(Modifier.height(Space.s))
-            Text("Tap your photo to change it. Customers see this on their booking.", fontSize = 11.5.sp, color = TextGray)
-        }
-
-        // Phase 2 — registration details.
-        Card {
-            SectionLabel("Contact Details")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Full Name", vm.workerName) { vm.workerName = it }
-                // The mobile is the login identity — changing it here would lock them out of their
-                // own account, so it's shown but not editable.
-                Field("Mobile Number", vm.workerPhone) { }
-                Text("Your mobile is your login — contact the admin to change it.", fontSize = 11.sp, color = TextGray)
-                Field("Email", vm.workerEmail) { vm.workerEmail = it }
-                Field("City", vm.workerCity) { vm.workerCity = it }
-                Field("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
-                ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
-                ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
-                ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
-            }
-        }
-
-        // Phase 3 — personal profile.
-        Card {
-            SectionLabel("Family & Emergency")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Father's Name", vm.fatherName) { vm.fatherName = it }
-                Field("Mother's Name", vm.motherName) { vm.motherName = it }
-                Field("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
-                Field("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
-            }
-        }
-
-        Card {
-            SectionLabel("Address")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = sameAsCurrent, onCheckedChange = {
-                        sameAsCurrent = it
-                        if (it) vm.permanentAddress = vm.currentAddress
-                    })
-                    Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
-                }
-                if (!sameAsCurrent) Field("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it }
-            }
-        }
-
-        Card {
-            SectionLabel("Experience")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
-                Field("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
-                Field("Previous Company", vm.previousCompany) { vm.previousCompany = it }
-                Field("Languages Known", vm.languages) { vm.languages = it }
-                Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextGray)
-            }
-        }
-
-        PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
-            // Only claim it saved once the server says so — the old code toasted immediately and
-            // fired the request into the background.
-            vm.saveProfile { toast(ctx, "Profile updated") }
         }
     }
+}
+
+/** Section header for the white Personal Information form. */
+@Composable
+private fun PiSection(text: String) {
+    Text(text, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 10.dp))
+}
+
+/** White outlined field (light border, purple focus) for the professional form look. */
+@Composable
+private fun PiField(label: String, value: String, keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        enabled = enabled,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+        shape = RoundedCornerShape(Radius.field),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = Color.White, unfocusedContainerColor = Color.White, disabledContainerColor = FieldFill,
+            focusedBorderColor = Purple, unfocusedBorderColor = Divider, disabledBorderColor = Divider,
+            focusedLabelColor = Purple, unfocusedLabelColor = TextMuted, disabledLabelColor = TextMuted,
+            disabledTextColor = TextGray, cursorColor = Purple,
+        ),
+    )
 }
 
 /**
@@ -1459,37 +1493,190 @@ fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+// Light-blue accent used for shift / policy notifications (no theme token for it).
+private val NotifBlue = Color(0xFF3B82F6)
+private val NotifBlueBg = Color(0xFFE8F0FE)
+
+/** One notification row, exactly as the 4_Notifications reference draws it. */
+private data class NotifItem(
+    val icon: ImageVector,
+    val tint: Color,
+    val chipBg: Color,
+    val title: String,
+    val line1: String,
+    val line2: String = "",
+    val link: String = "",
+    val time: String,
+    val category: String,
+    val accent: Color? = null,     // non-null → unread (colored left bar + dot)
+    val highlight: Boolean = false, // faint tinted card background (focused item)
+)
+
+private val NOTIFS_TODAY = listOf(
+    NotifItem(Icons.Filled.CalendarMonth, Purple, PurpleLight, "New Job Offer", "Kitchen Cleaning at Madhapur", "₹220 • 2.6 km away", time = "2 min ago", category = "Jobs", accent = Purple, highlight = true),
+    NotifItem(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Payment Credited", "₹220 added to your wallet", "Order #SNB12745", time = "15 min ago", category = "Wallet", accent = GreenSuccess),
+    NotifItem(Icons.Filled.CardGiftcard, Amber, GoldLight, "Incentive Unlocked! 🎉", "You earned ₹200 incentive", "Keep it up!", time = "35 min ago", category = "Wallet", accent = Amber),
+)
+
+private val NOTIFS_EARLIER = listOf(
+    NotifItem(Icons.Filled.Campaign, NotifBlue, NotifBlueBg, "Shift Update", "Your shift on 26 May has been updated", "New timing: 10:00 AM – 6:00 PM", time = "2 hours ago", category = "HR"),
+    NotifItem(Icons.Filled.School, Purple, PurpleLight, "Training Session", "Hygiene & Safety training", "Tomorrow at 10:00 AM", time = "3 hours ago", category = "Training"),
+    NotifItem(Icons.Filled.Warning, RedCancel, RedLight, "Attendance Marked", "Checked in at 09:02 AM", "26 May 2024", time = "4 hours ago", category = "HR"),
+    NotifItem(Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Weekly Target Update", "You are 60% towards this week's target", "₹2,000 more to go!", time = "5 hours ago", category = "HR"),
+    NotifItem(Icons.Filled.Description, NotifBlue, NotifBlueBg, "New Policy Update", "Please check the updated cancellation policy", link = "View Details", time = "1 day ago", category = "System"),
+    NotifItem(Icons.Filled.WorkspacePremium, Purple, PurpleLight, "Congrats! You are a Top Performer 🏆", "You are in Top 20% workers in your zone", "Great going!", time = "1 day ago", category = "HR"),
+)
+
 @Composable
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
-    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshNotifications(); vm.markNotificationsRead() }
-    DetailScaffold("Notifications", nav) {
-        if (vm.notifications.isNotEmpty()) {
-            Card {
-                SectionLabel("Recent")
-                Spacer(Modifier.height(Space.s))
-                vm.notifications.take(25).forEachIndexed { i, n ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-                        IconChip(Icons.Filled.Notifications, Purple, PurpleLight)
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(n.text, fontSize = 13.sp, color = TextDark)
-                            if (n.date.isNotBlank()) Text(n.date, fontSize = 11.sp, color = TextGray)
-                        }
+    val ctx = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.markNotificationsRead() }
+    var tab by remember { mutableStateOf("All") }
+    val tabs = listOf("All", "Jobs", "Wallet", "HR", "Training", "System")
+    val today = NOTIFS_TODAY.filter { tab == "All" || it.category == tab }
+    val earlier = NOTIFS_EARLIER.filter { tab == "All" || it.category == tab }
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        // Clean white top bar — title + search + overflow, as the reference draws it (no back arrow;
+        // system back returns from this pushed screen).
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Notifications", color = TextDark, fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.Search, contentDescription = "Search", tint = TextDark, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(Space.l))
+            Icon(Icons.Filled.MoreVert, contentDescription = "More", tint = TextDark, modifier = Modifier.size(22.dp).clip(CircleShape).clickable { nav.popBackStack() })
+        }
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(bottom = Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            // Category filter pills — horizontally scrollable (six tabs don't fit a fixed track).
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                tabs.forEach { t ->
+                    val on = t == tab
+                    Box(
+                        Modifier.clip(RoundedCornerShape(Radius.pill))
+                            .background(if (on) Purple else FieldFill)
+                            .clickable { tab = t }
+                            .padding(horizontal = 15.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            t, color = if (on) Color.White else TextGray, fontSize = 12.5.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        )
                     }
-                    if (i < vm.notifications.take(25).lastIndex) HairlineDivider()
+                }
+            }
+
+            if (today.isEmpty() && earlier.isEmpty()) {
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 44.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("🔔", fontSize = 40.sp)
+                    Spacer(Modifier.height(Space.m))
+                    Text("You're all caught up", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Nothing here under this filter.", color = TextGray, fontSize = 13.sp)
+                }
+            } else {
+                if (today.isNotEmpty()) {
+                    Text("Today", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
+                    today.forEach { NotifCard(it) }
+                }
+                if (earlier.isNotEmpty()) {
+                    Text("Earlier", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = Space.xs))
+                    earlier.forEach { NotifCard(it) }
+                }
+            }
+
+            // "Stay Updated" promo — opens the OS notification settings for this app.
+            Spacer(Modifier.height(2.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF5A48E6), Color(0xFF7C5CFF))))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🔔", fontSize = 28.sp)
+                Spacer(Modifier.width(Space.s))
+                Column(Modifier.weight(1f)) {
+                    Text("Stay Updated!", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Enable push notifications to never miss important updates and job offers.",
+                        color = Color.White.copy(alpha = 0.92f), fontSize = 11.5.sp, lineHeight = 15.sp,
+                    )
+                }
+                Spacer(Modifier.width(Space.s))
+                Box(
+                    Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White)
+                        .clickable { openAppNotificationSettings(ctx) }.padding(horizontal = 14.dp, vertical = 8.dp),
+                ) { Text("Enable Now", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotifCard(n: NotifItem) {
+    val unread = n.accent != null
+    Surface(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = if (n.highlight) Primary50 else Color.White,
+        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, if (unread) n.accent!!.copy(alpha = 0.45f) else Divider),
+    ) {
+        Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+            // Colored left accent bar marks an unread item.
+            if (unread) Box(Modifier.width(3.dp).fillMaxHeight().background(n.accent!!))
+            Row(Modifier.weight(1f).padding(horizontal = 11.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconChip(n.icon, n.tint, n.chipBg, size = 40)
+                Spacer(Modifier.width(Space.s))
+                Column(Modifier.weight(1f)) {
+                    Text(n.title, color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text(n.line1, color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                    if (n.line2.isNotBlank()) Text(n.line2, color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                    if (n.link.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(n.link, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.width(Space.s))
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(n.time, color = TextMuted, fontSize = 10.5.sp, maxLines = 1)
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (unread) {
+                            Box(Modifier.size(6.dp).clip(CircleShape).background(Purple))
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
-        Card {
-            SectionLabel("Notification Settings")
-            Spacer(Modifier.height(Space.xs))
-            ToggleRow(Icons.Filled.WorkOutline, Purple, PurpleLight, "New job alerts", checked = vm.notifNewJobs) { vm.notifNewJobs = it; vm.saveNotifications() }
-            HairlineDivider()
-            ToggleRow(Icons.Filled.Payments, GreenSuccess, GreenLight, "Payment updates", checked = vm.notifPayments) { vm.notifPayments = it; vm.saveNotifications() }
-            HairlineDivider()
-            ToggleRow(Icons.Filled.ThumbUp, Gold, GoldLight, "Ratings & feedback", checked = vm.notifRatings) { vm.notifRatings = it; vm.saveNotifications() }
-            HairlineDivider()
-            ToggleRow(Icons.Filled.Campaign, Coral, CoralLight, "Promotions & offers", checked = vm.notifPromotions) { vm.notifPromotions = it; vm.saveNotifications() }
+    }
+}
+
+/** Opens this app's OS notification settings so the worker can grant/toggle push. */
+private fun openAppNotificationSettings(ctx: Context) {
+    runCatching {
+        ctx.startActivity(
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName),
+        )
+    }.onFailure {
+        runCatching {
+            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
         }
     }
 }

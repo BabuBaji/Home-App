@@ -33,9 +33,34 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
 
+/**
+ * DEBUG ONLY — lets `adb shell am start --es debug_route <route>` drive the app to any screen when
+ * touch injection is blocked by the OS (e.g. HyperOS SELinux). `am start` is permitted where `input`
+ * is not, so this is the only way to screenshot deep screens headlessly. Inert in release builds.
+ */
+object DebugNav {
+    var route: String? = null
+    var login: Boolean = false
+    var amount: Int = 0
+    var consumed: Boolean = false
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (BuildConfig.DEBUG) {
+            DebugNav.route = intent?.getStringExtra("debug_route")
+            DebugNav.login = intent?.getBooleanExtra("debug_login", false) == true
+            DebugNav.amount = intent?.getIntExtra("debug_amount", 0) ?: 0
+            DebugNav.consumed = false
+            // When driving the app headlessly via `am start` (touch injection blocked by the OS),
+            // turn the screen on and keep it lit so automated screenshots aren't black frames.
+            if (DebugNav.route != null) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
         // Restore any persisted login so the worker stays signed in across app restarts.
         Session.init(applicationContext)
         // osmdroid requires a unique user-agent or OSM tile servers return 403.
@@ -66,10 +91,23 @@ object Routes {
     const val DEDUCTIONS = "wallet_deductions"
     const val PAYSLIP = "wallet_payslip"
     const val WITHDRAW_RECEIPT = "wallet_receipt"
+    // Wallet module (3_wallet_Follow.png)
+    const val WITHDRAW_PIN = "wallet_withdraw_pin"
+    const val WITHDRAW_CONFIRM = "wallet_withdraw_confirm"
+    const val WITHDRAW_SUCCESS = "wallet_withdraw_success"
+    const val WITHDRAW_HISTORY = "wallet_withdraw_history"
+    const val WALLET_PIN_SET = "wallet_pin_set"
+    const val BANK_ACCOUNTS = "wallet_bank_accounts"
+    const val BANK_ADD = "wallet_bank_add"
+    const val BANK_MANAGE = "wallet_bank_manage"
+    const val PAYOUT_SETTINGS = "wallet_payout_settings"
+    const val PAYOUT_SCHEDULE = "wallet_payout_schedule"
+    const val WALLET_HELP = "wallet_help"
     const val PROFILE = "profile"
     const val NEW_JOB = "newjob"
     const val JOB_DETAILS = "jobdetails"
     const val ON_THE_WAY = "ontheway"
+    const val ARRIVED = "arrived"
     const val HYDERABAD_MAP = "hyderabad_map"
     const val START_SERVICE = "startservice"
     const val IN_PROGRESS = "inprogress"
@@ -139,6 +177,25 @@ fun AppRoot() {
 
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
+
+    // DEBUG ONLY — drive to a deep screen from `am start --es debug_route <route> [--ez debug_login true]`
+    // for headless UI verification when touch injection is blocked. No-op in release / without the extra.
+    if (BuildConfig.DEBUG) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            val target = DebugNav.route
+            if (target != null && !DebugNav.consumed) {
+                DebugNav.consumed = true
+                if (DebugNav.amount > 0) WithdrawDraft.amount = DebugNav.amount
+                if (DebugNav.login && !vm.isLoggedIn) {
+                    vm.debugLogin("9988776655", "1234") { ok ->
+                        if (ok) nav.navigate(target)
+                    }
+                } else {
+                    nav.navigate(target)
+                }
+            }
+        }
+    }
     // Re-pull backend data every time the app comes to the foreground, so a completed job /
     // updated earnings appear immediately instead of only after a full relaunch.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -209,7 +266,18 @@ fun AppRoot() {
             composable(Routes.PERFORMANCE) { PerformanceScreen(vm, nav) }
             composable(Routes.EARNINGS) { EarningsScreen(vm, nav) }
             composable(Routes.WALLET) { WalletDashboardScreen(vm, nav) }
-            composable(Routes.WITHDRAW) { WithdrawScreen(vm, nav) }
+            composable(Routes.WITHDRAW) { WithdrawMoneyScreen(vm, nav) }
+            composable(Routes.WITHDRAW_PIN) { WithdrawPinScreen(vm, nav) }
+            composable(Routes.WITHDRAW_CONFIRM) { ConfirmWithdrawalScreen(vm, nav) }
+            composable(Routes.WITHDRAW_SUCCESS) { WithdrawalSuccessScreen(vm, nav) }
+            composable(Routes.WITHDRAW_HISTORY) { WithdrawalHistoryScreen(vm, nav) }
+            composable(Routes.WALLET_PIN_SET) { WalletPinSetScreen(vm, nav) }
+            composable(Routes.BANK_ACCOUNTS) { BankAccountsScreen(vm, nav) }
+            composable(Routes.BANK_ADD) { AddBankAccountScreen(vm, nav) }
+            composable(Routes.BANK_MANAGE) { ManageBankAccountScreen(vm, nav) }
+            composable(Routes.PAYOUT_SETTINGS) { PayoutSettingsScreen(vm, nav) }
+            composable(Routes.PAYOUT_SCHEDULE) { PayoutScheduleScreen(vm, nav) }
+            composable(Routes.WALLET_HELP) { WalletHelpScreen(vm, nav) }
             composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
             composable(Routes.WALLET_HISTORY) { WalletHistoryScreen(vm, nav) }
             composable(Routes.EARNINGS_BREAKUP) { EarningsBreakupScreen(vm, nav) }
@@ -223,6 +291,7 @@ fun AppRoot() {
             composable(Routes.NEW_JOB) { NewJobScreen(vm, nav) }
             composable(Routes.JOB_DETAILS) { JobDetailsScreen(vm, nav) }
             composable(Routes.ON_THE_WAY) { OnTheWayScreen(vm, nav) }
+            composable(Routes.ARRIVED) { ArrivedScreen(vm, nav) }
             composable(Routes.HYDERABAD_MAP) { HyderabadMapScreen(nav) }
             composable(Routes.START_SERVICE) { StartServiceScreen(vm, nav) }
             composable(Routes.IN_PROGRESS) { InProgressScreen(vm, nav) }
