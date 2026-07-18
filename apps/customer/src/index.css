@@ -59,7 +59,7 @@ b, strong { font-weight: 500; }
 }
 
 /* fixed header + footer; ONLY .content scrolls */
-.screen { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.screen { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .content { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 18px 18px; }
 .content.pad-cta { padding-bottom: 18px; }
 .content::-webkit-scrollbar { width: 0; }
@@ -1936,12 +1936,43 @@ body { line-height: 1.45; }
   border: 1.5px solid var(--line); border-radius: 14px; background: #fff; color: #9aa0ad; font-size: 14.5px; }
 .hd-search svg { color: var(--sub); }
 
-/* live surge heads-up (rain / high demand) */
-.hd-surge { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 12px 14px;
-  border: 1.5px solid #bcd0ff; border-radius: 14px; background: #eef4ff; }
-.hd-surge-ic { font-size: 18px; line-height: 1.35; flex-shrink: 0; }
-.hd-surge-txt { font-size: 13px; line-height: 1.4; color: #1d4ed8; }
-.hd-surge-txt b { font-weight: 700; }
+/* ---- rain mode: purple header covering the top of the screen; white rain inside the hero ---- */
+/* persistent purple app bar so the top of the screen stays covered even as the hero scrolls.
+   Pull it up into the status-bar strip the .device shell reserves, then pad its content back
+   down below the clock — so the purple bleeds behind the status bar (like Pronto). */
+.rain-sky .hd-top { background: #5b63d6;
+  margin-top: calc(-1 * max(env(safe-area-inset-top), 28px));
+  padding-top: calc(8px + max(env(safe-area-inset-top), 28px)); }
+.rain-sky .content { padding-top: 0; }
+.rain-sky .hd-loc, .rain-sky .hd-loc b, .rain-sky .hd-loc svg { color: #fff; }
+.rain-sky .hd-wallet, .rain-sky .hd-bell { background: rgba(255,255,255,.18); border-color: transparent; }
+.rain-sky .hd-wallet svg, .rain-sky .hd-bell svg, .rain-sky .hd-wallet-bal { color: #fff; }
+.rain-sky .hd-prof { box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
+
+/* full-bleed rainy hero (scrolls with the content, joins seamlessly under the purple app bar).
+   Vertical gradient starting at the exact app-bar colour (#5b63d6) so the hero's top edge matches
+   the bar across the full width — no visible seam between the two. */
+.hd-hero.rainy { background: linear-gradient(to bottom, #5b63d6 0%, #4a3fb0 62%, #2e2a6b 100%);
+  box-shadow: 0 16px 30px rgba(46,42,107,.34); overflow: hidden; }
+.rain-sky .hd-hero { margin: 0 -18px; border-radius: 0 0 26px 26px; }
+
+/* white diagonal rain filling the hero (clipped to it) */
+.hd-skyrain { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; border-radius: inherit;
+  -webkit-mask-image: linear-gradient(to bottom, #000 86%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 86%, transparent 100%); }
+.hd-skyrain .rd { position: absolute; top: -44px; width: 2.5px; border-radius: 2px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));
+  box-shadow: 0 0 3px rgba(255,255,255,.55);
+  animation-name: hd-fall; animation-timing-function: linear; animation-iteration-count: infinite; }
+/* rotate + translateY ⇒ the drop travels along its own tilted axis, so it streaks diagonally */
+@keyframes hd-fall { 0% { transform: rotate(15deg) translateY(-60px); } 100% { transform: rotate(15deg) translateY(360px); } }
+@media (prefers-reduced-motion: reduce) { .hd-skyrain { display: none; } }
+/* compact surge chip folded into the hero (no separate banner, saves space) */
+.hd-hero.rainy .hd-hero-txt { max-width: 68%; }
+.hd-hero-surge { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; white-space: nowrap;
+  padding: 6px 11px; border-radius: 999px; font-size: 12px; line-height: 1.2; color: #fff;
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.32); backdrop-filter: blur(2px); }
+.hd-hero-surge b { font-weight: 700; }
 
 /* section head */
 .hd-sec-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 2px 12px; }
