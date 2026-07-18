@@ -26,6 +26,7 @@ const U = {
   worker: (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, ''),
   payment: (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, ''),
   catalog: (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, ''),
+  notification: (process.env.NOTIFICATION_URL || 'http://localhost:4003').replace(/\/$/, ''),
 }
 
 process.on('unhandledRejection', (e) => console.error('[admin] unhandledRejection:', e?.message || e))
@@ -1152,7 +1153,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
 // derive spending/service/activity summaries client-side without extra round-trips.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods, membershipLedger, membershipPlans, offers] = await Promise.all([
+  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods, membershipLedger, membershipPlans, offers, tickets] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
@@ -1165,6 +1166,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
     tryGet(U.auth, `/api/internal/users/${id}/membership-ledger`, []),
     tryGet(U.catalog, '/api/membership-plans', []),
     tryGet(U.catalog, `/api/internal/customers/${id}/offers`, { totalOffers: 0, coupons: [] }),
+    tryGet(U.notification, `/api/internal/customers/${id}/tickets`, []),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
@@ -1185,7 +1187,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   }))
   // A stable display id for the profile header (CUST-100001…). Derived, not stored.
   const displayId = 'CUST-' + String(100000 + id)
-  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers })
+  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers, tickets })
 })
 /* ---------- worker communication preferences (owned here, not on the worker record) ---------- */
 // Friendly shape used everywhere: { whatsapp, sms, email, push, promo }. Missing row = all on.

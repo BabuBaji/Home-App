@@ -4,9 +4,9 @@ import {
   ArrowLeft, Pencil, ChevronDown, ChevronLeft, ChevronRight, Star, StarHalf, Phone, Mail, Calendar,
   Wallet as WalletIcon, Briefcase, LayoutGrid, MapPin, BadgeCheck, Tag, Headphones, StickyNote, Activity,
   User, CalendarPlus, CreditCard, RotateCcw, CheckCircle2, Gift, Plus, Ban, Send, Users2, Clock, TrendingUp, Award,
-  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical, FileText, Funnel,
+  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical, FileText, Funnel, Wrench, ShieldCheck, MessageSquare,
 } from 'lucide-react'
-import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault, changeCustomerMembership } from '../api'
+import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault, changeCustomerMembership, createBookingComplaint, fetchTicketDetail, postTicketMessage, updateTicket } from '../api'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
 
 const SEG_TONE: Record<string, string> = { New: 'blue', Repeat: 'green', Loyal: 'violet', VIP: 'amber', 'At Risk': 'red', Inactive: 'gray' }
@@ -270,7 +270,7 @@ export default function AdminCustomerDetail() {
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} bookings={m.bookings} paymentMethods={d.paymentMethods || []} onAddMoney={() => openMoney('cash')} onSend={() => openMoney('promo')} goto={setTab} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
       {tab === 'membership' && <MembershipTab membership={d.membership} plans={d.membershipPlans || []} ledger={d.membershipLedger || []} c={c} cid={cid} paymentMethods={d.paymentMethods || []} onChanged={load} toast={toast} nav={nav} goto={setTab} />}
       {tab === 'offers' && <OffersTab bookings={m.bookings} offers={d.offers || { totalOffers: 0, coupons: [] }} c={c} nav={nav} toast={toast} goto={setTab} />}
-      {tab === 'support' && <SupportTab bookings={m.bookings} nav={nav} />}
+      {tab === 'support' && <SupportTab tickets={d.tickets || []} notes={d.notes || []} c={c} cid={cid} onChanged={load} toast={toast} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} />}
       {tab === 'notes' && <NotesTab notes={d.notes || []} onAdd={() => setNoteOpen(true)} />}
       {tab === 'activity' && <ActivityTab activity={m.activity} />}
@@ -1466,14 +1466,211 @@ function OffersTab({ bookings, offers, c, nav, toast, goto }: any) {
     </div>
   )
 }
-function SupportTab({ bookings, nav }: any) {
+const TSTATUS: Record<string, { label: string; tone: string; bucket: string }> = {
+  'open': { label: 'Open', tone: 'amber', bucket: 'open' },
+  'acknowledged': { label: 'In Progress', tone: 'blue', bucket: 'inprogress' },
+  'under review': { label: 'In Progress', tone: 'blue', bucket: 'inprogress' },
+  'in progress': { label: 'In Progress', tone: 'blue', bucket: 'inprogress' },
+  'reopened': { label: 'Reopened', tone: 'red', bucket: 'inprogress' },
+  'pending customer': { label: 'Pending Customer', tone: 'violet', bucket: 'pending' },
+  'resolved': { label: 'Resolved', tone: 'green', bucket: 'resolved' },
+  'closed': { label: 'Closed', tone: 'gray', bucket: 'closed' },
+}
+const tStat = (s: string) => TSTATUS[String(s || '').toLowerCase()] || { label: s || 'Open', tone: 'gray', bucket: 'inprogress' }
+const priTone = (p: string) => ({ high: 'red', medium: 'amber', low: 'green' }[String(p || '').toLowerCase()] || 'gray')
+const catIcon = (cat: string) => { const x = String(cat || '').toLowerCase(); if (/service/.test(x)) return Wrench; if (/quality/.test(x)) return ShieldCheck; if (/reschedul/.test(x)) return Calendar; if (/payment|refund|billing/.test(x)) return CreditCard; if (/behav/.test(x)) return User; return Headphones }
+const ticketRef = (t: any) => t.ref || `TKT${10000 + t.id}`
+const STATUS_OPTS = ['Open', 'In Progress', 'Pending Customer', 'Resolved', 'Closed']
+
+function SupportTab({ tickets, notes, c, cid, onChanged, toast, nav }: any) {
+  const [q, setQ] = useState('')
+  const [statusF, setStatusF] = useState('all')
+  const [catF, setCatF] = useState('all')
+  const [priF, setPriF] = useState('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const [menuId, setMenuId] = useState<number | null>(null)
+  const [newOpen, setNewOpen] = useState(false)
+  const [draft, setDraft] = useState({ category: 'Service Issue', subject: '', message: '', priority: 'medium', bookingRef: '' })
+  const [view, setView] = useState<any>(null)
+  const [reply, setReply] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { if (menuId == null) return; const h = () => setMenuId(null); window.addEventListener('click', h); return () => window.removeEventListener('click', h) }, [menuId])
+  useEffect(() => { setPage(1) }, [q, statusF, catF, priF])
+
+  const cats = useMemo(() => [...new Set(tickets.map((t: any) => t.category).filter(Boolean))] as string[], [tickets])
+  const counts = useMemo(() => {
+    const k = { total: tickets.length, open: 0, inprogress: 0, pending: 0, resolved: 0, closed: 0 } as Record<string, number>
+    for (const t of tickets) k[tStat(t.status).bucket]++
+    return k
+  }, [tickets])
+
+  const filtered = useMemo(() => tickets.filter((t: any) => {
+    if (statusF !== 'all' && tStat(t.status).label !== statusF) return false
+    if (catF !== 'all' && t.category !== catF) return false
+    if (priF !== 'all' && String(t.priority || '').toLowerCase() !== priF) return false
+    if (q && !`${ticketRef(t)} ${t.subject} ${t.message}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [tickets, statusF, catF, priF, q])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const reset = () => { setQ(''); setStatusF('all'); setCatF('all'); setPriF('all') }
+  const latestNote = (notes || [])[0]
+
+  const createTicket = async () => {
+    if (!draft.subject.trim()) { toast('Enter a subject', 'err'); return }
+    setBusy(true)
+    try { await createBookingComplaint({ userId: cid, category: draft.category, subject: draft.subject, message: draft.message, priority: draft.priority, bookingRef: draft.bookingRef, raisedBy: 'Admin' }); toast('Complaint created'); setNewOpen(false); setDraft({ category: 'Service Issue', subject: '', message: '', priority: 'medium', bookingRef: '' }); onChanged() }
+    catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
+  }
+  const openView = async (t: any) => { setMenuId(null); try { setView(await fetchTicketDetail(t.id)) } catch (e) { toast((e as Error).message, 'err') } }
+  const setStatus = async (status: string) => { if (!view) return; setBusy(true); try { await updateTicket(view.id, { status }); toast(`Marked ${status}`); setView(await fetchTicketDetail(view.id)); onChanged() } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) } }
+  const sendReply = async () => { if (!view || !reply.trim()) return; setBusy(true); try { await postTicketMessage(view.id, { body: reply.trim() }); setReply(''); setView(await fetchTicketDetail(view.id)) } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) } }
+
+  const skpi = (icon: ReactNode, tint: string, label: string, value: number, sub?: string) => (
+    <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}>
+        <span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}
+      </div>
+      <strong style={{ fontSize: 22, lineHeight: 1 }}>{value}</strong>
+      {sub && <span className="muted" style={{ fontSize: 11.5 }}>{sub}</span>}
+    </div>
+  )
+
   return (
-    <Card title="Support & Complaints">
-      <Empty>
-        Complaints are tracked per booking. Open a booking to view or raise a ticket.
-        {bookings.length > 0 && <div style={{ marginTop: 10 }}><button className="btn line" onClick={() => nav(`/bookings/${bookings[0].id}`)}>Open latest booking</button></div>}
-      </Empty>
-    </Card>
+    <div className="grid" style={{ gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Support &amp; Complaints</h2>
+          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Manage customer issues, complaints and support tickets</p>
+        </div>
+        <button className="btn" onClick={() => setNewOpen(true)}><Plus size={16} /> New Complaint</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+        {skpi(<MessageSquare size={15} />, '#5b51e8', 'Total Tickets', counts.total, 'All Time')}
+        {skpi(<MessageSquare size={15} />, '#f59e0b', 'Open', counts.open)}
+        {skpi(<RefreshCw size={15} />, '#2e90fa', 'In Progress', counts.inprogress)}
+        {skpi(<Clock size={15} />, '#7c3aed', 'Pending Customer', counts.pending)}
+        {skpi(<CheckCircle2 size={15} />, '#16a34a', 'Resolved', counts.resolved)}
+        {skpi(<Archive size={15} />, '#98a2b3', 'Closed', counts.closed)}
+      </div>
+
+      <Card>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1.6fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(120px, 1fr) auto', gap: 10, marginBottom: 12 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by ticket ID or subject…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+          </div>
+          <select className="select" value={statusF} onChange={(e) => setStatusF(e.target.value)}><option value="all">All Status</option>{STATUS_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+          <select className="select" value={catF} onChange={(e) => setCatF(e.target.value)}><option value="all">All Categories</option>{cats.map((cat) => <option key={cat} value={cat}>{cat}</option>)}</select>
+          <select className="select" value={priF} onChange={(e) => setPriF(e.target.value)}><option value="all">All Priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+          <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
+        </div>
+
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead><tr><th>Ticket ID</th><th>Subject</th><th>Category</th><th>Priority</th><th>Status</th><th>Booking ID</th><th>Created On</th><th style={{ width: 70 }}>Actions</th></tr></thead>
+            <tbody>
+              {pageRows.map((t: any) => {
+                const st = tStat(t.status); const CatI = catIcon(t.category)
+                return (
+                  <tr key={t.id}>
+                    <td style={{ fontWeight: 600, fontSize: 12.5 }}>{ticketRef(t)}</td>
+                    <td><div style={{ fontWeight: 600, fontSize: 13 }}>{t.subject || t.category}</div><div className="muted" style={{ fontSize: 11.5, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.message || '—'}</div></td>
+                    <td><span className="row" style={{ gap: 6, alignItems: 'center', fontSize: 12.5 }}><CatI size={14} className="muted" />{t.category}</span></td>
+                    <td><Badge tone={priTone(t.priority)} dot={false}>{t.priority || 'medium'}</Badge></td>
+                    <td><Badge tone={st.tone}>{st.label}</Badge></td>
+                    <td>{t.booking_ref ? <button className="linkbtn" style={LINK} onClick={() => t.booking_id && nav(`/bookings/${t.booking_id}`)}>{t.booking_ref}</button> : <span className="muted">—</span>}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{shortDate(t.created)}<div style={{ fontSize: 11 }}>{new Date(t.created).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></td>
+                    <td>
+                      <div className="row" style={{ gap: 2, position: 'relative' }}>
+                        <button className="iconbtn" style={{ width: 28, height: 28 }} title="View" onClick={() => openView(t)}><Eye size={15} /></button>
+                        <button className="iconbtn" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); setMenuId(menuId === t.id ? null : t.id) }}><MoreVertical size={15} /></button>
+                        {menuId === t.id && (
+                          <div className="menu" style={{ ...MENU_BOX, right: 0, top: 32 }} onClick={(e) => e.stopPropagation()}>
+                            <button className="menu-item" style={MENU_ITEM} onClick={() => openView(t)}><Eye size={15} /> View / Reply</button>
+                            {t.booking_id && <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); nav(`/bookings/${t.booking_id}`) }}><Calendar size={15} /> Open booking</button>}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+              {filtered.length === 0 && <tr><td colSpan={8}><Empty>No tickets match these filters.</Empty></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} tickets</span>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+            <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+            <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+          </div>
+        </div>
+      </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 16, alignItems: 'start' }}>
+        {latestNote ? (
+          <div className="card" style={{ padding: 16, background: '#f5f7ff', border: '1px solid #e0e7ff' }}>
+            <div className="row" style={{ gap: 7, alignItems: 'center', color: '#5b51e8', fontWeight: 700, fontSize: 13, marginBottom: 6 }}><StickyNote size={15} /> Latest Note</div>
+            <div style={{ fontSize: 13.5 }}>{latestNote.body}</div>
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Added by {latestNote.author || 'admin'} · {dateTime(latestNote.created)}</div>
+          </div>
+        ) : <div />}
+        <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Headphones size={16} /> Support Contact</span>}>
+          <div style={{ fontSize: 13 }}><strong>Need help?</strong><p className="muted" style={{ fontSize: 12.5, margin: '4px 0 10px' }}>Our support team is here to assist you.</p></div>
+          <button className="btn line" style={{ width: '100%', justifyContent: 'center' }} onClick={() => nav('/tickets')}>Contact Support Team</button>
+        </Card>
+      </div>
+
+      {newOpen && (
+        <Modal title="New Complaint" onClose={() => setNewOpen(false)} footer={<><button className="btn line" onClick={() => setNewOpen(false)}>Cancel</button><button className="btn" disabled={busy || !draft.subject.trim()} onClick={createTicket}>Create Complaint</button></>}>
+          <div className="grid" style={{ gap: 12 }}>
+            <div className="row" style={{ gap: 12 }}>
+              <Field label="Category"><select className="select" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}><option>Service Issue</option><option>Quality Issue</option><option>Reschedule</option><option>Payment</option><option>Behavior</option><option>General</option></select></Field>
+              <Field label="Priority"><select className="select" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></Field>
+            </div>
+            <Field label="Subject"><input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="Short summary of the issue" /></Field>
+            <Field label="Booking Ref (optional)"><input value={draft.bookingRef} onChange={(e) => setDraft({ ...draft, bookingRef: e.target.value })} placeholder="#HH…" /></Field>
+            <Field label="Details"><textarea value={draft.message} onChange={(e) => setDraft({ ...draft, message: e.target.value })} rows={4} placeholder="What happened?" style={{ resize: 'vertical' }} /></Field>
+          </div>
+        </Modal>
+      )}
+
+      {view && (
+        <Modal title={`${ticketRef(view)} · ${view.subject || view.category}`} onClose={() => setView(null)} wide>
+          <div className="grid" style={{ gap: 12 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Badge tone={priTone(view.priority)} dot={false}>{view.priority}</Badge>
+              <Badge tone={tStat(view.status).tone}>{tStat(view.status).label}</Badge>
+              <span className="muted" style={{ fontSize: 12.5 }}>{view.category}{view.booking_ref ? ` · ${view.booking_ref}` : ''} · {dateTime(view.created)}</span>
+              <div style={{ flex: 1 }} />
+              <select className="select" value="" onChange={(e) => e.target.value && setStatus(e.target.value)} style={{ height: 32, width: 160 }} disabled={busy}><option value="">Set status…</option>{STATUS_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </div>
+            {view.message && <div style={{ background: '#f9fafb', borderRadius: 10, padding: 12, fontSize: 13.5 }}>{view.message}</div>}
+            <div className="field"><span>Conversation ({(view.messages || []).length})</span></div>
+            <div className="grid" style={{ gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+              {(view.messages || []).map((mm: any) => (
+                <div key={mm.id} style={{ background: mm.sender_type === 'admin' ? '#eef0ff' : '#f2f4f7', borderRadius: 10, padding: '8px 10px', fontSize: 13 }}>
+                  <div>{mm.body}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{mm.sender_name || mm.sender_type} · {dateTime(mm.created)}</div>
+                </div>
+              ))}
+              {(view.messages || []).length === 0 && <Empty small>No messages yet</Empty>}
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
+              <Field label="Reply to customer"><input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Type a reply…" /></Field>
+              <button className="btn" disabled={busy || !reply.trim()} onClick={sendReply}>Send</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
   )
 }
 function RatingsTab({ reviews, rating }: any) {

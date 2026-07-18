@@ -185,6 +185,11 @@ app.get('/api/admin/tickets/booking/:bookingId', adminAuth, async (req, res) => 
   }
   res.json({ tickets: rows, counts })
 })
+// A customer's tickets (for the admin customer-profile Support tab).
+app.get('/api/internal/customers/:id/tickets', internalOnly, async (req, res) => {
+  const rows = (await pool.query('SELECT * FROM tickets WHERE user_id=$1 ORDER BY id DESC', [Number(req.params.id)])).rows
+  res.json(rows)
+})
 app.get('/api/admin/tickets/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)
   const t = (await pool.query('SELECT * FROM tickets WHERE id=$1', [id])).rows[0]
