@@ -561,7 +561,9 @@ app.delete('/api/favourites/:id', auth, async (req, res) => {
 /* ---------- notifications feed + policy ---------- */
 const STATUS_TITLES = { confirmed: 'Booking confirmed', worker_assigned: 'Expert assigned', on_the_way: 'Your expert is on the way', arrived: 'Your expert has arrived', in_progress: 'Service in progress', completed: 'Service completed', cancelled: 'Booking cancelled' }
 app.get('/api/notifications', auth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM bookings WHERE user_id=$1 ORDER BY id DESC LIMIT 6', [req.user.id])
+  // Booking notifications auto-clear once the service is finished: a completed or cancelled booking
+  // drops out of the feed automatically, so only live/in-progress bookings show up.
+  const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
   const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
   items.push({ id: 'o1', type: 'offer', title: '20% off this weekend', body: 'Use code CLEAN20 on any service. Limited time!', time: null })
   items.push({ id: 'o2', type: 'cashback', title: 'Earn ₹150 per friend', body: 'Share code HOMEHELP150 and earn on every referral.', time: null })
