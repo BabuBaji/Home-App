@@ -105,6 +105,20 @@ export interface Settlement {
   refund: { amount: number; status: string }
 }
 export const fetchSettlement = (id: number) => req<Settlement>(`/bookings/${id}/settlement`)
+export interface Evidence {
+  worker: { name: string; id: number | null; rating: number }
+  checkIn: { at: string | null; otp: string; verified: boolean; sig: string }
+  checkOut: { at: string | null; otp: string; verified: boolean; sig: string }
+  durationMin: number | null; status: string
+  location: { address: string; lat: number | null; lng: number | null }
+  beforePhotos: { url: string; at: string }[]; afterPhotos: { url: string; at: string }[]; beforeAt: string | null; afterAt: string | null
+  checklist: { task: string; required: boolean; completed: boolean }[]
+  workerNotes: string; materials: string
+  feedback: { rating: number; review: string }
+  device: string; network: string; instructions: string
+  summary: { service: string; duration: string; qty: number }
+}
+export const fetchEvidence = (id: number) => req<Evidence>(`/bookings/${id}/evidence`)
 
 /* customers */
 export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/customers?q=${encodeURIComponent(q)}&status=${status}`)

@@ -102,6 +102,25 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
     // Module 10 · Phase 2 — membership discount applied to this booking (₹), for the invoice breakdown.
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS member_discount INTEGER NOT NULL DEFAULT 0`,
+    // Service evidence captured by the worker during/after the job (before/after photos, checklist,
+    // notes, completion OTP, signatures + capture metadata). One row per booking; upserted by the
+    // worker app and read by the admin Service Evidence tab.
+    `CREATE TABLE IF NOT EXISTS booking_evidence (
+      booking_id INTEGER PRIMARY KEY,
+      before_photos JSONB NOT NULL DEFAULT '[]',   -- [{url, at}]
+      after_photos  JSONB NOT NULL DEFAULT '[]',
+      checklist     JSONB NOT NULL DEFAULT '[]',   -- [{task, required, completed}]
+      worker_notes  TEXT NOT NULL DEFAULT '',
+      materials     TEXT NOT NULL DEFAULT '',
+      completion_otp TEXT NOT NULL DEFAULT '',
+      start_sig     TEXT NOT NULL DEFAULT '',
+      end_sig       TEXT NOT NULL DEFAULT '',
+      device        TEXT NOT NULL DEFAULT '',
+      network       TEXT NOT NULL DEFAULT '',
+      before_at     TIMESTAMPTZ, after_at TIMESTAMPTZ,
+      created       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -643,6 +662,45 @@ app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
     documents: { invoice: `INV-${short}`, receipt: `RCPT-${short}`, payoutSlip: `PAYOUT-${short}` },
     refund: { amount: b.refund || 0, status: b.refund_status || '' },
   })
+})
+// Service evidence for the admin Service Evidence tab — merges the worker-captured evidence row
+// (before/after photos, checklist, notes, completion OTP, signatures) with the booking's own
+// timestamps/OTP/rating. Fields with no captured data come back empty (never invented).
+app.get('/api/admin/bookings/:id/evidence', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
+  const durMin = b.started_at && b.completed_at ? Math.max(0, Math.round((new Date(b.completed_at) - new Date(b.started_at)) / 60000)) : null
+  const before = (ev.before_photos && ev.before_photos.length) ? ev.before_photos : []
+  const after = (ev.after_photos && ev.after_photos.length) ? ev.after_photos : (b.work_photo ? [{ url: b.work_photo, at: b.completed_at }] : [])
+  res.json({
+    worker: { name: b.pro_name || '', id: b.worker_id || null, rating: b.pro_rating || 0 },
+    checkIn: { at: b.started_at || null, otp: b.service_otp || '', verified: !!b.started_at, sig: ev.start_sig || '' },
+    checkOut: { at: b.completed_at || null, otp: ev.completion_otp || '', verified: b.status === 'completed', sig: ev.end_sig || '' },
+    durationMin: durMin, status: b.status,
+    location: { address: b.address || '', lat: b.cust_lat ?? null, lng: b.cust_lng ?? null },
+    beforePhotos: before, afterPhotos: after, beforeAt: ev.before_at || null, afterAt: ev.after_at || b.completed_at || null,
+    checklist: ev.checklist || [],
+    workerNotes: ev.worker_notes || '',
+    materials: ev.materials || '',
+    feedback: { rating: b.rating || 0, review: b.review || '' },
+    device: ev.device || '', network: ev.network || '',
+    instructions: b.note || '',
+    summary: { service: (b.items || []).map((i) => i.name).join(', '), duration: b.duration || '', qty: (b.items || []).length || 1 },
+  })
+})
+// Worker-app / service-to-service upsert of a booking's evidence (photos, checklist, notes).
+app.post('/api/internal/bookings/:id/evidence', internalOnly, async (req, res) => {
+  const id = Number(req.params.id), e = req.body || {}
+  await pool.query(
+    `INSERT INTO booking_evidence (booking_id, before_photos, after_photos, checklist, worker_notes, materials, completion_otp, start_sig, end_sig, device, network, before_at, after_at, updated)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+     ON CONFLICT (booking_id) DO UPDATE SET before_photos=EXCLUDED.before_photos, after_photos=EXCLUDED.after_photos, checklist=EXCLUDED.checklist,
+       worker_notes=EXCLUDED.worker_notes, materials=EXCLUDED.materials, completion_otp=EXCLUDED.completion_otp, start_sig=EXCLUDED.start_sig,
+       end_sig=EXCLUDED.end_sig, device=EXCLUDED.device, network=EXCLUDED.network, before_at=EXCLUDED.before_at, after_at=EXCLUDED.after_at, updated=now()`,
+    [id, JSON.stringify(e.beforePhotos || []), JSON.stringify(e.afterPhotos || []), JSON.stringify(e.checklist || []), e.workerNotes || '', e.materials || '',
+      e.completionOtp || '', e.startSig || '', e.endSig || '', e.device || '', e.network || '', e.beforeAt || null, e.afterAt || null])
+  res.json({ ok: true })
 })
 // Admin booking actions — used by both the Bookings screen and the Control Tower console:
 // status change, reschedule (date/time), reassign / unassign a pro, escalate + reason, and an

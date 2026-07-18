@@ -6,7 +6,7 @@ import {
   LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle, CalendarCheck, PlayCircle, PauseCircle, Flag, HelpCircle,
 } from 'lucide-react'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, issueRefund, updateBooking, API_BASE, type Zone, type Settlement } from '../api'
+import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, fetchEvidence, issueRefund, updateBooking, API_BASE, type Zone, type Settlement, type Evidence } from '../api'
 
 const REACHED: Record<string, number> = { confirmed: 1, worker_assigned: 2, on_the_way: 3, arrived: 4, in_progress: 6, completed: 8, cancelled: 8 }
 // Job-timeline lifecycle: current level per status (steps below it are done, the matching one is live).
@@ -36,6 +36,7 @@ export default function AdminBookingDetail() {
   const [cust, setCust] = useState<any>(null)
   const [worker, setWorker] = useState<any>(null)
   const [settle, setSettle] = useState<Settlement | null>(null)
+  const [ev, setEv] = useState<Evidence | null>(null)
   const [seller, setSeller] = useState<any>(null)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
@@ -56,6 +57,7 @@ export default function AdminBookingDetail() {
       if (bk.worker_id) fetchWorkerDetail(bk.worker_id).then(setWorker).catch(() => {})
     }).catch((e: Error) => setErr(e.message))
     fetchSettlement(Number(id)).then(setSettle).catch(() => {})
+    fetchEvidence(Number(id)).then(setEv).catch(() => {})
   }
   useEffect(() => {
     load(); fetchZones().then(setZones).catch(() => {})
@@ -102,6 +104,8 @@ export default function AdminBookingDetail() {
   const reassign = () => { if (!assignTo) return toast('Select a worker', 'err'); doUpdate({ workerId: Number(assignTo), workerName: workerList.find((w) => String(w.id) === assignTo)?.name || '' }, 'Worker reassigned') }
   const reschedule = () => { if (!reDate && !reTime) return toast('Set a date or time', 'err'); doUpdate({ date: reDate || b.date, time: reTime || b.time }, 'Booking rescheduled') }
   const escalate = () => doUpdate({ escalated: true, escalateReason: 'Flagged from Booking Details' }, 'Booking escalated')
+  const reopen = async () => { if (!(await confirm({ title: 'Reopen this service?', message: 'Moves the booking back to in-progress so the worker can resume/redo it.', confirmLabel: 'Reopen' }))) return; doUpdate({ status: 'in_progress' }, 'Service reopened') }
+  const mediaAbs = (u: string) => (!u ? '' : u.startsWith('http') ? u : `${API_BASE}${u}`)
   const cancel = async () => { if (!(await confirm({ title: 'Cancel this booking?', message: 'The customer is notified and refunded per policy.', confirmLabel: 'Cancel booking', danger: true }))) return; doUpdate({ status: 'cancelled' }, 'Booking cancelled') }
   const doRefund = async () => {
     if (!(await confirm({ title: 'Create a refund for this booking?', message: 'Routed through the approval matrix — it may execute now or queue for sign-off.', confirmLabel: 'Create refund' }))) return
@@ -303,7 +307,114 @@ export default function AdminBookingDetail() {
           </div>
         </div>
       )}
-      {tab === 'evidence' && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>{evidenceCard()}{otpCard()}</div>}
+      {tab === 'evidence' && (!ev ? <Loading /> : (() => {
+        const done = ev.checklist.filter((t) => t.completed).length
+        const pct = ev.checklist.length ? Math.round((done / ev.checklist.length) * 100) : 0
+        const schedMin = (() => { const d = String(b.duration || items[0]?.durationLabel || ''); const h = /(\d+)\s*h/i.exec(d); const m = /(\d+)\s*m/i.exec(d); return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) || 60 })()
+        const durTxt = ev.durationMin != null ? `${Math.floor(ev.durationMin / 60)}h ${String(ev.durationMin % 60).padStart(2, '0')}m` : '—'
+        const ext = ev.durationMin != null ? ev.durationMin - schedMin : 0
+        const acts = [ev.beforeAt && [ev.beforeAt, 'Before photos uploaded'], ev.checkIn.at && [ev.checkIn.at, 'Start verification (OTP verified)'], b.started_at && [b.started_at, 'Service started'], ev.afterAt && [ev.afterAt, 'After photos uploaded'], ev.checkOut.at && [ev.checkOut.at, 'End verification (OTP verified)'], b.rating && [b.completed_at, 'Customer confirmed & rated']].filter(Boolean) as [string, string][]
+        const verifyBlock = (title: string, v: Evidence['checkIn']) => (
+          <div style={{ marginBottom: 12 }}>
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}><b style={{ fontSize: 13 }}><CheckCircle2 size={13} style={{ color: '#16a34a', verticalAlign: -2 }} /> {title}</b>{v.verified ? <Badge tone="green" dot={false}>Verified</Badge> : <Badge tone="amber" dot={false}>Pending</Badge>}</div>
+            <Row label="Verified By" value="Customer" />
+            <Row label="OTP" value={v.otp || '—'} />
+            <Row label="Verified At" value={fmtDateTime(v.at) || '—'} />
+          </div>
+        )
+        return (
+        <div className="grid" style={{ gap: 16 }}>
+          {/* KPI strip */}
+          <div className="stat-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+            <div className="card" style={{ padding: '12px 14px' }}><div className="row" style={{ gap: 8, alignItems: 'center' }}><Avatar name={ev.worker.name} size={30} /><div><div className="muted" style={{ fontSize: 11 }}>Worker</div><div style={{ fontWeight: 700, fontSize: 13 }}>{ev.worker.name || '—'}</div>{ev.worker.rating > 0 && <div className="muted" style={{ fontSize: 11 }}>★ {ev.worker.rating}</div>}</div></div></div>
+            <div className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>Check-in (Start)</div><div style={{ fontWeight: 800, fontSize: 16 }}>{timeOnly(ev.checkIn.at)}</div>{ev.checkIn.otp && <Badge tone="green" dot={false}>OTP {ev.checkIn.otp}</Badge>}</div>
+            <div className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>Check-out (End)</div><div style={{ fontWeight: 800, fontSize: 16 }}>{timeOnly(ev.checkOut.at)}</div>{ev.checkOut.otp && <Badge tone="green" dot={false}>OTP {ev.checkOut.otp}</Badge>}</div>
+            <div className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>Actual Duration</div><div style={{ fontWeight: 800, fontSize: 16 }}>{durTxt}</div>{ext > 0 && <Badge tone="amber" dot={false}>+{ext}m Extension</Badge>}</div>
+            <div className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>Service Status</div><div style={{ fontWeight: 800, fontSize: 15, color: b.status === 'completed' ? '#16a34a' : 'var(--ink)', textTransform: 'capitalize' }}>{b.status}</div>{b.rating > 0 && <div className="muted" style={{ fontSize: 11 }}>Customer confirmed</div>}</div>
+            <div className="card" style={{ padding: '12px 14px' }}><div className="muted" style={{ fontSize: 11 }}>Location</div><div style={{ fontSize: 12, fontWeight: 600, marginTop: 2 }}>{ev.location.address || '—'}</div></div>
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2.6fr) minmax(260px, 1fr)', gap: 16, alignItems: 'start' }}>
+            <div className="grid" style={{ gap: 16 }}>
+              {/* photos */}
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+                {([['Before Service Photos', ev.beforePhotos, ev.beforeAt], ['After Service Photos', ev.afterPhotos, ev.afterAt]] as const).map(([title, photos, at]) => (
+                  <Card key={title} title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><ImageIcon size={16} /> {title}</span>} right={<span className="muted" style={{ fontSize: 12 }}>{photos.length} Photos</span>}>
+                    {photos.length ? <>
+                      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8 }}>
+                        {photos.map((ph, i) => <a key={i} href={mediaAbs(ph.url)} target="_blank" rel="noreferrer"><img src={mediaAbs(ph.url)} alt="" style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.opacity = '0.2')} /></a>)}
+                      </div>
+                      {at && <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>Uploaded at {fmtDateTime(at)}</div>}
+                    </> : <div className="muted" style={{ fontSize: 13, padding: '14px 0' }}>No photos captured.</div>}
+                  </Card>
+                ))}
+              </div>
+
+              {/* checklist + verification */}
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+                <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Sparkles size={16} /> Service Checklist</span>}>
+                  {ev.checklist.length ? <>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                      <thead><tr style={{ color: 'var(--muted)', fontSize: 11 }}><th style={{ textAlign: 'left', padding: '4px 6px' }}>Task</th><th style={{ padding: '4px 6px' }}>Required</th><th style={{ padding: '4px 6px' }}>Done</th></tr></thead>
+                      <tbody>{ev.checklist.map((t, i) => (
+                        <tr key={i}><td style={{ padding: '6px' }}>{i + 1}. {t.task}</td><td style={{ padding: '6px', textAlign: 'center' }}>{t.required ? <CheckCircle2 size={14} style={{ color: '#16a34a' }} /> : '—'}</td><td style={{ padding: '6px', textAlign: 'center' }}>{t.completed ? <CheckCircle2 size={14} style={{ color: '#16a34a' }} /> : <span style={{ color: '#d5d7e3' }}>○</span>}</td></tr>
+                      ))}</tbody>
+                    </table>
+                    <div style={{ height: 8, background: '#eceaf6', borderRadius: 6, marginTop: 10, overflow: 'hidden' }}><div style={{ width: `${pct}%`, height: '100%', background: '#16a34a' }} /></div>
+                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{done}/{ev.checklist.length} Completed · {pct}%</div>
+                  </> : <div className="muted" style={{ fontSize: 13, padding: '14px 0' }}>No checklist captured for this service.</div>}
+                </Card>
+                <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><ShieldCheck size={16} /> Service Verification</span>}>
+                  {verifyBlock('Start Verification (Check-in)', ev.checkIn)}
+                  {verifyBlock('End Verification (Check-out)', ev.checkOut)}
+                  <div className="row" style={{ gap: 16, marginTop: 4, fontSize: 12 }}>
+                    <div><div className="muted">Actual</div><b>{durTxt}</b></div>
+                    <div><div className="muted">Scheduled</div><b>{Math.floor(schedMin / 60)}h {String(schedMin % 60).padStart(2, '0')}m</b></div>
+                    {ext > 0 && <div><div className="muted">Extension</div><b style={{ color: '#b97400' }}>+{ext}m</b></div>}
+                  </div>
+                </Card>
+              </div>
+
+              {/* materials + notes + feedback */}
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+                <Card title="Materials / Equipment Used"><div className="muted" style={{ fontSize: 13, padding: '6px 0' }}>{ev.materials || 'No additional materials used for this service.'}</div></Card>
+                <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><StickyNote size={16} /> Worker Notes</span>}>{ev.workerNotes ? <div style={{ fontSize: 13 }}>{ev.workerNotes}<div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Submitted at {fmtDateTime(b.completed_at)}</div></div> : <div className="muted" style={{ fontSize: 13 }}>No notes from the worker.</div>}</Card>
+                <Card title="Customer Feedback">{ev.feedback.rating > 0 ? <><Row label="Rating" value={<b style={{ color: '#f5b301' }}>{'★'.repeat(ev.feedback.rating)}{'☆'.repeat(Math.max(0, 5 - ev.feedback.rating))} {ev.feedback.rating.toFixed(1)}</b>} />{ev.feedback.review && <div style={{ fontSize: 13, marginTop: 4 }}>“{ev.feedback.review}”</div>}<div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Submitted {fmtDateTime(b.completed_at)}</div></> : <div className="muted" style={{ fontSize: 13 }}>No feedback yet.</div>}</Card>
+              </div>
+
+              {/* bottom actions */}
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+                <Card title="Need Adjustment or Issue?"><div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>Raise a complaint or request an adjustment for this booking.</div><button className="btn line" onClick={() => nav('/support')}><LifeBuoy size={14} /> Create Support Ticket</button></Card>
+                <Card title="Reopen Service"><div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>If the customer reported an issue, you can reopen this service.</div><button className="btn line" onClick={reopen}><RefreshCw size={14} /> Reopen Booking</button></Card>
+              </div>
+            </div>
+
+            {/* sidebar */}
+            <div className="grid" style={{ gap: 16 }}>
+              <Card title="Service Summary">
+                <Row label="Service" value={ev.summary.service || svcName} />
+                <Row label="Duration" value={ev.summary.duration || '—'} />
+                <Row label="Quantity" value={`${ev.summary.qty} Session`} />
+                <Row label="Add-ons" value="None" />
+                {ev.instructions && <div style={{ marginTop: 8, background: '#f6f6fe', borderRadius: 8, padding: '8px 10px' }}><div className="muted" style={{ fontSize: 11 }}>Customer Instructions</div><div style={{ fontSize: 12.5, marginTop: 3 }}>{ev.instructions}</div></div>}
+                <div style={{ marginTop: 8 }}><div className="muted" style={{ fontSize: 11 }}>Service Location</div><div style={{ fontSize: 12.5 }}>{ev.location.address || '—'}</div></div>
+              </Card>
+              <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><ImageIcon size={16} /> Evidence Information</span>}>
+                <Row label="Photos by" value={ev.worker.name ? `${ev.worker.name}${ev.worker.id ? ` (WRK-${ev.worker.id})` : ''}` : '—'} />
+                <Row label="Device" value={ev.device || 'Not captured'} />
+                <Row label="Total Photos" value={`${ev.beforePhotos.length + ev.afterPhotos.length} (${ev.beforePhotos.length} + ${ev.afterPhotos.length})`} />
+                <Row label="Network" value={ev.network || 'Not captured'} />
+                <Row label="Location Captured" value={ev.location.lat != null ? <Badge tone="green" dot={false}>Yes</Badge> : 'No'} />
+                {ev.location.lat != null && <Row label="Geo" value={`${ev.location.lat}, ${ev.location.lng}`} />}
+              </Card>
+              <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={16} /> Activity Log</span>}>
+                {acts.length ? <div style={{ display: 'grid', gap: 8 }}>{acts.map(([at, label], i) => <div key={i} className="row" style={{ gap: 8, fontSize: 12.5 }}><span className="muted" style={{ minWidth: 62 }}>{timeOnly(at)}</span><span>{label}</span></div>)}</div> : <div className="muted" style={{ fontSize: 13 }}>No activity recorded.</div>}
+              </Card>
+            </div>
+          </div>
+        </div>
+        )
+      })())}
       {tab === 'support' && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>{supportCard()}{notesCard()}</div>}
       {tab === 'activity' && <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 16 }}>{notesCard()}</div>}
 
