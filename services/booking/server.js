@@ -613,6 +613,7 @@ app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
   const pgGstPct = Number(await getSetting(ADMIN_URL, 'pg_fee_gst_percent', '18')) || 18
   const opsCostPct = Number(await getSetting(ADMIN_URL, 'operational_cost_percent', '0')) || 0
   const mktgCostPct = Number(await getSetting(ADMIN_URL, 'marketing_cost_percent', '0')) || 0
+  const incentivePct = Number(await getSetting(ADMIN_URL, 'worker_incentive_percent', '0')) || 0
   const commissionPct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
 
   const total = b.total || 0
@@ -621,7 +622,7 @@ app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
   const pgGst = r2(pgFee * pgGstPct / 100)
   const net = r2(total - pgFee - pgGst)
   const workerPayout = b.worker_comp || Math.round((b.subtotal || 0) * (100 - commissionPct) / 100)
-  const incentive = 0
+  const incentive = r2((b.subtotal || 0) * incentivePct / 100)
   const opsCost = r2(total * opsCostPct / 100)
   const mktgCost = r2(total * mktgCostPct / 100)
   const companyMargin = r2(net - workerPayout - incentive - opsCost - mktgCost)

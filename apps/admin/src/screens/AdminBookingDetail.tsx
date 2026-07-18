@@ -418,15 +418,24 @@ export default function AdminBookingDetail() {
   function priceBreakdownCard() {
     if (!settle) return <Card title="Price & Charges Breakdown"><Loading /></Card>
     const c = settle.customer
+    const base = items[0]?.price ?? c.subtotal
+    const addons = Math.max(0, c.subtotal - base)
+    const halfGst = c.tax / 2
+    const gstPct = c.subtotal ? Math.round((c.tax / c.subtotal) * 1000) / 10 : 0
     return (
-      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><IndianRupee size={16} /> Price & Charges Breakdown</span>}>
-        <Row label={`Service Price (${svcName})`} value={money(c.subtotal)} />
-        <Row label="Subtotal" value={money(c.subtotal)} strong />
-        {c.discount > 0 && <Row label={c.coupon ? `Coupon Discount (${c.coupon})` : 'Discount'} value={<span style={{ color: '#0f8a4d' }}>− {money(c.discount)}</span>} />}
-        {c.fee > 0 && <Row label="Platform Fee" value={money(c.fee)} />}
-        {c.tax > 0 && <Row label="GST / Tax" value={money(c.tax)} />}
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><IndianRupee size={16} /> Price & Charges Breakdown (Customer View)</span>}>
+        <Row label={`Service Price (${svcName})`} value={<b>{money(base)}</b>} strong />
+        <div style={{ paddingLeft: 12 }}>
+          <Row label={`Duration (${b.duration || items[0]?.durationLabel || '1 session'})`} value={money(base)} />
+          <Row label="Add-ons" value={money(addons)} />
+        </div>
         <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
-        <Row label="Total Paid by Customer" value={<b>{money(c.total)}</b>} strong />
+        <Row label="Subtotal" value={money(c.subtotal)} strong />
+        {c.discount > 0 && <Row label={c.coupon ? `Coupon Discount (${c.coupon})` : 'Zone Discount'} value={<span style={{ color: '#0f8a4d' }}>− {money(c.discount)}</span>} />}
+        <Row label="Platform Fee" value={money(c.fee || 0)} />
+        <Row label={`CGST (${(gstPct / 2).toFixed(1)}%)`} value={rs(halfGst)} />
+        <Row label={`SGST (${(gstPct / 2).toFixed(1)}%)`} value={rs(halfGst)} />
+        <div style={{ background: '#f6f6fe', borderRadius: 8, padding: '0 8px', margin: '4px 0' }}><Row label="Total Paid by Customer" value={<b>{money(c.total)}</b>} strong /></div>
         {c.discount > 0 && <div style={{ marginTop: 8, color: '#0f8a4d', fontSize: 12.5, fontWeight: 600 }}>🎉 Customer saved {money(c.discount)} on this booking</div>}
       </Card>
     )

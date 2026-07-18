@@ -188,6 +188,21 @@ export default function SettingsScreen() {
           workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
         </p>
 
+        {/* Settlement rates — drive the per-booking Payment & Settlement breakdown. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Settlement Rates</h4>
+        <div className="form-grid">
+          <Field label="Payment gateway fee (%)"><input disabled={!editable} type="number" step="0.01" min={0} value={s.pg_fee_percent || ''} onChange={(e) => set('pg_fee_percent', e.target.value)} placeholder="2.36" /></Field>
+          <Field label="GST on gateway fee (%)"><input disabled={!editable} type="number" step="0.01" min={0} value={s.pg_fee_gst_percent || ''} onChange={(e) => set('pg_fee_gst_percent', e.target.value)} placeholder="18" /></Field>
+          <Field label="Worker incentive (% of service)"><input disabled={!editable} type="number" step="0.1" min={0} value={s.worker_incentive_percent || ''} onChange={(e) => set('worker_incentive_percent', e.target.value)} placeholder="3" /></Field>
+          <Field label="Operational cost (% of order)"><input disabled={!editable} type="number" step="0.1" min={0} value={s.operational_cost_percent || ''} onChange={(e) => set('operational_cost_percent', e.target.value)} placeholder="2" /></Field>
+          <Field label="Marketing & platform cost (% of order)"><input disabled={!editable} type="number" step="0.1" min={0} value={s.marketing_cost_percent || ''} onChange={(e) => set('marketing_cost_percent', e.target.value)} placeholder="1" /></Field>
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          These drive each booking's Payment &amp; Settlement breakdown. The gateway fee + its GST are the real
+          charges a card/UPI payment incurs (0 on wallet); incentive/operational/marketing are the org's
+          allocated per-booking costs. Set any to 0 to remove that line.
+        </p>
+
         {/* Session & Security */}
         <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Session &amp; Security</h4>
         <div className="form-grid">
