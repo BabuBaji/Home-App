@@ -42,6 +42,8 @@ object DebugNav {
     var route: String? = null
     var login: Boolean = false
     var amount: Int = 0
+    var phone: String? = null
+    var otp: String? = null
     var consumed: Boolean = false
 }
 
@@ -52,6 +54,8 @@ class MainActivity : ComponentActivity() {
             DebugNav.route = intent?.getStringExtra("debug_route")
             DebugNav.login = intent?.getBooleanExtra("debug_login", false) == true
             DebugNav.amount = intent?.getIntExtra("debug_amount", 0) ?: 0
+            DebugNav.phone = intent?.getStringExtra("debug_phone")
+            DebugNav.otp = intent?.getStringExtra("debug_otp")
             DebugNav.consumed = false
             // When driving the app headlessly via `am start` (touch injection blocked by the OS),
             // turn the screen on and keep it lit so automated screenshots aren't black frames.
@@ -188,7 +192,7 @@ fun AppRoot() {
                 DebugNav.consumed = true
                 if (DebugNav.amount > 0) WithdrawDraft.amount = DebugNav.amount
                 if (DebugNav.login && !vm.isLoggedIn) {
-                    vm.debugLogin("9988776655", "1234") { ok ->
+                    vm.debugLogin(DebugNav.phone ?: "9800000000", DebugNav.otp ?: "1234") { ok ->
                         if (ok) nav.navigate(target)
                     }
                 } else {
