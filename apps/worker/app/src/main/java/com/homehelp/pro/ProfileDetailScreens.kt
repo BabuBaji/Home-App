@@ -54,7 +54,11 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
@@ -1874,6 +1878,8 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             NavRow(Icons.Filled.Notifications, Purple, PurpleLight, "Notifications") { nav.navigate(Routes.P_NOTIFICATIONS) }
             HairlineDivider()
+            NavRow(Icons.Filled.Campaign, Purple, PurpleLight, "Communication Preferences", "How we can reach you") { nav.navigate(Routes.P_COMM) }
+            HairlineDivider()
             NavRow(Icons.Filled.PrivacyTip, Purple, PurpleLight, "Privacy Policy") {
                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://homehelp.pro/privacy"))) }
                     .onFailure { toast(ctx, "No browser app found") }
@@ -1898,6 +1904,38 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.width(Space.s))
             Text("Logout", color = RedCancel, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+/** Per-channel communication opt-in. Backed by the admin service (proxied through the worker service),
+ *  so toggling here is what the admin panel and broadcast targeting read. Each switch saves instantly. */
+@Composable
+fun CommPreferencesScreen(vm: AppViewModel, nav: NavHostController) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadComm() }
+    DetailScaffold("Communication", nav) {
+        Card {
+            SectionLabel("Communication Preferences")
+            Spacer(Modifier.height(Space.s))
+            Text(
+                "Choose how HomeHelp can reach you. Turning a channel off stops those messages.",
+                color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.xs))
+            ToggleRow(Icons.Filled.Chat, Purple, PurpleLight, "WhatsApp", "Updates & alerts on WhatsApp", vm.commWhatsapp) { vm.commWhatsapp = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.Sms, Purple, PurpleLight, "SMS", "Text messages", vm.commSms) { vm.commSms = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.Email, Purple, PurpleLight, "Email", "Email updates", vm.commEmail) { vm.commEmail = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.NotificationsActive, Purple, PurpleLight, "Push Notifications", "In-app push alerts", vm.commPush) { vm.commPush = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.LocalOffer, Purple, PurpleLight, "Promotional Offers", "Bonuses, campaigns & offers", vm.commPromo) { vm.commPromo = it; vm.saveComm() }
+        }
+        Text(
+            "Important account, job and payment messages are always sent, regardless of these settings.",
+            color = TextMuted, fontSize = 11.5.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(horizontal = Space.xs),
+        )
     }
 }
 

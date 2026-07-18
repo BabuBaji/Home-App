@@ -82,6 +82,12 @@ interface ApiService {
     @PUT("api/worker/notifications")
     suspend fun updateNotifications(@Body body: NotificationsBody): WorkerDto
 
+    @GET("api/worker/comm")
+    suspend fun getComm(): CommDto
+
+    @PUT("api/worker/comm")
+    suspend fun updateComm(@Body body: CommDto): CommDto
+
     @GET("api/worker/documents")
     suspend fun getDocuments(): List<DocumentDto>
 

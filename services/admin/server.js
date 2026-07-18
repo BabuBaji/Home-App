@@ -1183,7 +1183,8 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership })
 })
 /* ---------- worker communication preferences (owned here, not on the worker record) ---------- */
-const WORKER_COMM_COLS = ['comm_whatsapp', 'comm_sms', 'comm_email', 'comm_push', 'comm_promo']
+// Friendly shape used everywhere: { whatsapp, sms, email, push, promo }. Missing row = all on.
+const COMM_KEYS = ['whatsapp', 'sms', 'email', 'push', 'promo']
 const commRow = (r) => ({
   whatsapp: r?.comm_whatsapp ?? true, sms: r?.comm_sms ?? true, email: r?.comm_email ?? true,
   push: r?.comm_push ?? true, promo: r?.comm_promo ?? true,
@@ -1192,24 +1193,31 @@ async function getWorkerComm(id) {
   const { rows } = await pool.query('SELECT * FROM worker_comm WHERE worker_id=$1', [id])
   return commRow(rows[0])
 }
-app.get('/api/admin/worker-comm/:id', admin, async (req, res) => res.json(await getWorkerComm(Number(req.params.id))))
-app.patch('/api/admin/worker-comm/:id', admin, requirePerm('workers.edit'), async (req, res) => {
-  const id = Number(req.params.id)
-  const b = req.body || {}
-  const cur = await pool.query('SELECT * FROM worker_comm WHERE worker_id=$1', [id])
-  const base = cur.rows[0] || { comm_whatsapp: true, comm_sms: true, comm_email: true, comm_push: true, comm_promo: true }
-  const next = {}
-  for (const col of WORKER_COMM_COLS) next[col] = b[col] === undefined ? (base[col] ?? true) : !!b[col]
+// Merge a partial {whatsapp?,…} patch onto the stored row and upsert. Booleans coerced.
+async function upsertWorkerComm(id, patch) {
+  const cur = await getWorkerComm(id)
+  const next = { ...cur }
+  for (const k of COMM_KEYS) if (patch[k] !== undefined) next[k] = !!patch[k]
   await pool.query(
     `INSERT INTO worker_comm (worker_id, comm_whatsapp, comm_sms, comm_email, comm_push, comm_promo, updated)
      VALUES ($1,$2,$3,$4,$5,$6, now())
      ON CONFLICT (worker_id) DO UPDATE SET comm_whatsapp=$2, comm_sms=$3, comm_email=$4, comm_push=$5, comm_promo=$6, updated=now()`,
-    [id, next.comm_whatsapp, next.comm_sms, next.comm_email, next.comm_push, next.comm_promo])
-  await logAudit(req.admin?.name || 'admin', 'worker.comm', String(id))
-  res.json(commRow(next))
+    [id, next.whatsapp, next.sms, next.email, next.push, next.promo])
+  return next
+}
+app.get('/api/admin/worker-comm/:id', admin, async (req, res) => res.json(await getWorkerComm(Number(req.params.id))))
+app.patch('/api/admin/worker-comm/:id', admin, requirePerm('workers.edit'), async (req, res) => {
+  const b = req.body || {}
+  // Admin panel sends comm_* keys; translate to the friendly shape.
+  const patch = {}; for (const k of COMM_KEYS) if (b[`comm_${k}`] !== undefined) patch[k] = b[`comm_${k}`]
+  const next = await upsertWorkerComm(Number(req.params.id), patch)
+  await logAudit(req.admin?.name || 'admin', 'worker.comm', String(req.params.id))
+  res.json(next)
 })
-// Bulk map for the notification service: { [workerId]: {whatsapp,sms,email,push,promo} } — only workers
-// with a stored row appear; the notifier defaults everyone else to all-on.
+// Internal: single worker (worker-service proxy reads/writes these on the worker's own behalf).
+app.get('/internal/worker-comm/:id', internalOnly, async (req, res) => res.json(await getWorkerComm(Number(req.params.id))))
+app.post('/internal/worker-comm/:id', internalOnly, async (req, res) => res.json(await upsertWorkerComm(Number(req.params.id), req.body || {})))
+// Internal: bulk map for the notification service: { [workerId]: {whatsapp,…} }. Missing = all on.
 app.get('/internal/worker-comm', internalOnly, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM worker_comm')
   const map = {}; for (const r of rows) map[r.worker_id] = commRow(r)

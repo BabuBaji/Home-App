@@ -767,3 +767,13 @@ data class NotificationsBody(
     val notifPromotions: Boolean,
     val notifRatings: Boolean,
 )
+
+/** Per-channel communication opt-in. Stored in the admin service; the worker service proxies it.
+ *  Used for both the GET response and the PUT body (full state is sent). */
+data class CommDto(
+    val whatsapp: Boolean = true,
+    val sms: Boolean = true,
+    val email: Boolean = true,
+    val push: Boolean = true,
+    val promo: Boolean = true,
+)

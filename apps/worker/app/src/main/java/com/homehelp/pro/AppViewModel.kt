@@ -491,6 +491,13 @@ class AppViewModel : ViewModel() {
     var notifPromotions by mutableStateOf(false)
     var notifRatings by mutableStateOf(true)
 
+    // ---- communication channel opt-in (stored in the admin service; proxied by the worker service) ----
+    var commWhatsapp by mutableStateOf(true)
+    var commSms by mutableStateOf(true)
+    var commEmail by mutableStateOf(true)
+    var commPush by mutableStateOf(true)
+    var commPromo by mutableStateOf(true)
+
     // ---- verification documents ----
     // The required-document checklist. Statuses start as "Pending" and are replaced by the
     // backend's real review status on load (no document is shown as verified until it is).
@@ -1709,6 +1716,24 @@ class AppViewModel : ViewModel() {
 
     fun saveNotifications() = sync {
         api.updateNotifications(NotificationsBody(notifNewJobs, notifPayments, notifPromotions, notifRatings))
+    }
+
+    /** Pull the worker's communication channel opt-in (from the admin service via the worker proxy). */
+    fun loadComm() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val c = api.getComm()
+                commWhatsapp = c.whatsapp; commSms = c.sms; commEmail = c.email; commPush = c.push; commPromo = c.promo
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    /** Persist the current channel opt-in; adopts the server's returned state as truth. */
+    fun saveComm() = sync {
+        val c = api.updateComm(com.homehelp.pro.network.CommDto(commWhatsapp, commSms, commEmail, commPush, commPromo))
+        commWhatsapp = c.whatsapp; commSms = c.sms; commEmail = c.email; commPush = c.push; commPromo = c.promo
     }
 
     /** Record a picked document: flip to "Under Review" locally, then persist to the backend. */

@@ -127,6 +127,7 @@ object Routes {
     const val P_AVAILABILITY = "profile_availability"
     const val P_PREFERENCES = "profile_preferences"
     const val P_NOTIFICATIONS = "profile_notifications"
+    const val P_COMM = "profile_comm"
     const val P_HELP = "profile_help"
     const val P_ABOUT = "profile_about"
     const val RATE_CARD = "ratecard"
@@ -311,6 +312,7 @@ fun AppRoot() {
             composable(Routes.P_AVAILABILITY) { AvailabilityScreen(vm, nav) }
             composable(Routes.P_PREFERENCES) { PreferencesScreen(vm, nav) }
             composable(Routes.P_NOTIFICATIONS) { NotificationsScreen(vm, nav) }
+            composable(Routes.P_COMM) { CommPreferencesScreen(vm, nav) }
             composable(Routes.P_HELP) { HelpSupportScreen(vm, nav) }
             composable(Routes.P_ABOUT) { AboutScreen(nav) }
             composable(Routes.RATE_CARD) { RateCardScreen(vm, nav) }

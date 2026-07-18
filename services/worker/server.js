@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import {
-  makePool, migrate, makeAdminAuth, requirePerm, inScope, internalOnly, tryGet, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, inScope, internalOnly, tryGet, internalPost, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
   getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
@@ -1772,6 +1772,16 @@ app.get('/api/worker/shakti-bonus', auth, async (req, res) => {
 
 app.put('/api/worker/preferences', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { preferences: req.body || {} }))))
 app.put('/api/worker/notifications', auth, async (req, res) => res.json(workerDto(await mergeProfile(req.worker.id, { notifications: req.body || {} }))))
+// Communication channel opt-in lives in the admin service (off the worker record). The worker manages
+// their own here; we proxy to the admin service on their behalf. Shape: {whatsapp,sms,email,push,promo}.
+const COMM_DEFAULT = { whatsapp: true, sms: true, email: true, push: true, promo: true }
+app.get('/api/worker/comm', auth, async (req, res) => {
+  res.json(await tryGet(ADMIN_URL, `/internal/worker-comm/${req.worker.id}`, COMM_DEFAULT))
+})
+app.put('/api/worker/comm', auth, async (req, res) => {
+  try { res.json(await internalPost(ADMIN_URL, `/internal/worker-comm/${req.worker.id}`, req.body || {})) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
 /* The worker app's view of one document. This used to return raw DB rows, so the app received
  * `file_name`/`reject_reason` while its DTO reads `fileName`/`rejectReason` — both were always
  * empty, which made every uploaded document render as "Not uploaded yet" and hid the admin's
