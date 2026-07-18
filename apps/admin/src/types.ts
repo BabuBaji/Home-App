@@ -153,6 +153,7 @@ export interface WorkerDetail extends Worker {
 
 /* Surge pricing — live per-zone surge (weather-driven or a manual ops override). */
 export interface SurgeZone { zoneId: number; zone: string; city: string; active: boolean; pct: number; reason: string; prob: number | null; precipMm: number | null; at: number | null }
+export interface HomeBanner { id: number; title: string; subtitle: string; emoji: string; theme: string; cta_label: string; cta_link: string; starts: string | null; ends: string | null; zone_id: number | null; priority: number; status: string; kind: string; image_url: string; created: string }
 
 /* Logs tab — the worker's audit stream from the activity service, categorised + summarised. */
 export interface WorkerLog { id: number; date: string; logType: string; action: string; description: string; source: string; performedBy: string; actorType: string; ref: string }

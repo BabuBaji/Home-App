@@ -98,7 +98,7 @@ export default function ZoneOnboarding() {
         <button className="zo-btn" onClick={openWizard}><Plus size={17} /> Create Zone</button>
       </div>
       {loading ? <div className="zo-empty"><div className="spinner" /><p style={{ marginTop: 10 }}>Loading zones…</p></div>
-        : tab === 'overview' ? <ZoneAdminDashboard zones={zones} onCreate={openWizard} onOpenZone={openZone} />
+        : tab === 'overview' ? <ZoneAdminDashboard zones={zones} onCreate={openWizard} onOpenZone={openZone} onViewAllZones={() => setTab('zones')} />
         : zones.length === 0 ? <div className="zo-empty"><div className="e">🗺️</div><p>No zones yet. Create your first operational zone.</p></div>
           : (
             <div className="zo-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>

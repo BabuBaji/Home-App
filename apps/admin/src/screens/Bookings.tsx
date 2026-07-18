@@ -35,7 +35,7 @@ export default function Bookings() {
   const confirm = useConfirm()
   const [rows, setRows] = useState<AdminBooking[] | null>(null)
   const [err, setErr] = useState('')
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get('q') || '')
   const [tab, setTab] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
