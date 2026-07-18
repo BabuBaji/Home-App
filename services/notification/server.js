@@ -55,6 +55,9 @@ async function init() {
       audience TEXT NOT NULL DEFAULT 'all', channel TEXT NOT NULL DEFAULT 'in-app', sent INTEGER NOT NULL DEFAULT 0,
       admin TEXT, created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Delivery accounting: how many opted-out recipients were skipped, and whether this was promotional.
+    `ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS suppressed INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS promotional BOOLEAN NOT NULL DEFAULT false`,
     // Module 14 (Support): richer ticket fields + escalation.
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subcategory TEXT`,
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subject TEXT`,
@@ -249,14 +252,44 @@ app.patch('/api/admin/complaints/:id', adminAuth, async (req, res) => {
 })
 
 /* ---------- broadcasts / admin notifications ---------- */
+// A broadcast is promotional (marketing) rather than transactional if its type says so or it's flagged.
+const PROMO_TYPES = ['promo', 'promos', 'promotion', 'promotions', 'promotional', 'offer', 'offers', 'marketing', 'coupon']
+// Which per-customer opt-in flag governs each delivery channel.
+const CHANNEL_PREF = { whatsapp: 'whatsapp', sms: 'sms', email: 'email', push: 'push', 'in-app': 'push' }
+// Resolve who actually receives a broadcast, honoring each customer's opt-in. Promotional messages skip
+// anyone who turned off promotional offers (comm_promo=false); every message also skips a customer who
+// disabled the channel it's going out on. Returns the real send count and how many were suppressed.
+// Worker-targeted broadcasts aren't delivered from this service (no worker prefs here), so they resolve
+// to zero rather than a fabricated count.
+async function resolveRecipients(b) {
+  const isPromo = b.promotional === true || PROMO_TYPES.includes(String(b.type || '').toLowerCase())
+  const audience = String(b.audience || 'all').toLowerCase()
+  const targetsCustomers = audience === 'all' || audience === '' || audience.includes('customer')
+  if (!targetsCustomers) return { isPromo, sent: 0, suppressed: 0, recipientIds: [], targetsCustomers: false }
+  const chanPref = CHANNEL_PREF[String(b.channel || 'in-app').toLowerCase()] || null
+  const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
+  const base = customers.filter((c) => (c.status || 'active') === 'active')  // active customers
+  let suppressed = 0
+  const recipients = base.filter((c) => {
+    const comm = c.comm || {}
+    if (isPromo && comm.promo === false) { suppressed++; return false }        // opted out of marketing
+    if (chanPref && comm[chanPref] === false) { suppressed++; return false }    // opted out of this channel
+    return true
+  })
+  return { isPromo, sent: recipients.length, suppressed, recipientIds: recipients.map((c) => c.id), targetsCustomers: true }
+}
+
 app.get('/api/admin/notifications', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))
 app.post('/api/admin/notifications/broadcast', adminAuth, async (req, res) => {
   const b = req.body || {}
   if (!b.title) return res.status(400).json({ error: 'Title required' })
-  const { rows } = await pool.query('INSERT INTO broadcasts (type,title,body,audience,channel,sent,admin) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-    [b.type || 'announcement', b.title, b.body || null, b.audience || 'all', b.channel || 'in-app', 1, req.admin?.email || null])
-  await logEvent({ actorType: 'admin', actorName: req.admin?.email, action: 'admin.broadcast', detail: `Broadcast: ${b.title}` })
-  res.status(201).json(rows[0])
+  const { isPromo, sent, suppressed } = await resolveRecipients(b)
+  const { rows } = await pool.query(
+    'INSERT INTO broadcasts (type,title,body,audience,channel,sent,suppressed,promotional,admin) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+    [b.type || 'announcement', b.title, b.body || null, b.audience || 'all', b.channel || 'in-app', sent, suppressed, isPromo, req.admin?.email || null])
+  await logEvent({ actorType: 'admin', actorName: req.admin?.email, action: 'admin.broadcast',
+    detail: `Broadcast "${b.title}" → ${sent} recipient${sent === 1 ? '' : 's'}${suppressed ? `, ${suppressed} skipped (opted out)` : ''}` })
+  res.status(201).json({ ...rows[0], sent, suppressed })
 })
 
 /* ---------- event bus: record everything ---------- */

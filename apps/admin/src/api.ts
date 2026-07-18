@@ -450,7 +450,7 @@ export const createBookingComplaint = (body: Record<string, unknown>) => req<any
 
 /* notifications */
 export const fetchNotifications = () => req<any[]>('/notifications')
-export const broadcast = (body: Record<string, unknown>) => req<{ ok: boolean; sent: number }>('/notifications/broadcast', post('', body))
+export const broadcast = (body: Record<string, unknown>) => req<{ sent: number; suppressed: number; promotional: boolean }>('/notifications/broadcast', post('', body))
 
 /* settings */
 export const fetchSettings = () => req<Settings>('/settings')
