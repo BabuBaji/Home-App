@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
-import { fetchBookings, fetchBooking, updateBooking, fetchWorkers } from '../api'
+import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones } from '../api'
 import type { AdminBooking } from '../types'
 import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
 import { useStore, has } from '../store'
@@ -45,6 +45,9 @@ export default function Bookings() {
   const [service, setService] = useState('all')
   const [worker, setWorker] = useState(params.get('worker') || 'all')
   const [city, setCity] = useState('all')
+  const [zone, setZone] = useState('all')
+  const [zoneNames, setZoneNames] = useState<Record<number, string>>({})
+  useEffect(() => { fetchZones().then((zs) => setZoneNames(Object.fromEntries(zs.map((z) => [z.id, z.name])))).catch(() => {}) }, [])
 
   const [modal, setModal] = useState<null | 'view' | 'more'>(null)
   const [active, setActive] = useState<AdminBooking | null>(null)
@@ -84,11 +87,15 @@ export default function Bookings() {
     .filter((b) => service === 'all' || b.service === service)
     .filter((b) => worker === 'all' || b.pro === worker)
     .filter((b) => city === 'all' || (b as any).city === city)
+    .filter((b) => zone === 'all' || String((b as any).zone_id) === zone)
     .filter((b) =>
       !ql || b.ref.toLowerCase().includes(ql) || b.customer.toLowerCase().includes(ql) || (b.pro || '').toLowerCase().includes(ql) || (b.service || '').toLowerCase().includes(ql))
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   const cities = Array.from(new Set(rows.map((b) => (b as any).city).filter(Boolean)))
+  // Zones present in the bookings, labelled by name (falls back to the id if the name isn't loaded).
+  const zoneIds = Array.from(new Set(rows.map((b) => (b as any).zone_id).filter((z: unknown) => z != null))) as number[]
+  const zoneLabel = (id: number) => zoneNames[id] || `Zone ${id}`
 
   const exportCsv = () => {
     const head = ['Booking ID', 'Customer', 'Worker', 'Service', 'Type', 'Date', 'Time', 'Amount', 'Status', 'Payment']
@@ -157,6 +164,10 @@ export default function Bookings() {
             <option value="all">All Cities</option>
             {cities.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          <select className="select flt" value={zone} onChange={(e) => { setZone(e.target.value); setPage(1) }}>
+            <option value="all">All Zones</option>
+            {zoneIds.map((z) => <option key={z} value={String(z)}>{zoneLabel(z)}</option>)}
+          </select>
           <div className="tb-spacer" />
           <button className="btn line"><Funnel size={16} /> Filters</button>
           <button className="btn line" onClick={exportCsv}><Download size={16} /> Export</button>
@@ -191,7 +202,7 @@ export default function Bookings() {
                   <td className="muted">{r.ref}</td>
                   <td><div className="cell-user"><Avatar name={r.customer} size={34} /><div><strong>{r.customer}</strong></div></div></td>
                   <td>{r.pro ? <div className="cell-user"><Avatar name={r.pro} size={34} /><div><strong>{r.pro}</strong></div></div> : <span className="muted">Unassigned</span>}</td>
-                  <td><strong>{r.service || '—'}</strong>{r.type && <small style={{ display: 'block', color: '#6b7090' }}>{r.type}</small>}</td>
+                  <td><strong>{r.service || '—'}</strong>{r.type && <small style={{ display: 'block', color: '#6b7090' }}>{r.type}</small>}{(r as any).zone_id != null && <small style={{ display: 'block', color: '#9aa0ad' }}>📍 {zoneLabel((r as any).zone_id)}</small>}</td>
                   <td><strong>{r.date ? shortDate(r.date) : shortDate(r.created)}</strong>{r.time && <small style={{ display: 'block', color: '#6b7090' }}>{r.time}</small>}</td>
                   <td className="num">{money(r.total)}</td>
                   <td><Badge>{r.status}</Badge></td>
