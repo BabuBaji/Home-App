@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -85,6 +86,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -360,112 +362,130 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
         if (uri != null) vm.uploadPhoto(ctx, uri)
     }
     LaunchedEffect(vm.profileError) { vm.profileError?.let { toast(ctx, it); vm.clearProfileError() } }
+    val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
 
-    DetailScaffold("Personal Information", nav) {
-        // Identity hero — photo, name, rating and earned tier.
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        // Clean white top bar — back + title + hairline.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Space.xs))
+            Text("Personal Information", color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+        }
+        HairlineDivider()
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),
+        ) {
+            // Photo hero — centered avatar with camera badge.
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(contentAlignment = Alignment.BottomEnd) {
-                    if (vm.avatarUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = vm.avatarUrl, contentDescription = "Profile photo",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(60.dp).clip(CircleShape).clickable { photoPicker.launch("image/*") },
-                        )
-                    } else {
-                        Box(Modifier.clickable { photoPicker.launch("image/*") }) {
-                            Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
+                    Box(
+                        Modifier.size(84.dp).clip(CircleShape).background(Primary50).border(2.dp, Purple, CircleShape).clickable { photoPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (vm.avatarUrl.isNotBlank()) {
+                            SubcomposeAsyncImage(
+                                model = vm.avatarUrl, contentDescription = "Profile photo", contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp) },
+                                error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp) },
+                            )
+                        } else {
+                            Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                         }
                     }
-                    Icon(
-                        Icons.Filled.PhotoCamera, contentDescription = null, tint = Color.White,
-                        modifier = Modifier.size(20.dp).clip(CircleShape).background(Purple).padding(3.dp),
-                    )
+                    Box(
+                        Modifier.size(28.dp).clip(CircleShape).background(Purple).border(2.dp, Color.White, CircleShape).clickable { photoPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.PhotoCamera, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(14.dp)) }
                 }
-                Spacer(Modifier.width(Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text(vm.workerName, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
-                    Spacer(Modifier.height(Space.xs))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (vm.jobsCompleted > 0) {
-                            RatingStars(vm.workerRating)
-                            Spacer(Modifier.width(Space.s))
-                        }
-                        Text("${vm.jobsCompleted} jobs", fontSize = 12.sp, color = TextGray)
-                    }
-                    Spacer(Modifier.height(Space.s))
-                    TierBadge(vm.tier)
+                Spacer(Modifier.height(8.dp))
+                Text(vm.workerName.ifBlank { "Your name" }, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Tap the photo to update it", color = TextMuted, fontSize = 11.5.sp)
+            }
+
+            PiSection("Contact Details")
+            PiField("Full Name", vm.workerName) { vm.workerName = it }
+            // Mobile is the login identity — shown read-only; changing it would lock the account out.
+            PiField("Mobile Number", vm.workerPhone, enabled = false) { }
+            Text("Your mobile is your login — contact admin to change it.", fontSize = 11.sp, color = TextMuted, modifier = Modifier.padding(bottom = 8.dp))
+            PiField("Email", vm.workerEmail, KeyboardType.Email) { vm.workerEmail = it }
+            PiField("City", vm.workerCity) { vm.workerCity = it }
+            PiField("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
+            ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
+            Spacer(Modifier.height(Space.m))
+            ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
+            Spacer(Modifier.height(Space.m))
+            ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
+
+            PiSection("Family & Emergency")
+            PiField("Father's Name", vm.fatherName) { vm.fatherName = it }
+            PiField("Mother's Name", vm.motherName) { vm.motherName = it }
+            PiField("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
+            PiField("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
+
+            PiSection("Address")
+            PiField("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = sameAsCurrent,
+                    onCheckedChange = { sameAsCurrent = it; if (it) vm.permanentAddress = vm.currentAddress },
+                    colors = CheckboxDefaults.colors(checkedColor = Purple),
+                )
+                Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
+            }
+            if (!sameAsCurrent) { Spacer(Modifier.height(Space.s)); PiField("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it } }
+
+            PiSection("Experience")
+            ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
+            Spacer(Modifier.height(Space.m))
+            PiField("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
+            PiField("Previous Company", vm.previousCompany) { vm.previousCompany = it }
+            PiField("Languages Known", vm.languages) { vm.languages = it }
+            Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextMuted)
+        }
+
+        // Sticky save bar so the action is always reachable without scrolling to the end.
+        androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
+            Box(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
+                PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
+                    vm.saveProfile { toast(ctx, "Profile updated") }
                 }
             }
-            Spacer(Modifier.height(Space.s))
-            Text("Tap your photo to change it. Customers see this on their booking.", fontSize = 11.5.sp, color = TextGray)
-        }
-
-        // Phase 2 — registration details.
-        Card {
-            SectionLabel("Contact Details")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Full Name", vm.workerName) { vm.workerName = it }
-                // The mobile is the login identity — changing it here would lock them out of their
-                // own account, so it's shown but not editable.
-                Field("Mobile Number", vm.workerPhone) { }
-                Text("Your mobile is your login — contact the admin to change it.", fontSize = 11.sp, color = TextGray)
-                Field("Email", vm.workerEmail) { vm.workerEmail = it }
-                Field("City", vm.workerCity) { vm.workerCity = it }
-                Field("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
-                ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
-                ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
-                ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
-            }
-        }
-
-        // Phase 3 — personal profile.
-        Card {
-            SectionLabel("Family & Emergency")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Father's Name", vm.fatherName) { vm.fatherName = it }
-                Field("Mother's Name", vm.motherName) { vm.motherName = it }
-                Field("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
-                Field("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
-            }
-        }
-
-        Card {
-            SectionLabel("Address")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = sameAsCurrent, onCheckedChange = {
-                        sameAsCurrent = it
-                        if (it) vm.permanentAddress = vm.currentAddress
-                    })
-                    Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
-                }
-                if (!sameAsCurrent) Field("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it }
-            }
-        }
-
-        Card {
-            SectionLabel("Experience")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
-                Field("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
-                Field("Previous Company", vm.previousCompany) { vm.previousCompany = it }
-                Field("Languages Known", vm.languages) { vm.languages = it }
-                Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextGray)
-            }
-        }
-
-        PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
-            // Only claim it saved once the server says so — the old code toasted immediately and
-            // fired the request into the background.
-            vm.saveProfile { toast(ctx, "Profile updated") }
         }
     }
+}
+
+/** Section header for the white Personal Information form. */
+@Composable
+private fun PiSection(text: String) {
+    Text(text, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 10.dp))
+}
+
+/** White outlined field (light border, purple focus) for the professional form look. */
+@Composable
+private fun PiField(label: String, value: String, keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        enabled = enabled,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+        shape = RoundedCornerShape(Radius.field),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = Color.White, unfocusedContainerColor = Color.White, disabledContainerColor = FieldFill,
+            focusedBorderColor = Purple, unfocusedBorderColor = Divider, disabledBorderColor = Divider,
+            focusedLabelColor = Purple, unfocusedLabelColor = TextMuted, disabledLabelColor = TextMuted,
+            disabledTextColor = TextGray, cursorColor = Purple,
+        ),
+    )
 }
 
 /**

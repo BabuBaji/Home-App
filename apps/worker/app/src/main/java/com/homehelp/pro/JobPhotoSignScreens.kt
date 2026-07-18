@@ -11,6 +11,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -29,8 +30,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.foundation.shape.CircleShape
+import coil.compose.SubcomposeAsyncImage
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.LocationOn
@@ -54,7 +62,9 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -83,61 +93,87 @@ import java.io.ByteArrayOutputStream
 /** The nine steps of the job flow, as the mockups draw them. */
 private val FLOW_STEPS = listOf(
     "New Job\nOffer", "Navigate", "Arrived", "OTP\nVerification", "Before\nPhoto",
-    "Work in\nProgress", "After\nPhoto", "Customer\nSign & Rating", "Job\nCompleted",
+    "Work in\nProgress", "After\nPhoto", "Customer\nRating", "Job\nCompleted",
 )
 
 /** Step rail: done steps carry a tick, the current one is filled, later ones stay outlined. */
 @Composable
 private fun JobFlowStepper(current: Int) {
     Row(
-        Modifier.fillMaxWidth().horizontalScrollCompat(),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s, vertical = 10.dp),
         verticalAlignment = Alignment.Top,
     ) {
         FLOW_STEPS.forEachIndexed { i, label ->
             val step = i + 1
             val done = step < current
             val active = step == current
-            Column(
-                Modifier.width(46.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(
-                    Modifier.size(26.dp).clip(RoundedCornerShape(Radius.pill))
-                        .background(if (active) Purple else Color.White)
-                        .border(1.5.dp, if (active) Purple else Divider, RoundedCornerShape(Radius.pill)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (done) {
-                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
-                    } else {
-                        Text(
-                            "$step",
-                            color = if (active) Color.White else TextGray,
-                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        )
+            Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.fillMaxWidth().height(30.dp)) {
+                    if (i > 0) StepConnector(Modifier.align(Alignment.CenterStart).width(20.dp), coloured = step <= current)
+                    if (i < FLOW_STEPS.lastIndex) StepConnector(Modifier.align(Alignment.CenterEnd).width(20.dp), coloured = step < current)
+                    Box(
+                        Modifier.align(Alignment.Center).size(28.dp).clip(RoundedCornerShape(Radius.pill))
+                            .background(if (done || active) Purple else Color.White)
+                            .border(if (done || active) 0.dp else 1.5.dp, if (done || active) Color.Transparent else Divider, RoundedCornerShape(Radius.pill)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (done) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        else Text("$step", color = if (active) Color.White else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(5.dp))
                 Text(
-                    label,
-                    color = if (active) Purple else TextGray,
-                    fontSize = 7.5.sp, lineHeight = 9.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                    label, color = if (active) Purple else if (done) TextDark else TextMuted,
+                    fontSize = 9.5.sp, lineHeight = 11.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                     textAlign = TextAlign.Center,
                 )
-            }
-            if (i < FLOW_STEPS.lastIndex) {
-                Box(
-                    Modifier.padding(top = 12.dp).width(6.dp).height(1.5.dp)
-                        .background(if (done) Purple else Divider),
-                )
+                if (active) {
+                    Spacer(Modifier.height(3.dp))
+                    Box(Modifier.width(28.dp).height(2.dp).clip(RoundedCornerShape(Radius.pill)).background(Purple))
+                }
             }
         }
     }
 }
 
-/** The rail is wider than a phone; let it scroll rather than squeeze the labels. */
-private fun Modifier.horizontalScrollCompat(): Modifier = this
+@Composable
+private fun StepConnector(modifier: Modifier, coloured: Boolean) {
+    val color = if (coloured) Purple else Divider
+    Box(
+        modifier.height(2.dp).drawBehind {
+            if (coloured) {
+                drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height)
+            } else {
+                drawLine(
+                    color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f),
+                )
+            }
+        },
+    )
+}
+
+/** Clean white top navbar for the step-by-step flow — back + centred indigo title (matches the mockup). */
+@Composable
+private fun FlowTopBar(onBack: () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(Color.White)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(RoundedCornerShape(Radius.pill)).clickable { onBack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = PurpleDark, modifier = Modifier.size(22.dp))
+            }
+            Text(
+                "JOB FLOW (STEP BY STEP)", color = PurpleDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(38.dp))
+        }
+        HairlineDivider()
+    }
+}
 
 /** Hero: brand icon chip, title + subtitle, and the design's tip box. */
 @Composable
@@ -163,21 +199,47 @@ private fun FlowHero(icon: androidx.compose.ui.graphics.vector.ImageVector, titl
     }
 }
 
-/** Customer + service strip shown on every step of the flow. */
+/** Round customer photo with an initials fallback — the worker sees who they're serving. */
+@Composable
+private fun FlowCustomerPhoto(url: String?, initials: String, size: Int = 44) {
+    val fs = (size * 0.36f).sp
+    Box(
+        Modifier.size(size.dp).clip(CircleShape).background(Color.White).border(1.5.dp, Purple.copy(alpha = 0.35f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!url.isNullOrBlank()) {
+            SubcomposeAsyncImage(
+                model = url, contentDescription = "Customer", contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs) },
+                error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs) },
+            )
+        } else {
+            Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs)
+        }
+    }
+}
+
+/** Customer + service strip shown on every step of the flow — with the customer's real photo. */
 @Composable
 private fun FlowCustomerStrip(job: Job) {
     val ctx = LocalContext.current
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Primary50).padding(10.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(job.initials)
+                FlowCustomerPhoto(job.customerAvatar, job.initials, size = 44)
                 Spacer(Modifier.width(Space.s))
-                Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f)) {
+                    Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 7.dp, vertical = 2.dp)) {
+                        Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(7.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.clickable { dialCustomerPhone(ctx, job.customerPhone) },
@@ -190,17 +252,28 @@ private fun FlowCustomerStrip(job: Job) {
             Row(verticalAlignment = Alignment.Top) {
                 Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(job.address, color = TextGray, fontSize = 11.sp, lineHeight = 13.sp)
+                Text(job.area.ifBlank { job.address }, color = TextGray, fontSize = 11.sp, lineHeight = 14.sp)
             }
         }
-        Box(Modifier.width(1.dp).height(52.dp).background(Divider))
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.width(112.dp)) {
+        Spacer(Modifier.width(Space.m))
+        Box(Modifier.width(1.dp).height(62.dp).background(Divider))
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.width(108.dp)) {
             Text("Service", color = TextGray, fontSize = 10.sp)
-            Text(job.services.joinToString(", "), color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 14.sp)
-            Spacer(Modifier.height(5.dp))
+            Text(job.services.firstOrNull() ?: "Service", color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
+            Spacer(Modifier.height(7.dp))
             Text("Job ID", color = TextGray, fontSize = 10.sp)
-            Text(job.id, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(job.id, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Filled.ContentCopy, contentDescription = "Copy", tint = Purple,
+                    modifier = Modifier.size(13.dp).clickable {
+                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("Job ID", job.id)); toast(ctx, "Job ID copied")
+                    },
+                )
+            }
         }
     }
 }
@@ -285,6 +358,15 @@ private fun PhotoSlotCard(
             }
         }
     }
+}
+
+/** White bordered section card used to separate the photo-flow blocks. */
+@Composable
+private fun PhotoCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(Radius.card), color = Color.White, shadowElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Divider), modifier = Modifier.fillMaxWidth(),
+    ) { Column(Modifier.padding(14.dp), content = content) }
 }
 
 /** The "Ensure the following" guidance strip the mockups show under the photo grid. */
@@ -377,32 +459,46 @@ private fun PhotoStepScreen(
         else perm.launch(Manifest.permission.CAMERA)
     }
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header(title = "Job Flow (Step by Step)", onBack = { nav.popBackStack() })
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        FlowTopBar { nav.popBackStack() }
         if (job == null) {
             EmptyState("📷", "No active job", "Photos attach to a job you're working on.")
             return@Column
         }
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             JobFlowStepper(step)
-            Card(padding = Dp16.S) {
-                FlowHero(Icons.Filled.CameraAlt, title, subtitle, tip)
-                Spacer(Modifier.height(Space.m))
-                FlowCustomerStrip(job)
-                Spacer(Modifier.height(Space.m))
 
-                val done = vm.photosDone(phase)
-                val total = vm.photoSlots.size
+            // ── Hero (own card).
+            PhotoCard { FlowHero(Icons.Filled.CameraAlt, title, subtitle, tip) }
+
+            // ── Customer (own strip, with photo).
+            FlowCustomerStrip(job)
+
+            // ── Photos required + slots (on white).
+            val done = vm.photosDone(phase)
+            val total = vm.photoSlots.size
+            Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Photos Required ", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Photos Required ", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text(
                         "($done/$total)",
                         color = if (total > 0 && done == total) GreenSuccess else Purple,
-                        fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     )
+                    Spacer(Modifier.weight(1f))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(Radius.pill)).clickable {
+                            toast(ctx, "Clear before/after photos protect you — they prove the area's condition and help resolve any dispute.")
+                        }.padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Why photos?", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp))
+                    }
                 }
                 Spacer(Modifier.height(Space.s))
                 if (vm.photoSlots.isEmpty()) {
@@ -419,27 +515,68 @@ private fun PhotoStepScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(Space.m))
-                EnsureStrip()
-                Spacer(Modifier.height(Space.m))
-                NotesField(notes, notesPlaceholder) { notes = it }
-                Spacer(Modifier.height(Space.s))
+            }
+
+            // ── Ensure guidance.
+            EnsureStrip()
+
+            // ── Notes.
+            NotesField(notes, notesPlaceholder) { notes = it }
+
+            // ── Add additional photo (After Photos only).
+            if (phase == "after") {
+                val extra = vm.photoFor("after", "Additional")
+                Text("Add Additional Photo (Optional)", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Primary50).padding(10.dp),
-                    verticalAlignment = Alignment.Top,
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.5.dp, Purple.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("🔔", fontSize = 13.sp)
-                    Spacer(Modifier.width(Space.s))
-                    Text(footerNote, color = TextGray, fontSize = 10.5.sp, lineHeight = 13.sp)
+                    Box(Modifier.size(40.dp).clip(CircleShape).background(Primary50), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (extra != null) "Photo added ✓" else "Add Photo", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Capture any additional photo (optional)", color = TextGray, fontSize = 11.5.sp)
+                    }
+                    Box(
+                        Modifier.clip(RoundedCornerShape(Radius.button)).background(Color.White).border(1.5.dp, Purple, RoundedCornerShape(Radius.button))
+                            .clickable { shoot("Additional") }.padding(horizontal = 12.dp, vertical = 9.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Take Photo", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // ── Reminder (own card).
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Primary50).padding(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text("🔔", fontSize = 17.sp)
+                Spacer(Modifier.width(Space.m))
+                Column {
+                    Text("Reminder", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(footerNote, color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
                 }
             }
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(Space.l)) {
                 val allDone = vm.photoSlots.isNotEmpty() && vm.photosDone(phase) == vm.photoSlots.size
-                PrimaryButton(ctaLabel, enabled = allDone) {
-                    vm.saveJobNotes(phase, notes)
-                    onContinue()
+                if (phase == "after") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        OutlineButton("← BACK", modifier = Modifier.weight(1f)) { nav.popBackStack() }
+                        Box(Modifier.weight(1.7f)) {
+                            PrimaryButton(ctaLabel, enabled = allDone) { vm.saveJobNotes(phase, notes); onContinue() }
+                        }
+                    }
+                } else {
+                    PrimaryButton(ctaLabel, enabled = allDone) { vm.saveJobNotes(phase, notes); onContinue() }
                 }
                 if (!allDone) {
                     Spacer(Modifier.height(6.dp))
@@ -475,7 +612,7 @@ fun AfterPhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScree
     tip = "Clear after photos help build trust and improve customer satisfaction.",
     notesPlaceholder = "Any special instructions or observations after completing the service…",
     footerNote = "Please ensure all after photos are captured before proceeding.",
-    ctaLabel = "Continue to Customer Sign & Rating",
+    ctaLabel = "Continue to Customer Rating",
     onContinue = { nav.navigate(Routes.CUSTOMER_SIGN) },
 )
 
@@ -487,150 +624,90 @@ fun AfterPhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScree
 fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     val job = vm.activeJob
-    val strokes = remember { mutableListOf<MutableList<Offset>>().toMutableStateList() }
-    var current by remember { mutableStateOf<MutableList<Offset>?>(null) }
     var rating by remember { mutableIntStateOf(0) }
     var notes by remember { mutableStateOf("") }
-    var canvasW by remember { mutableIntStateOf(0) }
-    var canvasH by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) { vm.loadJobState() }
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header(title = "Job Flow (Step by Step)", onBack = { nav.popBackStack() })
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        FlowTopBar { nav.popBackStack() }
         if (job == null) {
-            EmptyState("✍️", "No active job", "Sign-off attaches to a job you're working on.")
+            EmptyState("⭐", "No active job", "Rating attaches to a job you're working on.")
             return@Column
         }
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             JobFlowStepper(8)
-            Card(padding = Dp16.S) {
+            // ── Hero (own card).
+            PhotoCard {
                 FlowHero(
-                    Icons.Filled.Draw, "Customer Sign & Rating",
-                    "Please collect customer signature & rating to complete the service.",
+                    Icons.Filled.Star, "Customer Rating",
+                    "Please collect the customer's rating to complete the service.",
                     "A quick rating from the customer helps us improve our service quality.",
                 )
-                Spacer(Modifier.height(Space.m))
-                FlowCustomerStrip(job)
-                Spacer(Modifier.height(Space.m))
-
-                // Service-complete banner, with the honest checklist count behind it.
+            }
+            // ── Customer (own strip, with photo).
+            FlowCustomerStrip(job)
+            // ── Rating form.
+            PhotoCard {
+                // Service-complete banner.
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(GreenLight).padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(20.dp))
+                    Box(Modifier.size(30.dp).clip(CircleShape).background(GreenSuccess), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
                     Spacer(Modifier.width(Space.s))
                     Column(Modifier.weight(1f)) {
                         Text("Service Completed!", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text("Please confirm with customer and collect signature.", color = TextGray, fontSize = 10.5.sp)
+                        Text("Please confirm with the customer and collect their rating.", color = TextGray, fontSize = 10.5.sp)
                     }
-                    Text(
-                        "${vm.checklistDone}/${vm.checklist.size} tasks",
-                        color = GreenSuccess, fontSize = 10.5.sp, fontWeight = FontWeight.Bold,
-                    )
+                    Box(Modifier.clip(RoundedCornerShape(Radius.pill)).border(1.dp, GreenSuccess, RoundedCornerShape(Radius.pill)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        Text("All tasks done", color = GreenSuccess, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-                Spacer(Modifier.height(Space.m))
+                Spacer(Modifier.height(Space.l))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Customer Signature ", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("*", color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.weight(1f))
-                    Row(
-                        Modifier.clickable { strokes.clear(); current = null },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(3.dp))
-                        Text("Clear", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(Modifier.height(Space.s))
-                Box(
-                    Modifier.fillMaxWidth().height(120.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.White)
-                        .border(1.dp, Divider, RoundedCornerShape(10.dp))
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragStart = { p -> current = mutableListOf(p).also { strokes.add(it) } },
-                                onDragEnd = { current = null },
-                                onDragCancel = { current = null },
-                            ) { change, _ ->
-                                current?.add(change.position)
-                                // Re-emit the list so Compose sees the mutation.
-                                if (strokes.isNotEmpty()) strokes[strokes.lastIndex] = strokes.last()
-                                change.consume()
-                            }
-                        },
-                ) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        canvasW = size.width.toInt(); canvasH = size.height.toInt()
-                        strokes.forEach { pts ->
-                            if (pts.size > 1) {
-                                val path = Path().apply {
-                                    moveTo(pts[0].x, pts[0].y)
-                                    for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
-                                }
-                                drawPath(path, color = TextDark, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-                            }
-                        }
-                    }
-                    if (strokes.isEmpty()) {
-                        Text(
-                            "Ask the customer to sign here",
-                            color = TextMuted, fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.Center),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "By signing above, the customer confirms the service was completed to their satisfaction.",
-                    color = TextMuted, fontSize = 9.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                )
+                // ── Rating — the priority, centered and prominent.
+                Text("How would you rate this service?", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                 Spacer(Modifier.height(Space.m))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Customer Rating ", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("*", color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-                Text("How would you rate our service?", color = TextGray, fontSize = 11.sp)
-                Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     (1..5).forEach { i ->
                         Icon(
-                            Icons.Filled.Star,
-                            contentDescription = "$i star",
-                            tint = if (i <= rating) Purple else Divider,
-                            modifier = Modifier.size(34.dp).padding(horizontal = 3.dp).clickable { rating = i },
+                            Icons.Filled.Star, contentDescription = "$i star",
+                            tint = if (i <= rating) Purple else Color(0xFFE3E3EC),
+                            modifier = Modifier.size(44.dp).padding(horizontal = 4.dp).clickable { rating = i },
                         )
                     }
                 }
                 if (rating > 0) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        ratingWord(rating),
-                        color = GreenSuccess, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                    )
+                    Spacer(Modifier.height(Space.s))
+                    Text(ratingWord(rating), color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, lineHeight = 17.sp)
                 }
-                Spacer(Modifier.height(Space.m))
+                Spacer(Modifier.height(Space.l))
+                Text("Add Notes ", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(5.dp))
                 NotesField(notes, "Any additional comments from the customer…") { notes = it }
+            }
+            // ── Thank you.
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Primary50).padding(12.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(Space.m))
+                Column {
+                    Text("Thank You!", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Your professionalism and customer satisfaction are highly appreciated.", color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
+                }
             }
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Row(Modifier.padding(Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                OutlineButton("← Back", modifier = Modifier.weight(1f)) { nav.popBackStack() }
+                OutlineButton("← BACK", modifier = Modifier.weight(1f)) { nav.popBackStack() }
                 Box(Modifier.weight(1.6f)) {
-                    val ready = strokes.isNotEmpty() && rating > 0
-                    PrimaryButton("Mark Job as Completed", enabled = ready) {
-                        val png = rasteriseSignature(strokes, canvasW, canvasH)
-                        if (png == null) { toast(ctx, "Couldn't read the signature — please sign again"); return@PrimaryButton }
-                        vm.saveSignature(png, rating, notes)
+                    PrimaryButton("MARK JOB AS COMPLETED", enabled = rating > 0) {
+                        vm.saveSignature("", rating, notes)
                         vm.endService()
                         nav.navigate(Routes.JOB_COMPLETED) { popUpTo(Routes.IN_PROGRESS) { inclusive = true } }
                     }

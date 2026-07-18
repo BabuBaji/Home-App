@@ -115,6 +115,9 @@ data class Job(
     val id: String,
     val customerName: String,
     val initials: String,
+    val customerAvatar: String = "",
+    val customerType: String = "Residential",
+    val note: String = "",
     val customerPhone: String,
     val customerRating: Double,
     val services: List<String>,
@@ -1222,7 +1225,7 @@ class AppViewModel : ViewModel() {
         qualification = w.qualification
         experienceYears = w.experienceYears
         previousCompany = w.previousCompany
-        avatarUrl = w.avatar
+        avatarUrl = w.avatar.orEmpty()
         shiftStart = w.shiftStart
         shiftEnd = w.shiftEnd
         if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
