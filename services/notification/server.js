@@ -264,22 +264,29 @@ const CHANNEL_PREF = { whatsapp: 'whatsapp', sms: 'sms', email: 'email', push: '
 async function resolveRecipients(b) {
   const isPromo = b.promotional === true || PROMO_TYPES.includes(String(b.type || '').toLowerCase())
   const audience = String(b.audience || 'all').toLowerCase()
+  const chanPref = CHANNEL_PREF[String(b.channel || 'in-app').toLowerCase()] || null
+  // Apply a recipient's opt-in: promotional messages skip comm_promo=false; every message skips the
+  // channel the recipient disabled. Shared by customers and workers (both expose the same `comm` shape).
+  const optIn = (list) => {
+    let suppressed = 0
+    const kept = list.filter((r) => {
+      const comm = r.comm || {}
+      if (isPromo && comm.promo === false) { suppressed++; return false }
+      if (chanPref && comm[chanPref] === false) { suppressed++; return false }
+      return true
+    })
+    return { kept, suppressed }
+  }
   if (audience.includes('worker')) {
     const wr = await tryGet(WORKER_URL, '/internal/workers', { workers: [] })
     const active = (wr.workers || []).filter((w) => (w.status || 'active') === 'active')
-    return { isPromo, sent: active.length, suppressed: 0, recipientIds: active.map((w) => w.id), audienceKind: 'workers' }
+    const { kept, suppressed } = optIn(active)
+    return { isPromo, sent: kept.length, suppressed, recipientIds: kept.map((w) => w.id), audienceKind: 'workers' }
   }
-  const chanPref = CHANNEL_PREF[String(b.channel || 'in-app').toLowerCase()] || null
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
-  const base = customers.filter((c) => (c.status || 'active') === 'active')  // active customers
-  let suppressed = 0
-  const recipients = base.filter((c) => {
-    const comm = c.comm || {}
-    if (isPromo && comm.promo === false) { suppressed++; return false }        // opted out of marketing
-    if (chanPref && comm[chanPref] === false) { suppressed++; return false }    // opted out of this channel
-    return true
-  })
-  return { isPromo, sent: recipients.length, suppressed, recipientIds: recipients.map((c) => c.id), audienceKind: 'customers' }
+  const active = customers.filter((c) => (c.status || 'active') === 'active')
+  const { kept, suppressed } = optIn(active)
+  return { isPromo, sent: kept.length, suppressed, recipientIds: kept.map((c) => c.id), audienceKind: 'customers' }
 }
 
 app.get('/api/admin/notifications', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))

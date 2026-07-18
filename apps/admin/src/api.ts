@@ -139,6 +139,7 @@ export const fetchWorkerNotes = (id: number) => req<WorkerNote[]>(`/workers/${id
 export const addWorkerNote = (id: number, note: string, author: string) => req<WorkerNote>(`/workers/${id}/notes`, post('', { note, author }))
 export const createWorker = (body: Record<string, unknown>) => req<Worker>('/workers', post('', body))
 export const updateWorker = (id: number, body: Record<string, unknown>) => req<Worker>(`/workers/${id}`, patch(body))
+export const updateWorkerComm = (id: number, body: Record<string, boolean>) => req<{ whatsapp: boolean; sms: boolean; email: boolean; push: boolean; promo: boolean }>(`/workers/${id}/comm`, patch(body))
 export const deleteWorker = (id: number) => req<{ ok: boolean }>(`/workers/${id}`, { method: 'DELETE' })
 
 /* worker wallet */

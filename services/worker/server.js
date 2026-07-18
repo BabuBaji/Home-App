@@ -491,6 +491,13 @@ async function init() {
       window_started TIMESTAMPTZ NOT NULL DEFAULT now(), created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS site_id INTEGER`,
+    // Per-channel communication opt-in (mirrors the customer model). Default on; drives who receives
+    // worker broadcasts. `comm_promo` gates marketing messages.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS comm_whatsapp BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS comm_sms BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS comm_email BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS comm_push BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS comm_promo BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_name TEXT`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_lat REAL`,
@@ -626,7 +633,13 @@ async function init() {
 }
 
 /* ---------- helpers ---------- */
-const rowToWorker = (w) => w && ({ ...w, verified: !!w.verified, available: !!w.available })
+const rowToWorker = (w) => w && ({
+  ...w, verified: !!w.verified, available: !!w.available,
+  comm: {
+    whatsapp: w.comm_whatsapp ?? true, sms: w.comm_sms ?? true, email: w.comm_email ?? true,
+    push: w.comm_push ?? true, promo: w.comm_promo ?? true,
+  },
+})
 // Worker app's bank_status vocabulary differs from the DB's — map it so the app shows the
 // right pill and unlocks withdrawals on a verified account.
 const APP_BANK_STATUS = { Verified: 'Approved', Pending: 'Pending Verification', Rejected: 'Rejected' }
@@ -3668,6 +3681,30 @@ app.patch('/api/admin/workers/:id/coverage', adminAuth, scopeWorker, async (req,
   }
   const after = await getWorker(id)
   res.json({ ok: true, zoneId: after.zone_id ?? null, storeId: after.store_id ?? null, jobRadiusKm: after.job_radius_km ?? null, allowOutsideRadius: after.allow_outside_radius !== false })
+})
+
+// Worker communication preferences (per-channel + marketing opt-in). Governs who receives worker
+// broadcasts; mirrors the customer model. Booleans coerced so a JSON false isn't dropped.
+const WORKER_COMM_COLS = { comm_whatsapp: 0, comm_sms: 0, comm_email: 0, comm_push: 0, comm_promo: 0 }
+app.patch('/api/admin/workers/:id/comm', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const b = req.body || {}
+  const sets = [], vals = []
+  for (const col of Object.keys(WORKER_COMM_COLS)) {
+    if (b[col] === undefined) continue
+    vals.push(!!b[col]); sets.push(`${col}=$${vals.length}`)
+  }
+  if (sets.length) {
+    vals.push(id)
+    await pool.query(`UPDATE workers SET ${sets.join(',')} WHERE id=$${vals.length}`, vals)
+    publishEvent(REDIS_URL, 'activity', {
+      actorType: 'admin', actorName: req.admin?.name || req.admin?.email || 'Admin', action: 'worker.comm',
+      entityType: 'worker', entityId: id, detail: `${w.name}: updated communication preferences`,
+    })
+  }
+  res.json(rowToWorker(await getWorker(id)).comm)
 })
 
 /* ---------- Phase 11: admin reviews availability ----------

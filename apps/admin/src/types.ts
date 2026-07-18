@@ -91,6 +91,8 @@ export interface Worker {
   recruiter?: string; referral_source?: string; invited_at?: string | null
   balance?: number; withdrawn?: number; hold?: number; pending?: number; advance_outstanding?: number
   last_lat?: number | null; last_lng?: number | null; shift_def_id?: number | null; site_id?: number | null
+  // Per-channel communication opt-in (default all true). Governs who receives worker broadcasts.
+  comm?: { whatsapp: boolean; sms: boolean; email: boolean; push: boolean; promo: boolean }
   // Organisational assignment. Recorded facts; dispatch matches on zone and does not read these.
   cluster_id?: number | null; store_id?: number | null; reporting_manager_id?: number | null
   // Coverage. These two DO change what dispatch offers (unlike cluster/store/manager).

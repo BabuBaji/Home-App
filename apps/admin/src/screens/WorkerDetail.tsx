@@ -6,7 +6,7 @@ import {
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
   FileText, AlertTriangle, UploadCloud, Plus, Award, Wrench, Trash2,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, updateWorkerComm, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -1044,6 +1044,30 @@ export default function WorkerDetail() {
       </div>
     </Panel>
   )
+  const comm = (w.comm || { whatsapp: true, sms: true, email: true, push: true, promo: true }) as Record<string, boolean>
+  const toggleComm = async (key: string, val: boolean) => {
+    if (!w) return
+    try { const next = await updateWorkerComm(w.id, { [`comm_${key}`]: val }); setW({ ...w, comm: next }); toast('Communication preferences updated') }
+    catch (e) { toast((e as Error).message) }
+  }
+  const commPanel = (
+    <Panel title="Communication Preferences">
+      <div className="grid" style={{ gap: 10 }}>
+        {([['whatsapp', 'WhatsApp'], ['sms', 'SMS'], ['email', 'Email'], ['push', 'Push Notifications'], ['promo', 'Promotional Offers']] as [string, string][]).map(([key, label]) => (
+          <div key={key} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 13 }}>{label}</span>
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="muted" style={{ fontSize: 12, minWidth: 50, textAlign: 'right' }}>{comm[key] ? 'Enabled' : 'Disabled'}</span>
+              <button onClick={() => toggleComm(key, !comm[key])} aria-pressed={comm[key]} style={{ width: 38, height: 20, borderRadius: 20, border: 'none', cursor: 'pointer', padding: 2, background: comm[key] ? '#16a34a' : '#cbd2da', display: 'inline-flex', justifyContent: comm[key] ? 'flex-end' : 'flex-start' }}>
+                <span style={{ width: 16, height: 16, borderRadius: '50%', background: '#fff', display: 'block', boxShadow: '0 1px 2px rgba(0,0,0,.2)' }} />
+              </button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
+
   const availabilityPanel = (
     <Panel title="Weekly Availability">
       {(() => {
@@ -1799,6 +1823,7 @@ export default function WorkerDetail() {
           <Info label="Shift Assigned" value={w.shift_def_id ? `Shift #${w.shift_def_id}` : '—'} />
           <Info label="Availability" value={<Badge tone={w.available ? 'green' : 'gray'} dot={false}>{w.available ? 'Online' : 'Offline'}</Badge>} />
         </Panel>
+        {commPanel}
       </div>}
 
       {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
