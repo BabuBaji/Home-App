@@ -116,6 +116,14 @@ export default function Book() {
           </div>
         )}
 
+        {(quote?.surgeAmount || 0) > 0 && (
+          <div className="note-box" style={{ background: '#eef4ff', borderColor: '#bcd0ff', color: '#1d4ed8' }}>
+            {quote?.surgeReason === 'rain'
+              ? `🌧️ Rain incoming — demand is high, so prices are up ${quote?.surgePct}% right now. Book soon to lock the best rate.`
+              : `⚡ High demand right now — prices are up ${quote?.surgePct}%. Book soon to lock the best rate.`}
+          </div>
+        )}
+
         {!instant && (
           <>
             <h3 className="incl-head">Pick a date</h3>
@@ -176,6 +184,7 @@ export default function Book() {
             <div className="bill-row"><span>Item total</span><span>₹{quote.subtotal}</span></div>
             {quote.discount > 0 && <div className="bill-row disc"><span><Check size={14} /> Coupon discount</span><span>−₹{quote.discount}</span></div>}
             {(quote.peakSurcharge || 0) > 0 && <div className="bill-row"><span>Peak-hour surcharge{quote.peakPct ? ` (+${quote.peakPct}%)` : ''}</span><span>+₹{quote.peakSurcharge}</span></div>}
+            {(quote.surgeAmount || 0) > 0 && <div className="bill-row"><span>{quote.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'}{quote.surgePct ? ` (+${quote.surgePct}%)` : ''}</span><span>+₹{quote.surgeAmount}</span></div>}
             {(quote.fee || 0) > 0 && <div className="bill-row"><span>Convenience fee</span><span>+₹{quote.fee}</span></div>}
             {(quote.tax || 0) > 0 && (quote.gstIncluded
               ? <div className="bill-row"><span>Incl. GST{quote.gstPct ? ` (${quote.gstPct}%)` : ''}</span><span>₹{quote.tax}</span></div>

@@ -27,6 +27,7 @@ import {
 import {
   loadActiveCampaigns, loadUsage, recordUsage, resolvePricing, rawDiscount, withinWindow, customerEligible,
 } from './pricing-engine.js'
+import { startWeatherPoller, getSurgeForZone, setManualSurge, surgeSnapshot } from './weather.js'
 
 const PORT = Number(process.env.PORT || 4001)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5432/catalog'
@@ -348,6 +349,11 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const onPeak = isPeakAt(peak, at)
   const peakPct = onPeak ? (Number(peak.upliftPct) || 0) : 0
   const peakSurcharge = onPeak ? Math.round(q.subtotal * peakPct / 100) : 0
+  // Weather (rain) surge: a demand-driven % uplift on the subtotal, from the cached weather signal
+  // for this zone (or an ops manual override). Same allocation model as the peak surcharge.
+  const surge = getSurgeForZone(zoneId)
+  const surgePct = surge.active ? surge.pct : 0
+  const surgeSurcharge = surgePct ? Math.round(q.subtotal * surgePct / 100) : 0
   // Convenience fee stays zone-level; GST rate is per-service; inclusive/exclusive display is platform-wide.
   const ex = (cfg && cfg.pricingExtras) || {}
   const fee = Math.round(Number(ex.convenienceFee) || 0)
@@ -360,18 +366,22 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   let taxF = 0
   for (const it of q.items) {
     const share = gross > 0 ? (it.price / gross) : (1 / (q.items.length || 1))
-    const net = Math.max(0, it.price - q.discount * share + peakSurcharge * share)
+    const net = Math.max(0, it.price - q.discount * share + peakSurcharge * share + surgeSurcharge * share)
     const g = gmap[it.id] ?? 18
     taxF += gstIncluded ? (net - net / (1 + g / 100)) : (net * g / 100)
   }
   const tax = Math.round(taxF)
-  const serviceAmount = Math.max(0, q.subtotal - q.discount + peakSurcharge)
+  const serviceAmount = Math.max(0, q.subtotal - q.discount + peakSurcharge + surgeSurcharge)
   const total = gstIncluded ? (serviceAmount + fee) : (serviceAmount + tax + fee)
   const gstBase = gstIncluded ? (serviceAmount - tax) : serviceAmount
   const gstPct = gstBase > 0 ? Math.round((tax / gstBase) * 100) : 0   // blended rate for display
   return {
     status: 200,
-    body: { items: q.items, coupon: q.coupon, subtotal: q.subtotal, discount: q.discount, peakPct, peakSurcharge, isPeak: onPeak, fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds },
+    body: {
+      items: q.items, coupon: q.coupon, subtotal: q.subtotal, discount: q.discount, peakPct, peakSurcharge, isPeak: onPeak,
+      surgePct, surgeAmount: surgeSurcharge, surgeReason: surgeSurcharge ? surge.reason : '',
+      fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds,
+    },
   }
 }
 
@@ -855,6 +865,26 @@ app.get('/api/admin/zones', adminAuth, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
   res.json(rows.map(zoneOut))
 })
+
+/* ---------- surge pricing (weather-driven + ops override) ---------- */
+// Current surge per live zone: the weather signal, the derived %, and whether it's automatic or a
+// manual override. Enriched with the zone name for display.
+app.get('/api/admin/surge', adminAuth, async (_q, res) => {
+  const snap = surgeSnapshot()
+  const names = new Map((await pool.query('SELECT id, name FROM zones')).rows.map((r) => [r.id, r.name]))
+  res.json(snap.map((s) => ({ ...s, zone: names.get(s.zoneId) || `Zone ${s.zoneId}` })).sort((a, b) => (b.pct - a.pct) || a.zone.localeCompare(b.zone)))
+})
+// Ops override: force a surge % on a zone (or "all") for N minutes; pct 0 clears it. Takes precedence
+// over the automatic weather surge until it expires.
+app.post('/api/admin/surge', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  const scope = b.zoneId === 'all' || b.zoneId === '*' ? '*' : Number(b.zoneId)
+  if (scope !== '*' && !Number.isFinite(scope)) return res.status(400).json({ error: 'zoneId (a zone id or "all") is required' })
+  const pct = Math.max(0, Math.min(50, Number(b.pct) || 0))
+  const minutes = b.minutes != null ? Math.max(0, Number(b.minutes)) : 120
+  setManualSurge(scope, pct, minutes)
+  res.json({ ok: true, scope: scope === '*' ? 'all' : scope, pct, minutes })
+})
 app.post('/api/admin/zones', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
@@ -1202,5 +1232,5 @@ app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
 subscribeEvents(REDIS_URL, 'catalog', (type) => { if (type === 'settings.updated') invalidateSettings() })
 
 init()
-  .then(() => app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)))
+  .then(() => { startWeatherPoller(pool, 20); app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)) })
   .catch((e) => { console.error('[catalog] failed to start:', e.message); process.exit(1) });

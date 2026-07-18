@@ -208,9 +208,17 @@ export default function BookingFlow() {
           <div className="bf-sumrow"><span>Worker</span><b>{worker === 'any' ? 'Any available' : (workers.find((w) => String(w.id) === worker)?.name || 'Any available')}</b></div>
           <div className="bf-sumrow"><span>Address</span><b className="bf-addr">{addr?.line || 'Set address'}</b></div>
           <div className="bf-div" />
+          {(quote?.surgeAmount || 0) > 0 && (
+            <div className="note-box" style={{ background: '#eef4ff', borderColor: '#bcd0ff', color: '#1d4ed8', marginBottom: 10 }}>
+              {quote?.surgeReason === 'rain'
+                ? `🌧️ Rain incoming — demand is high, so prices are up ${quote?.surgePct}% right now.`
+                : `⚡ High demand right now — prices are up ${quote?.surgePct}%.`}
+            </div>
+          )}
           <div className="bf-lbl">Price Details</div>
           <div className="bf-sumrow sm"><span>Service Charges</span><b>₹{quote?.subtotal ?? dur.price}</b></div>
           {(quote?.discount || 0) > 0 && <div className="bf-sumrow sm disc"><span>Coupon ({coupon})</span><b>−₹{quote!.discount}</b></div>}
+          {(quote?.surgeAmount || 0) > 0 && <div className="bf-sumrow sm"><span>{quote?.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'}{quote?.surgePct ? ` (+${quote.surgePct}%)` : ''}</span><b>+₹{quote!.surgeAmount}</b></div>}
           {(quote?.fee || 0) > 0 && <div className="bf-sumrow sm"><span>Platform Fee</span><b>₹{quote!.fee}</b></div>}
           {(quote?.tax || 0) > 0 && <div className="bf-sumrow sm"><span>GST{quote!.gstPct ? ` (${quote!.gstPct}%)` : ''}</span><b>₹{quote!.tax}</b></div>}
           <div className="bf-div" />
