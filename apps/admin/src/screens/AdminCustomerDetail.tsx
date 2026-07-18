@@ -152,7 +152,7 @@ export default function AdminCustomerDetail() {
   const doNote = async () => {
     if (!noteText.trim()) return
     setBusy(true)
-    try { await addCustomerNote(cid, noteText.trim()); toast('Note added'); setNoteOpen(false); setNoteText(''); load() }
+    try { await addCustomerNote(cid, { body: noteText.trim() }); toast('Note added'); setNoteOpen(false); setNoteText(''); load() }
     catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
   const doBlock = async () => {
@@ -272,7 +272,7 @@ export default function AdminCustomerDetail() {
       {tab === 'offers' && <OffersTab bookings={m.bookings} offers={d.offers || { totalOffers: 0, coupons: [] }} c={c} nav={nav} toast={toast} goto={setTab} />}
       {tab === 'support' && <SupportTab tickets={d.tickets || []} notes={d.notes || []} c={c} cid={cid} onChanged={load} toast={toast} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} bookings={m.bookings} />}
-      {tab === 'notes' && <NotesTab notes={d.notes || []} onAdd={() => setNoteOpen(true)} c={c} />}
+      {tab === 'notes' && <NotesTab notes={d.notes || []} c={c} cid={cid} bookings={m.bookings} onChanged={load} toast={toast} />}
       {tab === 'activity' && <ActivityTab activity={m.activity} c={c} />}
 
       {/* modals */}
@@ -1846,30 +1846,137 @@ function RatingsTab({ reviews, rating, bookings }: any) {
   )
 }
 
-function NotesTab({ notes, onAdd, c }: any) {
+const NOTE_TYPES = ['Preference', 'Issue', 'Request', 'Feedback', 'General']
+const NOTE_TONE: Record<string, string> = { Preference: 'green', Issue: 'red', Request: 'blue', Feedback: 'violet', General: 'gray' }
+
+function NotesTab({ notes, c, cid, bookings, onChanged, toast }: any) {
+  const [q, setQ] = useState('')
+  const [typeF, setTypeF] = useState('all')
+  const [byF, setByF] = useState('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [menuId, setMenuId] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState({ type: '', title: '', body: '', bookingRef: '', useBooking: false })
+
+  useEffect(() => { if (menuId == null) return; const h = () => setMenuId(null); window.addEventListener('click', h); return () => window.removeEventListener('click', h) }, [menuId])
+  useEffect(() => { setPage(1) }, [q, typeF, byF, pageSize])
+
+  const bByRef = useMemo(() => { const m: Record<string, any> = {}; for (const b of bookings) if (b.ref) m[b.ref] = b; return m }, [bookings])
+  const authors = useMemo(() => [...new Set(notes.map((n: any) => n.author).filter(Boolean))] as string[], [notes])
+  const summary = useMemo(() => { const s: Record<string, number> = {}; for (const n of notes) s[n.type || 'General'] = (s[n.type || 'General'] || 0) + 1; return s }, [notes])
+
+  const filtered = useMemo(() => notes.filter((n: any) => {
+    if (typeF !== 'all' && (n.type || 'General') !== typeF) return false
+    if (byF !== 'all' && n.author !== byF) return false
+    if (q && !`${n.title || ''} ${n.body} ${n.booking_ref || ''}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [notes, typeF, byF, q])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+
+  const save = async () => {
+    if (!draft.type) { toast('Pick a note type', 'err'); return }
+    if (!draft.body.trim()) { toast('Enter note details', 'err'); return }
+    setBusy(true)
+    try {
+      const bk = draft.useBooking && draft.bookingRef ? bByRef[draft.bookingRef] : null
+      await addCustomerNote(cid, { type: draft.type, title: draft.title || undefined, body: draft.body.trim(), bookingRef: bk?.ref, bookingId: bk?.id })
+      toast('Note saved'); setDraft({ type: '', title: '', body: '', bookingRef: '', useBooking: false }); onChanged()
+    } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
+  }
+  const initials = (n: string) => (n || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
+
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 20 }}>Notes</h2>
-          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Internal ops notes on {c.name || c.phone || 'this customer'} — visible to admins only</p>
+          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>View and manage all notes related to this customer</p>
         </div>
-        <button className="btn" onClick={onAdd}><Plus size={15} /> Add Note</button>
       </div>
-      <Card title={`${notes.length} Note${notes.length === 1 ? '' : 's'}`}>
-        <div style={{ position: 'relative', paddingLeft: 8 }}>
-          {notes.map((n: any, i: number) => (
-            <div key={n.id} className="row" style={{ gap: 12, alignItems: 'flex-start', paddingBottom: i === notes.length - 1 ? 0 : 14, borderLeft: '2px solid var(--line)', marginLeft: 6, paddingLeft: 16, position: 'relative' }}>
-              <span style={{ position: 'absolute', left: -7, top: 2, width: 12, height: 12, borderRadius: '50%', background: '#5b51e8', border: '2px solid #fff' }} />
-              <div style={{ flex: 1, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 12px', fontSize: 13.5 }}>
-                <div>{n.body}</div>
-                <div className="muted" style={{ fontSize: 11.5, marginTop: 5 }}>Added by {n.author || 'admin'} · {dateTime(n.created)}</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16, alignItems: 'start' }}>
+        {/* notes table */}
+        <Card>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 2fr) minmax(130px, 1fr) minmax(130px, 1fr) auto', gap: 10, marginBottom: 12 }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes by title or content…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+            </div>
+            <select className="select" value={typeF} onChange={(e) => setTypeF(e.target.value)}><option value="all">All Note Types</option>{NOTE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select>
+            <select className="select" value={byF} onChange={(e) => setByF(e.target.value)}><option value="all">All Added By</option>{authors.map((a) => <option key={a} value={a}>{a}</option>)}</select>
+            <button className="btn line" onClick={() => { setQ(''); setTypeF('all'); setByF('all') }}><Funnel size={15} /> Filters</button>
+          </div>
+
+          <div className="tablewrap">
+            <table className="tbl" style={{ tableLayout: 'fixed', width: '100%' }}>
+              <colgroup><col style={{ width: '44%' }} /><col style={{ width: '13%' }} /><col style={{ width: '22%' }} /><col style={{ width: '15%' }} /><col style={{ width: '6%' }} /></colgroup>
+              <thead><tr><th>Note</th><th>Type</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
+              <tbody>
+                {pageRows.map((n: any) => {
+                  const bk = n.booking_ref ? bByRef[n.booking_ref] : null
+                  return (
+                    <tr key={n.id}>
+                      <td style={{ whiteSpace: 'normal' }}>
+                        {n.title && <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>}
+                        <div style={{ fontSize: 13 }}>{n.body}</div>
+                        <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 5 }}>
+                          <Badge tone={NOTE_TONE[n.type] || 'gray'} dot={false}>{n.type || 'General'}</Badge>
+                          {n.booking_ref && <span className="muted" style={{ fontSize: 11 }}><Calendar size={11} style={{ verticalAlign: -1 }} /> {n.booking_ref}</span>}
+                          {bk?.service && <span className="muted" style={{ fontSize: 11 }}>· {bk.service}</span>}
+                          {bk?.worker && <span className="muted" style={{ fontSize: 11 }}>· {bk.worker}</span>}
+                        </div>
+                      </td>
+                      <td><Badge tone={NOTE_TONE[n.type] || 'gray'} dot={false}>{n.type || 'General'}</Badge></td>
+                      <td style={{ whiteSpace: 'normal' }}><div className="row" style={{ gap: 8, alignItems: 'center' }}><span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: '#eef0ff', color: '#5b51e8', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{initials(n.author || 'Admin')}</span><div style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, fontWeight: 600 }}>{n.author || 'Admin'}</div><div className="muted" style={{ fontSize: 11 }}>{n.author_role || 'Administrator'}</div></div></div></td>
+                      <td className="muted" style={{ fontSize: 12 }}>{shortDate(n.created)}<div style={{ fontSize: 11 }}>{new Date(n.created).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></td>
+                      <td><div style={{ position: 'relative' }}><button className="iconbtn" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); setMenuId(menuId === n.id ? null : n.id) }}><MoreVertical size={15} /></button>{menuId === n.id && <div className="menu" style={{ ...MENU_BOX, right: 0, top: 30 }} onClick={(e) => e.stopPropagation()}><button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuId(null); navigator.clipboard?.writeText(n.body); toast('Note copied') }}><Copy size={15} /> Copy</button></div>}</div></td>
+                    </tr>
+                  )
+                })}
+                {filtered.length === 0 && <tr><td colSpan={5}><Empty>No notes match these filters.</Empty></td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} notes</span>
+            <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+              <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+              <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+              <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+              <select className="select" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ height: 32 }}>{[10, 20, 50].map((s) => <option key={s} value={s}>{s} / page</option>)}</select>
+            </div>
+          </div>
+        </Card>
+
+        {/* right: add note + summary */}
+        <div className="grid" style={{ gap: 16, alignContent: 'start' }}>
+          <Card title="Add Note">
+            <div className="grid" style={{ gap: 12 }}>
+              <Field label="Note Type"><select className="select" value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}><option value="">Select Note Type</option>{NOTE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></Field>
+              <Field label="Title (Optional)"><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Enter a short title" /></Field>
+              <Field label="Note Details"><textarea value={draft.body} maxLength={1000} onChange={(e) => setDraft({ ...draft, body: e.target.value })} rows={4} placeholder="Write your note here…" style={{ resize: 'vertical' }} /><div className="muted" style={{ fontSize: 11, textAlign: 'right' }}>{draft.body.length} / 1000</div></Field>
+              <label className="row" style={{ gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}><input type="checkbox" checked={draft.useBooking} onChange={(e) => setDraft({ ...draft, useBooking: e.target.checked })} /> Add related booking (Optional)</label>
+              {draft.useBooking && <Field label="Booking"><select className="select" value={draft.bookingRef} onChange={(e) => setDraft({ ...draft, bookingRef: e.target.value })}><option value="">Select Booking</option>{bookings.map((b: any) => <option key={b.id} value={b.ref}>{b.ref} · {b.service}</option>)}</select></Field>}
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn line" onClick={() => setDraft({ type: '', title: '', body: '', bookingRef: '', useBooking: false })}>Cancel</button>
+                <button className="btn" disabled={busy || !draft.type || !draft.body.trim()} onClick={save}>Save Note</button>
               </div>
             </div>
-          ))}
-          {notes.length === 0 && <Empty>No notes yet — add one to record a call, complaint or context.</Empty>}
+          </Card>
+          <Card title="Note Summary">
+            <div className="grid" style={{ gap: 9 }}>
+              {NOTE_TYPES.map((t) => (
+                <div key={t} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}><span className="row" style={{ gap: 7, alignItems: 'center' }}><span style={{ color: '#98a2b3', fontWeight: 700, minWidth: 14 }}>{summary[t] || 0}</span><Badge tone={NOTE_TONE[t]} dot={false}>{t}</Badge></span></div>
+              ))}
+              <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+              <div className="row" style={{ justifyContent: 'space-between', fontWeight: 700, fontSize: 14 }}><span>Total Notes</span><span>{notes.length}</span></div>
+            </div>
+          </Card>
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

@@ -1231,10 +1231,16 @@ app.get('/internal/worker-comm', internalOnly, async (_q, res) => {
   res.json(map)
 })
 
-// Pin an internal ops note to a customer.
+// Pin a typed ops note to a customer (category, optional title + related booking).
 app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
-    const row = await internalPost(U.auth, `/api/internal/users/${req.params.id}/notes`, { body: req.body?.body, author: req.admin?.name || 'admin' })
+    const b = req.body || {}
+    const row = await internalPost(U.auth, `/api/internal/users/${req.params.id}/notes`, {
+      body: b.body, type: b.type || 'General', title: b.title || null,
+      bookingId: b.bookingId || null, bookingRef: b.bookingRef || null,
+      author: req.admin?.name || 'Admin', authorRole: req.admin?.role || 'Administrator',
+    })
+    await logAudit(req.admin?.name || 'admin', 'customer.note_add', `#${req.params.id}`)
     res.json(row)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })

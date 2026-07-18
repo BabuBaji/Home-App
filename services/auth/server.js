@@ -200,6 +200,12 @@ async function init() {
       id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
       body TEXT NOT NULL, author TEXT, created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Typed notes: a category, an optional title, an author role, and an optional related booking.
+    `ALTER TABLE customer_notes ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'General'`,
+    `ALTER TABLE customer_notes ADD COLUMN IF NOT EXISTS title TEXT`,
+    `ALTER TABLE customer_notes ADD COLUMN IF NOT EXISTS author_role TEXT`,
+    `ALTER TABLE customer_notes ADD COLUMN IF NOT EXISTS booking_id INTEGER`,
+    `ALTER TABLE customer_notes ADD COLUMN IF NOT EXISTS booking_ref TEXT`,
     `CREATE INDEX IF NOT EXISTS ix_custnote_user ON customer_notes(user_id)`,
   ])
   console.log('[auth] Postgres ready (users, addresses, transactions, auth_identities)')
@@ -1063,11 +1069,12 @@ app.get('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
   res.json(rows)
 })
 app.post('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
-  const body = String(req.body?.body || '').trim()
+  const b = req.body || {}
+  const body = String(b.body || '').trim()
   if (!body) return res.status(400).json({ error: 'Note is empty' })
   const { rows } = await pool.query(
-    'INSERT INTO customer_notes (user_id, body, author) VALUES ($1,$2,$3) RETURNING *',
-    [Number(req.params.id), body, req.body?.author || null])
+    'INSERT INTO customer_notes (user_id, body, author, author_role, type, title, booking_id, booking_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+    [Number(req.params.id), body, b.author || null, b.authorRole || null, b.type || 'General', b.title || null, b.bookingId || null, b.bookingRef || null])
   res.json(rows[0])
 })
 // Referral summary for the admin customer profile: who referred them, and how many they've referred

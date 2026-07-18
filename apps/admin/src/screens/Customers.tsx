@@ -159,7 +159,7 @@ export default function Customers() {
   const saveNote = async () => {
     if (!noteFor || !noteText.trim()) return
     setBusy(true)
-    try { await addCustomerNote(noteFor.id, noteText.trim()); toast('Note added'); setNoteFor(null); setNoteText('') }
+    try { await addCustomerNote(noteFor.id, { body: noteText.trim() }); toast('Note added'); setNoteFor(null); setNoteText('') }
     catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
 
