@@ -114,6 +114,7 @@ export default function BookingFlow() {
         type: 'schedule', date: dateStr, time: slot !== null ? slotLabel(slot) : '',
         at: slot !== null ? `${slot}:00` : undefined,
         payment: payable === 0 ? 'wallet' : method, coupon: coupon || undefined, pincode: pincode || undefined,
+        ...(addr?.id ? { addressId: addr.id } : {}),
         ...(worker !== 'any' ? { workerId: Number(worker) } : {}),
         ...(txnId ? { paymentId: txnId } : {}),
       })

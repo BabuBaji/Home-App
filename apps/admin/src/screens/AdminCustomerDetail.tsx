@@ -743,17 +743,22 @@ const addrType = (label?: string) => {
   return 'Other'
 }
 const norm = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-// Best-effort "last used": the customer's most recent booking whose address text matches this one
-// (by pincode + house/line). Falls back to null (→ "Never Used") rather than guessing.
+// "Last used": the customer's most recent booking stamped with this address id (checkout stores
+// address_id — exact). Falls back to a text match for legacy bookings placed before that existed,
+// and to null (→ "Never Used") when nothing matches.
 function lastUsedFor(a: any, bookings: any[]) {
-  const pin = norm(a.pincode), house = norm(a.house), line = norm(a.line)
-  const hits = bookings.filter((b) => {
-    const badr = norm(b.address)
-    if (!badr) return false
-    if (line && badr.includes(line)) return true
-    if (pin && badr.includes(pin) && (!house || badr.includes(house))) return true
-    return false
-  }).sort((x, y) => bMs(y) - bMs(x))
+  let hits = bookings.filter((b) => b.addressId != null && Number(b.addressId) === Number(a.id))
+  if (!hits.length) {
+    const pin = norm(a.pincode), house = norm(a.house), line = norm(a.line)
+    hits = bookings.filter((b) => {
+      const badr = norm(b.address)
+      if (!badr) return false
+      if (line && badr.includes(line)) return true
+      if (pin && badr.includes(pin) && (!house || badr.includes(house))) return true
+      return false
+    })
+  }
+  hits.sort((x, y) => bMs(y) - bMs(x))
   const b = hits[0]
   return b ? { date: b.date || (b.created ? shortDate(b.created) : ''), time: b.time || '', service: b.service || '' } : null
 }

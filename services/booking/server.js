@@ -96,6 +96,9 @@ async function init() {
     )`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pincode TEXT`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
+    // The saved address this booking was placed to — stamped at checkout so "last used" is exact
+    // rather than a text match. Null on legacy rows and free-typed addresses.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS address_id INTEGER`,
     // Control Tower: an executive can flag a live job as escalated and leave operational notes.
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalate_reason TEXT NOT NULL DEFAULT ''`,
@@ -381,11 +384,19 @@ app.post('/api/bookings', auth, async (req, res) => {
     if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
   }
 
-  // Address: explicit, else the customer's default (from the auth service).
+  // Address: explicit id/text, else the customer's default (from the auth service). We resolve the
+  // saved-address id so it can be stamped on the booking ("last used" becomes exact, not a text match).
   let address = body.address
-  if (!address) {
+  let addressId = body.addressId ?? body.address_id ?? null
+  if (addressId == null || !address) {
     const addrs = await tryGet(AUTH_URL, `/api/internal/users/${req.user.id}/addresses`, [])
-    address = addrs.find((a) => a.is_default)?.line || addrs[0]?.line || ''
+    let chosen = addressId != null ? addrs.find((a) => a.id === Number(addressId)) : null
+    if (!chosen && address) chosen = addrs.find((a) => a.line && a.line === address)   // match free text to a saved one
+    if (!chosen) chosen = addrs.find((a) => a.is_default) || addrs[0] || null
+    if (chosen) {
+      if (!address) address = chosen.line || ''
+      if (addressId == null) addressId = chosen.id
+    }
   }
 
   const payment = body.payment || 'phonepe'
@@ -406,12 +417,12 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   const ins = await pool.query(
     `INSERT INTO bookings (ref,user_id,type,freq,note,date,time,address,payment,payment_status,items,duration,
-       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24) RETURNING *`,
+       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created,address_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
     [ref(), req.user.id, body.type || 'instant', body.freq ?? null, body.note ?? null, body.date ?? null, body.time ?? null,
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
-      body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
+      body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso(), addressId ?? null])
   let booking = rowTo(ins.rows[0])
 
   // Assign an expert immediately: the customer's chosen worker, else the nearest ONLINE worker
