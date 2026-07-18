@@ -1024,6 +1024,11 @@ app.get('/api/internal/addresses/defaults', internalOnly, async (_q, res) => {
      FROM addresses ORDER BY user_id, is_default DESC, id`)
   res.json(rows)
 })
+// Saved payment methods (admin read-only view of the customer's cards/UPI).
+app.get('/api/internal/users/:id/payment-methods', internalOnly, async (req, res) => {
+  const { rows } = await pool.query('SELECT id,kind,label,detail,is_primary FROM payment_methods WHERE user_id=$1 ORDER BY is_primary DESC, id', [Number(req.params.id)])
+  res.json(rows)
+})
 // Admin-pinned customer notes.
 app.get('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM customer_notes WHERE user_id=$1 ORDER BY id DESC LIMIT 100', [Number(req.params.id)])

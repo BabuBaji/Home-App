@@ -83,7 +83,9 @@ export default function AdminCustomerDetail() {
   const [editOpen, setEditOpen] = useState(false)
   const [editDraft, setEditDraft] = useState({ name: '', email: '', city: '', gender: '', language: '' })
   const [moneyOpen, setMoneyOpen] = useState(false)
+  const [mBal, setMBal] = useState<'cash' | 'promo'>('cash')
   const [mAmt, setMAmt] = useState(''); const [mNote, setMNote] = useState('')
+  const openMoney = (bal: 'cash' | 'promo') => { setMBal(bal); setMAmt(''); setMNote(''); setMoneyOpen(true) }
   const [noteOpen, setNoteOpen] = useState(false); const [noteText, setNoteText] = useState('')
   const [wAmt, setWAmt] = useState(''); const [wNote, setWNote] = useState(''); const [wBal, setWBal] = useState<'cash' | 'promo' | 'points'>('cash')
 
@@ -144,7 +146,7 @@ export default function AdminCustomerDetail() {
   const doAddMoney = async () => {
     const amt = Number(mAmt); if (!amt) { toast('Enter an amount', 'err'); return }
     setBusy(true)
-    try { const r = await adjustWallet(cid, amt, mNote); toast(r.pending ? 'Sent for approval' : 'Wallet credited'); setMoneyOpen(false); setMAmt(''); setMNote(''); load() }
+    try { const r = await adjustWallet(cid, amt, mNote || (mBal === 'promo' ? 'Bonus from admin' : 'Added by admin'), mBal); toast(r.pending ? 'Sent for approval' : mBal === 'promo' ? 'Bonus sent to customer' : 'Wallet credited'); setMoneyOpen(false); setMAmt(''); setMNote(''); load() }
     catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
   const doNote = async () => {
@@ -265,7 +267,7 @@ export default function AdminCustomerDetail() {
       {tab === 'overview' && <Overview m={m} c={c} nav={nav} onNote={() => setNoteOpen(true)} onMoney={() => setMoneyOpen(true)} onBlock={doBlock} onCall={dialTo} onWa={whatsApp} onComm={onComm} blocked={blocked} goto={setTab} />}
       {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} c={c} toast={toast} />}
       {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} bookings={m.bookings} c={c} cid={cid} onChanged={load} toast={toast} />}
-      {tab === 'wallet' && <WalletTab c={c} txns={m.txns} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
+      {tab === 'wallet' && <WalletTab c={c} txns={m.txns} bookings={m.bookings} paymentMethods={d.paymentMethods || []} onAddMoney={() => openMoney('cash')} onSend={() => openMoney('promo')} goto={setTab} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
       {tab === 'membership' && <MembershipTab membership={d.membership} nav={nav} />}
       {tab === 'offers' && <OffersTab bookings={m.bookings} />}
       {tab === 'support' && <SupportTab bookings={m.bookings} nav={nav} />}
@@ -288,11 +290,12 @@ export default function AdminCustomerDetail() {
         </Modal>
       )}
       {moneyOpen && (
-        <Modal title="Add Money" onClose={() => setMoneyOpen(false)} footer={<><button className="btn line" onClick={() => setMoneyOpen(false)}>Cancel</button><button className="btn" disabled={busy || !mAmt.trim()} onClick={doAddMoney}>Add Money</button></>}>
+        <Modal title={mBal === 'promo' ? 'Send to Customer' : 'Add Money'} onClose={() => setMoneyOpen(false)} footer={<><button className="btn line" onClick={() => setMoneyOpen(false)}>Cancel</button><button className="btn" disabled={busy || !mAmt.trim()} onClick={doAddMoney}>{mBal === 'promo' ? 'Send Bonus' : 'Add Money'}</button></>}>
           <div className="grid" style={{ gap: 12 }}>
-            <Field label="Current Balance"><input value={money(c.wallet || 0)} readOnly /></Field>
+            <Field label={mBal === 'promo' ? 'Current Promo Balance' : 'Current Cash Balance'}><input value={money(mBal === 'promo' ? (c.promoBalance || 0) : (c.wallet || 0))} readOnly /></Field>
             <Field label="Amount (₹)"><input type="number" value={mAmt} onChange={(e) => setMAmt(e.target.value)} placeholder="500" /></Field>
-            <Field label="Note"><input value={mNote} onChange={(e) => setMNote(e.target.value)} placeholder="Reason / reference" /></Field>
+            <Field label="Note"><input value={mNote} onChange={(e) => setMNote(e.target.value)} placeholder={mBal === 'promo' ? 'Reason for the bonus' : 'Reason / reference'} /></Field>
+            {mBal === 'promo' && <p className="muted" style={{ fontSize: 11.5, margin: 0 }}>Sent as promo credit — usable at checkout, not withdrawable.</p>}
           </div>
         </Modal>
       )}
@@ -929,51 +932,198 @@ function AddressesTab({ addresses, bookings, c, cid, onChanged, toast }: any) {
     </div>
   )
 }
-function WalletTab({ c, txns, wAmt, setWAmt, wNote, setWNote, wBal, setWBal, busy, onAdjust, onStatus }: any) {
+// Classify a wallet ledger row into a display type (label + tone).
+function txnMeta(t: any) {
+  const kind = t.kind || ''
+  if (t.type === 'credit') {
+    if (kind === 'CASHBACK' || /cashback/i.test(t.title || '')) return { label: 'Cashback', tint: '#5b51e8' }
+    if (kind === 'REFUND' || /refund/i.test(t.title || '')) return { label: 'Refund', tint: '#f59e0b' }
+    return { label: 'Added', tint: '#16a34a' }
+  }
+  return { label: 'Used', tint: '#e5484d' }
+}
+const pmIcon = (kind: string) => kind === 'upi'
+  ? <span style={{ fontWeight: 800, fontSize: 10, color: '#5b51e8' }}>UPI</span>
+  : <CreditCard size={17} />
+
+function WalletTab({ c, txns, bookings, paymentMethods, onAddMoney, onSend, goto, wAmt, setWAmt, wNote, setWNote, wBal, setWBal, busy, onAdjust, onStatus }: any) {
+  const [sub, setSub] = useState<'overview' | 'methods'>('overview')
+  const [typeF, setTypeF] = useState('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+
+  const kpi = useMemo(() => {
+    const k = { added: 0, used: 0, cashback: 0, refunds: 0 }
+    for (const t of txns) {
+      const amt = t.amount || 0
+      if (t.type === 'credit') {
+        if (t.kind === 'CASHBACK' || /cashback/i.test(t.title || '')) k.cashback += amt
+        else if (t.kind === 'REFUND' || /refund/i.test(t.title || '')) k.refunds += amt
+        else k.added += amt
+      } else k.used += amt
+    }
+    return k
+  }, [txns])
+
+  const filtered = useMemo(() => txns.filter((t: any) => typeF === 'all' || txnMeta(t).label === typeF), [txns, typeF])
+  useEffect(() => { setPage(1) }, [typeF])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const updated = txns[0]?.created
+
+  const recentPayments = useMemo(() => bookings.filter((b: any) => b.payment_status === 'paid').slice(0, 4), [bookings])
+
+  const wkpi = (icon: ReactNode, tint: string, label: string, value: ReactNode) => (
+    <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}>
+        <span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}
+      </div>
+      <strong style={{ fontSize: 20, lineHeight: 1 }}>{value}</strong>
+      <span className="muted" style={{ fontSize: 11.5 }}>All Time</span>
+    </div>
+  )
+
+  const PaymentMethodsList = ({ manage }: { manage?: boolean }) => (
+    <Card title="Payment Methods" right={manage ? undefined : <button className="linkbtn" style={LINK} onClick={() => setSub('methods')}>Manage</button>}>
+      <div className="grid" style={{ gap: 10 }}>
+        {paymentMethods.map((p: any) => (
+          <div key={p.id} className="row" style={{ gap: 10, alignItems: 'center', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' }}>
+            <span style={{ display: 'inline-flex', width: 40, height: 28, borderRadius: 6, background: '#f2f4f7', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{pmIcon(p.kind)}</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{p.label || (p.kind === 'upi' ? 'UPI' : 'Card')}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{p.detail || ''}</div>
+            </div>
+            {p.is_primary ? <Badge tone="green" dot={false}>Default</Badge> : null}
+          </div>
+        ))}
+        {paymentMethods.length === 0 && <Empty small>No saved payment methods</Empty>}
+      </div>
+    </Card>
+  )
+
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-        <MiniStat tint="#16a34a" label="Cash Balance" value={money(c.wallet || 0)} sub="added / refunds" />
-        <MiniStat tint="#5b51e8" label="Promo Balance" value={money(c.promoBalance || 0)} sub="cashback / referral" />
-        <MiniStat tint="#f59e0b" label="Reward Points" value={(c.rewardPoints || 0).toLocaleString('en-IN')} sub="loyalty" />
+      {/* sub-tabs */}
+      <div className="row" style={{ gap: 4, borderBottom: '1px solid var(--line)' }}>
+        {(['overview', 'methods'] as const).map((k) => (
+          <button key={k} onClick={() => setSub(k)} style={{ padding: '10px 14px', background: 'none', border: 'none', borderBottom: sub === k ? '2px solid #5b51e8' : '2px solid transparent', color: sub === k ? '#5b51e8' : '#667085', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>{k === 'overview' ? 'Wallet Overview' : 'Payment Methods'}</button>
+        ))}
       </div>
-      <Card title="Adjust Wallet">
-        <div className="row" style={{ gap: 12, alignItems: 'center', marginBottom: 12 }}>
-          <span>Wallet status:</span>
-          <Badge tone={(c.walletStatus || 'active') === 'active' ? 'green' : c.walletStatus === 'blocked' ? 'red' : 'gray'}>{(c.walletStatus || 'active').toUpperCase()}</Badge>
-          <div style={{ flex: 1 }} />
-          <button className="btn line" disabled={busy} onClick={() => onStatus('active')}>Activate</button>
-          <button className="btn line" disabled={busy} onClick={() => onStatus('frozen')}>Freeze</button>
-          <button className="btn line" disabled={busy} onClick={() => onStatus('blocked')}>Block</button>
+
+      {sub === 'overview' && (
+        <div className="grid" style={{ gap: 16 }}>
+          {/* balance + KPIs */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) minmax(0, 2.4fr)', gap: 14, alignItems: 'stretch' }}>
+            <div className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <div className="muted" style={{ fontSize: 13 }}>Wallet Balance</div>
+                <div style={{ fontSize: 30, fontWeight: 800, color: '#5b51e8' }}>{money(c.wallet || 0)}</div>
+                <div className="muted" style={{ fontSize: 11.5 }}>Updated {updated ? `${shortDate(updated)}, ${new Date(updated).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : '—'}</div>
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn" onClick={onAddMoney}><Plus size={15} /> Add Money</button>
+                <button className="btn line" onClick={onSend}><Send size={15} /> Send to Customer</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+              {wkpi(<TrendingUp size={15} />, '#16a34a', 'Total Added', money(kpi.added))}
+              {wkpi(<CreditCard size={15} />, '#f59e0b', 'Total Used', money(kpi.used))}
+              {wkpi(<Gift size={15} />, '#5b51e8', 'Cashback Earned', money(kpi.cashback))}
+              {wkpi(<RotateCcw size={15} />, '#2e90fa', 'Refunds Received', money(kpi.refunds))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#f5f7ff', border: '1px solid #e0e7ff', borderRadius: 12, padding: '12px 14px', fontSize: 13, color: '#475467' }}>
+            <BadgeCheck size={17} style={{ color: '#5b51e8', flexShrink: 0 }} /> Use wallet balance during booking checkout. Refunds are automatically added to wallet.
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(260px, 1fr)', gap: 16, alignItems: 'start' }}>
+            {/* transactions */}
+            <Card title="Wallet Transactions" right={
+              <select className="select" value={typeF} onChange={(e) => setTypeF(e.target.value)} style={{ height: 32 }}>
+                <option value="all">All Transactions</option><option value="Added">Added</option><option value="Used">Used</option><option value="Cashback">Cashback</option><option value="Refund">Refund</option>
+              </select>
+            }>
+              <div className="tablewrap">
+                <table className="tbl">
+                  <thead><tr><th>Date &amp; Time</th><th>Type</th><th>Description</th><th className="num">Amount</th><th className="num">Balance</th><th>Reference ID</th></tr></thead>
+                  <tbody>
+                    {pageRows.map((t: any) => {
+                      const meta = txnMeta(t)
+                      return (
+                        <tr key={t.id}>
+                          <td><div style={{ fontSize: 13 }}>{shortDate(t.created)}</div><div className="muted" style={{ fontSize: 11.5 }}>{new Date(t.created).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></td>
+                          <td><span className="row" style={{ gap: 6, alignItems: 'center', fontSize: 13 }}><span style={{ display: 'inline-flex', width: 22, height: 22, borderRadius: '50%', background: `${meta.tint}1f`, color: meta.tint, alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>{t.type === 'credit' ? '+' : '−'}</span>{meta.label}</span></td>
+                          <td><div style={{ fontSize: 13 }}>{t.title || '—'}</div><div className="muted" style={{ fontSize: 11.5 }}>{t.balance_type && t.balance_type !== 'cash' ? t.balance_type : (t.kind || '').replace(/_/g, ' ').toLowerCase()}</div></td>
+                          <td className="num" style={{ color: meta.tint, fontWeight: 600 }}>{t.type === 'credit' ? '+' : '−'}{money(t.amount || 0)}</td>
+                          <td className="num">{money(t.balance || 0)}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{t.ref || `TXN${String(t.id).padStart(6, '0')}`}</td>
+                        </tr>
+                      )
+                    })}
+                    {filtered.length === 0 && <tr><td colSpan={6}><Empty>No transactions</Empty></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} transactions</span>
+                <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+                  <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+                </div>
+              </div>
+            </Card>
+
+            {/* right rail */}
+            <div className="grid" style={{ gap: 16, alignContent: 'start' }}>
+              <PaymentMethodsList />
+              <Card title="Recent Payments" right={<button className="linkbtn" style={LINK} onClick={() => goto('bookings')}>View All</button>}>
+                <div className="grid" style={{ gap: 10 }}>
+                  {recentPayments.map((b: any) => (
+                    <div key={b.id} className="row" style={{ gap: 10, alignItems: 'center' }}>
+                      <span style={{ fontSize: 18 }}>{(b.items || [])[0]?.icon || '🧹'}</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{b.ref}</div>
+                        <div className="muted" style={{ fontSize: 11.5 }}>{b.date ? shortDate(b.date) : shortDate(b.created)}{b.time ? `, ${b.time}` : ''}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{money(b.total || 0)}</div>
+                        <Badge tone="green" dot={false}>Paid</Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {recentPayments.length === 0 && <Empty small>No payments yet</Empty>}
+                </div>
+              </Card>
+            </div>
+          </div>
         </div>
-        <div className="row" style={{ gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <Field label="Balance"><select className="select" value={wBal} onChange={(e) => setWBal(e.target.value)}><option value="cash">Cash</option><option value="promo">Promo</option><option value="points">Reward Points</option></select></Field>
-          <Field label={wBal === 'points' ? 'Points' : 'Amount (₹)'}><input type="number" value={wAmt} onChange={(e) => setWAmt(e.target.value)} placeholder={wBal === 'points' ? '100' : '500'} /></Field>
-          <Field label="Note / reason"><input value={wNote} onChange={(e) => setWNote(e.target.value)} placeholder="Reason / reference" /></Field>
-          <button className="btn" disabled={busy || !wAmt.trim()} onClick={() => onAdjust(1)}>Credit</button>
-          <button className="btn line" disabled={busy || !wAmt.trim()} onClick={() => onAdjust(-1)}>Debit</button>
+      )}
+
+      {sub === 'methods' && (
+        <div className="grid" style={{ gap: 16 }}>
+          <PaymentMethodsList manage />
+          <Card title="Admin Wallet Controls">
+            <div className="row" style={{ gap: 12, alignItems: 'center', marginBottom: 14 }}>
+              <span>Wallet status:</span>
+              <Badge tone={(c.walletStatus || 'active') === 'active' ? 'green' : c.walletStatus === 'blocked' ? 'red' : 'gray'}>{(c.walletStatus || 'active').toUpperCase()}</Badge>
+              <div style={{ flex: 1 }} />
+              <button className="btn line" disabled={busy} onClick={() => onStatus('active')}>Activate</button>
+              <button className="btn line" disabled={busy} onClick={() => onStatus('frozen')}>Freeze</button>
+              <button className="btn line" disabled={busy} onClick={() => onStatus('blocked')}>Block</button>
+            </div>
+            <div className="row" style={{ gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <Field label="Balance"><select className="select" value={wBal} onChange={(e) => setWBal(e.target.value)}><option value="cash">Cash</option><option value="promo">Promo</option><option value="points">Reward Points</option></select></Field>
+              <Field label={wBal === 'points' ? 'Points' : 'Amount (₹)'}><input type="number" value={wAmt} onChange={(e) => setWAmt(e.target.value)} placeholder={wBal === 'points' ? '100' : '500'} /></Field>
+              <Field label="Note / reason"><input value={wNote} onChange={(e) => setWNote(e.target.value)} placeholder="Reason / reference" /></Field>
+              <button className="btn" disabled={busy || !wAmt.trim()} onClick={() => onAdjust(1)}>Credit</button>
+              <button className="btn line" disabled={busy || !wAmt.trim()} onClick={() => onAdjust(-1)}>Debit</button>
+            </div>
+            <p className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>Customers add and manage their own cards/UPI in the app; the list above is read-only for admins.</p>
+          </Card>
         </div>
-      </Card>
-      <Card title={`Transactions (${txns.length})`}>
-        <div className="tablewrap">
-          <table className="tbl">
-            <thead><tr><th>Title</th><th>Kind</th><th>Balance</th><th className="num">Amount</th><th className="num">Bal After</th><th>Date</th></tr></thead>
-            <tbody>
-              {txns.slice(0, 60).map((t: any) => (
-                <tr key={t.id}>
-                  <td>{t.title || '—'}</td>
-                  <td className="muted">{t.kind || t.type}</td>
-                  <td className="muted">{t.balance_type || 'cash'}</td>
-                  <td className="num" style={{ color: t.type === 'credit' ? '#16a34a' : '#e5484d' }}>{t.type === 'credit' ? '+' : '-'}{money(t.amount || 0)}</td>
-                  <td className="num">{money(t.balance || 0)}</td>
-                  <td className="muted">{shortDate(t.created)}</td>
-                </tr>
-              ))}
-              {txns.length === 0 && <tr><td colSpan={6}><Empty>No transactions</Empty></td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      )}
     </div>
   )
 }
@@ -1057,15 +1207,6 @@ function NotesTab({ notes, onAdd }: any) {
 }
 function ActivityTab({ activity }: any) {
   return <Card title={`Activity Logs (${activity.length})`}><Timeline evs={activity} /></Card>
-}
-function MiniStat({ tint, label, value, sub }: any) {
-  return (
-    <div className="card" style={{ padding: 16 }}>
-      <div className="muted" style={{ fontSize: 12.5, fontWeight: 600, color: tint }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0' }}>{value}</div>
-      <div className="muted" style={{ fontSize: 11.5 }}>{sub}</div>
-    </div>
-  )
 }
 
 const MENU_BOX: CSSProperties = { position: 'absolute', right: 0, top: 42, zIndex: 30, background: '#fff', border: '1px solid var(--line, #e4e7ec)', borderRadius: 10, boxShadow: '0 12px 28px rgba(16,24,40,.14)', minWidth: 190, padding: 5 }

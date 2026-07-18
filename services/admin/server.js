@@ -1152,7 +1152,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
 // derive spending/service/activity summaries client-side without extra round-trips.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones] = await Promise.all([
+  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
@@ -1161,6 +1161,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
     tryGet(U.auth, `/api/internal/users/${id}/referrals`, { joined: 0, pending: 0, referredByName: null }),
     tryGet(U.auth, `/api/internal/users/${id}/membership`, { active: false }),
     tryGet(U.catalog, '/api/internal/zones', []),
+    tryGet(U.auth, `/api/internal/users/${id}/payment-methods`, []),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
@@ -1181,7 +1182,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   }))
   // A stable display id for the profile header (CUST-100001…). Derived, not stored.
   const displayId = 'CUST-' + String(100000 + id)
-  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership })
+  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods })
 })
 /* ---------- worker communication preferences (owned here, not on the worker record) ---------- */
 // Friendly shape used everywhere: { whatsapp, sms, email, push, promo }. Missing row = all on.
