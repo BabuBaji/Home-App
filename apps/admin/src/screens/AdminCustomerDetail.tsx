@@ -4,7 +4,7 @@ import {
   ArrowLeft, Pencil, ChevronDown, ChevronLeft, ChevronRight, Star, StarHalf, Phone, Mail, Calendar,
   Wallet as WalletIcon, Briefcase, LayoutGrid, MapPin, BadgeCheck, Tag, Headphones, StickyNote, Activity,
   User, CalendarPlus, CreditCard, RotateCcw, CheckCircle2, Gift, Plus, Ban, Send, Users2, Clock, TrendingUp, Award,
-  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical, FileText,
+  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical, FileText, Funnel,
 } from 'lucide-react'
 import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault, changeCustomerMembership } from '../api'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
@@ -269,7 +269,7 @@ export default function AdminCustomerDetail() {
       {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} bookings={m.bookings} c={c} cid={cid} onChanged={load} toast={toast} />}
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} bookings={m.bookings} paymentMethods={d.paymentMethods || []} onAddMoney={() => openMoney('cash')} onSend={() => openMoney('promo')} goto={setTab} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
       {tab === 'membership' && <MembershipTab membership={d.membership} plans={d.membershipPlans || []} ledger={d.membershipLedger || []} c={c} cid={cid} paymentMethods={d.paymentMethods || []} onChanged={load} toast={toast} nav={nav} goto={setTab} />}
-      {tab === 'offers' && <OffersTab bookings={m.bookings} offers={d.offers || { totalOffers: 0, coupons: [] }} c={c} nav={nav} toast={toast} />}
+      {tab === 'offers' && <OffersTab bookings={m.bookings} offers={d.offers || { totalOffers: 0, coupons: [] }} c={c} nav={nav} toast={toast} goto={setTab} />}
       {tab === 'support' && <SupportTab bookings={m.bookings} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} />}
       {tab === 'notes' && <NotesTab notes={d.notes || []} onAdd={() => setNoteOpen(true)} />}
@@ -1319,12 +1319,15 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
   )
 }
 const discountText = (o: any) => o.discountType === 'percent' ? `${o.discountValue}% OFF${o.maxDiscount ? ` up to ${money(o.maxDiscount)}` : ''}` : `${money(o.discountValue)} OFF`
+const discountMain = (o: any) => o.discountType === 'percent' ? `${o.discountValue}% OFF` : `${money(o.discountValue)} OFF`
+const discountSub = (o: any) => o.discountType === 'percent' ? (o.maxDiscount ? `Up to ${money(o.maxDiscount)}` : '') : 'Flat'
 const daysLeft = (d?: string | null) => { if (!d) return null; const n = Math.ceil((Date.parse(d) - Date.now()) / 86400000); return n }
 
-function OffersTab({ bookings, offers, c, nav, toast }: any) {
+function OffersTab({ bookings, offers, c, nav, toast, goto }: any) {
   const [q, setQ] = useState('')
   const [typeF, setTypeF] = useState('all')
   const [statusF, setStatusF] = useState('all')
+  const [menuCode, setMenuCode] = useState<string | null>(null)
   const coupons: any[] = offers.coupons || []
 
   // This customer's redemptions come from their bookings (coupon + discount stamped at checkout).
@@ -1339,6 +1342,7 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
     return true
   })
   const copyCode = (code: string) => { navigator.clipboard?.writeText(code); toast(`Code ${code} copied`) }
+  useEffect(() => { if (!menuCode) return; const h = () => setMenuCode(null); window.addEventListener('click', h); return () => window.removeEventListener('click', h) }, [menuCode])
 
   const OKPI = (icon: ReactNode, tint: string, label: string, value: ReactNode, sub: string) => (
     <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
@@ -1391,18 +1395,19 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 16, alignItems: 'start' }}>
         {/* Available coupons */}
         <Card title="Available Coupons">
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr)', gap: 10, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) auto', gap: 10, marginBottom: 12 }}>
             <div style={{ position: 'relative' }}>
               <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search coupon code or name…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
             </div>
             <select className="select" value={typeF} onChange={(e) => setTypeF(e.target.value)}><option value="all">All Types</option><option value="percent">Percentage</option><option value="flat">Flat</option></select>
             <select className="select" value={statusF} onChange={(e) => setStatusF(e.target.value)}><option value="all">All Status</option><option value="Available">Available</option><option value="Used">Used</option><option value="Expired">Expired</option></select>
+            <button className="btn line" onClick={() => { setQ(''); setTypeF('all'); setStatusF('all') }}><Funnel size={15} /> Filters</button>
           </div>
           <div className="tablewrap">
             <table className="tbl" style={{ tableLayout: 'fixed', width: '100%', fontSize: 12.5 }}>
-              <colgroup><col style={{ width: '24%' }} /><col style={{ width: '12%' }} /><col style={{ width: '14%' }} /><col style={{ width: '10%' }} /><col style={{ width: '15%' }} /><col style={{ width: '12%' }} /><col style={{ width: '9%' }} /><col style={{ width: '9%' }} /></colgroup>
-              <thead><tr><th>Coupon Details</th><th>Code</th><th>Discount</th><th className="num">Min Order</th><th>Valid Till</th><th>Usage</th><th>Status</th><th></th></tr></thead>
+              <colgroup><col style={{ width: '22%' }} /><col style={{ width: '11%' }} /><col style={{ width: '13%' }} /><col style={{ width: '10%' }} /><col style={{ width: '14%' }} /><col style={{ width: '11%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /></colgroup>
+              <thead><tr><th>Coupon Details</th><th>Code</th><th>Discount</th><th className="num">Min Order</th><th>Valid Till</th><th>Usage</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((o) => {
                   const dl = daysLeft(o.validTill)
@@ -1410,12 +1415,23 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
                     <tr key={o.code}>
                       <td style={{ whiteSpace: 'normal' }}><div style={{ fontWeight: 600, fontSize: 13 }}>{o.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{o.subtitle || '—'}</div></td>
                       <td><span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11.5, background: '#eef0ff', color: '#5b51e8', borderRadius: 6, padding: '2px 6px' }}>{o.code}</span></td>
-                      <td style={{ fontSize: 13 }}>{discountText(o)}</td>
+                      <td style={{ whiteSpace: 'normal' }}><div style={{ fontSize: 13 }}>{discountMain(o)}</div>{discountSub(o) && <div className="muted" style={{ fontSize: 11 }}>{discountSub(o)}</div>}</td>
                       <td className="num">{money(o.minSubtotal)}</td>
-                      <td><div style={{ fontSize: 12.5 }}>{o.validTill ? shortDate(o.validTill) : 'No expiry'}</div>{dl != null && <div className="muted" style={{ fontSize: 11 }}>{dl > 0 ? `${dl} days left` : 'Expired'}</div>}</td>
-                      <td style={{ fontSize: 12.5 }}>{o.usedByCustomer} / {o.perCustomerLimit || '∞'}<div className="muted" style={{ fontSize: 11 }}>Per Customer</div></td>
+                      <td style={{ whiteSpace: 'normal' }}><div style={{ fontSize: 12.5 }}>{o.validTill ? shortDate(o.validTill) : 'No expiry'}</div>{dl != null && <div className="muted" style={{ fontSize: 11 }}>{dl > 0 ? `${dl} days left` : 'Expired'}</div>}</td>
+                      <td style={{ whiteSpace: 'normal', fontSize: 12.5 }}>{o.usedByCustomer} / {o.perCustomerLimit || '∞'}<div className="muted" style={{ fontSize: 11 }}>Per Customer</div></td>
                       <td><Badge tone={o.status === 'Available' ? 'green' : o.status === 'Expired' ? 'red' : 'gray'}>{o.status}</Badge></td>
-                      <td><button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => copyCode(o.code)}>Copy</button></td>
+                      <td>
+                        <div className="row" style={{ gap: 2, alignItems: 'center', position: 'relative' }}>
+                          <button className="linkbtn" style={{ ...LINK, fontSize: 12.5 }} onClick={() => copyCode(o.code)}>Apply</button>
+                          <button className="iconbtn" style={{ width: 26, height: 26 }} onClick={(e) => { e.stopPropagation(); setMenuCode(menuCode === o.code ? null : o.code) }}><MoreVertical size={15} /></button>
+                          {menuCode === o.code && (
+                            <div className="menu" style={{ ...MENU_BOX, right: 0, top: 30 }} onClick={(e) => e.stopPropagation()}>
+                              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuCode(null); copyCode(o.code) }}><Copy size={15} /> Copy code</button>
+                              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMenuCode(null); nav('/campaigns') }}><Eye size={15} /> View offer</button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   )
                 })}
@@ -1426,9 +1442,9 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
         </Card>
 
         {/* Usage history */}
-        <Card title="Coupon Usage History">
-          <div className="grid" style={{ gap: 10 }}>
-            {history.slice(0, 8).map((h: any, i: number) => (
+        <Card title="Coupon Usage History" right={history.length > 0 ? <button className="linkbtn" style={LINK} onClick={() => goto('bookings')}>View All</button> : undefined}>
+          <div className="grid" style={{ gap: 12 }}>
+            {history.slice(0, 5).map((h: any, i: number) => (
               <div key={i} className="row" style={{ gap: 10, alignItems: 'center' }}>
                 <span style={{ display: 'inline-flex', width: 30, height: 30, borderRadius: 8, background: '#eef0ff', color: '#5b51e8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Tag size={15} /></span>
                 <div style={{ minWidth: 0, flex: 1 }}>
@@ -1440,6 +1456,7 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
             ))}
             {history.length === 0 && <Empty small>No coupons redeemed yet</Empty>}
           </div>
+          {history.length > 0 && <button className="btn line" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} onClick={() => goto('bookings')}>View All Usage History <ChevronRight size={14} /></button>}
         </Card>
       </div>
 
