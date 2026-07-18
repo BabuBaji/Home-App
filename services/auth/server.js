@@ -986,6 +986,17 @@ app.post('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
     [Number(req.params.id), body, req.body?.author || null])
   res.json(rows[0])
 })
+// Referral summary for the admin customer profile: who referred them, and how many they've referred
+// (joined = signed up; pending = joined but the referral reward hasn't been earned yet).
+app.get('/api/internal/users/:id/referrals', internalOnly, async (req, res) => {
+  const id = Number(req.params.id)
+  const u = await getUser(id)
+  let referredByName = null, referredByCode = null
+  if (u?.referred_by) { const r = await getUser(u.referred_by); referredByName = r?.name || null; referredByCode = r?.referral_code || null }
+  const { rows } = await pool.query(
+    'SELECT COUNT(*)::int AS joined, COUNT(*) FILTER (WHERE NOT referral_rewarded)::int AS pending FROM users WHERE referred_by=$1', [id])
+  res.json({ referredByName, referredByCode, referralCode: u?.referral_code || null, joined: rows[0].joined, pending: rows[0].pending })
+})
 // Full wallet ledger for a user (admin view).
 app.get('/api/internal/users/:id/transactions', internalOnly, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200', [Number(req.params.id)])

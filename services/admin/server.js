@@ -1139,24 +1139,40 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
     res.json({ ok: true, id: user.id })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
-// Customer detail (View modal): { customer, addresses, bookings, transactions }.
+// Customer detail (profile page): everything the /customers/:id screen renders. Bookings are enriched
+// with the fields the Overview cards need (service, worker, schedule, payment, rating) so the screen can
+// derive spending/service/activity summaries client-side without extra round-trips.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings, transactions, notes] = await Promise.all([
+  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.auth, `/api/internal/users/${id}/transactions`, []),
     tryGet(U.auth, `/api/internal/users/${id}/notes`, []),
+    tryGet(U.auth, `/api/internal/users/${id}/referrals`, { joined: 0, pending: 0, referredByName: null }),
+    tryGet(U.auth, `/api/internal/users/${id}/membership`, { active: false }),
+    tryGet(U.catalog, '/api/internal/zones', []),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
   // Data scope: a scoped admin can't open an out-of-scope customer by id. 404 (not 403) so they
   // can't probe which ids exist outside their scope.
   if (!inScope(req.admin?.scope, { city: customer.city })) return res.status(404).json({ error: 'Not found' })
-  const bookings = allBookings.filter((b) => b.user_id === id)
-    .map((b) => ({ id: b.id, ref: b.ref, service: (b.items || []).map((i) => i.name).join(', '), total: b.total, status: b.status, created: b.created }))
-  res.json({ customer, addresses, bookings, transactions, notes })
+  const zoneName = {}; for (const z of zones) zoneName[z.id] = z.name
+  const bookings = allBookings.filter((b) => b.user_id === id).map((b) => ({
+    id: b.id, ref: b.ref,
+    service: (b.items || []).map((i) => i.name).join(', '),
+    items: b.items || [],
+    total: b.total, subtotal: b.subtotal, discount: b.discount, coupon: b.coupon,
+    status: b.status, payment: b.payment, payment_status: b.payment_status,
+    date: b.date, time: b.time, worker: b.pro_name, worker_id: b.worker_id,
+    rating: b.rating, review: b.review, zone: b.zone_id ? (zoneName[b.zone_id] || null) : null,
+    created: b.created, started_at: b.started_at, completed_at: b.completed_at,
+  }))
+  // A stable display id for the profile header (CUST-100001…). Derived, not stored.
+  const displayId = 'CUST-' + String(100000 + id)
+  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership })
 })
 // Pin an internal ops note to a customer.
 app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'), async (req, res) => {

@@ -10,6 +10,7 @@ import { ShieldAlert } from 'lucide-react'
 import Login from './screens/Login'
 import Dashboard from './screens/Dashboard'
 import Customers from './screens/Customers'
+import AdminCustomerDetail from './screens/AdminCustomerDetail'
 import Workers from './screens/Workers'
 import WorkerDetail from './screens/WorkerDetail'
 import WorkerWallet from './screens/WorkerWallet'
@@ -69,6 +70,7 @@ export default function App() {
         <Route element={<Guard authed={!!admin} />}>
           <Route path="/dashboard" element={<Page perm="dashboard.view"><Dashboard /></Page>} />
           <Route path="/customers" element={<Page perm="customers.view"><Customers /></Page>} />
+          <Route path="/customers/:id" element={<Page perm="customers.view"><AdminCustomerDetail /></Page>} />
           <Route path="/workers" element={<Page perm="workers.view"><Workers /></Page>} />
           <Route path="/workers/new" element={<Page perm="workers.create"><AddWorker /></Page>} />
           <Route path="/workers/:id/edit" element={<Page perm="workers.edit"><AddWorker /></Page>} />

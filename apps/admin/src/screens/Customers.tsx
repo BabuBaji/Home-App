@@ -164,7 +164,7 @@ export default function Customers() {
   }
 
   const openEdit = (c: Customer) => { setEditDraft({ name: c.name, email: c.email || '', city: c.city || '' }); setEditing(c) }
-  const openView = async (c: Customer) => { setMenuId(null); try { setViewing(await fetchCustomer(c.id)) } catch (e) { toast((e as Error).message, 'err') } }
+  const openView = (c: Customer) => { setMenuId(null); nav(`/customers/${c.id}`) }
   const openWallet = async (c: Customer) => {
     setMenuId(null); setWAmt(''); setWNote(''); setWBal('cash')
     try { setWallet(await fetchCustomer(c.id)) } catch (e) { toast((e as Error).message, 'err') }
@@ -288,7 +288,7 @@ export default function Customers() {
                   <tr key={c.id}>
                     <td><input type="checkbox" checked={sel.has(c.id)} onChange={() => toggleOne(c.id)} /></td>
                     <td>
-                      <div className="cell-user">
+                      <div className="cell-user" style={{ cursor: 'pointer' }} onClick={() => nav(`/customers/${c.id}`)}>
                         <Avatar name={c.name || 'Customer'} size={36} />
                         <div style={{ minWidth: 0 }}>
                           <strong style={{ display: 'block' }}>{c.name || <span className="muted">Profile Incomplete</span>}</strong>
