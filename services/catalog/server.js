@@ -572,6 +572,37 @@ app.post('/api/coupons/validate', async (req, res) => {
   if (r.error) return res.status(400).json(r)
   res.json(r)
 })
+// Admin customer-profile Offers tab: active manual coupons + THIS customer's per-coupon usage/status.
+app.get('/api/internal/customers/:id/offers', internalOnly, async (req, res) => {
+  const cid = Number(req.params.id)
+  const camps = await pool.query(
+    `SELECT m.campaign_id, m.campaign_name, m.discount_type, m.discount_value, m.max_discount, m.min_subtotal,
+            m.banner_title, m.banner_subtitle, m.ends, c.coupon_code, c.expiry,
+            r.max_usage AS per_customer_limit, r.segment
+       FROM campaign_master m
+       JOIN coupon c ON c.campaign_id = m.campaign_id
+       LEFT JOIN campaign_customer_rule r ON r.campaign_id = m.campaign_id
+      WHERE m.status='active' AND c.auto_apply=false
+      ORDER BY m.min_subtotal, m.campaign_id`)
+  const usage = await pool.query('SELECT campaign_id, COUNT(*)::int n FROM customer_campaign_usage WHERE customer_id=$1 GROUP BY campaign_id', [cid])
+  const uBy = Object.fromEntries(usage.rows.map((u) => [u.campaign_id, u.n]))
+  const now = Date.now()
+  const coupons = camps.rows.map((r) => {
+    const used = uBy[r.campaign_id] || 0
+    const limit = r.per_customer_limit || 0                 // 0 = unlimited
+    const validTill = r.expiry || r.ends || null
+    const expired = validTill ? new Date(validTill).getTime() < now : false
+    const exhausted = limit > 0 && used >= limit
+    return {
+      campaignId: r.campaign_id, code: r.coupon_code, name: r.campaign_name, subtitle: r.banner_subtitle,
+      bannerTitle: r.banner_title, discountType: r.discount_type, discountValue: r.discount_value,
+      maxDiscount: r.max_discount, minSubtotal: r.min_subtotal, validTill,
+      perCustomerLimit: limit, usedByCustomer: used, segment: r.segment || 'all',
+      status: expired ? 'Expired' : exhausted ? 'Used' : 'Available',
+    }
+  })
+  res.json({ totalOffers: new Set(camps.rows.map((r) => r.campaign_id)).size, coupons })
+})
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
 // Live surge for the customer's zone (public, pincode-keyed) — powers the "rain incoming" heads-up
 // on Home so a customer sees it on open, before starting a booking. Silent (no surge) when the

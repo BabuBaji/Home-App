@@ -1152,7 +1152,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
 // derive spending/service/activity summaries client-side without extra round-trips.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods, membershipLedger, membershipPlans] = await Promise.all([
+  const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods, membershipLedger, membershipPlans, offers] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
@@ -1164,6 +1164,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
     tryGet(U.auth, `/api/internal/users/${id}/payment-methods`, []),
     tryGet(U.auth, `/api/internal/users/${id}/membership-ledger`, []),
     tryGet(U.catalog, '/api/membership-plans', []),
+    tryGet(U.catalog, `/api/internal/customers/${id}/offers`, { totalOffers: 0, coupons: [] }),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
@@ -1184,7 +1185,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   }))
   // A stable display id for the profile header (CUST-100001…). Derived, not stored.
   const displayId = 'CUST-' + String(100000 + id)
-  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans })
+  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers })
 })
 /* ---------- worker communication preferences (owned here, not on the worker record) ---------- */
 // Friendly shape used everywhere: { whatsapp, sms, email, push, promo }. Missing row = all on.
