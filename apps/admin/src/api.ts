@@ -95,6 +95,32 @@ export const fetchActivity = (params: Record<string, string | number> = {}) => {
 }
 export const fetchActivityStats = (days = 7) => req<{ total: number; since: string; byActor: { actor_type: string; n: number }[]; byAction: { action: string; n: number }[] }>(`/activity/stats?days=${days}`)
 export const fetchBookingTimeline = (id: number) => req<any[]>(`/bookings/${id}/timeline`)
+export interface Settlement {
+  total: number; paymentMethod: string; paymentStatus: string; paidAt: string
+  customer: { subtotal: number; discount: number; coupon: string; fee: number; tax: number; total: number }
+  settlement: { collected: number; pgFee: number; pgFeePct: number; pgGst: number; pgGstPct: number; net: number; workerPayout: number; incentive: number; opsCost: number; mktgCost: number; companyMargin: number; marginPct: number }
+  payout: { workerName: string; workerId: number | null; amount: number; incentive: number; total: number; status: string; paidAt: string | null; txnId: string }
+  txns: { at: string; type: string; status: string; amount: number; method: string; txnId: string }[]
+  documents: { invoice: string; receipt: string; payoutSlip: string }
+  refund: { amount: number; status: string }
+}
+export const fetchSettlement = (id: number) => req<Settlement>(`/bookings/${id}/settlement`)
+export interface Evidence {
+  worker: { name: string; id: number | null; rating: number }
+  checkIn: { at: string | null; otp: string; verified: boolean; sig: string }
+  checkOut: { at: string | null; otp: string; verified: boolean; sig: string }
+  durationMin: number | null; status: string
+  location: { address: string; lat: number | null; lng: number | null }
+  beforePhotos: { url: string; at: string }[]; afterPhotos: { url: string; at: string }[]; beforeAt: string | null; afterAt: string | null
+  checklist: { task: string; required: boolean; completed: boolean }[]
+  workerNotes: string; materials: string
+  feedback: { rating: number; review: string }
+  device: string; network: string; instructions: string
+  summary: { service: string; duration: string; qty: number }
+}
+export const fetchEvidence = (id: number) => req<Evidence>(`/bookings/${id}/evidence`)
+export interface BookingActivity { at: string; role: string; name: string; module: string; actionType: string; details: string }
+export const fetchBookingActivity = (id: number) => req<{ activities: BookingActivity[]; counts: { total: number; system: number; admin: number; worker: number; customer: number; auto: number } }>(`/bookings/${id}/activity`)
 
 /* customers */
 export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/customers?q=${encodeURIComponent(q)}&status=${status}`)
@@ -414,7 +440,12 @@ export const updateComplaint = (id: number, body: Record<string, unknown>) => re
 
 /* tickets */
 export const fetchTickets = () => req<Ticket[]>('/tickets')
-export const updateTicket = (id: number, body: { status?: string; response?: string }) => req<Ticket>(`/tickets/${id}`, patch(body))
+export const updateTicket = (id: number, body: Record<string, unknown>) => req<Ticket>(`/tickets/${id}`, patch(body))
+/* booking-linked complaints (Support & Complaints tab) */
+export const fetchBookingTickets = (bookingId: number) => req<{ tickets: any[]; counts: { total: number; open: number; resolved: number; reopened: number; escalated: number } }>(`/tickets/booking/${bookingId}`)
+export const fetchTicketDetail = (id: number) => req<any>(`/tickets/${id}`)
+export const postTicketMessage = (id: number, body: { body: string; internal?: boolean; senderName?: string }) => req<any>(`/tickets/${id}/messages`, post('', body))
+export const createBookingComplaint = (body: Record<string, unknown>) => req<any>('/tickets', post('', body))
 
 /* notifications */
 export const fetchNotifications = () => req<any[]>('/notifications')

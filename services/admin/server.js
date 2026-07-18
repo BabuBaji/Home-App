@@ -49,6 +49,11 @@ const DEFAULT_SETTINGS = {
   platform_fee: '20', tax_percent: '5',
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
+  // Settlement rates used to break down each booking's economics (Payment & Settlement tab).
+  // pg_fee = payment-gateway charge (Razorpay ~2.36%) + 18% GST on it (0 on wallet); the incentive /
+  // operational / marketing rates are the org's allocated per-booking costs — set to 0 to disable.
+  pg_fee_percent: '2.36', pg_fee_gst_percent: '18',
+  worker_incentive_percent: '3', operational_cost_percent: '2', marketing_cost_percent: '1',
   auto_assign: 'true', maintenance_mode: 'false', dispatch_timeout_min: '5',
   gst_inclusive: 'false',   // GST is added on top of the shown price (exclusive) — the market norm; toggle in Settings
   // Seller details printed on the customer tax invoice (edit to your registered company).

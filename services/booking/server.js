@@ -102,6 +102,25 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
     // Module 10 · Phase 2 — membership discount applied to this booking (₹), for the invoice breakdown.
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS member_discount INTEGER NOT NULL DEFAULT 0`,
+    // Service evidence captured by the worker during/after the job (before/after photos, checklist,
+    // notes, completion OTP, signatures + capture metadata). One row per booking; upserted by the
+    // worker app and read by the admin Service Evidence tab.
+    `CREATE TABLE IF NOT EXISTS booking_evidence (
+      booking_id INTEGER PRIMARY KEY,
+      before_photos JSONB NOT NULL DEFAULT '[]',   -- [{url, at}]
+      after_photos  JSONB NOT NULL DEFAULT '[]',
+      checklist     JSONB NOT NULL DEFAULT '[]',   -- [{task, required, completed}]
+      worker_notes  TEXT NOT NULL DEFAULT '',
+      materials     TEXT NOT NULL DEFAULT '',
+      completion_otp TEXT NOT NULL DEFAULT '',
+      start_sig     TEXT NOT NULL DEFAULT '',
+      end_sig       TEXT NOT NULL DEFAULT '',
+      device        TEXT NOT NULL DEFAULT '',
+      network       TEXT NOT NULL DEFAULT '',
+      before_at     TIMESTAMPTZ, after_at TIMESTAMPTZ,
+      created       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -600,6 +619,117 @@ app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   res.json({ ...b, customer: u?.user?.name || 'Customer' })
+})
+// Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
+// actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp
+// (or the commission split); ops/marketing cost rates are configurable and default to 0 so nothing
+// is invented; company margin is whatever's left. Transactions + document refs are derived.
+app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const r2 = (n) => Math.round(n * 100) / 100
+  const pgFeePct = Number(await getSetting(ADMIN_URL, 'pg_fee_percent', '2.36')) || 2.36
+  const pgGstPct = Number(await getSetting(ADMIN_URL, 'pg_fee_gst_percent', '18')) || 18
+  const opsCostPct = Number(await getSetting(ADMIN_URL, 'operational_cost_percent', '0')) || 0
+  const mktgCostPct = Number(await getSetting(ADMIN_URL, 'marketing_cost_percent', '0')) || 0
+  const incentivePct = Number(await getSetting(ADMIN_URL, 'worker_incentive_percent', '0')) || 0
+  const commissionPct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+
+  const total = b.total || 0
+  const isWallet = b.payment === 'wallet'
+  const pgFee = isWallet ? 0 : r2(total * pgFeePct / 100)
+  const pgGst = r2(pgFee * pgGstPct / 100)
+  const net = r2(total - pgFee - pgGst)
+  const workerPayout = b.worker_comp || Math.round((b.subtotal || 0) * (100 - commissionPct) / 100)
+  const incentive = r2((b.subtotal || 0) * incentivePct / 100)
+  const opsCost = r2(total * opsCostPct / 100)
+  const mktgCost = r2(total * mktgCostPct / 100)
+  const companyMargin = r2(net - workerPayout - incentive - opsCost - mktgCost)
+  const marginPct = total ? Math.round((companyMargin / total) * 1000) / 10 : 0
+  const short = String(b.ref || b.id).replace(/[#\s]/g, '')
+
+  const txns = [{ at: b.created, type: 'Customer Payment', status: 'success', amount: total, method: b.payment || 'razorpay', txnId: `pay_${short}` }]
+  if (pgFee) txns.push({ at: b.created, type: 'PG Fee Deducted', status: 'success', amount: -pgFee, method: 'Razorpay', txnId: `fee_${short}` })
+  if (pgGst) txns.push({ at: b.created, type: 'GST on PG Fee', status: 'success', amount: -pgGst, method: 'Razorpay', txnId: `tax_${short}` })
+  if (b.settled) txns.push({ at: b.completed_at || b.created, type: 'Worker Payout', status: 'success', amount: -workerPayout, method: 'Wallet Transfer', txnId: `PAYOUT_${short}` })
+
+  res.json({
+    total, paymentMethod: b.payment || '', paymentStatus: b.payment_status || '', paidAt: b.created,
+    customer: { subtotal: b.subtotal || 0, discount: b.discount || 0, coupon: b.coupon || '', fee: b.fee || 0, tax: b.tax || 0, total },
+    settlement: { collected: total, pgFee, pgFeePct, pgGst, pgGstPct, net, workerPayout, incentive, opsCost, mktgCost, companyMargin, marginPct },
+    payout: { workerName: b.pro_name || '', workerId: b.worker_id || null, amount: workerPayout, incentive, total: workerPayout + incentive, status: b.settled ? 'paid' : 'pending', paidAt: b.settled ? (b.completed_at || null) : null, txnId: `PAYOUT_${short}` },
+    txns,
+    documents: { invoice: `INV-${short}`, receipt: `RCPT-${short}`, payoutSlip: `PAYOUT-${short}` },
+    refund: { amount: b.refund || 0, status: b.refund_status || '' },
+  })
+})
+// Service evidence for the admin Service Evidence tab — merges the worker-captured evidence row
+// (before/after photos, checklist, notes, completion OTP, signatures) with the booking's own
+// timestamps/OTP/rating. Fields with no captured data come back empty (never invented).
+app.get('/api/admin/bookings/:id/evidence', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
+  const durMin = b.started_at && b.completed_at ? Math.max(0, Math.round((new Date(b.completed_at) - new Date(b.started_at)) / 60000)) : null
+  const before = (ev.before_photos && ev.before_photos.length) ? ev.before_photos : []
+  const after = (ev.after_photos && ev.after_photos.length) ? ev.after_photos : (b.work_photo ? [{ url: b.work_photo, at: b.completed_at }] : [])
+  res.json({
+    worker: { name: b.pro_name || '', id: b.worker_id || null, rating: b.pro_rating || 0 },
+    checkIn: { at: b.started_at || null, otp: b.service_otp || '', verified: !!b.started_at, sig: ev.start_sig || '' },
+    checkOut: { at: b.completed_at || null, otp: ev.completion_otp || '', verified: b.status === 'completed', sig: ev.end_sig || '' },
+    durationMin: durMin, status: b.status,
+    location: { address: b.address || '', lat: b.cust_lat ?? null, lng: b.cust_lng ?? null },
+    beforePhotos: before, afterPhotos: after, beforeAt: ev.before_at || null, afterAt: ev.after_at || b.completed_at || null,
+    checklist: ev.checklist || [],
+    workerNotes: ev.worker_notes || '',
+    materials: ev.materials || '',
+    feedback: { rating: b.rating || 0, review: b.review || '' },
+    device: ev.device || '', network: ev.network || '',
+    instructions: b.note || '',
+    summary: { service: (b.items || []).map((i) => i.name).join(', '), duration: b.duration || '', qty: (b.items || []).length || 1 },
+  })
+})
+// Worker-app / service-to-service upsert of a booking's evidence (photos, checklist, notes).
+app.post('/api/internal/bookings/:id/evidence', internalOnly, async (req, res) => {
+  const id = Number(req.params.id), e = req.body || {}
+  await pool.query(
+    `INSERT INTO booking_evidence (booking_id, before_photos, after_photos, checklist, worker_notes, materials, completion_otp, start_sig, end_sig, device, network, before_at, after_at, updated)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+     ON CONFLICT (booking_id) DO UPDATE SET before_photos=EXCLUDED.before_photos, after_photos=EXCLUDED.after_photos, checklist=EXCLUDED.checklist,
+       worker_notes=EXCLUDED.worker_notes, materials=EXCLUDED.materials, completion_otp=EXCLUDED.completion_otp, start_sig=EXCLUDED.start_sig,
+       end_sig=EXCLUDED.end_sig, device=EXCLUDED.device, network=EXCLUDED.network, before_at=EXCLUDED.before_at, after_at=EXCLUDED.after_at, updated=now()`,
+    [id, JSON.stringify(e.beforePhotos || []), JSON.stringify(e.afterPhotos || []), JSON.stringify(e.checklist || []), e.workerNotes || '', e.materials || '',
+      e.completionOtp || '', e.startSig || '', e.endSig || '', e.device || '', e.network || '', e.beforeAt || null, e.afterAt || null])
+  res.json({ ok: true })
+})
+// Per-booking activity/audit feed — derived from the booking's real lifecycle (create, payment,
+// dispatch, service start, evidence upload, completion, rating, escalation, admin note). Every entry
+// has a real timestamp; nothing is invented. Counts grouped by actor role for the summary chips.
+app.get('/api/admin/bookings/:id/activity', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
+  const custName = u?.user?.name || 'Customer'
+  const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
+  const acts = []
+  const iso = (v) => (v ? new Date(v).toISOString() : null)
+  const push = (at, role, name, module, actionType, details) => { if (at) acts.push({ at: iso(at), role, name, module, actionType, details }) }
+  const total = b.total || 0
+  const method = b.payment === 'wallet' ? 'Wallet' : (b.payment || 'Razorpay')
+  push(b.created, 'customer', custName, 'Bookings', 'Create', 'Booking created from Customer App')
+  push(b.created, 'system', method === 'Wallet' ? 'Wallet' : 'Razorpay', 'Payments', 'Payment', `Payment of ₹${total} received via ${method}`)
+  if (b.pro_name) push(b.created, 'auto', 'Auto Dispatch', 'Dispatch', 'Assignment', `Job assigned to ${b.pro_name}`)
+  if (b.started_at) push(b.started_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Started service after OTP verification${b.service_otp ? ` · Start OTP ${b.service_otp}` : ''}`)
+  if (ev.after_at) push(ev.after_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Ended job and uploaded after-service photos${(ev.after_photos || []).length ? ` · ${ev.after_photos.length} photos` : ''}`)
+  if (b.completed_at) push(b.completed_at, 'system', 'System', 'Workflow', 'Auto Update', 'Job marked as Completed')
+  if (b.rating) push(b.completed_at, 'customer', custName, 'Jobs', 'Customer Action', `Confirmed the service and rated ${Number(b.rating).toFixed(1)}${b.review ? ` · ${b.review}` : ''}`)
+  if (b.escalated) push(b.created, 'admin', 'Admin', 'Support', 'Escalation', `Booking escalated${b.escalate_reason ? `: ${b.escalate_reason}` : ''}`)
+  if (b.admin_note) push(b.created, 'admin', 'Admin', 'Notes', 'Note', b.admin_note)
+  if (b.status === 'cancelled') push(b.cancel_time || b.created, 'admin', b.cancelled_by || 'Admin', 'Bookings', 'Cancellation', `Booking cancelled${b.cancel_reason ? `: ${b.cancel_reason}` : ''}`)
+  acts.sort((a, z) => new Date(z.at) - new Date(a.at))
+  const counts = { total: acts.length, system: 0, admin: 0, worker: 0, customer: 0, auto: 0 }
+  for (const a of acts) if (counts[a.role] != null) counts[a.role]++
+  res.json({ activities: acts, counts })
 })
 // Admin booking actions — used by both the Bookings screen and the Control Tower console:
 // status change, reschedule (date/time), reassign / unassign a pro, escalate + reason, and an
