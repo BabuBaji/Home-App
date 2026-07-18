@@ -1912,7 +1912,7 @@ body { line-height: 1.45; }
 .hd-loc { display: flex; align-items: center; gap: 5px; color: var(--ink); font-size: 15px; }
 .hd-loc b { font-weight: 600; }
 .hd-loc svg:first-child { color: var(--v); }
-.hd-bell { position: relative; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; color: var(--ink); }
+.hd-bell { position: relative; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); }
 .hd-bell:active { background: var(--vsoft); }
 .hd-badge { position: absolute; top: 5px; right: 5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
   background: var(--v); color: #fff; font-size: 10.5px; font-weight: 700; display: grid; place-items: center; }
@@ -1942,19 +1942,32 @@ body { line-height: 1.45; }
    down below the clock — so the purple bleeds behind the status bar (like Pronto). */
 .rain-sky .hd-top { background: #5b63d6;
   margin-top: calc(-1 * max(env(safe-area-inset-top), 28px));
-  padding-top: calc(8px + max(env(safe-area-inset-top), 28px)); }
+  padding-top: calc(8px + max(env(safe-area-inset-top), 28px));
+  transition: background .25s ease, box-shadow .25s ease; }
 .rain-sky .content { padding-top: 0; }
-.rain-sky .hd-loc, .rain-sky .hd-loc b, .rain-sky .hd-loc svg { color: #fff; }
-.rain-sky .hd-wallet, .rain-sky .hd-bell { background: rgba(255,255,255,.18); border-color: transparent; }
-.rain-sky .hd-wallet svg, .rain-sky .hd-bell svg, .rain-sky .hd-wallet-bal { color: #fff; }
+.rain-sky .hd-loc, .rain-sky .hd-loc b, .rain-sky .hd-loc svg { color: #fff; transition: color .25s ease; }
+.rain-sky .hd-wallet, .rain-sky .hd-bell { background: rgba(255,255,255,.18); border-color: transparent; transition: background .25s ease; }
+.rain-sky .hd-wallet svg, .rain-sky .hd-bell svg, .rain-sky .hd-wallet-bal { color: #fff; transition: color .25s ease; }
 .rain-sky .hd-prof { box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
+
+/* collapsed (scrolled) header — solid white with dark controls, so the top reads on white content */
+.rain-sky .hd-top.solid { background: #fff; box-shadow: 0 2px 14px rgba(20,16,40,.09); }
+.rain-sky .hd-top.solid .hd-loc, .rain-sky .hd-top.solid .hd-loc b { color: var(--ink, #1c2033); }
+.rain-sky .hd-top.solid .hd-loc svg { color: var(--ink, #1c2033); }
+.rain-sky .hd-top.solid .hd-loc svg:first-child { color: var(--v, #6d4ee6); }
+.rain-sky .hd-top.solid .hd-wallet, .rain-sky .hd-top.solid .hd-bell { background: #f2f0fb; }
+.rain-sky .hd-top.solid .hd-wallet svg, .rain-sky .hd-top.solid .hd-bell svg { color: var(--v, #6d4ee6); }
+.rain-sky .hd-top.solid .hd-wallet-bal { color: var(--ink, #1c2033); }
+.rain-sky .hd-top.solid .hd-prof { box-shadow: none; }
 
 /* full-bleed rainy hero (scrolls with the content, joins seamlessly under the purple app bar).
    Vertical gradient starting at the exact app-bar colour (#5b63d6) so the hero's top edge matches
    the bar across the full width — no visible seam between the two. */
 .hd-hero.rainy { background: linear-gradient(to bottom, #5b63d6 0%, #4a3fb0 62%, #2e2a6b 100%);
   box-shadow: 0 16px 30px rgba(46,42,107,.34); overflow: hidden; }
-.rain-sky .hd-hero { margin: 0 -18px; border-radius: 0 0 26px 26px; }
+.rain-sky .hd-hero { margin: 0 -18px; border-radius: 0; min-height: 200px; padding-bottom: 24px; }
+.rain-sky .hd-hero-img { height: 172px; }
+.rain-sky .hd-hero-emoji { font-size: 88px; }
 
 /* white diagonal rain filling the hero (clipped to it) */
 .hd-skyrain { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; border-radius: inherit;
@@ -1973,6 +1986,24 @@ body { line-height: 1.45; }
   padding: 6px 11px; border-radius: 999px; font-size: 12px; line-height: 1.2; color: #fff;
   background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.32); backdrop-filter: blur(2px); }
 .hd-hero-surge b { font-weight: 700; }
+
+/* hero carousel — promo/festival/offer slides, big emoji, CTA button, and slide dots */
+.hd-hero-promo { min-height: 156px; }
+/* photo-background banner: full-bleed image + left-to-right dark scrim so white text stays legible */
+.hd-hero-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; }
+.hd-hero-bg img { width: 100%; height: 100%; object-fit: cover; }
+.hd-hero-photo::after { content: ''; position: absolute; inset: 0; z-index: 0;
+  background: linear-gradient(90deg, rgba(20,16,45,.78) 0%, rgba(20,16,45,.45) 45%, rgba(20,16,45,.12) 100%); }
+.hd-hero-photo .hd-hero-txt { z-index: 2; }
+.hd-hero-promo .hd-hero-txt { max-width: 66%; }
+.hd-hero-cta { align-self: flex-start; margin-top: 14px; padding: 9px 16px; border-radius: 999px;
+  background: #fff; color: #4a3fb0; font-size: 13px; font-weight: 700; }
+.hd-hero-cta:active { transform: scale(.97); }
+.hd-hero-emoji { position: absolute; right: 22px; bottom: 16px; z-index: 1; font-size: 82px; line-height: 1;
+  filter: drop-shadow(0 6px 12px rgba(0,0,0,.28)); }
+.hd-dots { position: absolute; left: 0; right: 0; bottom: 9px; z-index: 4; display: flex; justify-content: center; gap: 6px; }
+.hd-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.42); padding: 0; transition: width .2s, background .2s; }
+.hd-dot.on { width: 18px; border-radius: 4px; background: #fff; }
 
 /* section head */
 .hd-sec-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 2px 12px; }
@@ -3633,6 +3664,6 @@ body { line-height: 1.45; }
 
 
 /* Home wallet chip with live balance */
-.hd-wallet { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 11px 0 9px; border-radius: 999px; background: var(--primary-50); color: var(--primary-dark); }
+.hd-wallet { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 40px; min-width: 40px; padding: 0 12px; border-radius: 999px; background: var(--primary-50); color: var(--primary-dark); }
 .hd-wallet:active { background: var(--primary-light); }
 .hd-wallet-bal { font-size: 13px; font-weight: 700; }

@@ -72,6 +72,16 @@ export const fetchHome = () => req<HomeContent>('/api/home')
 // Live surge for the customer's zone — drives the "rain incoming" heads-up on Home.
 export interface ZoneSurge { active: boolean; pct: number; reason: string; prob: number | null }
 export const fetchZoneSurge = (pincode: string) => req<ZoneSurge>(`/api/surge?pincode=${encodeURIComponent(pincode)}`)
+// Dynamic Home hero slides — scheduled festival/promo banners + live offers + weather surge.
+export interface HomeBanner {
+  key: string; kind: 'festival' | 'promo' | 'announcement' | 'offer' | 'weather'
+  title: string; subtitle: string; emoji: string; theme: string
+  ctaLabel: string; ctaLink: string; priority: number; image?: string
+  pct?: number; prob?: number | null; reason?: string
+}
+export const fetchHomeBanners = (pincode?: string) => req<HomeBanner[]>(`/api/home-banners${pinQ(pincode)}`)
+// Absolute URL for a stored media path (banner images), so <img> can load it directly.
+export const mediaUrl = (path: string) => (!path ? '' : path.startsWith('http') ? path : `${API_BASE}${path}`)
 export interface InvoiceInfo { name: string; gstin: string; address: string; state: string; sac: string; prefix: string; gstInclusive: boolean }
 export const fetchInvoiceInfo = () => req<InvoiceInfo>('/api/invoice-info')
 export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ(pincode)}`)

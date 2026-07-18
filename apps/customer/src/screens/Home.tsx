@@ -4,8 +4,19 @@ import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, 
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
-import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchZoneSurge, type ZoneSurge } from '../api'
+import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, type HomeBanner } from '../api'
 import type { Service, Booking, Address } from '../types'
+
+// Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
+// then diverge into the theme colour lower down. Kept dark enough for white text + status icons.
+const THEME: Record<string, string> = {
+  purple:  'linear-gradient(to bottom, #5b63d6 0%, #4a3fb0 62%, #2e2a6b 100%)',
+  rain:    'linear-gradient(to bottom, #5b63d6 0%, #4a3fb0 62%, #2e2a6b 100%)',
+  night:   'linear-gradient(to bottom, #5b63d6 0%, #35357e 55%, #14133f 100%)',
+  festive: 'linear-gradient(to bottom, #5b63d6 0%, #7a3fae 52%, #b8329a 100%)',
+  sunset:  'linear-gradient(to bottom, #5b63d6 0%, #8f3fb0 48%, #d9488a 100%)',
+}
+type Slide = HomeBanner & { greetingName?: string }
 
 // Module 2 · #7 — Home Dashboard. UI redesigned to the mock; all booking data/flow
 // (services, bookings, serviceable guard, service navigation) is preserved.
@@ -25,7 +36,9 @@ export default function Home() {
   const [addr, setAddr] = useState<Address | null>(null)
   const [notifCount, setNotifCount] = useState(0)
   const [walletBal, setWalletBal] = useState<number | null>(null)
-  const [surge, setSurge] = useState<ZoneSurge | null>(null)
+  const [banners, setBanners] = useState<HomeBanner[]>([])
+  const [active, setActive] = useState(0)
+  const [scrolled, setScrolled] = useState(false)   // past the hero → collapse the header to white
 
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
@@ -35,9 +48,8 @@ export default function Home() {
   }, [])
   useEffect(() => {
     fetchServices(pincode || undefined).then((c) => setServices(c.services)).catch(() => {})
-    // Live surge heads-up for the customer's zone — so they see "rain incoming" on open.
-    if (pincode) fetchZoneSurge(pincode).then(setSurge).catch(() => setSurge(null))
-    else setSurge(null)
+    // Dynamic hero slides — festival/promo banners + live offers + weather surge, for this zone.
+    fetchHomeBanners(pincode || undefined).then(setBanners).catch(() => setBanners([]))
   }, [pincode])
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
@@ -45,15 +57,28 @@ export default function Home() {
   const popular = useMemo(() => services.filter((s) => s.available).slice(0, 8), [services])
   const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || bookings[0] || null, [bookings])
 
-  // Live rain surge → turn the greeting hero into an animated rainy scene (no extra banner space).
-  const raining = !!(surge?.active && surge.pct > 0 && surge.reason === 'rain')
-  // While the purple rainy header covers the top, use light (white) status-bar icons; revert on leave.
+  // The greeting is always the first slide; live banners rotate in after it.
+  const slides: Slide[] = useMemo(() => [
+    { key: 'greeting', kind: 'announcement', title: firstName, subtitle: "Let's make your home spotless today!", emoji: '', theme: 'purple', ctaLabel: '', ctaLink: '', priority: 0, greetingName: firstName },
+    ...banners,
+  ], [banners, firstName])
+  const cur = slides[Math.min(active, slides.length - 1)] || slides[0]
+  const raining = cur.kind === 'weather' && cur.reason === 'rain'
+
+  // Keep the active index in range, and auto-rotate through the slides.
+  useEffect(() => { if (active >= slides.length) setActive(0) }, [slides.length, active])
   useEffect(() => {
-    if (!raining) return
-    let live = true
-    import('@capacitor/status-bar').then(({ StatusBar, Style }) => { if (live) StatusBar.setStyle({ style: Style.Dark }).catch(() => {}) }).catch(() => {})
-    return () => { live = false; import('@capacitor/status-bar').then(({ StatusBar, Style }) => { StatusBar.setStyle({ style: Style.Light }).catch(() => {}) }).catch(() => {}) }
-  }, [raining])
+    if (slides.length < 2) return
+    const id = setInterval(() => setActive((i) => (i + 1) % slides.length), 5000)
+    return () => clearInterval(id)
+  }, [slides.length])
+
+  // Status-bar icons: white over the dark hero at the top; dark once the header collapses to white
+  // on scroll. (Capacitor Style.Dark = white icons, Style.Light = dark icons.)
+  useEffect(() => {
+    import('@capacitor/status-bar').then(({ StatusBar, Style }) => StatusBar.setStyle({ style: scrolled ? Style.Light : Style.Dark }).catch(() => {})).catch(() => {})
+  }, [scrolled])
+  useEffect(() => () => { import('@capacitor/status-bar').then(({ StatusBar, Style }) => StatusBar.setStyle({ style: Style.Light }).catch(() => {})).catch(() => {}) }, [])
   // Deterministic raindrop field (index-derived, so it never reshuffles on re-render).
   // x spans 0–112% so drops also sweep in from the right edge as they slant left across the screen.
   const drops = useMemo(() => Array.from({ length: 70 }, (_, i) => ({
@@ -81,9 +106,9 @@ export default function Home() {
   ]
 
   return (
-    <div className={`screen has-nav m2${raining ? ' rain-sky' : ''}`}>
-      {/* top bar */}
-      <div className="hd-top">
+    <div className="screen has-nav m2 rain-sky">
+      {/* top bar — matches the hero at the top, collapses to solid white on scroll */}
+      <div className={`hd-top${scrolled ? ' solid' : ''}`}>
         <button className="hd-loc" onClick={() => nav('/locations')}>
           <MapPin size={16} /> <b>{cityLabel}</b> <ChevronDown size={15} />
         </button>
@@ -103,10 +128,15 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="content hd-content">
+      <div className="content hd-content" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 60)}>
         {serviceable === false ? <ComingSoon /> : (<>
-          {/* greeting hero — becomes an animated rainy scene when the customer's zone is surging on rain */}
-          <div className={`hd-hero${raining ? ' rainy' : ''}`}>
+          {/* dynamic hero carousel — greeting + festival/promo banners + live offers + weather surge */}
+          <div className={`hd-hero rainy${cur.key === 'greeting' || cur.kind === 'weather' ? '' : ' hd-hero-promo'}${cur.image ? ' hd-hero-photo' : ''}`} style={{ background: THEME[cur.theme] || THEME.purple }}>
+            {cur.image && (
+              <div className="hd-hero-bg" aria-hidden="true">
+                <img src={mediaUrl(cur.image)} alt="" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
+              </div>
+            )}
             {raining && (
               <div className="hd-skyrain" aria-hidden="true">
                 {drops.map((d, i) => (
@@ -115,19 +145,34 @@ export default function Home() {
               </div>
             )}
             <div className="hd-hero-txt">
-              <div className="hd-hi">{greeting()} 👋</div>
-              <div className="hd-name">{firstName}</div>
-              <div className="hd-sub">{raining ? 'Rainy day out there — perfect time for a spotless home ☔' : "Let's make your home spotless today!"}</div>
-              {surge?.active && surge.pct > 0 && (
-                <div className="hd-hero-surge">
-                  {raining
-                    ? <><b>🌧️ {surge.prob != null ? `${surge.prob}% rain` : 'Rain'}</b> · +{surge.pct}% surge</>
-                    : <><b>⚡ High demand</b> · +{surge.pct}% surge</>}
-                </div>
-              )}
+              {cur.key === 'greeting' ? (<>
+                <div className="hd-hi">{greeting()} 👋</div>
+                <div className="hd-name">{firstName}</div>
+                <div className="hd-sub">{cur.subtitle}</div>
+              </>) : cur.kind === 'weather' ? (<>
+                <div className="hd-hi">{greeting()} 👋</div>
+                <div className="hd-name">{firstName}</div>
+                <div className="hd-sub">Rainy day out there — perfect time for a spotless home ☔</div>
+                <div className="hd-hero-surge"><b>{cur.emoji} {cur.prob != null ? `${cur.prob}% rain` : 'Rain'}</b> · +{cur.pct}% surge</div>
+              </>) : (<>
+                <div className="hd-hi">{cur.kind === 'offer' ? 'OFFER' : cur.kind.toUpperCase()}</div>
+                <div className="hd-name">{cur.title}</div>
+                {cur.subtitle && <div className="hd-sub">{cur.subtitle}</div>}
+                {cur.ctaLabel && cur.ctaLink && (
+                  <button className="hd-hero-cta" onClick={() => nav(cur.ctaLink)}>{cur.ctaLabel} →</button>
+                )}
+              </>)}
             </div>
-            <img className="hd-hero-img" src="/expert.jpg" alt=""
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+            {cur.kind === 'weather' || cur.key === 'greeting'
+              ? <img className="hd-hero-img" src="/expert.jpg" alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+              : cur.emoji && !cur.image && <span className="hd-hero-emoji" aria-hidden="true">{cur.emoji}</span>}
+            {slides.length > 1 && (
+              <div className="hd-dots">
+                {slides.map((s, i) => (
+                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => setActive(i)} aria-label={`Slide ${i + 1}`} />
+                ))}
+              </div>
+            )}
           </div>
 
           {/* quick actions */}
