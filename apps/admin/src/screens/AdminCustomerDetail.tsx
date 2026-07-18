@@ -273,7 +273,7 @@ export default function AdminCustomerDetail() {
       {tab === 'support' && <SupportTab tickets={d.tickets || []} notes={d.notes || []} c={c} cid={cid} onChanged={load} toast={toast} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} bookings={m.bookings} />}
       {tab === 'notes' && <NotesTab notes={d.notes || []} c={c} cid={cid} bookings={m.bookings} onChanged={load} toast={toast} />}
-      {tab === 'activity' && <ActivityTab bookings={m.bookings} txns={m.txns} notes={d.notes || []} tickets={d.tickets || []} ledger={d.membershipLedger || []} c={c} />}
+      {tab === 'activity' && <ActivityTab bookings={m.bookings} txns={m.txns} notes={d.notes || []} tickets={d.tickets || []} ledger={d.membershipLedger || []} audit={d.audit || []} c={c} nav={nav} />}
 
       {/* modals */}
       {editOpen && (
@@ -1981,110 +1981,157 @@ function NotesTab({ notes, c, cid, bookings, onChanged, toast }: any) {
   )
 }
 
-const KIND_META: Record<string, { label: string; tone: string }> = {
-  booking: { label: 'Booking', tone: 'blue' }, payment: { label: 'Payment', tone: 'amber' }, wallet: { label: 'Wallet', tone: 'green' },
-  review: { label: 'Review', tone: 'violet' }, note: { label: 'Note', tone: 'amber' }, ticket: { label: 'Support', tone: 'red' },
-  membership: { label: 'Membership', tone: 'violet' }, coupon: { label: 'Coupon', tone: 'violet' },
+const MOD_META: Record<string, { tint: string; Icon: any }> = {
+  Booking: { tint: '#2e90fa', Icon: Calendar }, Payment: { tint: '#f59e0b', Icon: CreditCard }, Wallet: { tint: '#16a34a', Icon: WalletIcon },
+  Rating: { tint: '#f59e0b', Icon: Star }, Profile: { tint: '#5b51e8', Icon: User }, Support: { tint: '#e5484d', Icon: Headphones },
+  Membership: { tint: '#5b51e8', Icon: Award }, Offer: { tint: '#7c3aed', Icon: Tag }, Address: { tint: '#2e90fa', Icon: MapPin }, Notes: { tint: '#f59e0b', Icon: StickyNote },
 }
-// The full customer activity feed — customer actions (bookings/wallet/reviews/coupons) plus ops
-// actions on record (notes, support tickets, membership changes). All from the detail payload.
-function buildFullActivity(bookings: any[], txns: any[], notes: any[], tickets: any[], ledger: any[]): Ev[] {
-  const evs: Ev[] = [...buildActivity(bookings, txns)]
-  for (const b of bookings) if (b.coupon) evs.push({ kind: 'coupon', icon: <Tag size={15} />, tint: '#7c3aed', title: `Coupon ${b.coupon} applied`, sub: `Saved ${money(b.discount || 0)} · ${b.ref}`, time: b.created })
-  for (const n of notes) evs.push({ kind: 'note', icon: <StickyNote size={15} />, tint: '#f59e0b', title: `Note added${n.type && n.type !== 'General' ? ` · ${n.type}` : ''}`, sub: `${String(n.title || n.body || '').slice(0, 90)} — ${n.author || 'admin'}`, time: n.created })
-  for (const t of tickets) evs.push({ kind: 'ticket', icon: <Headphones size={15} />, tint: '#e5484d', title: `Support ticket · ${t.subject || t.category}`, sub: `${t.status || 'Open'} · ${t.ref || `TKT${10000 + t.id}`}`, time: t.created })
-  for (const l of ledger) evs.push({ kind: 'membership', icon: <Award size={15} />, tint: '#5b51e8', title: `Membership ${l.event}`, sub: l.detail || '', time: l.created })
-  return evs.filter((e) => e.time).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
+// Full audit trail for a customer: customer/worker/system actions (bookings, wallet ledger, reviews,
+// coupons) + admin actions (audit log) + ops records (notes, tickets, membership). Each event is
+// attributed to who performed it. IP/device aren't captured for these, so they show as "—".
+function buildAudit(bookings: any[], txns: any[], notes: any[], tickets: any[], ledger: any[], audit: any[], c: any): any[] {
+  const cust = c.name || c.phone || 'Customer'
+  const evs: any[] = []
+  for (const b of bookings) {
+    evs.push({ module: 'Booking', action: 'Booking Created', actorType: 'customer', actor: cust, actorRole: 'Customer', bookingId: b.id, time: b.created, description: `New booking created for ${cust}.`, details: [['Booking ID', b.ref], ['Service', b.service || '—'], ['Date', b.date ? shortDate(b.date) : shortDate(b.created)], ['Amount', money(b.total || 0)], ['Payment Mode', payLabel(b.payment)]] })
+    if (b.status === 'completed' || b.completed_at) evs.push({ module: 'Booking', action: 'Booking Completed', actorType: b.worker ? 'worker' : 'system', actor: b.worker || 'System', actorRole: b.worker ? 'Worker' : 'Auto', bookingId: b.id, time: b.completed_at || b.created, details: [['Booking ID', b.ref], ['Service', b.service || '—']] })
+    if (b.status === 'cancelled') evs.push({ module: 'Booking', action: 'Booking Cancelled', actorType: 'system', actor: 'System', actorRole: 'Auto', bookingId: b.id, time: b.created, details: [['Booking ID', b.ref]] })
+    if (b.rating) evs.push({ module: 'Rating', action: 'Review Submitted', actorType: 'customer', actor: cust, actorRole: 'Customer', bookingId: b.id, time: b.completed_at || b.created, details: [['Rating', `${b.rating}.0`], ['Booking ID', b.ref], ['Review', b.review || '']] })
+    if (b.coupon) evs.push({ module: 'Offer', action: 'Coupon Applied', actorType: 'customer', actor: cust, actorRole: 'Customer', bookingId: b.id, time: b.created, details: [['Coupon', b.coupon], ['Saved', money(b.discount || 0)], ['Booking ID', b.ref]] })
+  }
+  for (const t of txns) {
+    const amt = money(t.amount || 0)
+    if (t.type === 'credit') {
+      if (t.kind === 'ADD_MONEY') evs.push({ module: 'Wallet', action: 'Wallet Top-up', actorType: 'customer', actor: cust, actorRole: 'Customer', time: t.created, details: [['Amount', amt]] })
+      else if (t.kind === 'CASHBACK' || /cashback/i.test(t.title || '')) evs.push({ module: 'Wallet', action: 'Cashback Credited', actorType: 'system', actor: 'System', actorRole: 'Auto', time: t.created, details: [['Amount', amt], ['Description', t.title || '']] })
+      else if (t.kind === 'REFUND' || /refund/i.test(t.title || '')) evs.push({ module: 'Wallet', action: 'Refund Processed', actorType: 'system', actor: 'System', actorRole: 'Auto', time: t.created, details: [['Amount', amt], ['Reference', t.ref || '']] })
+      else evs.push({ module: 'Wallet', action: 'Wallet Credited', actorType: 'system', actor: 'System', actorRole: 'Auto', time: t.created, details: [['Amount', amt], ['Description', t.title || '']] })
+    } else {
+      if (/payment/i.test(t.kind || '') || /payment/i.test(t.title || '')) evs.push({ module: 'Payment', action: 'Payment Successful', actorType: 'system', actor: 'System', actorRole: 'Auto', time: t.created, details: [['Amount', amt], ['Mode', t.balance_type && t.balance_type !== 'cash' ? t.balance_type : 'Wallet']] })
+      else evs.push({ module: 'Wallet', action: 'Wallet Deducted', actorType: 'system', actor: 'System', actorRole: 'Auto', time: t.created, details: [['Amount', amt], ['Reason', t.title || '']] })
+    }
+  }
+  for (const n of notes) evs.push({ module: 'Notes', action: 'Note Added', actorType: 'admin', actor: n.author || 'Admin', actorRole: n.author_role || 'Administrator', time: n.created, description: n.body, details: [['Type', n.type || 'General'], ['Note', n.title || n.body || '']] })
+  for (const t of tickets) { const byAdmin = /admin/i.test(t.raised_by || ''); evs.push({ module: 'Support', action: 'Ticket Raised', actorType: byAdmin ? 'admin' : 'customer', actor: t.raised_by || cust, actorRole: byAdmin ? 'Admin' : 'Customer', bookingId: t.booking_id || undefined, time: t.created, description: t.message, details: [['Ticket', t.ref || `TKT${10000 + t.id}`], ['Subject', t.subject || t.category], ['Status', t.status || 'Open']] }) }
+  for (const l of ledger) { const byAdmin = /admin/i.test(l.detail || ''); evs.push({ module: 'Membership', action: `Plan ${String(l.event).charAt(0).toUpperCase() + String(l.event).slice(1)}`, actorType: byAdmin ? 'admin' : 'system', actor: byAdmin ? 'Admin' : 'System', actorRole: byAdmin ? 'Admin' : 'Auto', time: l.created, details: [['Plan', (l.detail || '').split(' · ')[0] || ''], ['Amount', money(l.amount || 0)]] }) }
+  const AMAP: Record<string, [string, string]> = { 'customer.edit': ['Profile', 'Profile Updated'], 'customer.wallet_adjust': ['Wallet', 'Wallet Adjusted'], 'customer.note_add': ['Notes', 'Note Added'], 'customer.membership_change': ['Membership', 'Plan Changed'], 'customer.create': ['Profile', 'Customer Created'], 'customer.address_add': ['Address', 'Address Added'], 'customer.address_edit': ['Address', 'Address Updated'], 'customer.address_archive': ['Address', 'Address Archived'], 'customer.address_restore': ['Address', 'Address Restored'], 'customer.address_default': ['Address', 'Default Address Set'] }
+  for (const a of audit) { const [module, action] = AMAP[a.action] || ['Profile', String(a.action).replace('customer.', '').replace(/_/g, ' ')]; evs.push({ module, action, actorType: 'admin', actor: a.admin || 'Admin', actorRole: 'Admin', time: a.created, description: `${action} by ${a.admin || 'an admin'}.`, details: [['Detail', a.target || '']] }) }
+  return evs.filter((e) => e.time).sort((x, y) => Date.parse(y.time) - Date.parse(x.time))
 }
 
-function ActivityTab({ bookings, txns, notes, tickets, ledger, c }: any) {
+function ActivityTab({ bookings, txns, notes, tickets, ledger, audit, c, nav }: any) {
   const [q, setQ] = useState('')
-  const [kindF, setKindF] = useState('all')
+  const [modF, setModF] = useState('all')
+  const [actF, setActF] = useState('all')
+  const [byF, setByF] = useState('all')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [page, setPage] = useState(1)
-  const pageSize = 15
+  const [sel, setSel] = useState<any>(null)
+  const pageSize = 10
 
-  const all = useMemo(() => buildFullActivity(bookings, txns, notes, tickets, ledger), [bookings, txns, notes, tickets, ledger])
-  useEffect(() => { setPage(1) }, [q, kindF, from, to])
-  const counts = useMemo(() => { const k: Record<string, number> = { all: all.length }; for (const e of all) k[e.kind] = (k[e.kind] || 0) + 1; return k }, [all])
+  const all = useMemo(() => buildAudit(bookings, txns, notes, tickets, ledger, audit, c), [bookings, txns, notes, tickets, ledger, audit, c])
+  useEffect(() => { setPage(1) }, [q, modF, actF, byF, from, to])
+  const modules = useMemo(() => [...new Set(all.map((e) => e.module))] as string[], [all])
+  const actions = useMemo(() => [...new Set(all.map((e) => e.action))] as string[], [all])
+  const actors = useMemo(() => [...new Set(all.map((e) => e.actor))] as string[], [all])
 
   const filtered = useMemo(() => all.filter((e) => {
-    if (kindF !== 'all' && e.kind !== kindF) return false
+    if (modF !== 'all' && e.module !== modF) return false
+    if (actF !== 'all' && e.action !== actF) return false
+    if (byF !== 'all' && e.actor !== byF) return false
     if (from && Date.parse(e.time) < Date.parse(from)) return false
     if (to && Date.parse(e.time) > Date.parse(to) + 86400000) return false
-    if (q && !`${String(e.title)} ${e.sub || ''}`.toLowerCase().includes(q.toLowerCase())) return false
+    if (q && !`${e.module} ${e.action} ${e.actor} ${e.details.map((d: any) => d[1]).join(' ')}`.toLowerCase().includes(q.toLowerCase())) return false
     return true
-  }), [all, kindF, from, to, q])
+  }), [all, modF, actF, byF, from, to, q])
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const reset = () => { setQ(''); setKindF('all'); setFrom(''); setTo('') }
-
-  const akpi = (label: string, val: number, tint: string, icon: ReactNode) => (
-    <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-      <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}><span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}</div>
-      <strong style={{ fontSize: 22, lineHeight: 1 }}>{val}</strong>
-    </div>
-  )
+  const reset = () => { setQ(''); setModF('all'); setActF('all'); setByF('all'); setFrom(''); setTo('') }
+  const initials = (n: string) => (n || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div>
         <h2 style={{ margin: 0, fontSize: 20 }}>Activity Logs</h2>
-        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Full activity for {c.name || c.phone || 'this customer'} — bookings, payments, reviews, notes, support and membership</p>
+        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Track all activities and actions performed for this customer</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-        {akpi('Total Events', counts.all, '#5b51e8', <Activity size={15} />)}
-        {akpi('Bookings', counts.booking || 0, '#2e90fa', <Calendar size={15} />)}
-        {akpi('Payments', (counts.payment || 0) + (counts.wallet || 0), '#f59e0b', <CreditCard size={15} />)}
-        {akpi('Support', counts.ticket || 0, '#e5484d', <Headphones size={15} />)}
-        {akpi('Notes', counts.note || 0, '#7c3aed', <StickyNote size={15} />)}
-      </div>
-
-      <Card>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1.6fr) minmax(140px, 1fr) minmax(200px, 1.4fr) auto', gap: 10, alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ position: 'relative' }}>
-            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search activity…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: sel ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+        <Card>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1.6fr) repeat(3, minmax(120px, 1fr)) minmax(180px, 1.4fr) auto', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by action, module…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+            </div>
+            <select className="select" value={modF} onChange={(e) => setModF(e.target.value)}><option value="all">All Modules</option>{modules.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+            <select className="select" value={actF} onChange={(e) => setActF(e.target.value)}><option value="all">All Actions</option>{actions.map((a) => <option key={a} value={a}>{a}</option>)}</select>
+            <select className="select" value={byF} onChange={(e) => setByF(e.target.value)}><option value="all">All Performed By</option>{actors.map((a) => <option key={a} value={a}>{a}</option>)}</select>
+            <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+              <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+              <span className="muted">–</span>
+              <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+            </div>
+            <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
           </div>
-          <select className="select" value={kindF} onChange={(e) => setKindF(e.target.value)}><option value="all">All Activity</option><option value="booking">Bookings</option><option value="payment">Payments</option><option value="wallet">Wallet</option><option value="review">Reviews</option><option value="note">Notes</option><option value="ticket">Support</option><option value="membership">Membership</option><option value="coupon">Coupons</option></select>
-          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-            <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
-            <span className="muted">–</span>
-            <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+
+          <div className="tablewrap">
+            <table className="tbl" style={{ fontSize: 12.5 }}>
+              <thead><tr><th>Date &amp; Time</th><th>Module</th><th>Action</th><th>Performed By</th><th>Details</th><th>IP Address</th><th style={{ width: 40 }}></th></tr></thead>
+              <tbody>
+                {pageRows.map((e, i) => {
+                  const mm = MOD_META[e.module] || { tint: '#98a2b3', Icon: Activity }
+                  return (
+                    <tr key={i} style={{ cursor: 'pointer', ...(sel === e ? { background: '#f5f3ff' } : {}) }} onClick={() => setSel(e)}>
+                      <td className="muted">{shortDate(e.time)}<div style={{ fontSize: 11 }}>{new Date(e.time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></td>
+                      <td><span className="row" style={{ gap: 6, alignItems: 'center' }}><mm.Icon size={14} style={{ color: mm.tint }} />{e.module}</span></td>
+                      <td style={{ fontWeight: 600 }}>{e.action}</td>
+                      <td style={{ whiteSpace: 'normal' }}><div className="row" style={{ gap: 7, alignItems: 'center' }}><span style={{ display: 'inline-flex', width: 26, height: 26, borderRadius: '50%', background: e.actorType === 'system' ? '#eef0f4' : '#eef0ff', color: e.actorType === 'system' ? '#667085' : '#5b51e8', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{e.actorType === 'system' ? 'SYS' : initials(e.actor)}</span><div style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, fontWeight: 600 }}>{e.actor}</div><div className="muted" style={{ fontSize: 10.5 }}>{e.actorRole}</div></div></div></td>
+                      <td className="muted" style={{ whiteSpace: 'normal', fontSize: 11.5 }}>{e.details.slice(0, 2).map((d: any, j: number) => <div key={j}>{d[0]}: {d[1]}</div>)}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>—</td>
+                      <td><button className="iconbtn" style={{ width: 26, height: 26 }} onClick={(ev) => { ev.stopPropagation(); setSel(e) }}><MoreVertical size={15} /></button></td>
+                    </tr>
+                  )
+                })}
+                {filtered.length === 0 && <tr><td colSpan={7}><Empty>No activity matches these filters.</Empty></td></tr>}
+              </tbody>
+            </table>
           </div>
-          <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
-        </div>
 
-        <div style={{ position: 'relative' }}>
-          {pageRows.map((e: Ev, i: number) => {
-            const meta = KIND_META[e.kind] || { label: e.kind, tone: 'gray' }
-            return (
-              <div key={i} className="row" style={{ gap: 12, alignItems: 'flex-start', padding: '10px 0', borderBottom: i === pageRows.length - 1 ? 'none' : '1px solid var(--line-2, #f0f2f5)' }}>
-                <span style={{ display: 'inline-flex', width: 32, height: 32, borderRadius: '50%', background: `${e.tint}18`, color: e.tint, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{e.icon}</span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span style={{ fontSize: 13.5, fontWeight: 500 }}>{e.title}</span><Badge tone={meta.tone} dot={false}>{meta.label}</Badge></div>
-                  {e.sub && <div className="muted" style={{ fontSize: 12 }}>{e.sub}</div>}
-                </div>
-                <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap', flexShrink: 0 }}>{dateTime(e.time)}</span>
-              </div>
-            )
-          })}
-          {filtered.length === 0 && <Empty>No activity matches these filters.</Empty>}
-        </div>
-
-        {filtered.length > 0 && (
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
-            <span className="muted" style={{ fontSize: 12.5 }}>Showing {(page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} events</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} activities</span>
             <div className="row" style={{ gap: 6, alignItems: 'center' }}>
               <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
               <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
               <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
             </div>
           </div>
-        )}
-      </Card>
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>IP address and device aren't captured for these events yet — shown as "—".</p>
+        </Card>
+
+        {sel && (() => { const mm = MOD_META[sel.module] || { tint: '#98a2b3', Icon: Activity }; return (
+          <Card title={<span className="row" style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>Activity Details<button className="iconbtn" style={{ width: 26, height: 26 }} onClick={() => setSel(null)}><XCircle size={16} /></button></span>}>
+            <div className="grid" style={{ gap: 12 }}>
+              <div className="row" style={{ gap: 10, alignItems: 'center' }}><span style={{ display: 'inline-flex', width: 40, height: 40, borderRadius: 10, background: `${mm.tint}18`, color: mm.tint, alignItems: 'center', justifyContent: 'center' }}><mm.Icon size={20} /></span><div><strong style={{ fontSize: 14 }}>{sel.action}</strong>{sel.description && <div className="muted" style={{ fontSize: 12 }}>{sel.description}</div>}</div></div>
+              <div className="grid" style={{ gap: 8, fontSize: 13 }}>
+                <Row k="Date & Time" v={dateTime(sel.time)} />
+                <Row k="Module" v={sel.module} />
+                <Row k="Action" v={sel.action} />
+                <Row k="Performed By" v={<span style={{ textAlign: 'right' }}>{sel.actor}<div className="muted" style={{ fontSize: 11 }}>{sel.actorRole}</div></span>} />
+                <Row k="IP Address" v={<span className="muted">—</span>} />
+                <Row k="Device" v={<span className="muted">Not tracked</span>} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Details</div>
+                <div style={{ background: '#f9fafb', border: '1px solid var(--line)', borderRadius: 10, padding: 12, fontSize: 12.5 }}>
+                  {sel.details.map((d: any, j: number) => <div key={j} className="row" style={{ justifyContent: 'space-between', gap: 12, padding: '2px 0' }}><span className="muted">{d[0]}</span><span style={{ textAlign: 'right', fontWeight: 500, wordBreak: 'break-word' }}>{d[1] || '—'}</span></div>)}
+                </div>
+              </div>
+              {sel.bookingId && <button className="btn line" style={{ width: '100%', justifyContent: 'center' }} onClick={() => nav(`/bookings/${sel.bookingId}`)}>View Booking Details <ChevronRight size={14} /></button>}
+            </div>
+          </Card>
+        ) })()}
+      </div>
     </div>
   )
 }

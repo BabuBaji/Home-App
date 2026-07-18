@@ -1187,7 +1187,12 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   }))
   // A stable display id for the profile header (CUST-100001…). Derived, not stored.
   const displayId = 'CUST-' + String(100000 + id)
-  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers, tickets })
+  // Admin audit entries for this customer (profile edits, wallet adjustments, plan/address/note actions)
+  // so the Activity Logs tab can attribute them to the admin who performed them. The target string
+  // always leads with the customer's #id, so we match on that.
+  const auditRows = (await pool.query("SELECT admin, action, target, created FROM audit_log WHERE action LIKE 'customer.%' ORDER BY id DESC LIMIT 300")).rows
+  const audit = auditRows.filter((r) => { const m = String(r.target || '').match(/#(\d+)/); return m && m[1] === String(id) })
+  res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers, tickets, audit })
 })
 /* ---------- worker communication preferences (owned here, not on the worker record) ---------- */
 // Friendly shape used everywhere: { whatsapp, sms, email, push, promo }. Missing row = all on.
