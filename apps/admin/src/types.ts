@@ -75,7 +75,8 @@ export interface Customer {
   wallet: number; rating: number; status: string; bookings: number; spend: number
   lastOrder?: string | null; joined: string
   // Derived server-side from the customer's bookings (see admin BFF customerSegment).
-  lastBooking?: string | null; zoneId?: number | null; zone?: string | null; segment?: string
+  // `area` = default-address locality (falls back to the last booking's zone); `zone` = last booking's zone.
+  lastBooking?: string | null; zoneId?: number | null; zone?: string | null; area?: string | null; segment?: string
 }
 
 export interface Worker {

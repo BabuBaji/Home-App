@@ -965,6 +965,14 @@ app.post('/api/internal/users/:id/membership-usage', internalOnly, async (req, r
   res.json({ ok: true })
 })
 app.get('/api/internal/users/:id/addresses', internalOnly, async (req, res) => res.json(await getAddresses(Number(req.params.id))))
+// One default (or first) address per user — lets the admin Customers list show a locality without
+// N per-user calls. `is_default DESC` picks the default; ties fall back to the earliest address.
+app.get('/api/internal/addresses/defaults', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (user_id) user_id, street, landmark, apartment, city, pincode
+     FROM addresses ORDER BY user_id, is_default DESC, id`)
+  res.json(rows)
+})
 // Admin-pinned customer notes.
 app.get('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM customer_notes WHERE user_id=$1 ORDER BY id DESC LIMIT 100', [Number(req.params.id)])

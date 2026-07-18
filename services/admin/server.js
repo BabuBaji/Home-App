@@ -1071,15 +1071,29 @@ function customerSegment({ bookings, rating, status, lastBooking, now }) {
   return 'Repeat'                                               // 2–4 orders, recent
 }
 
+// A short locality pulled from a saved address for the Location column. Prefers `street` (which holds
+// the area, e.g. "Erragadda, Hyderabad"), then landmark/apartment; takes the first comma-segment and
+// drops it if it's merely the city or a raw "lat,lng" line. Returns null when nothing usable exists.
+function localityFrom(addr) {
+  if (!addr) return null
+  const cand = String(addr.street || addr.landmark || addr.apartment || '').trim()
+  if (!cand || /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(cand)) return null
+  const a = cand.split(',')[0].trim()
+  if (!a || (addr.city && a.toLowerCase() === String(addr.city).toLowerCase())) return null
+  return a
+}
+
 app.get('/api/admin/customers', admin, async (req, res) => {
-  const [customersAll, bookings, zones] = await Promise.all([
+  const [customersAll, bookings, zones, defAddrs] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.catalog, '/api/internal/zones', []),
+    tryGet(U.auth, '/api/internal/addresses/defaults', []),
   ])
   // Customers are only city-tagged (no zone), so a scoped admin sees them by city (the coarse key).
   const customers = customersAll.filter((c) => inScope(req.admin?.scope, { city: c.city }))
   const zoneName = {}; for (const z of zones) zoneName[z.id] = z.name
+  const addrOf = {}; for (const a of defAddrs) addrOf[a.user_id] = a
   // Per-customer roll-up from the full booking list: count, paid/completed spend, most-recent booking
   // (drives Last Booking + the recency segment), and the zone of that latest booking (drives Location).
   const cnt = {}, spend = {}, last = {}, lastZone = {}
@@ -1093,14 +1107,18 @@ app.get('/api/admin/customers', admin, async (req, res) => {
   res.json(customers.map((c) => {
     const bookingsN = cnt[c.id] || 0
     const lastBooking = last[c.id] || null
+    const addr = addrOf[c.id]
     return {
       ...c,
+      city: c.city || addr?.city || null,   // fall back to the address city when the profile has none
       bookings: bookingsN,
       spend: spend[c.id] || 0,
       joined: c.created,                 // auth returns `created`, the screen reads `joined`
       lastBooking,                       // ISO of the customer's most recent booking (null if none)
       zoneId: lastZone[c.id] || null,
       zone: lastZone[c.id] ? (zoneName[lastZone[c.id]] || null) : null,
+      // Location sub-line: the saved default-address locality, falling back to the last booking's zone.
+      area: localityFrom(addr) || (lastZone[c.id] ? (zoneName[lastZone[c.id]] || null) : null),
       // A brand-new customer has no meaningful rating yet — show 0 rather than the 5.0 seed default.
       rating: bookingsN > 0 ? c.rating : 0,
       segment: customerSegment({ bookings: bookingsN, rating: c.rating, status: c.status, lastBooking, now }),

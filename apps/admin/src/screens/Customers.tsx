@@ -303,12 +303,12 @@ export default function Customers() {
                       </div>
                     </td>
                     <td>
-                      {c.city || c.zone ? (
+                      {c.city || c.area ? (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <MapPin size={14} className="muted" style={{ marginTop: 2, flexShrink: 0 }} />
                           <div style={{ display: 'grid', gap: 1, fontSize: 13 }}>
                             <span>{c.city || '—'}</span>
-                            {c.zone && <span className="muted" style={{ fontSize: 12 }}>{c.zone}</span>}
+                            {c.area && <span className="muted" style={{ fontSize: 12 }}>{c.area}</span>}
                           </div>
                         </div>
                       ) : <span className="muted">—</span>}
