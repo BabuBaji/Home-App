@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone, MembershipPlan,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -362,6 +362,12 @@ export const fetchCampaigns = () => req<Campaign[]>('/campaigns')
 export const createCampaign = (body: Record<string, unknown>) => req<{ ok: boolean; campaign_id: number }>('/campaigns', post('', body))
 export const updateCampaign = (id: number, body: Record<string, unknown>) => req<{ ok: boolean }>(`/campaigns/${id}`, patch(body))
 export const deleteCampaign = (id: number) => req<{ ok: boolean }>(`/campaigns/${id}`, { method: 'DELETE' })
+
+/* membership plans (Module 10 config) — body uses snake_case column names */
+export const fetchMembershipPlans = () => req<MembershipPlan[]>('/membership-plans')
+export const createMembershipPlan = (body: Record<string, unknown>) => req<MembershipPlan>('/membership-plans', post('', body))
+export const updateMembershipPlan = (id: number, body: Record<string, unknown>) => req<MembershipPlan>(`/membership-plans/${id}`, patch(body))
+export const deleteMembershipPlan = (id: number) => req<{ ok: boolean }>(`/membership-plans/${id}`, { method: 'DELETE' })
 export const campaignUsage = (id: number) => req<{ total: number; customers: number; recent: { customer_id: number; booking_id: number; created: string }[] }>(`/campaigns/${id}/usage`)
 
 /* payments / refunds */

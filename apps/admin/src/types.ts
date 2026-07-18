@@ -1,3 +1,30 @@
+// Membership plan config (Module 10) — served by catalog, camelCased. Admin edits it.
+export interface MembershipPlan {
+  id: number
+  key: string
+  name: string
+  tagline: string
+  popular: boolean
+  price: number
+  features: string[]
+  discountPct: number
+  maxDiscountPerOrder: number
+  discountedOrdersPerMonth: number
+  platformFeeWaiver: boolean
+  cashbackPct: number
+  cashbackMax: number
+  freeCancellations: number
+  priorityBooking: boolean
+  minOrderValue: number
+  eligibleServices: string[]
+  eligibleZones: number[]
+  customerSegment: string
+  startsAt: string | null
+  endsAt: string | null
+  status: string
+  sort: number
+}
+
 export interface Admin {
   id: number; name: string; email: string; phone?: string
   // Role is now a free-form key (system role or a custom one). `permissions` is the resolved,

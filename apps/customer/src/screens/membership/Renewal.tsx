@@ -1,15 +1,47 @@
-// 79 · Renewal — renew the active plan; pick a renewal cycle. (Payment wiring later.)
-import { useState } from 'react'
+// 79 · Renewal — renew (or reactivate) the active plan; pick a renewal cycle. Extends the real
+// membership on the backend.
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Smartphone } from 'lucide-react'
-import { useToast } from '../../components/UI'
-import { planByKey, CYCLES, cyclePrice, money } from '../../membership'
+import { Loading, useToast } from '../../components/UI'
+import { pickPlan, loadPlans, CYCLES, cyclePrice, money, type Plan } from '../../membership'
+import { fetchMembership, renewMembership, type Membership } from '../../api'
+
+const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 
 export default function Renewal() {
   const nav = useNavigate()
   const toast = useToast()
-  const plan = planByKey('gold')
+  const [mem, setMem] = useState<Membership | null>(null)
+  const [plans, setPlans] = useState<Plan[]>([])
   const [cycle, setCycle] = useState('monthly')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    fetchMembership().then((m) => {
+      setMem(m)
+      if (!m.active && !m.plan) nav('/membership/plans', { replace: true })
+      else if (m.cycle) setCycle(m.cycle)
+    }).catch(() => setMem({ active: false }))
+  }, [nav])
+  useEffect(() => { loadPlans().then(setPlans).catch(() => setPlans([])) }, [])
+
+  if (!mem) return <div className="screen"><header className="appbar ord-appbar"><button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button><div className="titles"><h1>Renew Your Plan</h1></div><span className="iconbtn ghost" /></header><Loading /></div>
+
+  const plan = pickPlan(plans, mem.plan || 'gold')
+
+  const renew = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await renewMembership({ cycle })
+      toast('Your plan has been renewed 🎉')
+      nav('/membership/active', { replace: true })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not renew')
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="screen">
@@ -23,7 +55,7 @@ export default function Renewal() {
         <div className="ren-card">
           <div className="ren-name">{plan.name} Plan</div>
           <div className="ren-price">{money(plan.price)} <small>/month</small></div>
-          <div className="ren-next">Next Renewal<br /><b>16 May 2026</b></div>
+          <div className="ren-next">{mem.status === 'cancelled' ? 'Access Until' : 'Next Renewal'}<br /><b>{fmtDate(mem.renewsAt)}</b></div>
           <span className="ren-crown">👑</span>
         </div>
 
@@ -50,8 +82,8 @@ export default function Renewal() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" onClick={() => toast('Renewal is coming soon')}>Renew Now</button>
-        <div className="ren-note">Your plan will be renewed on 16 May 2026</div>
+        <button className="btn full" disabled={busy} onClick={renew}>{busy ? 'Processing…' : 'Renew Now'}</button>
+        <div className="ren-note">Renewing extends your plan from {fmtDate(mem.renewsAt)}</div>
       </div>
     </div>
   )

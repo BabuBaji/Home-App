@@ -83,6 +83,28 @@ async function init() {
       id SERIAL PRIMARY KEY, zone_id INTEGER NOT NULL, service_id TEXT NOT NULL,
       price INTEGER NOT NULL DEFAULT 0, discount INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true
     )`,
+    // ── Membership plans (Module 10) — the admin-configurable catalog of paid benefit plans. This is
+    // the pricing/benefit AUTHORITY: the customer app renders these, auth prices subscriptions from
+    // `price`, and the Phase-2 pricing engine reads the benefit-rule columns to discount bookings.
+    // `plan_key` is the stable id a purchased membership references. Eligibility JSONB arrays: [] = all.
+    `CREATE TABLE IF NOT EXISTS membership_plans (
+      id SERIAL PRIMARY KEY, plan_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tagline TEXT NOT NULL DEFAULT '',
+      popular BOOLEAN NOT NULL DEFAULT false, price INTEGER NOT NULL DEFAULT 0, features JSONB NOT NULL DEFAULT '[]',
+      discount_pct INTEGER NOT NULL DEFAULT 0, max_discount_per_order INTEGER NOT NULL DEFAULT 0,
+      discounted_orders_per_month INTEGER NOT NULL DEFAULT 0, platform_fee_waiver BOOLEAN NOT NULL DEFAULT false,
+      cashback_pct INTEGER NOT NULL DEFAULT 0, cashback_max INTEGER NOT NULL DEFAULT 0,
+      free_cancellations INTEGER NOT NULL DEFAULT 0, priority_booking BOOLEAN NOT NULL DEFAULT false,
+      min_order_value INTEGER NOT NULL DEFAULT 0, eligible_services JSONB NOT NULL DEFAULT '[]',
+      eligible_zones JSONB NOT NULL DEFAULT '[]', customer_segment TEXT NOT NULL DEFAULT 'all',
+      starts_at DATE, ends_at DATE, status TEXT NOT NULL DEFAULT 'published', sort INTEGER NOT NULL DEFAULT 0,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    // Seed the launch line-up (Silver/Gold/Platinum). ON CONFLICT keeps admin edits on restart.
+    `INSERT INTO membership_plans (plan_key,name,tagline,popular,price,features,discount_pct,max_discount_per_order,discounted_orders_per_month,cashback_pct,cashback_max,platform_fee_waiver,priority_booking,sort) VALUES
+      ('silver','Silver','Best for small homes',false,299,'["Up to ₹1,000 off on bookings","Priority customer support","Exclusive member offers"]',10,30,5,0,0,false,true,1),
+      ('gold','Gold','Great for regular users',true,599,'["Up to ₹2,500 off on bookings","Free add-ons every month","Priority support","Exclusive member offers"]',10,30,6,5,20,false,true,2),
+      ('platinum','Platinum','Best value for family',false,999,'["Up to ₹5,000 off on bookings","Free add-ons every month","Priority support","Exclusive member offers","No convenience fees"]',12,40,8,5,20,true,true,3)
+      ON CONFLICT (plan_key) DO NOTHING`,
     // Stores (dark-stores) inside a zone: a service point with a lat/lng centre + service radius.
     // Overlap/coverage between stores is guarded at create time (only super-admin may override).
     `CREATE TABLE IF NOT EXISTS stores (
@@ -338,6 +360,27 @@ async function priceCart({ items: rawItems, coupon, zoneId, customerId, applyCou
   const items = r.items.map((it) => ({ id: it.serviceId, name: it.name, icon: it.icon, category: it.category, durationId: it.durationId, durationLabel: it.durationLabel, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount }))
   return { items, subtotal: r.subtotal, discount: r.discount, total: r.total, coupon: r.coupon, savings: r.savings, appliedCampaignIds: r.appliedCampaignIds }
 }
+// Membership benefit for a customer on this order (Module 10 · Phase 2). Reads the customer's active
+// plan (auth) + the plan RULES from our membership_plans → a capped, limit-aware discount. Never
+// throws — pricing must not fail on a benefit lookup. `netBase` = service value after campaign discount.
+async function memberBenefit(customerId, netBase) {
+  if (!customerId || netBase <= 0) return { discount: 0 }
+  try {
+    const m = await tryGet(AUTH_URL, `/api/internal/users/${customerId}/membership`, null)
+    if (!m || !m.active) return { discount: 0 }
+    const { rows } = await pool.query('SELECT * FROM membership_plans WHERE plan_key=$1', [m.planKey])
+    const plan = rows[0]
+    if (!plan) return { discount: 0 }
+    if (netBase < (plan.min_order_value || 0)) return { discount: 0, planName: plan.name, reason: 'below-min' }
+    const cap = plan.discounted_orders_per_month || 0            // 0 = unlimited
+    if (cap > 0 && (m.usedThisMonth || 0) >= cap) return { discount: 0, planName: plan.name, reason: 'limit', remaining: 0 }
+    let d = Math.round(netBase * (plan.discount_pct || 0) / 100)
+    if (plan.max_discount_per_order > 0) d = Math.min(d, plan.max_discount_per_order)   // margin cap per order
+    d = Math.max(0, Math.min(d, netBase))
+    return { discount: d, planName: plan.name, planKey: plan.plan_key, remaining: cap > 0 ? Math.max(0, cap - (m.usedThisMonth || 0)) : null }
+  } catch { return { discount: 0 } }
+}
+
 async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const zoneId = await zoneIdForPincode(pincode)
   const q = await priceCart({ items, coupon, zoneId, customerId, applyCoupons: true })
@@ -354,6 +397,14 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const surge = getSurgeForZone(zoneId)
   const surgePct = surge.active ? surge.pct : 0
   const surgeSurcharge = surgePct ? Math.round(q.subtotal * surgePct / 100) : 0
+  // Membership benefit: % off the post-campaign service value, capped per-order and per-month by the
+  // admin-configured plan rules. Optional admin margin floor caps it further so the service value can't
+  // be discounted below `membership_min_service_amount`. Preview + booking share this path.
+  const memberBase = Math.max(0, q.subtotal - q.discount)
+  const member = await memberBenefit(customerId, memberBase)
+  let memberDiscount = member.discount || 0
+  const marginFloor = Math.round(Number(await getSetting(ADMIN_URL, 'membership_min_service_amount', '0')) || 0)
+  if (marginFloor > 0) memberDiscount = Math.max(0, Math.min(memberDiscount, Math.max(0, memberBase - marginFloor)))
   // Convenience fee stays zone-level; GST rate is per-service; inclusive/exclusive display is platform-wide.
   const ex = (cfg && cfg.pricingExtras) || {}
   const fee = Math.round(Number(ex.convenienceFee) || 0)
@@ -366,12 +417,12 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   let taxF = 0
   for (const it of q.items) {
     const share = gross > 0 ? (it.price / gross) : (1 / (q.items.length || 1))
-    const net = Math.max(0, it.price - q.discount * share + peakSurcharge * share + surgeSurcharge * share)
+    const net = Math.max(0, it.price - (q.discount + memberDiscount) * share + peakSurcharge * share + surgeSurcharge * share)
     const g = gmap[it.id] ?? 18
     taxF += gstIncluded ? (net - net / (1 + g / 100)) : (net * g / 100)
   }
   const tax = Math.round(taxF)
-  const serviceAmount = Math.max(0, q.subtotal - q.discount + peakSurcharge + surgeSurcharge)
+  const serviceAmount = Math.max(0, q.subtotal - q.discount - memberDiscount + peakSurcharge + surgeSurcharge)
   const total = gstIncluded ? (serviceAmount + fee) : (serviceAmount + tax + fee)
   const gstBase = gstIncluded ? (serviceAmount - tax) : serviceAmount
   const gstPct = gstBase > 0 ? Math.round((tax / gstBase) * 100) : 0   // blended rate for display
@@ -380,6 +431,7 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
     body: {
       items: q.items, coupon: q.coupon, subtotal: q.subtotal, discount: q.discount, peakPct, peakSurcharge, isPeak: onPeak,
       surgePct, surgeAmount: surgeSurcharge, surgeReason: surgeSurcharge ? surge.reason : '',
+      memberDiscount, memberPlan: memberDiscount > 0 ? (member.planName || '') : '', memberRemaining: member.remaining ?? null,
       fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds,
     },
   }
@@ -1175,6 +1227,62 @@ entityRoutes('clusters', 'clusters')
 entityRoutes('apartments', 'apartments')
 entityRoutes('inventory', 'inventory')
 entityRoutes('zone-pricing', 'zone_pricing', 'pricing.edit')
+
+/* ───────── Membership plans (Module 10) — admin config authority + public catalog ─────────
+   Admin edits reuse the pricing permission. Body uses snake_case column names (like campaigns);
+   the three JSONB columns are stringified before write. Customer app + auth read the public list. */
+const MP_COLS = ['plan_key', 'name', 'tagline', 'popular', 'price', 'features', 'discount_pct',
+  'max_discount_per_order', 'discounted_orders_per_month', 'platform_fee_waiver', 'cashback_pct',
+  'cashback_max', 'free_cancellations', 'priority_booking', 'min_order_value', 'eligible_services',
+  'eligible_zones', 'customer_segment', 'starts_at', 'ends_at', 'status', 'sort']
+const MP_JSON = new Set(['features', 'eligible_services', 'eligible_zones'])
+const mpVal = (c, v) => (MP_JSON.has(c) ? JSON.stringify(v ?? []) : v)
+const mpParse = (v, d) => { if (v == null) return d; if (typeof v === 'object') return v; try { return JSON.parse(v) } catch { return d } }
+function membershipPlanOut(r) {
+  return {
+    id: r.id, key: r.plan_key, name: r.name, tagline: r.tagline, popular: r.popular, price: r.price,
+    features: mpParse(r.features, []), discountPct: r.discount_pct, maxDiscountPerOrder: r.max_discount_per_order,
+    discountedOrdersPerMonth: r.discounted_orders_per_month, platformFeeWaiver: r.platform_fee_waiver,
+    cashbackPct: r.cashback_pct, cashbackMax: r.cashback_max, freeCancellations: r.free_cancellations,
+    priorityBooking: r.priority_booking, minOrderValue: r.min_order_value,
+    eligibleServices: mpParse(r.eligible_services, []), eligibleZones: mpParse(r.eligible_zones, []),
+    customerSegment: r.customer_segment, startsAt: r.starts_at, endsAt: r.ends_at, status: r.status, sort: r.sort,
+  }
+}
+
+app.get('/api/admin/membership-plans', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM membership_plans ORDER BY sort, id')
+  res.json(rows.map(membershipPlanOut))
+})
+app.post('/api/admin/membership-plans', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  if (!b.plan_key || !String(b.plan_key).trim()) return res.status(400).json({ error: 'plan_key is required' })
+  if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'name is required' })
+  const cols = MP_COLS.filter((c) => b[c] !== undefined)
+  const ph = cols.map((_, i) => `$${i + 1}`).join(',')
+  try {
+    const { rows } = await pool.query(`INSERT INTO membership_plans (${cols.join(',')}) VALUES (${ph}) RETURNING *`, cols.map((c) => mpVal(c, b[c])))
+    res.status(201).json(membershipPlanOut(rows[0]))
+  } catch (e) { res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'A plan with that key already exists' : 'Could not create plan' }) }
+})
+app.patch('/api/admin/membership-plans/:id', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  const cols = MP_COLS.filter((c) => b[c] !== undefined)
+  if (!cols.length) return res.json({ ok: true })
+  const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
+  const { rows } = await pool.query(`UPDATE membership_plans SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => mpVal(c, b[c])), Number(req.params.id)])
+  if (!rows.length) return res.status(404).json({ error: 'Not found' })
+  res.json(membershipPlanOut(rows[0]))
+})
+app.delete('/api/admin/membership-plans/:id', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  await pool.query('DELETE FROM membership_plans WHERE id=$1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
+// Public catalog: published plans only — the customer app renders these and auth prices from them.
+app.get('/api/membership-plans', async (_q, res) => {
+  const { rows } = await pool.query("SELECT * FROM membership_plans WHERE status='published' ORDER BY sort, id")
+  res.json(rows.map(membershipPlanOut))
+})
 
 /* Real per-zone operations metrics, aggregated from live DB (apartments, inventory, workers,
  * bookings) — powers the dashboards with real numbers instead of derived estimates. */

@@ -1,8 +1,10 @@
-// Membership plan catalog for Module 10 (Subscription). This is plan/pricing CONTENT (like a
-// pricing page), not user data — safe to define here. Real subscription state (who is subscribed,
-// billing, renewals) is a later backend feature; these screens are the UI for it.
+// Membership plan catalog for Module 10 (Subscription). The AUTHORITY is now the admin-configured
+// catalog served at /api/membership-plans (see loadPlans below); the static PLANS here are the
+// offline/first-paint fallback and the shape reference.
+import { fetchMembershipPlans } from './api'
+
 export interface Plan {
-  key: 'silver' | 'gold' | 'platinum'
+  key: string
   name: string
   price: number
   tagline: string
@@ -21,6 +23,26 @@ export const PLANS: Plan[] = [
 ]
 
 export const planByKey = (k: string) => PLANS.find((p) => p.key === k) || PLANS[1]
+
+// Load the admin-configured plan catalog (cached for the session). Falls back to static PLANS if the
+// backend is unreachable, so the membership screens always render something.
+let _plans: Plan[] | null = null
+export async function loadPlans(): Promise<Plan[]> {
+  if (_plans) return _plans
+  try {
+    const dto = await fetchMembershipPlans()
+    if (Array.isArray(dto) && dto.length) {
+      _plans = dto.map((p) => ({
+        key: p.key, name: p.name, price: p.price, tagline: p.tagline, popular: p.popular,
+        features: p.features || [], discountCap: p.maxDiscountPerOrder || 0,
+      }))
+      return _plans
+    }
+  } catch { /* fall back to the static catalog */ }
+  return PLANS
+}
+// Find a plan by key from a loaded list, with the static catalog as a safety net.
+export const pickPlan = (plans: Plan[], k: string) => plans.find((p) => p.key === k) || planByKey(k)
 
 // Billing cycles (monthly base × months, with a saving for longer commitments).
 export const CYCLES = [

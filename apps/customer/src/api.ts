@@ -211,6 +211,43 @@ export const addPlan = (p: { service_id: string; name: string; frequency: string
 export const updatePlan = (id: number, patch: { active?: boolean }) => req<CleaningPlan>(`/api/plans/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
 export const removePlan = (id: number) => req<{ ok: boolean }>(`/api/plans/${id}`, { method: 'DELETE' })
 
+/* membership (Module 10 · Subscription) */
+export interface Membership {
+  active: boolean
+  id?: number
+  plan?: 'silver' | 'gold' | 'platinum'
+  planName?: string
+  discountCap?: number
+  cycle?: 'monthly' | '3m' | '12m'
+  price?: number
+  method?: string
+  status?: 'active' | 'cancelled' | 'expired'
+  autoRenew?: boolean
+  startedAt?: string
+  renewsAt?: string
+  validTill?: string
+  daysLeft?: number
+  usage?: { totalSaved: number; addonsUsed: number; bookings: number }
+}
+export interface MembershipEvent { id: number; event: string; detail: string | null; amount: number; created: string }
+export const fetchMembership = () => req<Membership>('/api/membership')
+export const subscribeMembership = (p: { plan: string; cycle: string; method?: string; payWithWallet?: boolean }) =>
+  req<Membership>('/api/membership/subscribe', { method: 'POST', body: JSON.stringify(p) })
+export const renewMembership = (p: { cycle?: string; payWithWallet?: boolean } = {}) =>
+  req<Membership>('/api/membership/renew', { method: 'POST', body: JSON.stringify(p) })
+export const cancelMembership = (reason?: string) =>
+  req<Membership>('/api/membership/cancel', { method: 'POST', body: JSON.stringify({ reason }) })
+export const fetchMembershipUsage = () => req<{ membership: Membership; history: MembershipEvent[] }>('/api/membership/usage')
+
+/* membership plan catalog (admin-configured, served by catalog) */
+export interface MembershipPlanDTO {
+  id: number; key: string; name: string; tagline: string; popular: boolean; price: number; features: string[]
+  discountPct: number; maxDiscountPerOrder: number; discountedOrdersPerMonth: number
+  platformFeeWaiver: boolean; cashbackPct: number; cashbackMax: number; freeCancellations: number
+  priorityBooking: boolean; minOrderValue: number; customerSegment: string; status: string; sort: number
+}
+export const fetchMembershipPlans = () => req<MembershipPlanDTO[]>('/api/membership-plans')
+
 /* live location — captured once when the app opens, cached so bookings/maps use it
    instantly without re-prompting, and persisted to the user's profile so the assigned
    worker and the admin can see where the customer is. */

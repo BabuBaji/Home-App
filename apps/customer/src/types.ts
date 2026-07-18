@@ -103,7 +103,7 @@ export interface Address {
 }
 
 export interface Coupon { code: string; type: string; value: number; min: number; max?: number; label: string }
-export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number; savings?: number; appliedCampaignIds?: (number | string)[]; peakSurcharge?: number; peakPct?: number; isPeak?: boolean; surgePct?: number; surgeAmount?: number; surgeReason?: string; gstPct?: number; gstIncluded?: boolean }
+export interface Quote { items: CartItem[]; coupon: string | null; subtotal: number; fee: number; tax: number; discount: number; total: number; savings?: number; appliedCampaignIds?: (number | string)[]; peakSurcharge?: number; peakPct?: number; isPeak?: boolean; surgePct?: number; surgeAmount?: number; surgeReason?: string; memberDiscount?: number; memberPlan?: string; memberRemaining?: number | null; gstPct?: number; gstIncluded?: boolean }
 
 export type BookingTypeId = 'instant' | 'schedule'
 export type BookingStatus =

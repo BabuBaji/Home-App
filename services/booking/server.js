@@ -100,6 +100,8 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalate_reason TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
+    // Module 10 · Phase 2 — membership discount applied to this booking (₹), for the invoice breakdown.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS member_discount INTEGER NOT NULL DEFAULT 0`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -434,6 +436,14 @@ app.post('/api/bookings', auth, async (req, res) => {
     internalPost(CATALOG_URL, '/api/internal/campaign-usage', {
       customerId: req.user.id, bookingId: booking.id, campaignIds: priced.appliedCampaignIds || [], couponCode: priced.coupon || null,
     }).catch(() => {})
+  }
+
+  // Membership: persist the applied discount on the booking and bump the member's monthly usage +
+  // lifetime savings. Best-effort — never fails the booking.
+  if ((priced.memberDiscount || 0) > 0) {
+    pool.query('UPDATE bookings SET member_discount=$1 WHERE id=$2', [priced.memberDiscount, booking.id]).catch(() => {})
+    booking.member_discount = priced.memberDiscount
+    internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/membership-usage`, { saved: priced.memberDiscount }).catch(() => {})
   }
 
   // Events: dispatch starts matching; notification logs; payment records the collected money.

@@ -1,20 +1,38 @@
-// 76 · Subscribe — chosen plan, billing cycle, payment method. (Payment wiring comes later.)
-import { useState } from 'react'
+// 76 · Subscribe — chosen plan, billing cycle, payment method. Creates a real membership on the
+// backend, which records the subscription (and charges the wallet when that method is chosen).
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Check, Smartphone, CreditCard, Building2, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Check, Smartphone, CreditCard, Building2, Wallet, ChevronRight } from 'lucide-react'
 import { useToast } from '../../components/UI'
-import { planByKey, CYCLES, cyclePrice, money } from '../../membership'
+import { planByKey, pickPlan, loadPlans, CYCLES, cyclePrice, money } from '../../membership'
+import { subscribeMembership } from '../../api'
 
 export default function Subscribe() {
   const nav = useNavigate()
   const toast = useToast()
   const [params] = useSearchParams()
-  const plan = planByKey(params.get('plan') || 'gold')
+  const key = params.get('plan') || 'gold'
+  const [plan, setPlan] = useState(planByKey(key))
+  useEffect(() => { loadPlans().then((ps) => setPlan(pickPlan(ps, key))).catch(() => setPlan(planByKey(key))) }, [key])
   const [cycle, setCycle] = useState('monthly')
   const [method, setMethod] = useState('upi')
+  const [busy, setBusy] = useState(false)
 
   const active = CYCLES.find((c) => c.key === cycle) || CYCLES[0]
   const { total } = cyclePrice(plan.price, active.months, active.savePct)
+
+  const subscribe = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await subscribeMembership({ plan: plan.key, cycle, method, payWithWallet: method === 'wallet' })
+      toast(`Welcome to ${plan.name}! 🎉`)
+      nav('/membership/active', { replace: true })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not complete subscription')
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="screen">
@@ -50,7 +68,7 @@ export default function Subscribe() {
 
         <div className="sub-sec">Payment Method</div>
         <div className="sub-methods">
-          {[{ k: 'upi', icon: <Smartphone size={17} />, l: 'UPI', rec: true }, { k: 'card', icon: <CreditCard size={17} />, l: 'Card' }, { k: 'nb', icon: <Building2 size={17} />, l: 'Net Banking' }].map((m) => (
+          {[{ k: 'upi', icon: <Smartphone size={17} />, l: 'UPI', rec: true }, { k: 'card', icon: <CreditCard size={17} />, l: 'Card' }, { k: 'nb', icon: <Building2 size={17} />, l: 'Net Banking' }, { k: 'wallet', icon: <Wallet size={17} />, l: 'Wallet' }].map((m) => (
             <button key={m.k} className={`sub-method ${method === m.k ? 'sel' : ''}`} onClick={() => setMethod(m.k)}>
               {m.icon}<span>{m.l}</span>{m.rec && <span className="sub-rec">Recommended</span>}
             </button>
@@ -60,7 +78,7 @@ export default function Subscribe() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" onClick={() => toast('Subscription checkout is coming soon')}>Pay {money(total)} &amp; Subscribe</button>
+        <button className="btn full" disabled={busy} onClick={subscribe}>{busy ? 'Processing…' : <>Pay {money(total)} &amp; Subscribe</>}</button>
         <div className="sub-terms">By continuing, you agree to our <button onClick={() => nav('/terms')}>Terms &amp; Conditions</button></div>
       </div>
     </div>

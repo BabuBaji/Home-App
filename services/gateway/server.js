@@ -39,6 +39,10 @@ function pickTarget(url) {
   const u = (url || '').split('?')[0]
   const p = (s) => u === s || u.startsWith(s + '/') || u.startsWith(s)
 
+  // ----- membership plan CATALOG (config) lives in catalog, NOT the auth membership-instance API.
+  // Checked first: '/api/membership-plans' would otherwise prefix-match the '/api/membership' rule.
+  if (p('/api/admin/membership-plans') || p('/api/membership-plans')) return U.catalog
+
   // ----- admin panel (BFF + per-domain admin routes) -----
   if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/campaigns') || p('/api/admin/ops-overview') || p('/api/admin/stores') || p('/api/admin/surge')) return U.catalog
   if (p('/api/admin/activity')) return U.notification
@@ -60,7 +64,7 @@ function pickTarget(url) {
   // which owns saved payment methods, rather than the payment service.
   if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')
     || p('/api/family') || p('/api/payment-methods') || p('/api/profile')
-    || p('/api/reminders') || p('/api/plans')) return U.auth
+    || p('/api/reminders') || p('/api/plans') || p('/api/membership')) return U.auth
 
   // ----- catalogue / pricing / address search -----
   if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info') || p('/api/surge')) return U.catalog

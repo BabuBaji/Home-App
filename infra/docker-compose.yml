@@ -130,6 +130,7 @@ services:
       INTERNAL_KEY: ${INTERNAL_KEY}
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
       WORKER_URL: http://worker:4004
     ports: ["4001:4001"]

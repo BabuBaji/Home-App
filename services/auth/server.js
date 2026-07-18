@@ -150,6 +150,34 @@ async function init() {
       frequency TEXT NOT NULL, next_date DATE, active BOOLEAN NOT NULL DEFAULT true, created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `CREATE INDEX IF NOT EXISTS ix_plan_user ON cleaning_plans(user_id)`,
+    // --- Module 10 (Membership / Subscription) ---
+    // One row per user's CURRENT membership (status='active' or 'cancelled' until it lapses).
+    // Price is the amount charged for the cycle; renews_at is both the next-renewal date and the
+    // valid-till date. Usage counters accrue as the member books/saves.
+    `CREATE TABLE IF NOT EXISTS memberships (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+      plan TEXT NOT NULL, cycle TEXT NOT NULL, price INTEGER NOT NULL, method TEXT,
+      status TEXT NOT NULL DEFAULT 'active', auto_renew BOOLEAN NOT NULL DEFAULT true,
+      total_saved INTEGER NOT NULL DEFAULT 0, addons_used INTEGER NOT NULL DEFAULT 0, bookings_count INTEGER NOT NULL DEFAULT 0,
+      started TIMESTAMPTZ NOT NULL DEFAULT now(), renews_at TIMESTAMPTZ NOT NULL,
+      cancelled_at TIMESTAMPTZ, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_membership_user ON memberships(user_id)`,
+    // Membership history: subscribed / renewed / cancelled / saved / addon events, for Usage History.
+    `CREATE TABLE IF NOT EXISTS membership_ledger (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, membership_id INTEGER,
+      event TEXT NOT NULL, detail TEXT, amount INTEGER NOT NULL DEFAULT 0,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_memledger_user ON membership_ledger(user_id)`,
+    // Per-month membership usage: how many discounted bookings + how much saved this month. Powers the
+    // "N of M discounts used" cap and the dashboard savings. One row per (membership, YYYY-MM).
+    `CREATE TABLE IF NOT EXISTS membership_usage (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, membership_id INTEGER NOT NULL,
+      month TEXT NOT NULL, discounted_orders INTEGER NOT NULL DEFAULT 0, saved INTEGER NOT NULL DEFAULT 0,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_memusage_month ON membership_usage(membership_id, month)`,
     // Backfill `kind` on rows written before the ledger was typed. These three titles are the exact
     // strings this service and the booking/payment services write, so the match is precise rather
     // than a guess at free text — without it, refunds are invisible to the Refund filter.
@@ -767,10 +795,168 @@ app.delete('/api/plans/:id', auth, async (req, res) => {
   res.json({ ok: true })
 })
 
+/* ---------- membership (Module 10 · Subscription) ---------- */
+// Authoritative plan catalog + billing cycles. The client has a copy for display (membership.ts),
+// but price is ALWAYS recomputed here so the amount charged can't be tampered with.
+const MEM_PLANS = {
+  silver:   { name: 'Silver',   price: 299, discountCap: 1000 },
+  gold:     { name: 'Gold',     price: 599, discountCap: 2500 },
+  platinum: { name: 'Platinum', price: 999, discountCap: 5000 },
+}
+const MEM_CYCLES = { monthly: { months: 1, savePct: 0 }, '3m': { months: 3, savePct: 0.11 }, '12m': { months: 12, savePct: 0.17 } }
+const cyclePrice = (price, months, savePct = 0) => Math.round(price * months * (1 - savePct))
+const addMonths = (from, months) => { const d = new Date(from); d.setMonth(d.getMonth() + months); return d }
+
+// Plan catalog is the admin-configurable one owned by the catalog service. Cache briefly and fall
+// back to the built-in defaults above if catalog is unreachable, so subscribe/renew never hard-fail.
+let _planCache = { at: 0, byKey: null }
+async function planCatalog() {
+  if (_planCache.byKey && Date.now() - _planCache.at < 60000) return _planCache.byKey
+  try {
+    const r = await fetch(`${CATALOG_URL}/api/membership-plans`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) })
+    if (r.ok) {
+      const list = await r.json()
+      if (Array.isArray(list) && list.length) {
+        const byKey = {}
+        for (const p of list) byKey[p.key] = { name: p.name, price: p.price, discountCap: p.maxDiscountPerOrder || 0 }
+        _planCache = { at: Date.now(), byKey }
+        return byKey
+      }
+    }
+  } catch { /* fall through to defaults */ }
+  return MEM_PLANS
+}
+
+// The user's current membership row (most recent), or null.
+async function currentMembership(uid) {
+  const { rows } = await pool.query('SELECT * FROM memberships WHERE user_id=$1 ORDER BY id DESC LIMIT 1', [uid])
+  return rows[0] || null
+}
+// Shape a membership row for the app: a cancelled plan still counts as active until renews_at passes.
+function membershipOut(m) {
+  if (!m) return { active: false }
+  const renews = new Date(m.renews_at)
+  const live = renews.getTime() > Date.now() && m.status !== 'expired'
+  const daysLeft = Math.max(0, Math.ceil((renews.getTime() - Date.now()) / 86400000))
+  // Tier names are stable labels; an admin-created key we don't recognise falls back to the key itself.
+  const plan = MEM_PLANS[m.plan] || { name: m.plan, discountCap: 0 }
+  return {
+    active: live, id: m.id, plan: m.plan, planName: plan.name, discountCap: plan.discountCap,
+    cycle: m.cycle, price: m.price, method: m.method, status: m.status, autoRenew: m.auto_renew,
+    startedAt: m.started, renewsAt: m.renews_at, validTill: m.renews_at, daysLeft,
+    usage: { totalSaved: m.total_saved || 0, addonsUsed: m.addons_used || 0, bookings: m.bookings_count || 0 },
+  }
+}
+// Validate {plan, cycle} against the (admin-configurable) catalog and return
+// { planKey, cycleKey, months, amount, name } or throw a 400. Price is ALWAYS the config price.
+async function priceFor(planKey, cycleKey) {
+  const plans = await planCatalog()
+  const plan = plans[planKey]; const cyc = MEM_CYCLES[cycleKey]
+  if (!plan) throw Object.assign(new Error('Unknown plan'), { code: 400 })
+  if (!cyc) throw Object.assign(new Error('Unknown billing cycle'), { code: 400 })
+  return { planKey, cycleKey, months: cyc.months, amount: cyclePrice(plan.price, cyc.months, cyc.savePct), name: plan.name }
+}
+// Charge the amount: from the wallet (Promo→Cash) when payWithWallet, else treat the external
+// gateway payment as already succeeded (the app's pay sheet handles the real charge).
+async function chargeMembership(uid, amount, payWithWallet, title) {
+  if (payWithWallet) await walletSpend(uid, amount, { title, kind: 'MEMBERSHIP' })
+}
+
+app.get('/api/membership', auth, async (req, res) => {
+  res.json(membershipOut(await currentMembership(req.user.id)))
+})
+
+app.post('/api/membership/subscribe', auth, async (req, res) => {
+  try {
+    const { plan, cycle = 'monthly', method = 'upi', payWithWallet = false } = req.body || {}
+    const { planKey, cycleKey, months, amount, name } = await priceFor(plan, cycle)
+    await chargeMembership(req.user.id, amount, payWithWallet, `${name} membership`)
+    const renewsAt = addMonths(new Date(), months)
+    // Replace any prior membership (upgrade/downgrade/re-subscribe) with a fresh active row.
+    await pool.query('DELETE FROM memberships WHERE user_id=$1', [req.user.id])
+    const { rows } = await pool.query(
+      `INSERT INTO memberships (user_id, plan, cycle, price, method, status, renews_at)
+       VALUES ($1,$2,$3,$4,$5,'active',$6) RETURNING *`,
+      [req.user.id, planKey, cycleKey, amount, method, renewsAt.toISOString()])
+    const m = rows[0]
+    await pool.query('INSERT INTO membership_ledger (user_id,membership_id,event,detail,amount) VALUES ($1,$2,$3,$4,$5)',
+      [req.user.id, m.id, 'subscribed', `${name} · ${cycleKey}`, amount])
+    publishEvent(REDIS_URL, 'customer.membership', { userId: req.user.id, name: req.user.name, detail: `Subscribed to ${name} (${cycleKey})` })
+    res.json(membershipOut(m))
+  } catch (e) { res.status(e.code === 402 ? 402 : e.code === 400 ? 400 : 500).json({ error: e.message || 'Could not subscribe' }) }
+})
+
+app.post('/api/membership/renew', auth, async (req, res) => {
+  try {
+    const cur = await currentMembership(req.user.id)
+    if (!cur) return res.status(404).json({ error: 'No membership to renew' })
+    const cycle = req.body?.cycle || cur.cycle
+    const { cycleKey, months, amount, name } = await priceFor(cur.plan, cycle)
+    await chargeMembership(req.user.id, amount, req.body?.payWithWallet, `${name} renewal`)
+    // Extend from whichever is later: the existing valid-till (if still live) or now.
+    const base = new Date(cur.renews_at).getTime() > Date.now() ? new Date(cur.renews_at) : new Date()
+    const renewsAt = addMonths(base, months)
+    const { rows } = await pool.query(
+      `UPDATE memberships SET cycle=$1, price=$2, status='active', auto_renew=true, cancelled_at=NULL, renews_at=$3 WHERE id=$4 RETURNING *`,
+      [cycleKey, amount, renewsAt.toISOString(), cur.id])
+    await pool.query('INSERT INTO membership_ledger (user_id,membership_id,event,detail,amount) VALUES ($1,$2,$3,$4,$5)',
+      [req.user.id, cur.id, 'renewed', `${name} · ${cycleKey}`, amount])
+    publishEvent(REDIS_URL, 'customer.membership', { userId: req.user.id, name: req.user.name, detail: `Renewed ${name}` })
+    res.json(membershipOut(rows[0]))
+  } catch (e) { res.status(e.code === 402 ? 402 : e.code === 400 ? 400 : 500).json({ error: e.message || 'Could not renew' }) }
+})
+
+app.post('/api/membership/cancel', auth, async (req, res) => {
+  const cur = await currentMembership(req.user.id)
+  if (!cur) return res.status(404).json({ error: 'No membership to cancel' })
+  // Soft-cancel: turn off auto-renew and mark cancelled, but keep benefits until renews_at.
+  const { rows } = await pool.query(
+    `UPDATE memberships SET status='cancelled', auto_renew=false, cancelled_at=now() WHERE id=$1 RETURNING *`, [cur.id])
+  await pool.query('INSERT INTO membership_ledger (user_id,membership_id,event,detail,amount) VALUES ($1,$2,$3,$4,0)',
+    [req.user.id, cur.id, 'cancelled', String(req.body?.reason || '').slice(0, 200) || 'Cancelled'])
+  publishEvent(REDIS_URL, 'customer.membership', { userId: req.user.id, name: req.user.name, detail: `Cancelled ${MEM_PLANS[cur.plan]?.name || cur.plan}` })
+  res.json(membershipOut(rows[0]))
+})
+
+app.get('/api/membership/usage', auth, async (req, res) => {
+  const cur = await currentMembership(req.user.id)
+  const { rows } = await pool.query(
+    'SELECT id, event, detail, amount, created FROM membership_ledger WHERE user_id=$1 ORDER BY id DESC LIMIT 100', [req.user.id])
+  res.json({ membership: membershipOut(cur), history: rows })
+})
+
 /* ---------- internal (service-to-service) ---------- */
 app.get('/api/internal/users/:id', internalOnly, async (req, res) => {
   const u = await getUser(Number(req.params.id))
   res.json({ user: publicUser(u) })
+})
+
+// Membership snapshot for the catalog pricing engine: the active plan key + this-month usage count.
+app.get('/api/internal/users/:id/membership', internalOnly, async (req, res) => {
+  const cur = await currentMembership(Number(req.params.id))
+  if (!cur) return res.json({ active: false })
+  const live = new Date(cur.renews_at).getTime() > Date.now() && cur.status !== 'expired'
+  const month = new Date().toISOString().slice(0, 7)
+  const u = (await pool.query('SELECT discounted_orders FROM membership_usage WHERE membership_id=$1 AND month=$2', [cur.id, month])).rows[0]
+  res.json({ active: live, planKey: cur.plan, cycle: cur.cycle, usedThisMonth: u?.discounted_orders || 0 })
+})
+
+// Record a membership-discounted booking: bump this-month usage + lifetime savings on the membership.
+// Called by the booking service after a booking that received a member discount. Best-effort.
+app.post('/api/internal/users/:id/membership-usage', internalOnly, async (req, res) => {
+  const uid = Number(req.params.id)
+  const saved = Math.max(0, Math.round(Number(req.body?.saved) || 0))
+  const cur = await currentMembership(uid)
+  if (!cur) return res.json({ ok: false })
+  const month = new Date().toISOString().slice(0, 7)
+  await pool.query(
+    `INSERT INTO membership_usage (user_id, membership_id, month, discounted_orders, saved) VALUES ($1,$2,$3,1,$4)
+     ON CONFLICT (membership_id, month) DO UPDATE SET discounted_orders = membership_usage.discounted_orders + 1, saved = membership_usage.saved + $4`,
+    [uid, cur.id, month, saved])
+  await pool.query('UPDATE memberships SET total_saved = total_saved + $1, bookings_count = bookings_count + 1 WHERE id=$2', [saved, cur.id])
+  await pool.query('INSERT INTO membership_ledger (user_id,membership_id,event,detail,amount) VALUES ($1,$2,$3,$4,$5)',
+    [uid, cur.id, 'saved', 'Member discount on booking', saved])
+  res.json({ ok: true })
 })
 app.get('/api/internal/users/:id/addresses', internalOnly, async (req, res) => res.json(await getAddresses(Number(req.params.id))))
 // Full wallet ledger for a user (admin view).

@@ -1,12 +1,15 @@
-// 75 · Compare Plans — plan selector + feature comparison table.
-import { useState } from 'react'
+// 75 · Compare Plans — plan selector + feature comparison table. Prices come from the admin-config
+// catalog; the feature matrix is static content.
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check } from 'lucide-react'
-import { PLANS, COMPARE_ROWS, planByKey, money } from '../../membership'
+import { PLANS, COMPARE_ROWS, pickPlan, loadPlans, money, type Plan } from '../../membership'
 
 export default function ComparePlans() {
   const nav = useNavigate()
   const [sel, setSel] = useState('gold')
+  const [plans, setPlans] = useState<Plan[]>(PLANS)
+  useEffect(() => { loadPlans().then(setPlans).catch(() => setPlans(PLANS)) }, [])
   const cell = (v: string | boolean) => v === true ? <Check size={15} className="cmp-yes" /> : v === false ? <span className="cmp-no">—</span> : <span className="cmp-txt">{v}</span>
 
   return (
@@ -19,7 +22,7 @@ export default function ComparePlans() {
 
       <div className="content pad-cta">
         <div className="cmp-tabs">
-          {PLANS.map((p) => (
+          {plans.map((p) => (
             <button key={p.key} className={`cmp-tab ${sel === p.key ? 'sel' : ''}`} onClick={() => setSel(p.key)}>
               {p.popular && <span className="cmp-pop">Popular</span>}
               <span className="cmp-tab-n">{p.name}</span>
@@ -43,7 +46,7 @@ export default function ComparePlans() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" onClick={() => nav(`/membership/subscribe?plan=${sel}`)}>Choose {planByKey(sel).name} Plan</button>
+        <button className="btn full" onClick={() => nav(`/membership/subscribe?plan=${sel}`)}>Choose {pickPlan(plans, sel).name} Plan</button>
       </div>
     </div>
   )

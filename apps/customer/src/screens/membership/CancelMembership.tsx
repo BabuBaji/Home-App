@@ -1,8 +1,10 @@
-// 80 · Cancel Membership — reasons + confirm. (Cancellation wiring later.)
+// 80 · Cancel Membership — reasons + confirm. Soft-cancels the real membership (benefits stay
+// until the end of the current cycle).
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { useToast } from '../../components/UI'
+import { cancelMembership } from '../../api'
 
 const REASONS = ['Too expensive', 'Not using enough', 'Found better alternatives', 'Service not as expected', 'Other (please specify)']
 
@@ -11,6 +13,21 @@ export default function CancelMembership() {
   const toast = useToast()
   const [reason, setReason] = useState('')
   const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const confirmCancel = async () => {
+    if (!reason) { toast('Please select a reason'); return }
+    if (busy) return
+    setBusy(true)
+    try {
+      await cancelMembership(note.trim() ? `${reason} — ${note.trim()}` : reason)
+      toast('Membership cancelled. Benefits stay until your cycle ends.')
+      nav('/membership/active', { replace: true })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not cancel')
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="screen">
@@ -42,7 +59,7 @@ export default function CancelMembership() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full danger-btn" onClick={() => reason ? toast('Membership cancellation is coming soon') : toast('Please select a reason')}>Cancel Membership</button>
+        <button className="btn full danger-btn" disabled={busy} onClick={confirmCancel}>{busy ? 'Cancelling…' : 'Cancel Membership'}</button>
         <button className="btn-text full" onClick={() => nav(-1)} style={{ marginTop: 8, color: 'var(--primary)', fontWeight: 600 }}>Go Back</button>
       </div>
     </div>
