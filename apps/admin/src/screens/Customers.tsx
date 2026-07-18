@@ -291,7 +291,7 @@ export default function Customers() {
                       <div className="cell-user" style={{ cursor: 'pointer' }} onClick={() => nav(`/customers/${c.id}`)}>
                         <Avatar name={c.name || 'Customer'} size={36} />
                         <div style={{ minWidth: 0 }}>
-                          <strong style={{ display: 'block' }}>{c.name || <span className="muted">Profile Incomplete</span>}</strong>
+                          <strong style={{ display: 'block' }}>{c.name || c.phone || <span className="muted">Unnamed</span>}</strong>
                           <Badge tone={SEG_TONE[seg]} dot={false}>{seg}</Badge>
                         </div>
                       </div>

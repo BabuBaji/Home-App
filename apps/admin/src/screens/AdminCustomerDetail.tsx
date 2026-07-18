@@ -203,7 +203,7 @@ export default function AdminCustomerDetail() {
             <Avatar name={c.name || 'Customer'} size={72} />
             <div style={{ minWidth: 0 }}>
             <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'nowrap' }}>
-              <h2 style={{ margin: 0, fontSize: 22, whiteSpace: 'nowrap' }}>{c.name || 'Profile Incomplete'}</h2>
+              <h2 style={{ margin: 0, fontSize: 22, whiteSpace: 'nowrap' }}>{c.name || c.phone || 'Unnamed Customer'}</h2>
               <Badge tone={blocked ? 'red' : 'green'}>{blocked ? (c.status || 'Inactive') : 'Active'}</Badge>
             </div>
             <div className="row" style={{ gap: 10, alignItems: 'center', margin: '8px 0', flexWrap: 'wrap' }}>
