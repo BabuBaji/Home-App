@@ -24,6 +24,7 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
+const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[notification] unhandledRejection:', e?.message || e))
 
@@ -256,16 +257,18 @@ app.patch('/api/admin/complaints/:id', adminAuth, async (req, res) => {
 const PROMO_TYPES = ['promo', 'promos', 'promotion', 'promotions', 'promotional', 'offer', 'offers', 'marketing', 'coupon']
 // Which per-customer opt-in flag governs each delivery channel.
 const CHANNEL_PREF = { whatsapp: 'whatsapp', sms: 'sms', email: 'email', push: 'push', 'in-app': 'push' }
-// Resolve who actually receives a broadcast, honoring each customer's opt-in. Promotional messages skip
-// anyone who turned off promotional offers (comm_promo=false); every message also skips a customer who
-// disabled the channel it's going out on. Returns the real send count and how many were suppressed.
-// Worker-targeted broadcasts aren't delivered from this service (no worker prefs here), so they resolve
-// to zero rather than a fabricated count.
+// Resolve who actually receives a broadcast. Customer audiences honor each customer's opt-in:
+// promotional messages skip comm_promo=false, and any message skips a customer who disabled the target
+// channel. Worker audiences go to every active worker — workers have no per-channel/marketing opt-in
+// yet, so nothing is suppressed. Returns the real send count and how many were suppressed.
 async function resolveRecipients(b) {
   const isPromo = b.promotional === true || PROMO_TYPES.includes(String(b.type || '').toLowerCase())
   const audience = String(b.audience || 'all').toLowerCase()
-  const targetsCustomers = audience === 'all' || audience === '' || audience.includes('customer')
-  if (!targetsCustomers) return { isPromo, sent: 0, suppressed: 0, recipientIds: [], targetsCustomers: false }
+  if (audience.includes('worker')) {
+    const wr = await tryGet(WORKER_URL, '/internal/workers', { workers: [] })
+    const active = (wr.workers || []).filter((w) => (w.status || 'active') === 'active')
+    return { isPromo, sent: active.length, suppressed: 0, recipientIds: active.map((w) => w.id), audienceKind: 'workers' }
+  }
   const chanPref = CHANNEL_PREF[String(b.channel || 'in-app').toLowerCase()] || null
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
   const base = customers.filter((c) => (c.status || 'active') === 'active')  // active customers
@@ -276,7 +279,7 @@ async function resolveRecipients(b) {
     if (chanPref && comm[chanPref] === false) { suppressed++; return false }    // opted out of this channel
     return true
   })
-  return { isPromo, sent: recipients.length, suppressed, recipientIds: recipients.map((c) => c.id), targetsCustomers: true }
+  return { isPromo, sent: recipients.length, suppressed, recipientIds: recipients.map((c) => c.id), audienceKind: 'customers' }
 }
 
 app.get('/api/admin/notifications', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))

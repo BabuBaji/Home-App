@@ -263,6 +263,7 @@ services:
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
+      WORKER_URL: http://worker:4004
     ports: ["4003:4003"]
     depends_on:
       notification-db: { condition: service_healthy }
