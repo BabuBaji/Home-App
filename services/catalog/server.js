@@ -28,6 +28,9 @@ import {
   loadActiveCampaigns, loadUsage, recordUsage, resolvePricing, rawDiscount, withinWindow, customerEligible,
 } from './pricing-engine.js'
 import { startWeatherPoller, getSurgeForZone, setManualSurge, surgeSnapshot } from './weather.js'
+import { ensurePublicBucket, storageConfigured, sniffType, storageKey, putPublicObject, getObjectStream } from '@homehelp/shared/storage.js'
+import multer from 'multer'
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }) // 5 MB banner images
 
 const PORT = Number(process.env.PORT || 4001)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5432/catalog'
@@ -134,6 +137,23 @@ async function init() {
       UNIQUE (customer_id, campaign_id, booking_id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_ccu_cust_camp ON customer_campaign_usage (customer_id, campaign_id)`,
+    // Scheduled Home hero banners (festival wishes / promos) shown in the rotating hero carousel.
+    `CREATE TABLE IF NOT EXISTS home_banners (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      subtitle TEXT NOT NULL DEFAULT '',
+      emoji TEXT NOT NULL DEFAULT '',
+      theme TEXT NOT NULL DEFAULT 'purple',       -- preset gradient key rendered by the app
+      cta_label TEXT NOT NULL DEFAULT '',
+      cta_link TEXT NOT NULL DEFAULT '',
+      starts DATE, ends DATE,                     -- active window (NULL = open-ended)
+      zone_id INTEGER,                            -- NULL = all zones
+      priority INTEGER NOT NULL DEFAULT 50,
+      status TEXT NOT NULL DEFAULT 'active',      -- active | paused
+      kind TEXT NOT NULL DEFAULT 'festival',      -- festival | promo | announcement
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `ALTER TABLE home_banners ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS duration_min INTEGER`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS gst_pct INTEGER`,   // GST rate per service (SAC-based); default 18%
   ])
@@ -455,6 +475,71 @@ app.get('/api/surge', async (req, res) => {
   if (!zoneId) return res.json({ active: false, pct: 0, reason: '' })
   const s = getSurgeForZone(zoneId)
   res.json({ active: !!s.active, pct: s.pct || 0, reason: s.active ? s.reason : '', prob: s.prob ?? null })
+})
+// Dynamic Home hero slides (public) — merges scheduled festival/promo banners (in their date window),
+// live offers (campaigns with a banner), and the weather surge, ranked by priority. The app prepends
+// its own greeting slide and rotates through them. Everything here is real, dated, targeted data.
+app.get('/api/home-banners', async (req, res) => {
+  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const customerId = customerIdFromReq(req)
+  const slides = []
+
+  // 1) scheduled banners currently in their active window, for this zone (or all zones)
+  const scheduled = await pool.query(
+    `SELECT * FROM home_banners
+      WHERE status='active'
+        AND (starts IS NULL OR starts <= CURRENT_DATE)
+        AND (ends   IS NULL OR ends   >= CURRENT_DATE)
+        AND (zone_id IS NULL OR zone_id = $1)
+      ORDER BY priority DESC, id DESC`, [zoneId])
+  for (const b of scheduled.rows) slides.push({
+    key: `banner-${b.id}`, kind: b.kind || 'festival', title: b.title, subtitle: b.subtitle || '',
+    emoji: b.emoji || '', theme: b.theme || 'purple', ctaLabel: b.cta_label || '', ctaLink: b.cta_link || '',
+    image: b.image_url || '', priority: b.priority ?? 50,
+  })
+
+  // 2) live offers — campaigns with a banner that are in-window and eligible for this customer
+  try {
+    const zmap = await zonePriceMap(zoneId)
+    const [campaigns, ctx] = await Promise.all([campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId)])
+    const now = new Date()
+    for (const c of campaigns) {
+      if (!c.banner_title || !withinWindow(c, now)) continue
+      if (c.campaign_type === 'customer' && !customerEligible(c, ctx)) continue
+      const badge = c.discount_type === 'percent' ? `${c.discount_value}% OFF` : `₹${c.discount_value} OFF`
+      slides.push({
+        key: `offer-${c.campaign_id}`, kind: 'offer', title: c.banner_title, subtitle: c.banner_subtitle || badge,
+        emoji: '🎁', theme: 'sunset', ctaLabel: c.coupon ? `Use ${c.coupon.coupon_code}` : 'View offers',
+        ctaLink: '/offers', priority: 60,
+      })
+    }
+  } catch { /* offers are best-effort — never block the hero */ }
+
+  // 3) live weather surge slide (rendered with the rain animation by the app)
+  if (zoneId) {
+    const s = getSurgeForZone(zoneId)
+    if (s.active && s.pct > 0) slides.push({
+      key: 'weather', kind: 'weather', reason: s.reason, pct: s.pct, prob: s.prob ?? null,
+      title: s.reason === 'rain' ? 'Rain incoming' : 'High demand right now',
+      subtitle: s.reason === 'rain'
+        ? `${s.prob != null ? s.prob + '% chance — ' : ''}prices up ${s.pct}%. Book soon.`
+        : `Prices up ${s.pct}%. Book soon.`,
+      emoji: s.reason === 'rain' ? '🌧️' : '⚡', theme: 'rain', ctaLabel: '', ctaLink: '', priority: 70,
+    })
+  }
+
+  slides.sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  res.json(slides)
+})
+// Public proxy for banner background images — streams the object from the media bucket so the phone
+// (which can't reach the localhost-bound MinIO port) loads it through the gateway instead.
+app.get('/api/banner-media/:key(*)', async (req, res) => {
+  try {
+    const { body, contentType } = await getObjectStream(req.params.key)
+    res.set('Content-Type', contentType)
+    res.set('Cache-Control', 'public, max-age=604800')
+    body.pipe(res)
+  } catch { res.status(404).end() }
 })
 // Seller details for the customer tax invoice (from admin settings). Public — GSTIN is on every invoice anyway.
 app.get('/api/invoice-info', async (_q, res) => res.json({
@@ -894,6 +979,49 @@ app.post('/api/admin/surge', adminAuth, requirePerm('pricing.edit'), async (req,
   setManualSurge(scope, pct, minutes)
   res.json({ ok: true, scope: scope === '*' ? 'all' : scope, pct, minutes })
 })
+
+/* ---------- admin: Home hero banners (festival / promo scheduling) ---------- */
+const HB_COLS = ['title', 'subtitle', 'emoji', 'theme', 'cta_label', 'cta_link', 'starts', 'ends', 'zone_id', 'priority', 'status', 'kind', 'image_url']
+const hbDefaults = { subtitle: '', emoji: '', theme: 'purple', cta_label: '', cta_link: '', starts: null, ends: null, zone_id: null, priority: 50, status: 'active', kind: 'festival', image_url: '' }
+// Upload a banner background image → public media bucket. Returns a gateway-relative URL the phone
+// can load (streamed back through /api/banner-media, since MinIO itself isn't reachable off-host).
+app.post('/api/admin/banners/image', adminAuth, requirePerm('campaigns.edit'), upload.single('file'), async (req, res) => {
+  if (!storageConfigured()) return res.status(503).json({ error: 'Image storage is not configured' })
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind || !kind.mime.startsWith('image/')) return res.status(400).json({ error: 'Please upload a JPG, PNG or WebP image' })
+  const key = storageKey('banners', kind.ext)
+  try { await putPublicObject(key, req.file.buffer, kind.mime) }
+  catch (e) { return res.status(502).json({ error: 'Upload failed: ' + e.message }) }
+  res.status(201).json({ url: `/api/banner-media/${key}` })
+})
+const hbClean = (b) => ({ ...b, zone_id: b.zone_id === '' || b.zone_id == null ? null : Number(b.zone_id), starts: b.starts || null, ends: b.ends || null })
+app.get('/api/admin/banners', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM home_banners ORDER BY priority DESC, id DESC')
+  res.json(rows)
+})
+app.post('/api/admin/banners', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
+  const b = hbClean(req.body || {})
+  if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'Title is required' })
+  const vals = HB_COLS.map((c) => (b[c] !== undefined ? b[c] : hbDefaults[c]))
+  const ph = HB_COLS.map((_, i) => `$${i + 1}`).join(',')
+  const { rows } = await pool.query(`INSERT INTO home_banners (${HB_COLS.join(',')}) VALUES (${ph}) RETURNING id`, vals)
+  res.status(201).json({ ok: true, id: rows[0].id })
+})
+app.patch('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
+  const id = Number(req.params.id), b = hbClean(req.body || {})
+  if (!(await pool.query('SELECT 1 FROM home_banners WHERE id=$1', [id])).rowCount) return res.status(404).json({ error: 'Banner not found' })
+  const cols = HB_COLS.filter((c) => b[c] !== undefined)
+  if (cols.length) {
+    const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
+    await pool.query(`UPDATE home_banners SET ${set} WHERE id=$${cols.length + 1}`, [...cols.map((c) => b[c]), id])
+  }
+  res.json({ ok: true })
+})
+app.delete('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
+  await pool.query('DELETE FROM home_banners WHERE id=$1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
 app.post('/api/admin/zones', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
@@ -1241,5 +1369,5 @@ app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
 subscribeEvents(REDIS_URL, 'catalog', (type) => { if (type === 'settings.updated') invalidateSettings() })
 
 init()
-  .then(() => { startWeatherPoller(pool, 20); app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)) })
+  .then(() => { ensurePublicBucket().catch(() => {}); startWeatherPoller(pool, 20); app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)) })
   .catch((e) => { console.error('[catalog] failed to start:', e.message); process.exit(1) });
