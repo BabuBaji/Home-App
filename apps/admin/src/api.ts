@@ -134,6 +134,7 @@ export const addCustomerNote = (id: number, body: string) => req<{ id: number; b
 export const addCustomerAddress = (id: number, body: Record<string, unknown>) => req<any>(`/customers/${id}/addresses`, post('', body))
 export const updateCustomerAddress = (id: number, aid: number, body: Record<string, unknown>) => req<any>(`/customers/${id}/addresses/${aid}`, patch(body))
 export const setCustomerAddressDefault = (id: number, aid: number) => req<any>(`/customers/${id}/addresses/${aid}/default`, post('', {}))
+export const changeCustomerMembership = (id: number, plan: string, cycle = 'monthly') => req<any>(`/customers/${id}/membership`, post('', { plan, cycle }))
 
 /* workers */
 export const fetchWorkers = (q = '', status = 'all', city = 'all') => req<{ stats: any; workers: Worker[] }>(`/workers?q=${encodeURIComponent(q)}&status=${status}&city=${city}`)

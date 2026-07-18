@@ -6,7 +6,7 @@ import {
   User, CalendarPlus, CreditCard, RotateCcw, CheckCircle2, Gift, Plus, Ban, Send, Users2, Clock, TrendingUp, Award,
   Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical,
 } from 'lucide-react'
-import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault } from '../api'
+import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault, changeCustomerMembership } from '../api'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
 
 const SEG_TONE: Record<string, string> = { New: 'blue', Repeat: 'green', Loyal: 'violet', VIP: 'amber', 'At Risk': 'red', Inactive: 'gray' }
@@ -268,7 +268,7 @@ export default function AdminCustomerDetail() {
       {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} c={c} toast={toast} />}
       {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} bookings={m.bookings} c={c} cid={cid} onChanged={load} toast={toast} />}
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} bookings={m.bookings} paymentMethods={d.paymentMethods || []} onAddMoney={() => openMoney('cash')} onSend={() => openMoney('promo')} goto={setTab} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
-      {tab === 'membership' && <MembershipTab membership={d.membership} nav={nav} />}
+      {tab === 'membership' && <MembershipTab membership={d.membership} plans={d.membershipPlans || []} ledger={d.membershipLedger || []} c={c} cid={cid} paymentMethods={d.paymentMethods || []} onChanged={load} toast={toast} nav={nav} />}
       {tab === 'offers' && <OffersTab bookings={m.bookings} />}
       {tab === 'support' && <SupportTab bookings={m.bookings} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} />}
@@ -1127,20 +1127,158 @@ function WalletTab({ c, txns, bookings, paymentMethods, onAddMoney, onSend, goto
     </div>
   )
 }
-function MembershipTab({ membership, nav }: any) {
-  if (!membership?.active) return (
-    <Card title="Membership">
-      <Empty>No active membership. <button className="linkbtn" style={LINK} onClick={() => nav('/membership')}>View plans</button></Empty>
-    </Card>
-  )
+const hasFeat = (p: any, re: RegExp) => (p.features || []).some((f: string) => re.test(f))
+const chk = (on: boolean) => on ? <CheckCircle2 size={16} style={{ color: '#16a34a' }} /> : <span className="muted">—</span>
+
+function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onChanged, toast }: any) {
+  const [busy, setBusy] = useState(false)
+  const [pick, setPick] = useState<string | null>(null)   // plan key pending confirm
+  const active = !!membership?.active
+  const curKey = membership?.plan || null
+  const defPm = (paymentMethods || []).find((p: any) => p.is_primary) || (paymentMethods || [])[0] || null
+
+  const changeTo = async (planKey: string) => {
+    setBusy(true)
+    try { await changeCustomerMembership(cid, planKey); toast('Membership updated'); setPick(null); onChanged() }
+    catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
+  }
+
+  // Compare rows built from real plan fields.
+  const rows: [string, (p: any) => ReactNode][] = [
+    ['Monthly Price', (p) => <strong>{money(p.price)}</strong>],
+    ['Discount on Services', (p) => `${p.discountPct || 0}%`],
+    ['Discounted Orders / mo', (p) => p.discountedOrdersPerMonth || '—'],
+    ['Priority Booking', (p) => chk(!!p.priorityBooking)],
+    ['Priority Support', (p) => chk(hasFeat(p, /support/i))],
+    ['Exclusive Offers', (p) => chk(hasFeat(p, /offer/i))],
+    ['Wallet Cashback', (p) => p.cashbackPct ? `${p.cashbackPct}%` : <span className="muted">—</span>],
+    ['Platform Fee Waiver', (p) => chk(!!p.platformFeeWaiver)],
+  ]
+  const curPlan = plans.find((p: any) => p.key === curKey) || null
+
   return (
-    <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Award size={16} /> Active Membership</span>}>
-      <div className="grid" style={{ gap: 9, fontSize: 14 }}>
-        <Row k="Plan" v={<Badge tone="violet" dot={false}>{membership.planKey}</Badge>} />
-        <Row k="Billing Cycle" v={membership.cycle || '—'} />
-        <Row k="Discounted bookings this month" v={membership.usedThisMonth ?? 0} />
+    <div className="grid" style={{ gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Membership Overview</h2>
+          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Manage customer membership and view plan details</p>
+        </div>
       </div>
-    </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(0, 1.7fr) minmax(260px, 1fr)', gap: 16, alignItems: 'start' }}>
+        {/* Current plan */}
+        <Card title="Current Plan">
+          {active ? (
+            <div className="grid" style={{ gap: 12 }}>
+              <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+                <span style={{ display: 'inline-flex', width: 44, height: 44, borderRadius: 12, background: '#eef0ff', color: '#5b51e8', alignItems: 'center', justifyContent: 'center' }}><Award size={22} /></span>
+                <div>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}><strong style={{ fontSize: 16 }}>{membership.planName || curKey}</strong><Badge tone={(membership.status === 'active') ? 'green' : 'amber'}>{membership.status === 'cancelled' ? 'Cancelling' : 'Active'}</Badge></div>
+                  <div className="muted" style={{ fontSize: 12 }}>{membership.cycle || 'monthly'} · {money(membership.price || 0)}</div>
+                </div>
+              </div>
+              <div className="row" style={{ gap: 10, textAlign: 'center' }}>
+                <div style={{ flex: 1, background: '#f9fafb', borderRadius: 10, padding: '8px 4px' }}><div className="muted" style={{ fontSize: 11 }}>Start Date</div><div style={{ fontSize: 12.5, fontWeight: 600 }}>{shortDate(membership.startedAt)}</div></div>
+                <div style={{ flex: 1, background: '#f9fafb', borderRadius: 10, padding: '8px 4px' }}><div className="muted" style={{ fontSize: 11 }}>Next Renewal</div><div style={{ fontSize: 12.5, fontWeight: 600 }}>{shortDate(membership.renewsAt)}</div></div>
+                <div style={{ flex: 1, background: '#f9fafb', borderRadius: 10, padding: '8px 4px' }}><div className="muted" style={{ fontSize: 11 }}>Auto Renewal</div><div style={{ fontSize: 12.5, fontWeight: 600, color: membership.autoRenew ? '#16a34a' : '#98a2b3' }}>{membership.autoRenew ? 'Enabled' : 'Off'}</div></div>
+              </div>
+              {curPlan && (
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Plan Benefits</div>
+                  <div className="grid" style={{ gap: 5 }}>
+                    {(curPlan.features || []).map((f: string, i: number) => <div key={i} className="row" style={{ gap: 7, alignItems: 'center', fontSize: 13 }}><CheckCircle2 size={14} style={{ color: '#16a34a', flexShrink: 0 }} />{f}</div>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : <Empty>No active membership. Choose a plan from the table to enrol this customer.</Empty>}
+        </Card>
+
+        {/* Compare plans */}
+        <Card title="Choose / Compare Plan">
+          <div className="tablewrap">
+            <table className="tbl" style={{ fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th>Features</th>
+                  {plans.map((p: any) => (
+                    <th key={p.key} style={{ textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>
+                      <div className="row" style={{ gap: 5, justifyContent: 'center', alignItems: 'center' }}>{p.name}{p.popular && <span style={{ background: '#5b51e8', color: '#fff', borderRadius: 8, padding: '1px 6px', fontSize: 10 }}>Popular</span>}</div>
+                      {p.key === curKey && <div style={{ fontSize: 10, color: '#5b51e8', fontWeight: 700 }}>Current</div>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(([label, render]) => (
+                  <tr key={label}>
+                    <td className="muted">{label}</td>
+                    {plans.map((p: any) => <td key={p.key} style={{ textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>{render(p)}</td>)}
+                  </tr>
+                ))}
+                <tr>
+                  <td />
+                  {plans.map((p: any) => (
+                    <td key={p.key} style={{ textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>
+                      {p.key === curKey
+                        ? <span style={{ fontSize: 12, fontWeight: 700, color: '#5b51e8' }}>Current Plan</span>
+                        : <button className="btn line" style={{ padding: '5px 10px', fontSize: 12 }} disabled={busy} onClick={() => setPick(p.key)}>Select</button>}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* Summary */}
+        <div className="grid" style={{ gap: 16, alignContent: 'start' }}>
+          <Card title="Membership Summary">
+            <div className="grid" style={{ gap: 10, fontSize: 13.5 }}>
+              <Row k="Plan Name" v={active ? (membership.planName || curKey) : <span className="muted">None</span>} />
+              <Row k="Status" v={<Badge tone={active ? 'green' : 'gray'}>{active ? 'Active' : 'None'}</Badge>} />
+              <Row k="Member Since" v={active ? shortDate(membership.startedAt) : '—'} />
+              <Row k="Next Renewal" v={active ? shortDate(membership.renewsAt) : '—'} />
+              <Row k="Renewal Amount" v={active ? `${money(membership.price || 0)} / mo` : '—'} />
+              <Row k="Payment Method" v={defPm ? `${defPm.label}${defPm.detail ? ` · ${defPm.detail}` : ''}` : <span className="muted">—</span>} />
+              <Row k="Auto Renewal" v={active ? <Badge tone={membership.autoRenew ? 'green' : 'gray'} dot={false}>{membership.autoRenew ? 'Enabled' : 'Off'}</Badge> : '—'} />
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {/* Transactions */}
+      <Card title="Membership Transactions">
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead><tr><th>Date &amp; Time</th><th>Transaction ID</th><th>Description</th><th>Plan</th><th className="num">Amount</th><th>Status</th></tr></thead>
+            <tbody>
+              {(ledger || []).map((l: any) => {
+                const paid = l.event !== 'cancelled'
+                return (
+                  <tr key={l.id}>
+                    <td><div style={{ fontSize: 13 }}>{shortDate(l.created)}</div><div className="muted" style={{ fontSize: 11.5 }}>{new Date(l.created).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></td>
+                    <td className="muted" style={{ fontSize: 12 }}>{`TXN${String(l.id).padStart(6, '0')}`}</td>
+                    <td><div style={{ fontSize: 13, textTransform: 'capitalize' }}>{l.event}</div><div className="muted" style={{ fontSize: 11.5 }}>{l.detail || ''}</div></td>
+                    <td>{(l.detail || '').split(' · ')[0] || '—'}</td>
+                    <td className="num" style={{ fontWeight: 600 }}>{l.amount ? money(l.amount) : '—'}</td>
+                    <td><Badge tone={paid ? 'green' : 'gray'}>{paid ? 'Paid' : 'Cancelled'}</Badge></td>
+                  </tr>
+                )
+              })}
+              {(!ledger || ledger.length === 0) && <tr><td colSpan={6}><Empty>No membership transactions yet.</Empty></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {pick && (() => { const p = plans.find((x: any) => x.key === pick); return (
+        <Modal title="Change Membership Plan" onClose={() => setPick(null)} footer={<><button className="btn line" onClick={() => setPick(null)}>Cancel</button><button className="btn" disabled={busy} onClick={() => changeTo(pick)}>Confirm &amp; Set Plan</button></>}>
+          <p style={{ margin: 0, fontSize: 14 }}>Set <strong>{c.name || c.phone}</strong>'s membership to <strong>{p?.name}</strong> ({money(p?.price || 0)}/mo)?</p>
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>This replaces any current plan and records a membership transaction. No charge is taken — this is an admin change.</p>
+        </Modal>
+      ) })()}
+    </div>
   )
 }
 function OffersTab({ bookings }: any) {

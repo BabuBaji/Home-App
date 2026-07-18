@@ -960,7 +960,32 @@ app.get('/api/internal/users/:id/membership', internalOnly, async (req, res) => 
   const live = new Date(cur.renews_at).getTime() > Date.now() && cur.status !== 'expired'
   const month = new Date().toISOString().slice(0, 7)
   const u = (await pool.query('SELECT discounted_orders FROM membership_usage WHERE membership_id=$1 AND month=$2', [cur.id, month])).rows[0]
-  res.json({ active: live, planKey: cur.plan, cycle: cur.cycle, usedThisMonth: u?.discounted_orders || 0 })
+  // Full membership shape for the admin customer profile (planName/price/method/dates/autoRenew),
+  // while keeping the fields the catalog pricing engine reads (active/planKey/cycle/usedThisMonth).
+  res.json({ ...membershipOut(cur), active: live, planKey: cur.plan, cycle: cur.cycle, usedThisMonth: u?.discounted_orders || 0 })
+})
+// Membership ledger (subscribe / renew / cancel entries) for the admin profile transactions table.
+app.get('/api/internal/users/:id/membership-ledger', internalOnly, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM membership_ledger WHERE user_id=$1 ORDER BY id DESC LIMIT 100', [Number(req.params.id)])
+  res.json(rows)
+})
+// Admin sets a customer's plan (change/subscribe). Reuses the same pricing + ledger as the app path;
+// no wallet charge (admin action). Method is recorded for the summary.
+app.post('/api/internal/users/:id/membership/set', internalOnly, async (req, res) => {
+  try {
+    const uid = Number(req.params.id)
+    const { plan, cycle = 'monthly', method = 'admin' } = req.body || {}
+    const { planKey, cycleKey, months, amount, name } = await priceFor(plan, cycle)
+    const renewsAt = addMonths(new Date(), months)
+    await pool.query('DELETE FROM memberships WHERE user_id=$1', [uid])
+    const { rows } = await pool.query(
+      `INSERT INTO memberships (user_id, plan, cycle, price, method, status, renews_at) VALUES ($1,$2,$3,$4,$5,'active',$6) RETURNING *`,
+      [uid, planKey, cycleKey, amount, method, renewsAt.toISOString()])
+    const m = rows[0]
+    await pool.query('INSERT INTO membership_ledger (user_id,membership_id,event,detail,amount) VALUES ($1,$2,$3,$4,$5)',
+      [uid, m.id, 'subscribed', `${name} · ${cycleKey} (by admin)`, amount])
+    res.json(membershipOut(m))
+  } catch (e) { res.status(e.code === 400 ? 400 : 500).json({ error: e.message || 'Could not set plan' }) }
 })
 
 // Record a membership-discounted booking: bump this-month usage + lifetime savings on the membership.
