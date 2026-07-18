@@ -14,6 +14,7 @@ import Workers from './screens/Workers'
 import WorkerDetail from './screens/WorkerDetail'
 import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
+import AdminBookingDetail from './screens/AdminBookingDetail'
 import Services from './screens/Services'
 import Campaigns from './screens/Campaigns'
 import MembershipPlans from './screens/MembershipPlans'
@@ -74,6 +75,7 @@ export default function App() {
           <Route path="/workers/:id" element={<Page perm="workers.view"><WorkerDetail /></Page>} />
           <Route path="/worker-wallet" element={<Page perm="wallet.view"><WorkerWallet /></Page>} />
           <Route path="/bookings" element={<Page perm="bookings.view"><Bookings /></Page>} />
+          <Route path="/bookings/:id" element={<Page perm="bookings.view"><AdminBookingDetail /></Page>} />
           <Route path="/cancellations" element={<Page perm="cancellations.view"><Bookings /></Page>} />
           <Route path="/services" element={<Page perm="services.view"><Services /></Page>} />
           <Route path="/campaigns" element={<Page perm="campaigns.view"><Campaigns /></Page>} />

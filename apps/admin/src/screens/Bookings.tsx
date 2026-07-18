@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical, UserX, AlertTriangle } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones } from '../api'
 import type { AdminBooking } from '../types'
@@ -47,6 +47,7 @@ const paymentTone = (p: string): string => {
 
 export default function Bookings() {
   const { admin } = useStore()
+  const nav = useNavigate()
   const toast = useToast()
   const confirm = useConfirm()
   const [rows, setRows] = useState<AdminBooking[] | null>(null)
@@ -229,7 +230,7 @@ export default function Bookings() {
                   <td><Badge tone={paymentTone(r.payment_status)}>{r.payment_status || r.payment || '—'}</Badge></td>
                   <td>
                     <div className="actions">
-                      <button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => openView(r)}><Eye size={16} /></button>
+                      <button className="iconbtn" style={{ width: 30, height: 30 }} title="Open booking" onClick={() => nav(`/bookings/${r.id}`)}><Eye size={16} /></button>
                       <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={() => openMore(r)}><MoreVertical size={16} /></button>
                     </div>
                   </td>
