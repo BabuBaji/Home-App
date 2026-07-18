@@ -177,17 +177,32 @@ export default function AdminCustomerDetail() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <button className="linkbtn" style={{ background: 'none', border: 'none', color: '#5b51e8', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center', width: 'fit-content' }} onClick={() => nav('/customers')}>
-        <ArrowLeft size={16} /> Back to Customers
-      </button>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <button className="linkbtn" style={{ background: 'none', border: 'none', color: '#5b51e8', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center' }} onClick={() => nav('/customers')}>
+          <ArrowLeft size={16} /> Back to Customers
+        </button>
+        <div className="row" style={{ gap: 8, position: 'relative' }}>
+          <button className="btn line" onClick={openEdit}><Pencil size={15} /> Edit Profile</button>
+          <button className="btn line" onClick={(e) => { e.stopPropagation(); setMoreOpen((v) => !v) }}>More Actions <ChevronDown size={15} /></button>
+          {moreOpen && (
+            <div className="menu" style={MENU_BOX} onClick={(e) => e.stopPropagation()}>
+              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); setMoneyOpen(true) }}><Plus size={15} /> Add Money</button>
+              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); setNoteOpen(true) }}><StickyNote size={15} /> Add Note</button>
+              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); nav(`/bookings?q=${encodeURIComponent(c.phone || c.name)}`) }}><Calendar size={15} /> View Bookings</button>
+              <div style={MENU_SEP} />
+              <button className="menu-item" style={{ ...MENU_ITEM, color: '#e5484d' }} onClick={() => { setMoreOpen(false); doBlock() }}><Ban size={15} /> {blocked ? 'Unblock' : 'Block'} Customer</button>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* header + KPI */}
       <div className="card" style={{ padding: 20 }}>
         <div className="row" style={{ gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <Avatar name={c.name || 'Customer'} size={72} />
           <div style={{ flex: 1, minWidth: 240 }}>
-            <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <h2 style={{ margin: 0, fontSize: 22 }}>{c.name || 'Profile Incomplete'}</h2>
+            <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'nowrap' }}>
+              <h2 style={{ margin: 0, fontSize: 22, whiteSpace: 'nowrap' }}>{c.name || 'Profile Incomplete'}</h2>
               <Badge tone={blocked ? 'red' : 'green'}>{blocked ? (c.status || 'Inactive') : 'Active'}</Badge>
             </div>
             <div className="row" style={{ gap: 10, alignItems: 'center', margin: '8px 0', flexWrap: 'wrap' }}>
@@ -205,19 +220,6 @@ export default function AdminCustomerDetail() {
               <span>Customer ID: <strong style={{ color: '#344054' }}>{c.displayId}</strong></span>
               <span>Joined on: <strong style={{ color: '#344054' }}>{dateTime(c.created)}</strong></span>
             </div>
-          </div>
-          <div className="row" style={{ gap: 8, position: 'relative' }}>
-            <button className="btn line" onClick={openEdit}><Pencil size={15} /> Edit Profile</button>
-            <button className="btn line" onClick={(e) => { e.stopPropagation(); setMoreOpen((v) => !v) }}>More Actions <ChevronDown size={15} /></button>
-            {moreOpen && (
-              <div className="menu" style={MENU_BOX} onClick={(e) => e.stopPropagation()}>
-                <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); setMoneyOpen(true) }}><Plus size={15} /> Add Money</button>
-                <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); setNoteOpen(true) }}><StickyNote size={15} /> Add Note</button>
-                <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); nav(`/bookings?q=${encodeURIComponent(c.phone || c.name)}`) }}><Calendar size={15} /> View Bookings</button>
-                <div style={MENU_SEP} />
-                <button className="menu-item" style={{ ...MENU_ITEM, color: '#e5484d' }} onClick={() => { setMoreOpen(false); doBlock() }}><Ban size={15} /> {blocked ? 'Unblock' : 'Block'} Customer</button>
-              </div>
-            )}
           </div>
         </div>
 
