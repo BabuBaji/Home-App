@@ -822,10 +822,25 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
    Service details (redesigned, attractive) + Terms & Conditions
    ============================================================ */
 .content.no-pad { padding: 0 0 18px; }
+/* `.m2 .content` (module-2 scope, further down this file) has the same specificity as
+   `.content.no-pad` but wins on order and puts 18px back on the sides — which stops the
+   hero being edge-to-edge. Out-specify it so the full-bleed hero really is full-bleed. */
+.screen.m2 .content.no-pad { padding: 0 0 18px; }
 .sheet-back.overlay { background: rgba(255,255,255,.92); box-shadow: 0 2px 10px rgba(0,0,0,.18); }
 
-.sd2-hero { position: relative; height: 340px; overflow: hidden; background: #fff; }
-.sd2-img { width: 100%; height: 100%; object-fit: contain; object-position: center; background: #fff; display: block; }
+/* Full-bleed hero: edge-to-edge, no side margin, no radius. Sized in vh so it keeps the
+   same proportion of the screen on every phone, clamped so it never dwarfs small devices
+   or eats a tablet. `cover` (not contain) so the photo fills the frame with no letterbox. */
+/* Full-bleed hero: edge-to-edge, no side margin, no radius. The source photos are PORTRAIT
+   (~1200x1500, ratio .8) in a landscape box, so `cover` always crops vertically — anchor near
+   the top so the worker's head is never cut. Kept short so the name, price, rating and the
+   Schedule / Book Instant bar stay visible without scrolling. */
+.sd2-hero { position: relative; width: 100%; height: 36vh; min-height: 270px; max-height: 330px; overflow: hidden; background: var(--primary-50, #efeafe); border-radius: 0; }
+/* The photos are PORTRAIT (~1200x1500) in a full-width landscape hero. `contain` shows the
+   WHOLE frame so nothing is ever cut, and a blurred, scaled copy of the same photo fills the
+   space either side so the hero still reads edge-to-edge instead of as bars. */
+.sd2-hero-bg { position: absolute; inset: 0; background-size: cover; background-position: center; filter: blur(20px) saturate(1.15); transform: scale(1.2); }
+.sd2-img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; object-position: center; display: block; }
 .sd2-emoji { display: grid; place-items: center; font-size: 90px; background: linear-gradient(135deg, #d5f3f1, #eafbfa); }
 .sd2-iconbtn { position: absolute; top: 16px; width: 40px; height: 40px; border-radius: 50%; background: rgba(38,38,38,.55); color: #fff; font-size: 19px; line-height: 1; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.2); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .sd2-iconbtn.back { left: 16px; }
@@ -833,21 +848,33 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 
 .sd2-body { padding: 18px; }
 /* name + price + rating (below the image, on white) */
-.sd2-name { font-size: 22px; font-weight: 500; letter-spacing: -.4px; color: var(--ink); text-shadow: none; line-height: 1.22; }
+.sd2-name { font-size: 27px; font-weight: 700; letter-spacing: -.6px; color: var(--ink); text-shadow: none; line-height: 1.18; }
+/* Name left, rating right, on one row. min-width:0 lets a long name wrap instead of
+   squeezing the rating off the edge. */
+.sd2-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sd2-title-row .sd2-name { min-width: 0; }
+.sd2-rate-inline { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 14.5px; color: var(--ink); }
+.sd2-rate-inline b { font-weight: 700; }
+.sd2-rate-inline span { color: var(--muted); }
 .sd2-price-row { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
-.sd2-price { font-size: 22px; font-weight: 500; color: var(--ink); }
+.sd2-price { font-size: 22px; font-weight: 700; color: var(--ink); }
 .sd2-orig { font-size: 16px; color: var(--muted); text-decoration: line-through; }
 .sd2-off { font-size: 12px; font-weight: 700; color: #15803d; background: #dcfce7; padding: 3px 9px; border-radius: 50px; }
 .sd2-rate-row { display: flex; align-items: center; gap: 8px; margin: 16px 0; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .sd2-star { color: #f5a623; font-size: 16px; }
 .sd2-rate-val { font-weight: 500; color: var(--ink); font-size: 15px; }
 .sd2-rate-count { color: var(--muted); font-size: 15px; }
-.sd2-headline { font-size: 16px; font-weight: 500; color: var(--ink); letter-spacing: -.1px; margin: 4px 0 8px; line-height: 1.35; }
+.sd2-headline { font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: -.3px; margin: 4px 0 8px; line-height: 1.3; }
 .sd2-desc { font-size: 14.5px; color: var(--muted); line-height: 1.55; margin-bottom: 4px; }
+
+/* Duration + Additional information rows */
+.sd2-term { margin-top: 12px; }
+.sd2-term b { display: block; font-size: 14.5px; color: var(--ink); margin-bottom: 3px; }
+.sd2-term p { font-size: 14px; color: var(--muted); line-height: 1.5; }
 
 /* flat includes / does-not-include sections (Pronto/UC style) */
 .incl-sec { margin-top: 24px; }
-.incl-sec .incl-head { font-size: 16px; font-weight: 500; color: var(--ink); margin: 0 0 12px; letter-spacing: -.1px; }
+.incl-sec .incl-head { font-size: 19px; font-weight: 700; color: var(--ink); margin: 0 0 14px; letter-spacing: -.3px; }
 
 .info-card { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 18px; margin-bottom: 14px; box-shadow: var(--shadow-sm); }
 .info-card .incl-head { margin: 0 0 14px; display: flex; align-items: center; gap: 9px; }
