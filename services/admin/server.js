@@ -1235,7 +1235,10 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
 // changed which fields, so a name/email/city/status change is always traceable.
 app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
-    const body = req.body || {}
+    const body = { ...(req.body || {}) }
+    // Phone is the customer's login identity — never editable from the admin profile edit (changing it
+    // would silently reassign the account). It's dropped here regardless of what the caller sends.
+    delete body.phone
     const result = await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, body)
     const fields = Object.keys(body)
     await logAudit(req.admin?.name || 'admin', 'customer.edit', `#${req.params.id}${fields.length ? ` (${fields.join(', ')})` : ''}`)
