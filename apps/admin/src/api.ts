@@ -130,6 +130,7 @@ export const updateCustomer = (id: number, body: Record<string, unknown>) => req
 // May execute immediately or be queued for approval — returns { executed | pending, ... } (+ balance when executed).
 export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<ActionResult & { balance?: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
 export const setWalletStatus = (id: number, status: 'active' | 'frozen' | 'blocked' | 'inactive') => req<{ ok: boolean; status: string }>(`/customers/${id}/wallet/status`, post('', { status }))
+export const addCustomerNote = (id: number, body: string) => req<{ id: number; body: string; author?: string; created: string }>(`/customers/${id}/notes`, post('', { body }))
 
 /* workers */
 export const fetchWorkers = (q = '', status = 'all', city = 'all') => req<{ stats: any; workers: Worker[] }>(`/workers?q=${encodeURIComponent(q)}&status=${status}&city=${city}`)

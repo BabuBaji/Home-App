@@ -1056,29 +1056,80 @@ app.get('/api/admin/alerts', admin, async (_q, res) => {
 })
 
 /* ---------- customers (proxied to the auth service) ---------- */
+// Derived customer segment — a classification, NOT a stored field. Rules use only real signals
+// (booking count, recency, the customer's rating, account status) and mirror the campaign engine's
+// thresholds where they overlap (vip = 10+ orders, at-risk/winback = 30+ days idle) so the two agree.
+function customerSegment({ bookings, rating, status, lastBooking, now }) {
+  if (status && status !== 'active') return 'Inactive'          // blocked / inactive account
+  if (!bookings) return 'New'                                   // no orders yet
+  const days = lastBooking ? (now - Date.parse(lastBooking)) / 86400000 : Infinity
+  if ((rating || 0) > 0 && rating < 3.5) return 'At Risk'       // rated us poorly
+  if (days > 30) return 'At Risk'                               // dormant past the winback window
+  if (bookings >= 10) return 'VIP'
+  if (bookings >= 5) return 'Loyal'
+  if (bookings === 1) return 'New'                              // one order — still finding their feet
+  return 'Repeat'                                               // 2–4 orders, recent
+}
+
 app.get('/api/admin/customers', admin, async (req, res) => {
-  const [customersAll, bookings] = await Promise.all([
+  const [customersAll, bookings, zones] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.catalog, '/api/internal/zones', []),
   ])
   // Customers are only city-tagged (no zone), so a scoped admin sees them by city (the coarse key).
   const customers = customersAll.filter((c) => inScope(req.admin?.scope, { city: c.city }))
-  const cnt = {}, spend = {}
+  const zoneName = {}; for (const z of zones) zoneName[z.id] = z.name
+  // Per-customer roll-up from the full booking list: count, paid/completed spend, most-recent booking
+  // (drives Last Booking + the recency segment), and the zone of that latest booking (drives Location).
+  const cnt = {}, spend = {}, last = {}, lastZone = {}
   for (const b of bookings) {
-    cnt[b.user_id] = (cnt[b.user_id] || 0) + 1
-    if (b.payment_status === 'paid' || b.status === 'completed') spend[b.user_id] = (spend[b.user_id] || 0) + (b.total || 0)
+    const u = b.user_id
+    cnt[u] = (cnt[u] || 0) + 1
+    if (b.payment_status === 'paid' || b.status === 'completed') spend[u] = (spend[u] || 0) + (b.total || 0)
+    if (!last[u] || Date.parse(b.created) > Date.parse(last[u])) { last[u] = b.created; lastZone[u] = b.zone_id || null }
   }
-  // Customers screen reads bookings/spend/joined per row (auth returns `created`, not `joined`).
-  res.json(customers.map((c) => ({ ...c, bookings: cnt[c.id] || 0, spend: spend[c.id] || 0, joined: c.created })))
+  const now = Date.now()
+  res.json(customers.map((c) => {
+    const bookingsN = cnt[c.id] || 0
+    const lastBooking = last[c.id] || null
+    return {
+      ...c,
+      bookings: bookingsN,
+      spend: spend[c.id] || 0,
+      joined: c.created,                 // auth returns `created`, the screen reads `joined`
+      lastBooking,                       // ISO of the customer's most recent booking (null if none)
+      zoneId: lastZone[c.id] || null,
+      zone: lastZone[c.id] ? (zoneName[lastZone[c.id]] || null) : null,
+      // A brand-new customer has no meaningful rating yet — show 0 rather than the 5.0 seed default.
+      rating: bookingsN > 0 ? c.rating : 0,
+      segment: customerSegment({ bookings: bookingsN, rating: c.rating, status: c.status, lastBooking, now }),
+    }
+  }))
+})
+// Add Customer (admin). Creates the user in auth by phone (find-or-create is idempotent), then applies
+// the name/email/city. Returns the created customer id.
+app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (req, res) => {
+  try {
+    const phone = String(req.body?.phone || '').trim()
+    if (phone.length < 6) return res.status(400).json({ error: 'A valid mobile number is required' })
+    const { user } = await internalPost(U.auth, '/api/internal/users/find-or-create', { phone })
+    const patch = {}
+    for (const k of ['name', 'email', 'city']) if (req.body?.[k] != null) patch[k] = req.body[k]
+    if (Object.keys(patch).length) await internalPatch(U.auth, `/api/internal/users/${user.id}`, patch)
+    await logAudit(req.admin?.name || 'admin', 'customer.create', String(user.id))
+    res.json({ ok: true, id: user.id })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 // Customer detail (View modal): { customer, addresses, bookings, transactions }.
 app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const id = Number(req.params.id)
-  const [u, addresses, allBookings, transactions] = await Promise.all([
+  const [u, addresses, allBookings, transactions, notes] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
     tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.auth, `/api/internal/users/${id}/transactions`, []),
+    tryGet(U.auth, `/api/internal/users/${id}/notes`, []),
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
@@ -1087,7 +1138,14 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   if (!inScope(req.admin?.scope, { city: customer.city })) return res.status(404).json({ error: 'Not found' })
   const bookings = allBookings.filter((b) => b.user_id === id)
     .map((b) => ({ id: b.id, ref: b.ref, service: (b.items || []).map((i) => i.name).join(', '), total: b.total, status: b.status, created: b.created }))
-  res.json({ customer, addresses, bookings, transactions })
+  res.json({ customer, addresses, bookings, transactions, notes })
+})
+// Pin an internal ops note to a customer.
+app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'), async (req, res) => {
+  try {
+    const row = await internalPost(U.auth, `/api/internal/users/${req.params.id}/notes`, { body: req.body?.body, author: req.admin?.name || 'admin' })
+    res.json(row)
+  } catch (e) { res.status(400).json({ error: e.message }) }
 })
 app.patch('/api/admin/customers/:id', admin, async (req, res) => {
   try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }

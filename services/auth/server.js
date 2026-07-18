@@ -184,6 +184,12 @@ async function init() {
     `UPDATE transactions SET kind='REFUND' WHERE kind IS NULL AND title LIKE 'Refund %'`,
     `UPDATE transactions SET kind='ADD_MONEY' WHERE kind IS NULL AND title='Added to wallet'`,
     `UPDATE transactions SET kind='WELCOME_BONUS' WHERE kind IS NULL AND title='Welcome bonus'`,
+    // Internal ops notes an admin pins to a customer (from the Customers screen "Add Note" action).
+    `CREATE TABLE IF NOT EXISTS customer_notes (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+      body TEXT NOT NULL, author TEXT, created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_custnote_user ON customer_notes(user_id)`,
   ])
   console.log('[auth] Postgres ready (users, addresses, transactions, auth_identities)')
 }
@@ -959,6 +965,19 @@ app.post('/api/internal/users/:id/membership-usage', internalOnly, async (req, r
   res.json({ ok: true })
 })
 app.get('/api/internal/users/:id/addresses', internalOnly, async (req, res) => res.json(await getAddresses(Number(req.params.id))))
+// Admin-pinned customer notes.
+app.get('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM customer_notes WHERE user_id=$1 ORDER BY id DESC LIMIT 100', [Number(req.params.id)])
+  res.json(rows)
+})
+app.post('/api/internal/users/:id/notes', internalOnly, async (req, res) => {
+  const body = String(req.body?.body || '').trim()
+  if (!body) return res.status(400).json({ error: 'Note is empty' })
+  const { rows } = await pool.query(
+    'INSERT INTO customer_notes (user_id, body, author) VALUES ($1,$2,$3) RETURNING *',
+    [Number(req.params.id), body, req.body?.author || null])
+  res.json(rows[0])
+})
 // Full wallet ledger for a user (admin view).
 app.get('/api/internal/users/:id/transactions', internalOnly, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200', [Number(req.params.id)])

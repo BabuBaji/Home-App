@@ -74,6 +74,8 @@ export interface Customer {
   id: number; name: string; phone?: string; email?: string; city?: string; country?: string
   wallet: number; rating: number; status: string; bookings: number; spend: number
   lastOrder?: string | null; joined: string
+  // Derived server-side from the customer's bookings (see admin BFF customerSegment).
+  lastBooking?: string | null; zoneId?: number | null; zone?: string | null; segment?: string
 }
 
 export interface Worker {
