@@ -3,25 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Phone, MessageCircle, CalendarClock, RefreshCw, XCircle,
   User, HardHat, Sparkles, Clock, MapPin, IndianRupee, ShieldCheck, KeyRound, Image as ImageIcon,
-  LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle,
+  LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle, CalendarCheck, PlayCircle, PauseCircle, Flag, HelpCircle,
 } from 'lucide-react'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
 import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, updateBooking, type Zone } from '../api'
 
-// The full operational lifecycle we display in the journey (some steps are derived, not yet tracked).
-const JOURNEY = [
-  { key: 'created', label: 'Booking Created' },
-  { key: 'paid', label: 'Payment Completed' },
-  { key: 'worker_assigned', label: 'Worker Assigned' },
-  { key: 'on_the_way', label: 'On the Way' },
-  { key: 'arrived', label: 'Arrived' },
-  { key: 'otp', label: 'OTP Verified' },
-  { key: 'in_progress', label: 'Service Started' },
-  { key: 'completed', label: 'Service Completed' },
-  { key: 'closed', label: 'Closed' },
-]
 const REACHED: Record<string, number> = { confirmed: 1, worker_assigned: 2, on_the_way: 3, arrived: 4, in_progress: 6, completed: 8, cancelled: 8 }
-const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
+// Job-timeline lifecycle: current level per status (steps below it are done, the matching one is live).
+const CUR_LV: Record<string, number> = { confirmed: 3, worker_assigned: 5, on_the_way: 5, arrived: 7, in_progress: 8, completed: 99, cancelled: -1 }
+const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
+const timeOnly = (v?: string | null) => (v ? new Date(v).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—')
 
 function Row({ label, value, strong }: { label: string; value: ReactNode; strong?: boolean }) {
   return (
@@ -91,6 +82,9 @@ export default function AdminBookingDetail() {
   const margin = Math.max(0, (b.total || 0) - (b.worker_comp || 0))
   const marginPct = b.total ? Math.round((margin / b.total) * 1000) / 10 : 0
   const reached = REACHED[b.status] ?? 0
+  const payMethod = b.payment === 'wallet' ? 'HomeHelp Wallet' : b.payment === 'razorpay' || b.payment === 'card' || b.payment === 'upi' ? 'Razorpay' : b.payment || '—'
+  const durMin = b.started_at && b.completed_at ? Math.max(0, Math.round((new Date(b.completed_at).getTime() - new Date(b.started_at).getTime()) / 60000)) : 0
+  const totalDuration = durMin ? `${durMin}m` : (b.duration || items[0]?.durationLabel || '—')
 
   const openReassign = () => { setAssignTo(''); setModal('reassign'); if (!workerList.length) fetchWorkers().then((r) => setWorkerList((r.workers || []).map((w: any) => ({ id: w.id, name: w.name })))).catch(() => {}) }
   const doUpdate = (body: Record<string, unknown>, msg: string) => {
@@ -105,6 +99,33 @@ export default function AdminBookingDetail() {
   const tel = (p: string) => p && window.open(`tel:${p}`)
   const custPos = parseLatLng({ lat: b.cust_lat, lng: b.cust_lng })
   const workerPos = parseLatLng({ lat: b.worker_lat, lng: b.worker_lng })
+
+  // ---------- Job-timeline steps ----------
+  const curLv = CUR_LV[b.status] ?? 3
+  type Step = { icon: ReactNode; label: string; desc: string; at: string | null; lv: number; extra?: string; optional?: boolean }
+  const steps: Step[] = [
+    { icon: <CalendarCheck size={15} />, label: 'Booking Created', desc: 'Booking created by customer from mobile app', at: b.created, lv: 1 },
+    { icon: <IndianRupee size={15} />, label: 'Payment Completed', desc: `Payment of ${money(b.total)} completed via ${payMethod}`, at: b.created, lv: 2 },
+    { icon: <User size={15} />, label: 'Worker Assigned', desc: b.pro_name ? `${b.pro_name} assigned by Auto Dispatch` : 'Awaiting worker assignment', at: null, lv: 3 },
+    { icon: <User size={15} />, label: 'Worker Accepted', desc: 'Worker accepted the job', at: null, lv: 4 },
+    { icon: <MapPin size={15} />, label: 'On the Way', desc: 'Worker started from current location', at: null, lv: 5 },
+    { icon: <MapPin size={15} />, label: 'Arrived at Location', desc: 'Worker reached customer location', at: null, lv: 6 },
+    { icon: <KeyRound size={15} />, label: 'OTP Verified (Start)', desc: 'Start OTP verified by customer', at: b.started_at, lv: 7, extra: b.service_otp ? `OTP: ${b.service_otp}` : '' },
+    { icon: <PlayCircle size={15} />, label: 'Service Started', desc: 'Service in progress', at: b.started_at, lv: 8, extra: b.duration ? `Duration: ${b.duration}` : '' },
+    { icon: <PauseCircle size={15} />, label: 'Service Paused', desc: 'If worker pauses the service', at: null, lv: 9, optional: true },
+    { icon: <PlayCircle size={15} />, label: 'Service Resumed', desc: 'If worker resumes the service', at: null, lv: 10, optional: true },
+    { icon: <KeyRound size={15} />, label: 'OTP Verified (Completion)', desc: 'Completion OTP verified by customer', at: null, lv: 11 },
+    { icon: <CheckCircle2 size={15} />, label: 'Service Completed', desc: 'Worker marked the service as completed', at: b.completed_at, lv: 12 },
+    { icon: <CheckCircle2 size={15} />, label: 'Customer Confirmed', desc: 'Customer confirmed the service & rated', at: b.rating ? b.completed_at : null, lv: 13 },
+    { icon: <Flag size={15} />, label: 'Closed', desc: 'Booking closed successfully', at: null, lv: 14 },
+  ]
+  const stepState = (s: Step): 'done' | 'current' | 'pending' => {
+    if (b.status === 'cancelled') return s.lv <= 2 ? 'done' : 'pending'
+    if (s.optional) return 'pending'
+    if (s.lv < curLv) return 'done'
+    if (s.lv === curLv && derived.active) return 'current'
+    return 'pending'
+  }
 
   return (
     <div className="grid" style={{ gap: 16 }}>
@@ -125,7 +146,7 @@ export default function AdminBookingDetail() {
             <button className="btn line sm" style={{ color: 'var(--red)' }} onClick={cancel}><XCircle size={14} /> Cancel</button>
           </div>
         </div>
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{svcName} · {b.type === 'instant' ? 'Instant' : 'Scheduled'} · via {b.type === 'instant' ? 'Instant' : 'Customer App'}</div>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{svcName} · {b.date ? shortDate(b.date) : shortDate(b.created)}{b.time ? `, ${b.time}` : ''}</div>
       </div>
 
       {/* tabs */}
@@ -137,106 +158,75 @@ export default function AdminBookingDetail() {
         ))}
       </div>
 
-      {(tab === 'overview' || tab === 'timeline') && (
+      {tab === 'overview' && (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-          {tab === 'overview' && <>
-            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><CalendarClock size={16} /> Booking Summary</span>}>
-              <Row label="Booking ID" value={<b>{b.ref}</b>} />
-              <Row label="Service" value={svcName} />
-              <Row label="Type" value={b.type === 'instant' ? 'Instant' : 'Scheduled'} />
-              <Row label="Date" value={b.date ? shortDate(b.date) : shortDate(b.created)} />
-              <Row label="Time Slot" value={b.time || '—'} />
-              <Row label="Duration" value={b.duration || (items[0]?.durationLabel) || '—'} />
-              <Row label="Zone" value={derived.zone?.name || (b.zone_id ? `Zone ${b.zone_id}` : '—')} />
-              <Row label="Amount Paid" value={<b>{money(b.total)}</b>} strong />
-              <Row label="Created" value={fmtDateTime(b.created)} />
-            </Card>
+          {summaryCard()}{customerCard()}{workerCard()}{serviceCard()}
+          {journeyCard()}{trackingCard()}{paymentCard()}{slaCard()}{otpCard()}{evidenceCard()}{notesCard()}
+        </div>
+      )}
 
-            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><User size={16} /> Customer Details</span>} right={cust && <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => nav(`/customers/${b.user_id}`)}>View Customer</button>}>
-              <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
-                <Avatar name={b.customer} size={40} />
-                <div><div style={{ fontWeight: 700 }}>{b.customer}</div><div className="muted" style={{ fontSize: 12 }}>{custBookings} booking{custBookings === 1 ? '' : 's'}{custRating ? ` · ★ ${custRating}` : ''}</div></div>
-              </div>
-              <Row label="Phone" value={custPhone || 'Not available'} />
-              <Row label="Email" value={custEmail || 'Not available'} />
-              <Row label="Address" value={<span style={{ maxWidth: 200, display: 'inline-block' }}>{b.address || '—'}</span>} />
-              <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                <button className="btn line" style={{ flex: 1, fontSize: 12 }} disabled={!custPhone} onClick={() => tel(custPhone)}><Phone size={13} /> Call</button>
-                <button className="btn line" style={{ flex: 1, fontSize: 12 }} disabled={!custPhone} onClick={() => custPhone && window.open(`https://wa.me/${custPhone.replace(/\D/g, '')}`)}><MessageCircle size={13} /> WhatsApp</button>
-              </div>
-            </Card>
-
-            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><HardHat size={16} /> Worker Assignment</span>}>
-              {b.pro_name ? <>
-                <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
-                  <Avatar name={b.pro_name} size={40} />
-                  <div><div style={{ fontWeight: 700 }}>{b.pro_name}</div><div className="muted" style={{ fontSize: 12 }}>{workerRating ? `★ ${workerRating}` : ''}{workerJobs ? ` · ${workerJobs} jobs` : ''}</div></div>
+      {tab === 'timeline' && (
+        <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2.1fr) minmax(280px, 1fr)', gap: 16, alignItems: 'start' }}>
+          <div className="grid" style={{ gap: 16 }}>
+            {/* KPI strip */}
+            <div className="stat-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
+              {[
+                { ic: <CalendarCheck size={18} />, tint: '#5b51e8', label: 'Total Duration', val: totalDuration },
+                { ic: <PlayCircle size={18} />, tint: '#2e90fa', label: 'Actual Start', val: timeOnly(b.started_at) },
+                { ic: <CheckCircle2 size={18} />, tint: '#16a34a', label: 'Completed At', val: timeOnly(b.completed_at) },
+                { ic: <CheckCircle2 size={18} />, tint: '#f59e0b', label: 'Customer Confirmed', val: b.rating ? timeOnly(b.completed_at) : '—' },
+                { ic: <Flag size={18} />, tint: b.status === 'completed' ? '#16a34a' : '#98a2b3', label: 'Status', val: b.status },
+              ].map((k) => (
+                <div key={k.label} className="card" style={{ padding: '12px 14px' }}>
+                  <div className="row" style={{ gap: 8, alignItems: 'center', color: k.tint }}>{k.ic}<span className="muted" style={{ fontSize: 12, color: 'var(--muted)' }}>{k.label}</span></div>
+                  <div style={{ fontSize: 17, fontWeight: 700, marginTop: 4, textTransform: 'capitalize' }}>{k.val}</div>
                 </div>
-                <Row label="Worker ID" value={b.worker_id ? `WRK-${b.worker_id}` : '—'} />
-                <Row label="Current Status" value={<Badge>{b.status}</Badge>} />
-                <Row label="Shift" value="Not tracked yet" />
-                <Row label="Distance / ETA" value="Not tracked yet" />
-                <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                  <button className="btn line" style={{ flex: 1, fontSize: 12 }} disabled={!workerPhone} onClick={() => tel(workerPhone)}><Phone size={13} /> Call</button>
-                  <button className="btn line" style={{ flex: 1, fontSize: 12 }} onClick={() => nav(`/workers/${b.worker_id}`)}><User size={13} /> View</button>
-                  <button className="btn line" style={{ flex: 1, fontSize: 12 }} onClick={openReassign}><RefreshCw size={13} /> Reassign</button>
-                </div>
-              </> : <div style={{ padding: '10px 0' }}><Badge tone="red" dot={false}>Unassigned</Badge><div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>No worker assigned yet.</div><button className="btn sm" style={{ marginTop: 10 }} onClick={openReassign}>Assign worker</button></div>}
-            </Card>
+              ))}
+            </div>
 
-            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Sparkles size={16} /> Service Details</span>}>
-              <Row label="Service" value={<b>{svcName}</b>} />
-              <Row label="Duration" value={b.duration || items[0]?.durationLabel || '—'} />
-              <Row label="Items" value={items.length || 1} />
-              <Row label="Frequency" value={b.freq || 'One-time'} />
-              {b.note && <div style={{ marginTop: 8 }}><div className="muted" style={{ fontSize: 12 }}>Customer Instructions</div><div style={{ fontSize: 13, marginTop: 3 }}>“{b.note}”</div></div>}
-            </Card>
-
-            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={16} /> Booking Journey</span>}>
-              <div style={{ display: 'grid', gap: 2 }}>
-                {JOURNEY.map((step, i) => {
-                  const done = b.status === 'cancelled' ? step.key === 'created' || step.key === 'paid' : i <= reached
-                  const current = i === reached && derived.active
+            {/* vertical timeline */}
+            <Card title="Job Timeline">
+              <div style={{ position: 'relative' }}>
+                {steps.map((s, i) => {
+                  const st = stepState(s)
+                  const dotBg = st === 'done' ? '#16a34a' : st === 'current' ? '#5b51e8' : '#fff'
+                  const dotBd = st === 'done' ? '#16a34a' : st === 'current' ? '#5b51e8' : '#d5d7e3'
                   return (
-                    <div key={step.key} className="row" style={{ gap: 10, alignItems: 'center', padding: '5px 0', opacity: done || current ? 1 : 0.45 }}>
-                      <span style={{ width: 18, height: 18, borderRadius: 50, display: 'grid', placeItems: 'center', background: current ? '#eef0ff' : done ? '#e7f7ee' : '#eeeef5', color: current ? '#5b51e8' : done ? '#0f8a4d' : '#9aa0ad', flex: 'none' }}>{done ? <CheckCircle2 size={12} /> : current ? '•' : ''}</span>
-                      <span style={{ fontSize: 13, fontWeight: current ? 700 : 500 }}>{step.label}</span>
-                      {current && <Badge tone="violet" dot={false}>Current</Badge>}
+                    <div key={i} className="row" style={{ gap: 12, alignItems: 'stretch' }}>
+                      {/* rail */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 24, flex: 'none' }}>
+                        <span style={{ width: 18, height: 18, borderRadius: 50, background: dotBg, border: `2px solid ${dotBd}`, display: 'grid', placeItems: 'center', color: '#fff', marginTop: 14, flex: 'none' }}>{st === 'done' && <CheckCircle2 size={11} />}</span>
+                        {i < steps.length - 1 && <span style={{ flex: 1, width: 2, background: st === 'done' ? '#bfe6cd' : '#eceaf6', minHeight: 20 }} />}
+                      </div>
+                      {/* body */}
+                      <div className="row" style={{ flex: 1, gap: 10, alignItems: 'center', padding: '10px 0', borderBottom: i < steps.length - 1 ? '1px solid var(--line-2,#f4f4fa)' : 'none', opacity: st === 'pending' ? 0.5 : 1 }}>
+                        <span style={{ width: 32, height: 32, borderRadius: 9, background: st === 'current' ? '#eef0ff' : '#f4f4fa', color: st === 'current' ? '#5b51e8' : '#6b7090', display: 'grid', placeItems: 'center', flex: 'none' }}>{s.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13.5, color: st === 'current' ? '#5b51e8' : 'var(--ink)' }}>{s.label}</div>
+                          <div className="muted" style={{ fontSize: 12.5 }}>{s.desc}</div>
+                        </div>
+                        <div style={{ textAlign: 'right', flex: 'none' }}>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.at ? fmtDateTime(s.at) : '—'}</div>
+                          {s.extra && <div style={{ fontSize: 12, fontWeight: 700, color: st === 'current' ? '#5b51e8' : '#0f8a4d', marginTop: 2 }}>{s.extra}</div>}
+                        </div>
+                      </div>
                     </div>
                   )
                 })}
-                {b.status === 'cancelled' && <div className="row" style={{ gap: 10, padding: '5px 0' }}><span style={{ width: 18, height: 18, borderRadius: 50, background: '#fdecec', color: '#d92d20', display: 'grid', placeItems: 'center', flex: 'none' }}><XCircle size={12} /></span><span style={{ fontSize: 13, fontWeight: 700, color: '#d92d20' }}>Cancelled{b.cancel_reason ? ` · ${b.cancel_reason}` : ''}</span></div>}
+              </div>
+              {/* legend */}
+              <div className="row" style={{ gap: 16, marginTop: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--muted)' }}>
+                {[['#16a34a', 'Completed'], ['#5b51e8', 'In Progress'], ['#d5d7e3', 'Pending'], ['#f04438', 'Cancelled'], ['#7c3aed', 'Rescheduled']].map(([c, l]) => (
+                  <span key={l} className="row" style={{ gap: 6, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: c, display: 'inline-block' }} />{l}</span>
+                ))}
               </div>
             </Card>
+          </div>
 
-            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><MapPin size={16} /> Live Job Tracking</span>}>
-              {workerPos || custPos ? <MiniMap lat={(workerPos || custPos)!.lat} lng={(workerPos || custPos)!.lng} label={b.address || ''} /> : <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No live location for this booking yet.</div>}
-            </Card>
-
-            {/* Payment + SLA also on overview */}
-            {paymentCard()}
-            {slaCard()}
-            {otpCard()}
-            {evidenceCard()}
-            {notesCard()}
-          </>}
-
-          {tab === 'timeline' && <Card title="Job Timeline">
-            <div style={{ display: 'grid', gap: 2 }}>
-              {JOURNEY.map((step, i) => {
-                const done = b.status === 'cancelled' ? i < 2 : i <= reached
-                const current = i === reached && derived.active
-                const at = step.key === 'created' ? b.created : step.key === 'in_progress' ? b.started_at : step.key === 'completed' ? b.completed_at : null
-                return (
-                  <div key={step.key} className="row" style={{ gap: 10, alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)', opacity: done || current ? 1 : 0.45 }}>
-                    <span style={{ width: 20, height: 20, borderRadius: 50, display: 'grid', placeItems: 'center', background: current ? '#eef0ff' : done ? '#e7f7ee' : '#eeeef5', color: current ? '#5b51e8' : done ? '#0f8a4d' : '#9aa0ad', flex: 'none' }}>{done ? <CheckCircle2 size={13} /> : ''}</span>
-                    <span style={{ fontSize: 13, fontWeight: current ? 700 : 500, flex: 1 }}>{step.label}{current && ' · Current'}</span>
-                    <span className="muted" style={{ fontSize: 12 }}>{at ? fmtDateTime(at) : ''}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </Card>}
+          {/* sidebar */}
+          <div className="grid" style={{ gap: 16 }}>
+            {summaryCard()}{customerCard()}{workerCard()}{keyInfoCard()}{needHelpCard()}
+          </div>
         </div>
       )}
 
@@ -261,7 +251,116 @@ export default function AdminBookingDetail() {
     </div>
   )
 
-  // ---- cards reused across tabs ----
+  // ---------- reusable cards ----------
+  function summaryCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><CalendarClock size={16} /> Booking Summary</span>}>
+        <Row label="Booking ID" value={<b>{b.ref}</b>} />
+        <Row label="Service" value={svcName} />
+        <Row label="Date" value={b.date ? shortDate(b.date) : shortDate(b.created)} />
+        <Row label="Time Slot" value={b.time || '—'} />
+        <Row label="Duration" value={b.duration || items[0]?.durationLabel || '—'} />
+        <Row label="Zone" value={derived!.zone?.name || (b.zone_id ? `Zone ${b.zone_id}` : '—')} />
+        <Row label="Amount Paid" value={<b>{money(b.total)}</b>} strong />
+        <Row label="Booking Source" value={b.type === 'instant' ? 'Instant · Customer App' : 'Customer App'} />
+      </Card>
+    )
+  }
+  function customerCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><User size={16} /> Customer Details</span>} right={cust && <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => nav(`/customers/${b.user_id}`)}>View Customer</button>}>
+        <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
+          <Avatar name={b.customer} size={40} />
+          <div><div style={{ fontWeight: 700 }}>{b.customer}{custBookings >= 3 && <Badge tone="amber" dot={false}>Loyal</Badge>}</div><div className="muted" style={{ fontSize: 12 }}>{custBookings} booking{custBookings === 1 ? '' : 's'}{custRating ? ` · ★ ${custRating}` : ''}</div></div>
+        </div>
+        <Row label="Phone" value={custPhone || 'Not available'} />
+        <Row label="Email" value={custEmail || 'Not available'} />
+        <Row label="Address" value={<span style={{ maxWidth: 200, display: 'inline-block' }}>{b.address || '—'}</span>} />
+        <div className="row" style={{ gap: 8, marginTop: 8 }}>
+          <button className="btn line" style={{ flex: 1, fontSize: 12 }} disabled={!custPhone} onClick={() => tel(custPhone)}><Phone size={13} /> Call</button>
+          <button className="btn line" style={{ flex: 1, fontSize: 12 }} disabled={!custPhone} onClick={() => custPhone && window.open(`https://wa.me/${custPhone.replace(/\D/g, '')}`)}><MessageCircle size={13} /> WhatsApp</button>
+        </div>
+      </Card>
+    )
+  }
+  function workerCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><HardHat size={16} /> Worker Details</span>} right={b.worker_id ? <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => nav(`/workers/${b.worker_id}`)}>View Worker</button> : undefined}>
+        {b.pro_name ? <>
+          <div className="row" style={{ gap: 10, alignItems: 'center', marginBottom: 8 }}>
+            <Avatar name={b.pro_name} size={40} />
+            <div style={{ flex: 1 }}><div style={{ fontWeight: 700 }}>{b.pro_name}</div><div className="muted" style={{ fontSize: 12 }}>{workerPhone || 'Phone not available'}</div></div>
+            {workerRating > 0 && <Badge tone="amber" dot={false}>★ {workerRating}</Badge>}
+          </div>
+          <Row label="Current Status" value={<Badge>{b.status}</Badge>} />
+          {workerJobs > 0 && <Row label="Jobs Completed" value={workerJobs} />}
+          <div className="row" style={{ gap: 8, marginTop: 8 }}>
+            <button className="btn line" style={{ flex: 1, fontSize: 12 }} disabled={!workerPhone} onClick={() => tel(workerPhone)}><Phone size={13} /> Call</button>
+            <button className="btn line" style={{ flex: 1, fontSize: 12 }} onClick={openReassign}><RefreshCw size={13} /> Reassign</button>
+          </div>
+        </> : <div style={{ padding: '8px 0' }}><Badge tone="red" dot={false}>Unassigned</Badge><button className="btn sm" style={{ marginTop: 10, display: 'block' }} onClick={openReassign}>Assign worker</button></div>}
+      </Card>
+    )
+  }
+  function serviceCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Sparkles size={16} /> Service Details</span>}>
+        <Row label="Service" value={<b>{svcName}</b>} />
+        <Row label="Duration" value={b.duration || items[0]?.durationLabel || '—'} />
+        <Row label="Items" value={items.length || 1} />
+        <Row label="Frequency" value={b.freq || 'One-time'} />
+        {b.note && <div style={{ marginTop: 8 }}><div className="muted" style={{ fontSize: 12 }}>Customer Instructions</div><div style={{ fontSize: 13, marginTop: 3 }}>“{b.note}”</div></div>}
+      </Card>
+    )
+  }
+  function keyInfoCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Sparkles size={16} /> Key Information</span>}>
+        <Row label="Assignment Type" value={b.pro_name ? 'Auto Dispatch' : 'Unassigned'} />
+        <Row label="Assigned At" value="Not tracked yet" />
+        <Row label="Accepted At" value="Not tracked yet" />
+        <Row label="Current Status" value={<Badge>{b.status}</Badge>} />
+        <Row label="ETA" value="Not tracked yet" />
+        <Row label="Distance" value="Not tracked yet" />
+      </Card>
+    )
+  }
+  function needHelpCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><HelpCircle size={16} /> Need Help?</span>}>
+        <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>Facing an issue with this booking?</div>
+        <button className="btn line" style={{ width: '100%' }} onClick={() => nav('/support')}><LifeBuoy size={14} /> Create Support Ticket</button>
+      </Card>
+    )
+  }
+  function journeyCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={16} /> Booking Journey</span>}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          {['Created', 'Assigned', 'On the Way', 'Arrived', 'In Service', 'Completed'].map((label, i) => {
+            const lvls = [1, 2, 3, 4, 6, 8]
+            const done = b.status === 'cancelled' ? i === 0 : lvls[i] <= reached
+            const current = lvls[i] === reached && derived!.active
+            return (
+              <div key={label} className="row" style={{ gap: 10, alignItems: 'center', padding: '5px 0', opacity: done || current ? 1 : 0.45 }}>
+                <span style={{ width: 18, height: 18, borderRadius: 50, display: 'grid', placeItems: 'center', background: current ? '#eef0ff' : done ? '#e7f7ee' : '#eeeef5', color: current ? '#5b51e8' : done ? '#0f8a4d' : '#9aa0ad', flex: 'none' }}>{done ? <CheckCircle2 size={12} /> : ''}</span>
+                <span style={{ fontSize: 13, fontWeight: current ? 700 : 500 }}>{label}</span>
+                {current && <Badge tone="violet" dot={false}>Current</Badge>}
+              </div>
+            )
+          })}
+          {b.status === 'cancelled' && <div className="row" style={{ gap: 10, padding: '5px 0', color: '#d92d20', fontWeight: 700, fontSize: 13 }}><XCircle size={14} /> Cancelled{b.cancel_reason ? ` · ${b.cancel_reason}` : ''}</div>}
+        </div>
+      </Card>
+    )
+  }
+  function trackingCard() {
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><MapPin size={16} /> Live Job Tracking</span>}>
+        {workerPos || custPos ? <MiniMap lat={(workerPos || custPos)!.lat} lng={(workerPos || custPos)!.lng} label={b.address || ''} /> : <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No live location for this booking yet.</div>}
+      </Card>
+    )
+  }
   function paymentCard() {
     return (
       <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><IndianRupee size={16} /> Payment & Price Breakdown</span>}>
@@ -312,8 +411,8 @@ export default function AdminBookingDetail() {
     return (
       <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><KeyRound size={16} /> OTP & Service Verification</span>}>
         <Row label="Start OTP" value={b.service_otp ? <span><b>{b.service_otp}</b> {b.started_at ? <Badge tone="green">Verified</Badge> : <Badge tone="amber">Pending</Badge>}</span> : '—'} />
-        <Row label="Started At" value={fmtDateTime(b.started_at)} />
-        <Row label="Completed At" value={fmtDateTime(b.completed_at)} />
+        <Row label="Started At" value={fmtDateTime(b.started_at) || '—'} />
+        <Row label="Completed At" value={fmtDateTime(b.completed_at) || '—'} />
         {b.rating != null && b.rating > 0 && <Row label="Customer Rating" value={`${'★'.repeat(b.rating)}${'☆'.repeat(Math.max(0, 5 - b.rating))}`} />}
       </Card>
     )
