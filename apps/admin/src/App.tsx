@@ -20,6 +20,7 @@ import ServiceAreas from './screens/ServiceAreas'
 import ZoneOnboarding from './screens/ZoneOnboarding'
 import Stores from './screens/Stores'
 import { CitiesPage, ClustersPage, ApartmentsPage, InventoryPage, PricingPage, ServiceCoveragePage } from './screens/ZoneEntities'
+import SurgePricing from './screens/SurgePricing'
 import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
 import Shifts from './screens/Shifts'
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/zones/apartments" element={<Page perm="zones.view"><ApartmentsPage /></Page>} />
           <Route path="/zones/stores" element={<Page perm="zones.view"><Stores /></Page>} />
           <Route path="/zones/pricing" element={<Page perm="pricing.view"><PricingPage /></Page>} />
+          <Route path="/zones/surge" element={<Page perm="pricing.view"><SurgePricing /></Page>} />
           <Route path="/zones/coverage" element={<Page perm="zones.view"><ServiceCoveragePage /></Page>} />
           <Route path="/zones/inventory" element={<Page perm="zones.view"><InventoryPage /></Page>} />
           <Route path="/command-center" element={<Page perm="liveops.view"><CommandCenter /></Page>} />

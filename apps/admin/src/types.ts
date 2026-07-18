@@ -151,6 +151,9 @@ export interface WorkerDetail extends Worker {
   jobsPerformance?: JobsPerformance; skillsServices?: SkillsServices
 }
 
+/* Surge pricing — live per-zone surge (weather-driven or a manual ops override). */
+export interface SurgeZone { zoneId: number; zone: string; city: string; active: boolean; pct: number; reason: string; prob: number | null; precipMm: number | null; at: number | null }
+
 /* Logs tab — the worker's audit stream from the activity service, categorised + summarised. */
 export interface WorkerLog { id: number; date: string; logType: string; action: string; description: string; source: string; performedBy: string; actorType: string; ref: string }
 export interface WorkerLogsData {
