@@ -1400,15 +1400,16 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
             <select className="select" value={statusF} onChange={(e) => setStatusF(e.target.value)}><option value="all">All Status</option><option value="Available">Available</option><option value="Used">Used</option><option value="Expired">Expired</option></select>
           </div>
           <div className="tablewrap">
-            <table className="tbl">
-              <thead><tr><th>Coupon Details</th><th>Code</th><th>Discount</th><th className="num">Min Order</th><th>Valid Till</th><th>Usage</th><th>Status</th><th style={{ width: 60 }}></th></tr></thead>
+            <table className="tbl" style={{ tableLayout: 'fixed', width: '100%', fontSize: 12.5 }}>
+              <colgroup><col style={{ width: '24%' }} /><col style={{ width: '12%' }} /><col style={{ width: '14%' }} /><col style={{ width: '10%' }} /><col style={{ width: '15%' }} /><col style={{ width: '12%' }} /><col style={{ width: '9%' }} /><col style={{ width: '9%' }} /></colgroup>
+              <thead><tr><th>Coupon Details</th><th>Code</th><th>Discount</th><th className="num">Min Order</th><th>Valid Till</th><th>Usage</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {filtered.map((o) => {
                   const dl = daysLeft(o.validTill)
                   return (
                     <tr key={o.code}>
-                      <td><div style={{ fontWeight: 600, fontSize: 13.5 }}>{o.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{o.subtitle || '—'}</div></td>
-                      <td><span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, background: '#eef0ff', color: '#5b51e8', borderRadius: 6, padding: '3px 7px' }}>{o.code}</span></td>
+                      <td style={{ whiteSpace: 'normal' }}><div style={{ fontWeight: 600, fontSize: 13 }}>{o.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{o.subtitle || '—'}</div></td>
+                      <td><span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11.5, background: '#eef0ff', color: '#5b51e8', borderRadius: 6, padding: '2px 6px' }}>{o.code}</span></td>
                       <td style={{ fontSize: 13 }}>{discountText(o)}</td>
                       <td className="num">{money(o.minSubtotal)}</td>
                       <td><div style={{ fontSize: 12.5 }}>{o.validTill ? shortDate(o.validTill) : 'No expiry'}</div>{dl != null && <div className="muted" style={{ fontSize: 11 }}>{dl > 0 ? `${dl} days left` : 'Expired'}</div>}</td>
