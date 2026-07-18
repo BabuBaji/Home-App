@@ -1673,61 +1673,175 @@ function SupportTab({ tickets, notes, c, cid, onChanged, toast, nav }: any) {
     </div>
   )
 }
+const isPositive = (r: any) => (r.rating || 0) >= 4
+const ratingLabel = (a: number) => a >= 4.5 ? 'Excellent' : a >= 4 ? 'Very Good' : a >= 3 ? 'Good' : a >= 2 ? 'Fair' : 'Poor'
+const daysAgo = (d?: string | null) => { if (!d) return ''; const n = Math.floor((Date.now() - Date.parse(d)) / 86400000); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago` }
+
 function RatingsTab({ reviews, rating, bookings }: any) {
-  const [starF, setStarF] = useState(0)   // 0 = all
-  const wById = useMemo(() => { const m: Record<number, any> = {}; for (const b of bookings) m[b.id] = b; return m }, [bookings])
+  const [q, setQ] = useState('')
+  const [starF, setStarF] = useState('all')
+  const [svcF, setSvcF] = useState('all')
+  const [pill, setPill] = useState('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [menuId, setMenuId] = useState<number | null>(null)
+
+  useEffect(() => { if (menuId == null) return; const h = () => setMenuId(null); window.addEventListener('click', h); return () => window.removeEventListener('click', h) }, [menuId])
+  useEffect(() => { setPage(1) }, [q, starF, svcF, pill, pageSize])
+
+  const avg = reviews.length ? reviews.reduce((a: number, b: any) => a + (b.rating || 0), 0) / reviews.length : (rating || 0)
+  const positive = reviews.filter(isPositive).length
+  const constructive = reviews.length - positive
+  const lastReview = reviews.length ? reviews.map((r: any) => r.completed_at || r.created).sort((a: string, b: string) => Date.parse(b) - Date.parse(a))[0] : null
   const dist = useMemo(() => { const d = [0, 0, 0, 0, 0]; for (const b of reviews) { const s = Math.round(b.rating); if (s >= 1 && s <= 5) d[s - 1]++ } return d }, [reviews])
-  const avg = reviews.length ? (reviews.reduce((a: number, b: any) => a + (b.rating || 0), 0) / reviews.length) : (rating || 0)
-  const withText = reviews.filter((b: any) => b.review).length
-  const shown = starF ? reviews.filter((b: any) => Math.round(b.rating) === starF) : reviews
+  const services = useMemo(() => [...new Set(reviews.map((r: any) => r.service).filter(Boolean))] as string[], [reviews])
+  const svcAgg = useMemo(() => { const m: Record<string, any> = {}; for (const r of reviews) { const k = r.service || '—'; (m[k] ||= { name: k, sum: 0, count: 0 }); m[k].sum += r.rating; m[k].count++ } return Object.values(m).map((x: any) => ({ name: x.name, avg: x.sum / x.count, count: x.count })).sort((a, b) => b.count - a.count) }, [reviews])
+  const workerAgg = useMemo(() => { const m: Record<string, any> = {}; for (const b of bookings) { if (!b.worker) continue; const k = b.worker; (m[k] ||= { name: k, rating: 0, count: 0 }); m[k].count++; if (b.workerRating) m[k].rating = b.workerRating } return Object.values(m).sort((a: any, b: any) => b.rating - a.rating) }, [bookings])
+
+  const filtered = useMemo(() => reviews.filter((r: any) => {
+    if (pill === 'positive' && !isPositive(r)) return false
+    if (pill === 'constructive' && isPositive(r)) return false
+    if (starF !== 'all' && Math.round(r.rating) !== Number(starF)) return false
+    if (svcF !== 'all' && r.service !== svcF) return false
+    if (q && !`${r.review} ${r.ref} ${r.worker} ${r.service}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [reviews, pill, starF, svcF, q])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const reset = () => { setQ(''); setStarF('all'); setSvcF('all') }
+
+  const rkpi = (icon: ReactNode, tint: string, label: string, value: ReactNode, sub: ReactNode) => (
+    <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}><span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}</div>
+      <strong style={{ fontSize: 21, lineHeight: 1 }}>{value}</strong>
+      <span className="muted" style={{ fontSize: 11.5 }}>{sub}</span>
+    </div>
+  )
+  const PILLS: [string, string, number][] = [['all', 'All Reviews', reviews.length], ['positive', 'Positive', positive], ['constructive', 'Constructive', constructive], ['workers', 'Worker Ratings', workerAgg.length]]
 
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div>
         <h2 style={{ margin: 0, fontSize: 20 }}>Ratings &amp; Feedback</h2>
-        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Ratings and reviews this customer left on their bookings</p>
+        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Track overall ratings, feedback and customer satisfaction</p>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) minmax(0, 1.6fr)', gap: 16, alignItems: 'start' }}>
-        <Card>
-          <div style={{ textAlign: 'center', padding: '6px 0' }}>
-            <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1 }}>{avg ? avg.toFixed(1) : '—'}</div>
-            <div style={{ display: 'inline-flex', margin: '8px 0 4px' }}><Stars rating={avg} size={18} /></div>
-            <div className="muted" style={{ fontSize: 12.5 }}>{reviews.length} review{reviews.length === 1 ? '' : 's'} · {withText} with a comment</div>
-          </div>
-          <div className="grid" style={{ gap: 6, marginTop: 12 }}>
-            {[5, 4, 3, 2, 1].map((s) => {
-              const n = dist[s - 1]; const pct = reviews.length ? Math.round((n / reviews.length) * 100) : 0
-              return (
-                <button key={s} onClick={() => setStarF(starF === s ? 0 : s)} style={{ display: 'flex', gap: 8, alignItems: 'center', background: starF === s ? '#f5f3ff' : 'none', border: 'none', borderRadius: 8, padding: '4px 6px', cursor: 'pointer' }}>
-                  <span style={{ fontSize: 12, width: 28, textAlign: 'right' }}>{s}★</span>
-                  <span style={{ flex: 1, height: 7, borderRadius: 6, background: '#eef0f4', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${pct}%`, background: '#f59e0b', borderRadius: 6 }} /></span>
-                  <span className="muted" style={{ fontSize: 11.5, width: 26, textAlign: 'left' }}>{n}</span>
-                </button>
-              )
-            })}
-          </div>
-          {starF > 0 && <button className="linkbtn" style={{ ...LINK, marginTop: 8 }} onClick={() => setStarF(0)}>Clear filter</button>}
-        </Card>
 
-        <Card title={`Reviews (${shown.length})`}>
-          <div className="grid" style={{ gap: 12 }}>
-            {shown.map((b: any) => {
-              const wk = wById[b.id]
-              return (
-                <div key={b.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
-                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <div className="row" style={{ gap: 8, alignItems: 'center' }}><Stars rating={b.rating} size={14} /><strong style={{ fontSize: 13 }}>{b.service}</strong></div>
-                    <span className="muted" style={{ fontSize: 12 }}>{shortDate(b.completed_at || b.created)}</span>
-                  </div>
-                  {b.review && <p style={{ margin: '8px 0 0', fontSize: 13.5 }}>{b.review}</p>}
-                  <div className="muted" style={{ fontSize: 11.5, marginTop: 6, display: 'flex', gap: 8, alignItems: 'center' }}>{b.ref}{wk?.worker && <span>· Worker: {wk.worker}</span>}</div>
-                </div>
-              )
-            })}
-            {shown.length === 0 && <Empty>{starF ? `No ${starF}★ reviews` : 'No reviews submitted yet'}</Empty>}
-          </div>
-        </Card>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        {rkpi(<Star size={15} />, '#5b51e8', 'Average Rating', <span className="row" style={{ gap: 8, alignItems: 'center' }}>{avg ? avg.toFixed(1) : '—'}<span style={{ fontSize: 13, color: '#667085', fontWeight: 600 }}>/5</span>{avg > 0 && <Badge tone={avg >= 4 ? 'green' : 'amber'} dot={false}>{ratingLabel(avg)}</Badge>}</span>, `Based on ${reviews.length} reviews`)}
+        {rkpi(<MessageSquare size={15} />, '#2e90fa', 'Total Reviews', reviews.length, 'All Time')}
+        {rkpi(<CheckCircle2 size={15} />, '#16a34a', 'Positive Feedback', positive, `${reviews.length ? Math.round(positive / reviews.length * 100) : 0}%`)}
+        {rkpi(<MessageSquare size={15} />, '#f59e0b', 'Constructive Feedback', constructive, `${reviews.length ? Math.round(constructive / reviews.length * 100) : 0}%`)}
+        {rkpi(<Calendar size={15} />, '#7c3aed', 'Last Review', lastReview ? shortDate(lastReview) : '—', lastReview ? daysAgo(lastReview) : 'No reviews')}
       </div>
+
+      <Card>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1.6fr) minmax(120px, 1fr) minmax(130px, 1fr) auto', gap: 10, marginBottom: 12 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by review, booking ID, worker…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+          </div>
+          <select className="select" value={starF} onChange={(e) => setStarF(e.target.value)}><option value="all">All Ratings</option>{[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>{s} Stars</option>)}</select>
+          <select className="select" value={svcF} onChange={(e) => setSvcF(e.target.value)}><option value="all">All Services</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+          <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
+        </div>
+
+        <div className="row" style={{ gap: 4, borderBottom: '1px solid var(--line)', marginBottom: 10, flexWrap: 'wrap' }}>
+          {PILLS.map(([k, label, n]) => (
+            <button key={k} onClick={() => setPill(k)} style={{ display: 'inline-flex', gap: 6, alignItems: 'center', padding: '9px 12px', background: 'none', border: 'none', borderBottom: pill === k ? '2px solid #5b51e8' : '2px solid transparent', color: pill === k ? '#5b51e8' : '#667085', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>{label}<span style={{ background: pill === k ? '#5b51e8' : '#eef0f4', color: pill === k ? '#fff' : '#667085', borderRadius: 10, padding: '0 7px', fontSize: 11 }}>{n}</span></button>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 16, alignItems: 'start' }}>
+          <div>
+            {pill === 'workers' ? (
+              <div className="grid" style={{ gap: 10 }}>
+                {workerAgg.map((w: any) => (
+                  <div key={w.name} className="row" style={{ gap: 10, alignItems: 'center', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' }}>
+                    <Avatar name={w.name} size={34} />
+                    <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, fontWeight: 600 }}>{w.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{w.count} booking{w.count === 1 ? '' : 's'} with this customer</div></div>
+                    <span className="row" style={{ gap: 4, alignItems: 'center', color: '#16a34a', fontWeight: 700 }}><Star size={14} fill="#16a34a" stroke="#16a34a" />{(w.rating || 0).toFixed(1)}</span>
+                  </div>
+                ))}
+                {workerAgg.length === 0 && <Empty>No workers yet</Empty>}
+              </div>
+            ) : (
+              <>
+                <div className="grid" style={{ gap: 0 }}>
+                  {pageRows.map((b: any) => {
+                    const pos = isPositive(b); const icon = (b.items || [])[0]?.icon || '🧹'
+                    return (
+                      <div key={b.id} className="row" style={{ gap: 12, alignItems: 'flex-start', padding: '14px 0', borderBottom: '1px solid var(--line-2, #f0f2f5)' }}>
+                        <span style={{ display: 'inline-flex', width: 40, height: 40, borderRadius: 10, background: '#f2f4f7', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{icon}</span>
+                        <div style={{ width: 150, flexShrink: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{b.service}</div>
+                          <div className="muted" style={{ fontSize: 11 }}>{b.ref}</div>
+                          <div className="muted" style={{ fontSize: 11 }}>{shortDate(b.completed_at || b.created)}</div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {b.review ? <p style={{ margin: 0, fontSize: 13 }}>{b.review}</p> : <span className="muted" style={{ fontSize: 12.5 }}>No comment left</span>}
+                          <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}><Stars rating={b.rating} size={13} /><strong style={{ fontSize: 12.5 }}>{b.rating?.toFixed(1)}</strong><Badge tone={pos ? 'green' : 'amber'} dot={false}>{pos ? 'Positive' : 'Constructive'}</Badge></div>
+                        </div>
+                        {b.worker && (
+                          <div className="row" style={{ gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                            <Avatar name={b.worker} size={30} />
+                            <div><div style={{ fontSize: 12.5, fontWeight: 600 }}>{b.worker}</div>{b.workerRating ? <div style={{ display: 'flex', gap: 3, alignItems: 'center', fontSize: 11, color: '#f59e0b' }}><Star size={10} fill="#f59e0b" stroke="#f59e0b" />{Number(b.workerRating).toFixed(1)}</div> : null}</div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {filtered.length === 0 && <Empty>No reviews match these filters.</Empty>}
+                </div>
+                {filtered.length > 0 && (
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+                    <span className="muted" style={{ fontSize: 12.5 }}>Showing {(page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} reviews</span>
+                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                      <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+                      <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+                      <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+                      <select className="select" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ height: 32 }}>{[5, 10, 20].map((s) => <option key={s} value={s}>{s} / page</option>)}</select>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* right rail */}
+          <div className="grid" style={{ gap: 16, alignContent: 'start' }}>
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Rating Breakdown</div>
+              <div className="grid" style={{ gap: 7 }}>
+                {[5, 4, 3, 2, 1].map((s) => { const n = dist[s - 1]; const pct = reviews.length ? Math.round(n / reviews.length * 100) : 0; return (
+                  <div key={s} className="row" style={{ gap: 8, alignItems: 'center', fontSize: 12 }}>
+                    <span style={{ width: 46 }}>{s} Star{s === 1 ? '' : 's'}</span>
+                    <span style={{ flex: 1, height: 7, borderRadius: 6, background: '#eef0f4', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${pct}%`, background: s >= 4 ? '#16a34a' : s === 3 ? '#f59e0b' : '#e5484d', borderRadius: 6 }} /></span>
+                    <span className="muted" style={{ width: 58, textAlign: 'right' }}>{n} ({pct}%)</span>
+                  </div>
+                ) })}
+              </div>
+            </div>
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Feedback by Service</div>
+              <div className="grid" style={{ gap: 9 }}>
+                {svcAgg.map((s: any) => (
+                  <div key={s.name} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}><span>{s.name}</span><span className="row" style={{ gap: 4, alignItems: 'center', color: '#16a34a', fontWeight: 700 }}><Star size={13} fill="#16a34a" stroke="#16a34a" />{s.avg.toFixed(1)} <span className="muted" style={{ fontWeight: 400 }}>({s.count})</span></span></div>
+                ))}
+                {svcAgg.length === 0 && <Empty small>No reviews yet</Empty>}
+              </div>
+            </div>
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Top Rated Workers</div>
+              <div className="grid" style={{ gap: 10 }}>
+                {workerAgg.slice(0, 5).map((w: any) => (
+                  <div key={w.name} className="row" style={{ gap: 8, alignItems: 'center' }}><Avatar name={w.name} size={28} /><span style={{ flex: 1, fontSize: 13 }}>{w.name}</span><span className="row" style={{ gap: 4, alignItems: 'center', color: '#16a34a', fontWeight: 700, fontSize: 12.5 }}><Star size={12} fill="#16a34a" stroke="#16a34a" />{(w.rating || 0).toFixed(1)} <span className="muted" style={{ fontWeight: 400 }}>({w.count})</span></span></div>
+                ))}
+                {workerAgg.length === 0 && <Empty small>No workers yet</Empty>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
     </div>
   )
 }
