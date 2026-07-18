@@ -95,6 +95,16 @@ export const fetchActivity = (params: Record<string, string | number> = {}) => {
 }
 export const fetchActivityStats = (days = 7) => req<{ total: number; since: string; byActor: { actor_type: string; n: number }[]; byAction: { action: string; n: number }[] }>(`/activity/stats?days=${days}`)
 export const fetchBookingTimeline = (id: number) => req<any[]>(`/bookings/${id}/timeline`)
+export interface Settlement {
+  total: number; paymentMethod: string; paymentStatus: string; paidAt: string
+  customer: { subtotal: number; discount: number; coupon: string; fee: number; tax: number; total: number }
+  settlement: { collected: number; pgFee: number; pgFeePct: number; pgGst: number; pgGstPct: number; net: number; workerPayout: number; incentive: number; opsCost: number; mktgCost: number; companyMargin: number; marginPct: number }
+  payout: { workerName: string; workerId: number | null; amount: number; incentive: number; total: number; status: string; paidAt: string | null; txnId: string }
+  txns: { at: string; type: string; status: string; amount: number; method: string; txnId: string }[]
+  documents: { invoice: string; receipt: string; payoutSlip: string }
+  refund: { amount: number; status: string }
+}
+export const fetchSettlement = (id: number) => req<Settlement>(`/bookings/${id}/settlement`)
 
 /* customers */
 export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/customers?q=${encodeURIComponent(q)}&status=${status}`)

@@ -6,13 +6,15 @@ import {
   LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle, CalendarCheck, PlayCircle, PauseCircle, Flag, HelpCircle,
 } from 'lucide-react'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, updateBooking, type Zone } from '../api'
+import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, issueRefund, updateBooking, type Zone, type Settlement } from '../api'
 
 const REACHED: Record<string, number> = { confirmed: 1, worker_assigned: 2, on_the_way: 3, arrived: 4, in_progress: 6, completed: 8, cancelled: 8 }
 // Job-timeline lifecycle: current level per status (steps below it are done, the matching one is live).
 const CUR_LV: Record<string, number> = { confirmed: 3, worker_assigned: 5, on_the_way: 5, arrived: 7, in_progress: 8, completed: 99, cancelled: -1 }
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
 const timeOnly = (v?: string | null) => (v ? new Date(v).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—')
+// Rupees with 2 decimals — settlement lines (gateway fee etc.) are sub-rupee, so whole-rupee money() would hide them.
+const rs = (n: number) => '₹' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function Row({ label, value, strong }: { label: string; value: ReactNode; strong?: boolean }) {
   return (
@@ -33,6 +35,7 @@ export default function AdminBookingDetail() {
   const [b, setB] = useState<any>(null)
   const [cust, setCust] = useState<any>(null)
   const [worker, setWorker] = useState<any>(null)
+  const [settle, setSettle] = useState<Settlement | null>(null)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
   const [tab, setTab] = useState<'overview' | 'timeline' | 'payment' | 'evidence' | 'support' | 'activity'>('overview')
@@ -51,6 +54,7 @@ export default function AdminBookingDetail() {
       if (bk.user_id) fetchCustomer(bk.user_id).then(setCust).catch(() => {})
       if (bk.worker_id) fetchWorkerDetail(bk.worker_id).then(setWorker).catch(() => {})
     }).catch((e: Error) => setErr(e.message))
+    fetchSettlement(Number(id)).then(setSettle).catch(() => {})
   }
   useEffect(() => { load(); fetchZones().then(setZones).catch(() => {}) }, [id])
 
@@ -95,6 +99,19 @@ export default function AdminBookingDetail() {
   const reschedule = () => { if (!reDate && !reTime) return toast('Set a date or time', 'err'); doUpdate({ date: reDate || b.date, time: reTime || b.time }, 'Booking rescheduled') }
   const escalate = () => doUpdate({ escalated: true, escalateReason: 'Flagged from Booking Details' }, 'Booking escalated')
   const cancel = async () => { if (!(await confirm({ title: 'Cancel this booking?', message: 'The customer is notified and refunded per policy.', confirmLabel: 'Cancel booking', danger: true }))) return; doUpdate({ status: 'cancelled' }, 'Booking cancelled') }
+  const doRefund = async () => {
+    if (!(await confirm({ title: 'Create a refund for this booking?', message: 'Routed through the approval matrix — it may execute now or queue for sign-off.', confirmLabel: 'Create refund' }))) return
+    issueRefund(b.id).then((r: any) => { toast(r?.executed ? 'Refund issued' : 'Refund queued for approval', 'ok'); load() }).catch((e: Error) => toast(e.message, 'err'))
+  }
+  const exportDoc = (type: 'invoice' | 'receipt' | 'payout' | 'all') => {
+    if (!settle) return
+    const L: string[] = []; const p = (k: string, v: any) => L.push(`"${k}","${String(v).replace(/"/g, '""')}"`)
+    if (type === 'invoice' || type === 'all') { L.push('=== TAX INVOICE ===', '"Item","Amount"'); const c = settle.customer; p(`Service (${svcName})`, c.subtotal); if (c.discount) p(c.coupon ? `Coupon ${c.coupon}` : 'Discount', -c.discount); if (c.fee) p('Platform Fee', c.fee); if (c.tax) p('GST', c.tax); p('Total Paid', c.total); L.push('') }
+    if (type === 'receipt' || type === 'all') { L.push('=== PAYMENT RECEIPT ===', '"Field","Value"'); p('Booking', b.ref); p('Paid', b.total); p('Method', payMethod); p('Status', b.payment_status); L.push('') }
+    if (type === 'payout' || type === 'all') { L.push('=== WORKER PAYOUT ===', '"Field","Value"'); const q = settle.payout; p('Worker', q.workerName); p('Amount', q.total); p('Status', q.status); p('Transaction ID', q.txnId); L.push('') }
+    const blob = new Blob([L.join('\n')], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `${String(b.ref).replace('#', '')}-${type}.csv`; a.click(); URL.revokeObjectURL(url)
+  }
 
   const tel = (p: string) => p && window.open(`tel:${p}`)
   const custPos = parseLatLng({ lat: b.cust_lat, lng: b.cust_lng })
@@ -230,7 +247,29 @@ export default function AdminBookingDetail() {
         </div>
       )}
 
-      {tab === 'payment' && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>{paymentCard()}{settlementCard()}</div>}
+      {tab === 'payment' && (
+        <div className="grid" style={{ gap: 16 }}>
+          {/* KPI strip */}
+          <div className="stat-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+            <div className="card" style={{ padding: '14px 16px' }}><div className="row" style={{ gap: 8, color: '#16a34a' }}><IndianRupee size={17} /><span className="muted" style={{ fontSize: 12 }}>Customer Paid</span></div><div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>{money(b.total)}</div><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>Paid via {payMethod}</div></div>
+            <div className="card" style={{ padding: '14px 16px' }}><div className="row" style={{ gap: 8, color: '#f59e0b' }}><CheckCircle2 size={17} /><span className="muted" style={{ fontSize: 12 }}>Payment Status</span></div><div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, textTransform: 'capitalize' }}>{b.payment_status || '—'}</div><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{fmtDateTime(b.created)}</div></div>
+            <div className="card" style={{ padding: '14px 16px' }}><div className="row" style={{ gap: 8, color: '#5b51e8' }}><KeyRound size={17} /><span className="muted" style={{ fontSize: 12 }}>Payment Method</span></div><div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>{payMethod}</div>{settle && <div className="row" style={{ gap: 6, marginTop: 4, alignItems: 'center' }}><span className="muted" style={{ fontSize: 11 }}>{settle.txns[0]?.txnId}</span></div>}</div>
+            <div className="card" style={{ padding: '14px 16px' }}><div className="row" style={{ gap: 8, color: '#2e90fa' }}><ImageIcon size={17} /><span className="muted" style={{ fontSize: 12 }}>Invoice</span></div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{settle?.documents.invoice || '—'}</div><button className="btn line" style={{ fontSize: 11, padding: '4px 8px', marginTop: 6 }} onClick={() => exportDoc('invoice')}>View Invoice</button></div>
+            <div className="card" style={{ padding: '14px 16px' }}><div className="row" style={{ gap: 8, color: '#ec4899' }}><ImageIcon size={17} /><span className="muted" style={{ fontSize: 12 }}>Receipt</span></div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{settle?.documents.receipt || '—'}</div><button className="btn line" style={{ fontSize: 11, padding: '4px 8px', marginTop: 6 }} onClick={() => exportDoc('receipt')}>View Receipt</button></div>
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2.4fr) minmax(280px, 1fr)', gap: 16, alignItems: 'start' }}>
+            <div className="grid" style={{ gap: 16 }}>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                {priceBreakdownCard()}{settlementSummaryCard()}{payoutCard()}
+              </div>
+              {txnHistoryCard()}
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>{refundCard()}{documentsCard()}</div>
+            </div>
+            <div className="grid" style={{ gap: 16 }}>{customerCard()}{workerCard()}{summaryCard()}{needHelpCard()}</div>
+          </div>
+        </div>
+      )}
       {tab === 'evidence' && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>{evidenceCard()}{otpCard()}</div>}
       {tab === 'support' && <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>{supportCard()}{notesCard()}</div>}
       {tab === 'activity' && <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 16 }}>{notesCard()}</div>}
@@ -376,15 +415,100 @@ export default function AdminBookingDetail() {
       </Card>
     )
   }
-  function settlementCard() {
+  function priceBreakdownCard() {
+    if (!settle) return <Card title="Price & Charges Breakdown"><Loading /></Card>
+    const c = settle.customer
     return (
-      <Card title="Settlement (Internal)">
-        <Row label="Worker Payout" value={money(b.worker_comp || 0)} />
-        <Row label="Worker Incentive" value="Not tracked yet" />
-        <Row label="Payment Gateway Fee" value="Not tracked yet" />
-        <Row label="Settled" value={<Badge tone={b.settled ? 'green' : 'gray'}>{b.settled ? 'Settled' : 'Pending'}</Badge>} />
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><IndianRupee size={16} /> Price & Charges Breakdown</span>}>
+        <Row label={`Service Price (${svcName})`} value={money(c.subtotal)} />
+        <Row label="Subtotal" value={money(c.subtotal)} strong />
+        {c.discount > 0 && <Row label={c.coupon ? `Coupon Discount (${c.coupon})` : 'Discount'} value={<span style={{ color: '#0f8a4d' }}>− {money(c.discount)}</span>} />}
+        {c.fee > 0 && <Row label="Platform Fee" value={money(c.fee)} />}
+        {c.tax > 0 && <Row label="GST / Tax" value={money(c.tax)} />}
         <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
-        <Row label="Company Margin" value={<b>{money(margin)} ({marginPct}%)</b>} strong />
+        <Row label="Total Paid by Customer" value={<b>{money(c.total)}</b>} strong />
+        {c.discount > 0 && <div style={{ marginTop: 8, color: '#0f8a4d', fontSize: 12.5, fontWeight: 600 }}>🎉 Customer saved {money(c.discount)} on this booking</div>}
+      </Card>
+    )
+  }
+  function settlementSummaryCard() {
+    if (!settle) return <Card title="Settlement Summary"><Loading /></Card>
+    const s = settle.settlement
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Sparkles size={16} /> Settlement Summary (Internal)</span>}>
+        <Row label="Total Collected from Customer" value={money(s.collected)} />
+        {s.pgFee > 0 && <Row label={`Payment Gateway Fee (${s.pgFeePct}%)`} value={<span style={{ color: '#d92d20' }}>− {rs(s.pgFee)}</span>} />}
+        {s.pgGst > 0 && <Row label={`GST on PG Fee (${s.pgGstPct}%)`} value={<span style={{ color: '#d92d20' }}>− {rs(s.pgGst)}</span>} />}
+        <div style={{ background: '#f6f6fe', borderRadius: 8, padding: '0 8px', margin: '4px 0' }}><Row label="Net Collection" value={<b>{rs(s.net)}</b>} strong /></div>
+        <Row label="Worker Payout" value={<span style={{ color: '#d92d20' }}>− {money(s.workerPayout)}</span>} />
+        {s.incentive > 0 && <Row label="Worker Incentive" value={<span style={{ color: '#d92d20' }}>− {money(s.incentive)}</span>} />}
+        {s.opsCost > 0 && <Row label="Other Operational Cost" value={<span style={{ color: '#d92d20' }}>− {rs(s.opsCost)}</span>} />}
+        {s.mktgCost > 0 && <Row label="Marketing & Platform Charges" value={<span style={{ color: '#d92d20' }}>− {rs(s.mktgCost)}</span>} />}
+        <div style={{ background: '#eef7f0', borderRadius: 8, padding: '0 8px', margin: '4px 0' }}><Row label="Company Margin (This Booking)" value={<b>{rs(s.companyMargin)}</b>} strong /></div>
+        <Row label="Margin %" value={<b style={{ color: '#0f8a4d' }}>{s.marginPct}%</b>} />
+      </Card>
+    )
+  }
+  function payoutCard() {
+    if (!settle) return <Card title="Payout to Worker"><Loading /></Card>
+    const p = settle.payout
+    return (
+      <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><HardHat size={16} /> Payout to Worker</span>}>
+        <Row label="Worker Name" value={p.workerName || '—'} />
+        {p.workerId && <Row label="Worker ID" value={`WRK-${p.workerId}`} />}
+        <Row label="Payout Type" value={b.payment === 'wallet' ? 'Wallet' : 'Bank / Wallet'} />
+        <Row label="Payout Amount" value={money(p.amount)} />
+        {p.incentive > 0 && <Row label="Commission / Incentive" value={money(p.incentive)} />}
+        <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
+        <Row label="Total Payout" value={<b>{money(p.total)}</b>} strong />
+        <Row label="Payout Status" value={<Badge tone={p.status === 'paid' ? 'green' : 'amber'}>{p.status}</Badge>} />
+        {p.paidAt && <Row label="Paid At" value={fmtDateTime(p.paidAt)} />}
+        <Row label="Transaction ID" value={<span style={{ fontSize: 12 }}>{p.txnId}</span>} />
+        {p.workerId && <button className="btn line sm" style={{ marginTop: 8 }} onClick={() => nav(`/workers/${p.workerId}`)}>View Worker</button>}
+      </Card>
+    )
+  }
+  function txnHistoryCard() {
+    if (!settle) return <Card title="Payment Transaction History"><Loading /></Card>
+    const td: React.CSSProperties = { padding: '9px 10px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, whiteSpace: 'nowrap' }
+    return (
+      <Card title="Payment Transaction History">
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+            <thead><tr style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase' }}>{['Date & Time', 'Type', 'Status', 'Amount', 'Method', 'Transaction ID'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid var(--line)' }}>{h}</th>)}</tr></thead>
+            <tbody>{settle.txns.map((t, i) => (
+              <tr key={i}>
+                <td style={td}>{fmtDateTime(t.at)}</td><td style={td}>{t.type}</td>
+                <td style={td}><Badge tone="green" dot={false}>{t.status}</Badge></td>
+                <td style={{ ...td, fontWeight: 700, color: t.amount < 0 ? '#d92d20' : 'var(--ink)' }}>{t.amount < 0 ? '− ' : ''}{rs(Math.abs(t.amount))}</td>
+                <td style={{ ...td, textTransform: 'capitalize' }}>{t.method}</td><td style={{ ...td, fontSize: 11 }}>{t.txnId}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </Card>
+    )
+  }
+  function refundCard() {
+    return (
+      <Card title="Refund & Adjustments">
+        {settle && settle.refund.amount > 0 ? <Row label="Refunded" value={<span style={{ color: '#d92d20' }}>{money(settle.refund.amount)}{settle.refund.status ? ` · ${settle.refund.status}` : ''}</span>} /> : <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>No refunds or adjustments for this booking.</div>}
+        <button className="btn line sm" style={{ marginTop: 8 }} onClick={doRefund}>Create Refund</button>
+      </Card>
+    )
+  }
+  function documentsCard() {
+    const docs: [string, string, 'invoice' | 'receipt' | 'payout'][] = settle ? [['Tax Invoice', settle.documents.invoice, 'invoice'], ['Payment Receipt', settle.documents.receipt, 'receipt'], ['Worker Payout Slip', settle.documents.payoutSlip, 'payout']] : []
+    return (
+      <Card title="Invoice & Documents">
+        {docs.map(([label, ref, type]) => (
+          <div key={label} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+            <div><div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div><div className="muted" style={{ fontSize: 11 }}>{ref}.pdf</div></div>
+            <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => exportDoc(type)}>Download</button>
+          </div>
+        ))}
+        <button className="btn line sm" style={{ marginTop: 10, width: '100%' }} onClick={() => exportDoc('all')}>Download All (CSV)</button>
+        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Documents export as CSV; formatted PDF invoices are a follow-up.</div>
       </Card>
     )
   }

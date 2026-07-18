@@ -601,6 +601,48 @@ app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   res.json({ ...b, customer: u?.user?.name || 'Customer' })
 })
+// Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
+// actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp
+// (or the commission split); ops/marketing cost rates are configurable and default to 0 so nothing
+// is invented; company margin is whatever's left. Transactions + document refs are derived.
+app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const r2 = (n) => Math.round(n * 100) / 100
+  const pgFeePct = Number(await getSetting(ADMIN_URL, 'pg_fee_percent', '2.36')) || 2.36
+  const pgGstPct = Number(await getSetting(ADMIN_URL, 'pg_fee_gst_percent', '18')) || 18
+  const opsCostPct = Number(await getSetting(ADMIN_URL, 'operational_cost_percent', '0')) || 0
+  const mktgCostPct = Number(await getSetting(ADMIN_URL, 'marketing_cost_percent', '0')) || 0
+  const commissionPct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+
+  const total = b.total || 0
+  const isWallet = b.payment === 'wallet'
+  const pgFee = isWallet ? 0 : r2(total * pgFeePct / 100)
+  const pgGst = r2(pgFee * pgGstPct / 100)
+  const net = r2(total - pgFee - pgGst)
+  const workerPayout = b.worker_comp || Math.round((b.subtotal || 0) * (100 - commissionPct) / 100)
+  const incentive = 0
+  const opsCost = r2(total * opsCostPct / 100)
+  const mktgCost = r2(total * mktgCostPct / 100)
+  const companyMargin = r2(net - workerPayout - incentive - opsCost - mktgCost)
+  const marginPct = total ? Math.round((companyMargin / total) * 1000) / 10 : 0
+  const short = String(b.ref || b.id).replace(/[#\s]/g, '')
+
+  const txns = [{ at: b.created, type: 'Customer Payment', status: 'success', amount: total, method: b.payment || 'razorpay', txnId: `pay_${short}` }]
+  if (pgFee) txns.push({ at: b.created, type: 'PG Fee Deducted', status: 'success', amount: -pgFee, method: 'Razorpay', txnId: `fee_${short}` })
+  if (pgGst) txns.push({ at: b.created, type: 'GST on PG Fee', status: 'success', amount: -pgGst, method: 'Razorpay', txnId: `tax_${short}` })
+  if (b.settled) txns.push({ at: b.completed_at || b.created, type: 'Worker Payout', status: 'success', amount: -workerPayout, method: 'Wallet Transfer', txnId: `PAYOUT_${short}` })
+
+  res.json({
+    total, paymentMethod: b.payment || '', paymentStatus: b.payment_status || '', paidAt: b.created,
+    customer: { subtotal: b.subtotal || 0, discount: b.discount || 0, coupon: b.coupon || '', fee: b.fee || 0, tax: b.tax || 0, total },
+    settlement: { collected: total, pgFee, pgFeePct, pgGst, pgGstPct, net, workerPayout, incentive, opsCost, mktgCost, companyMargin, marginPct },
+    payout: { workerName: b.pro_name || '', workerId: b.worker_id || null, amount: workerPayout, incentive, total: workerPayout + incentive, status: b.settled ? 'paid' : 'pending', paidAt: b.settled ? (b.completed_at || null) : null, txnId: `PAYOUT_${short}` },
+    txns,
+    documents: { invoice: `INV-${short}`, receipt: `RCPT-${short}`, payoutSlip: `PAYOUT-${short}` },
+    refund: { amount: b.refund || 0, status: b.refund_status || '' },
+  })
+})
 // Admin booking actions — used by both the Bookings screen and the Control Tower console:
 // status change, reschedule (date/time), reassign / unassign a pro, escalate + reason, and an
 // operational note. Built as a deduped column map so any subset can be sent in one call.
