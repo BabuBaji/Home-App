@@ -820,10 +820,13 @@ app.delete('/api/plans/:id', auth, async (req, res) => {
 /* ---------- membership (Module 10 · Subscription) ---------- */
 // Authoritative plan catalog + billing cycles. The client has a copy for display (membership.ts),
 // but price is ALWAYS recomputed here so the amount charged can't be tampered with.
+// Fallback plan map used only if the catalog service is unreachable; the live source is the catalog
+// membership_plans table (see planCatalog). Keep the keys in sync with what's seeded there.
 const MEM_PLANS = {
-  silver:   { name: 'Silver',   price: 299, discountCap: 1000 },
-  gold:     { name: 'Gold',     price: 599, discountCap: 2500 },
-  platinum: { name: 'Platinum', price: 999, discountCap: 5000 },
+  basic:    { name: 'Basic',    price: 99,  discountCap: 500 },
+  standard: { name: 'Standard', price: 199, discountCap: 1500 },
+  premium:  { name: 'Premium',  price: 399, discountCap: 2500 },
+  elite:    { name: 'Elite',    price: 699, discountCap: 5000 },
 }
 const MEM_CYCLES = { monthly: { months: 1, savePct: 0 }, '3m': { months: 3, savePct: 0.11 }, '12m': { months: 12, savePct: 0.17 } }
 const cyclePrice = (price, months, savePct = 0) => Math.round(price * months * (1 - savePct))

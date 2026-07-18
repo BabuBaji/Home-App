@@ -4,7 +4,7 @@ import {
   ArrowLeft, Pencil, ChevronDown, ChevronLeft, ChevronRight, Star, StarHalf, Phone, Mail, Calendar,
   Wallet as WalletIcon, Briefcase, LayoutGrid, MapPin, BadgeCheck, Tag, Headphones, StickyNote, Activity,
   User, CalendarPlus, CreditCard, RotateCcw, CheckCircle2, Gift, Plus, Ban, Send, Users2, Clock, TrendingUp, Award,
-  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical,
+  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical, FileText,
 } from 'lucide-react'
 import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault, changeCustomerMembership } from '../api'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
@@ -268,7 +268,7 @@ export default function AdminCustomerDetail() {
       {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} c={c} toast={toast} />}
       {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} bookings={m.bookings} c={c} cid={cid} onChanged={load} toast={toast} />}
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} bookings={m.bookings} paymentMethods={d.paymentMethods || []} onAddMoney={() => openMoney('cash')} onSend={() => openMoney('promo')} goto={setTab} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
-      {tab === 'membership' && <MembershipTab membership={d.membership} plans={d.membershipPlans || []} ledger={d.membershipLedger || []} c={c} cid={cid} paymentMethods={d.paymentMethods || []} onChanged={load} toast={toast} nav={nav} />}
+      {tab === 'membership' && <MembershipTab membership={d.membership} plans={d.membershipPlans || []} ledger={d.membershipLedger || []} c={c} cid={cid} paymentMethods={d.paymentMethods || []} onChanged={load} toast={toast} nav={nav} goto={setTab} />}
       {tab === 'offers' && <OffersTab bookings={m.bookings} />}
       {tab === 'support' && <SupportTab bookings={m.bookings} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} />}
@@ -1130,31 +1130,42 @@ function WalletTab({ c, txns, bookings, paymentMethods, onAddMoney, onSend, goto
 const hasFeat = (p: any, re: RegExp) => (p.features || []).some((f: string) => re.test(f))
 const chk = (on: boolean) => on ? <CheckCircle2 size={16} style={{ color: '#16a34a' }} /> : <span className="muted">—</span>
 
-function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onChanged, toast }: any) {
+const freeResched = (n: number) => (n >= 99 ? 'Unlimited' : n > 0 ? `${n} / month` : <span className="muted">—</span>)
+
+function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onChanged, toast, nav, goto }: any) {
   const [busy, setBusy] = useState(false)
   const [pick, setPick] = useState<string | null>(null)   // plan key pending confirm
+  const [changeMenu, setChangeMenu] = useState(false)
   const active = !!membership?.active
   const curKey = membership?.plan || null
   const defPm = (paymentMethods || []).find((p: any) => p.is_primary) || (paymentMethods || [])[0] || null
+  const curPlan = plans.find((p: any) => p.key === curKey) || null
+  const planName = curPlan?.name || membership?.planName || curKey
+  const elite = plans.find((p: any) => /elite/i.test(p.key) || /elite/i.test(p.name))
+
+  useEffect(() => { if (!changeMenu) return; const h = () => setChangeMenu(false); window.addEventListener('click', h); return () => window.removeEventListener('click', h) }, [changeMenu])
 
   const changeTo = async (planKey: string) => {
     setBusy(true)
     try { await changeCustomerMembership(cid, planKey); toast('Membership updated'); setPick(null); onChanged() }
     catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
+  const printInvoice = (l: any) => {
+    const w = window.open('', '_blank', 'width=620,height=760'); if (!w) return
+    w.document.write(`<html><head><title>Invoice TXN${String(l.id).padStart(6, '0')}</title><style>body{font-family:system-ui,Arial;padding:32px;color:#101828}h1{font-size:18px}table{width:100%;border-collapse:collapse;margin-top:16px}td{padding:8px 0;border-bottom:1px solid #eee}.r{text-align:right}.muted{color:#667085;font-size:12px}</style></head><body onload="window.print()"><h1>HomeHelp — Membership Invoice</h1><div class="muted">TXN${String(l.id).padStart(6, '0')} · ${new Date(l.created).toLocaleString('en-IN')}</div><table><tr><td>Customer</td><td class="r">${(c.name || c.phone || '')} (${c.displayId || ''})</td></tr><tr><td>Description</td><td class="r">${(l.detail || l.event || '').replace(/</g, '')}</td></tr><tr><td>Plan</td><td class="r">${((l.detail || '').split(' · ')[0]) || planName || ''}</td></tr><tr><td>Amount</td><td class="r">₹${(l.amount || 0).toLocaleString('en-IN')}</td></tr><tr><td>Status</td><td class="r">${l.event === 'cancelled' ? 'Cancelled' : 'Paid'}</td></tr></table></body></html>`)
+    w.document.close()
+  }
 
-  // Compare rows built from real plan fields.
+  // Compare rows mirror the mock; values come from the real plan fields / features.
   const rows: [string, (p: any) => ReactNode][] = [
     ['Monthly Price', (p) => <strong>{money(p.price)}</strong>],
     ['Discount on Services', (p) => `${p.discountPct || 0}%`],
-    ['Discounted Orders / mo', (p) => p.discountedOrdersPerMonth || '—'],
     ['Priority Booking', (p) => chk(!!p.priorityBooking)],
-    ['Priority Support', (p) => chk(hasFeat(p, /support/i))],
-    ['Exclusive Offers', (p) => chk(hasFeat(p, /offer/i))],
+    ['Free Reschedule', (p) => freeResched(p.freeCancellations)],
+    ['Exclusive Offers', (p) => chk(hasFeat(p, /exclusive|offer/i))],
+    ['Dedicated Support', (p) => chk(hasFeat(p, /support/i))],
     ['Wallet Cashback', (p) => p.cashbackPct ? `${p.cashbackPct}%` : <span className="muted">—</span>],
-    ['Platform Fee Waiver', (p) => chk(!!p.platformFeeWaiver)],
   ]
-  const curPlan = plans.find((p: any) => p.key === curKey) || null
 
   return (
     <div className="grid" style={{ gap: 16 }}>
@@ -1162,6 +1173,16 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
         <div>
           <h2 style={{ margin: 0, fontSize: 20 }}>Membership Overview</h2>
           <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Manage customer membership and view plan details</p>
+        </div>
+        <div style={{ position: 'relative' }}>
+          <button className="btn" onClick={(e) => { e.stopPropagation(); setChangeMenu((v) => !v) }}>Change Plan <ChevronDown size={15} /></button>
+          {changeMenu && (
+            <div className="menu" style={{ ...MENU_BOX, right: 0, top: 40 }} onClick={(e) => e.stopPropagation()}>
+              {plans.map((p: any) => (
+                <button key={p.key} className="menu-item" style={{ ...MENU_ITEM, ...(p.key === curKey ? { color: '#5b51e8', fontWeight: 700 } : {}) }} disabled={p.key === curKey} onClick={() => { setChangeMenu(false); setPick(p.key) }}>{p.name} · {money(p.price)}{p.key === curKey ? ' (current)' : ''}</button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1173,8 +1194,8 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
               <div className="row" style={{ gap: 12, alignItems: 'center' }}>
                 <span style={{ display: 'inline-flex', width: 44, height: 44, borderRadius: 12, background: '#eef0ff', color: '#5b51e8', alignItems: 'center', justifyContent: 'center' }}><Award size={22} /></span>
                 <div>
-                  <div className="row" style={{ gap: 8, alignItems: 'center' }}><strong style={{ fontSize: 16 }}>{membership.planName || curKey}</strong><Badge tone={(membership.status === 'active') ? 'green' : 'amber'}>{membership.status === 'cancelled' ? 'Cancelling' : 'Active'}</Badge></div>
-                  <div className="muted" style={{ fontSize: 12 }}>{membership.cycle || 'monthly'} · {money(membership.price || 0)}</div>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}><strong style={{ fontSize: 16 }}>{planName}</strong><Badge tone={(membership.status === 'active') ? 'green' : 'amber'}>{membership.status === 'cancelled' ? 'Cancelling' : 'Active'}</Badge></div>
+                  <div className="muted" style={{ fontSize: 12 }}>{curPlan?.tagline || `${membership.cycle || 'monthly'} · ${money(membership.price || 0)}`}</div>
                 </div>
               </div>
               <div className="row" style={{ gap: 10, textAlign: 'center' }}>
@@ -1190,6 +1211,7 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
                   </div>
                 </div>
               )}
+              <button className="btn line" style={{ width: '100%', justifyContent: 'center' }} onClick={() => nav('/membership')}>View Plan Details <ChevronRight size={14} /></button>
             </div>
           ) : <Empty>No active membership. Choose a plan from the table to enrol this customer.</Empty>}
         </Card>
@@ -1231,19 +1253,31 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
           </div>
         </Card>
 
-        {/* Summary */}
+        {/* Summary + upgrade */}
         <div className="grid" style={{ gap: 16, alignContent: 'start' }}>
           <Card title="Membership Summary">
             <div className="grid" style={{ gap: 10, fontSize: 13.5 }}>
-              <Row k="Plan Name" v={active ? (membership.planName || curKey) : <span className="muted">None</span>} />
+              <Row k="Plan Name" v={active ? planName : <span className="muted">None</span>} />
               <Row k="Status" v={<Badge tone={active ? 'green' : 'gray'}>{active ? 'Active' : 'None'}</Badge>} />
               <Row k="Member Since" v={active ? shortDate(membership.startedAt) : '—'} />
               <Row k="Next Renewal" v={active ? shortDate(membership.renewsAt) : '—'} />
               <Row k="Renewal Amount" v={active ? `${money(membership.price || 0)} / mo` : '—'} />
-              <Row k="Payment Method" v={defPm ? `${defPm.label}${defPm.detail ? ` · ${defPm.detail}` : ''}` : <span className="muted">—</span>} />
-              <Row k="Auto Renewal" v={active ? <Badge tone={membership.autoRenew ? 'green' : 'gray'} dot={false}>{membership.autoRenew ? 'Enabled' : 'Off'}</Badge> : '—'} />
+              <Row k="Payment Method" v={<span className="row" style={{ gap: 8, alignItems: 'center' }}>{defPm ? `${defPm.label}${defPm.detail ? ` · ${defPm.detail}` : ''}` : <span className="muted">—</span>}<button className="linkbtn" style={LINK} onClick={() => goto('wallet')}>Change</button></span>} />
+              <Row k="Auto Renewal" v={<span className="row" style={{ gap: 8, alignItems: 'center' }}>{active ? <Badge tone={membership.autoRenew ? 'green' : 'gray'} dot={false}>{membership.autoRenew ? 'Enabled' : 'Off'}</Badge> : '—'}<button className="linkbtn" style={LINK} onClick={() => toast('Auto-renew is managed by the customer in-app')}>Manage</button></span>} />
             </div>
           </Card>
+          {elite && curKey !== elite.key && (
+            <div className="card" style={{ padding: 16, background: 'linear-gradient(135deg,#f5f3ff,#eef2ff)', border: '1px solid #e0e7ff' }}>
+              <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                <Gift size={22} style={{ color: '#7c3aed' }} />
+                <div style={{ flex: 1 }}>
+                  <strong style={{ fontSize: 14 }}>Upgrade to {elite.name} Plan</strong>
+                  <p className="muted" style={{ fontSize: 12, margin: '3px 0 0' }}>Get more discounts, unlimited reschedule and higher cashback.</p>
+                </div>
+              </div>
+              <button className="linkbtn" style={{ ...LINK, marginTop: 8 }} onClick={() => setPick(elite.key)}>View {elite.name} Plan →</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1251,10 +1285,11 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
       <Card title="Membership Transactions">
         <div className="tablewrap">
           <table className="tbl">
-            <thead><tr><th>Date &amp; Time</th><th>Transaction ID</th><th>Description</th><th>Plan</th><th className="num">Amount</th><th>Status</th></tr></thead>
+            <thead><tr><th>Date &amp; Time</th><th>Transaction ID</th><th>Description</th><th>Plan</th><th className="num">Amount</th><th>Payment Method</th><th>Status</th><th style={{ width: 50 }}>Invoice</th></tr></thead>
             <tbody>
               {(ledger || []).map((l: any) => {
                 const paid = l.event !== 'cancelled'
+                const viaWallet = /wallet/i.test(l.detail || '')
                 return (
                   <tr key={l.id}>
                     <td><div style={{ fontSize: 13 }}>{shortDate(l.created)}</div><div className="muted" style={{ fontSize: 11.5 }}>{new Date(l.created).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></td>
@@ -1262,11 +1297,13 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
                     <td><div style={{ fontSize: 13, textTransform: 'capitalize' }}>{l.event}</div><div className="muted" style={{ fontSize: 11.5 }}>{l.detail || ''}</div></td>
                     <td>{(l.detail || '').split(' · ')[0] || '—'}</td>
                     <td className="num" style={{ fontWeight: 600 }}>{l.amount ? money(l.amount) : '—'}</td>
+                    <td className="muted" style={{ fontSize: 12.5 }}>{!paid ? '—' : viaWallet ? 'Wallet Balance' : (defPm ? `${defPm.label} ${defPm.detail || ''}`.trim() : 'Card')}</td>
                     <td><Badge tone={paid ? 'green' : 'gray'}>{paid ? 'Paid' : 'Cancelled'}</Badge></td>
+                    <td><button className="iconbtn" style={{ width: 30, height: 30 }} title="Invoice" onClick={() => printInvoice(l)}><FileText size={15} /></button></td>
                   </tr>
                 )
               })}
-              {(!ledger || ledger.length === 0) && <tr><td colSpan={6}><Empty>No membership transactions yet.</Empty></td></tr>}
+              {(!ledger || ledger.length === 0) && <tr><td colSpan={8}><Empty>No membership transactions yet.</Empty></td></tr>}
             </tbody>
           </table>
         </div>
