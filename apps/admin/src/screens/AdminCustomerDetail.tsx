@@ -37,21 +37,21 @@ function WhatsAppIcon({ size = 16, style }: { size?: number; style?: CSSProperti
   )
 }
 
-type Ev = { icon: ReactNode; tint: string; title: ReactNode; sub?: string; time: string }
+type Ev = { icon: ReactNode; tint: string; title: ReactNode; sub?: string; time: string; kind: string }
 function buildActivity(bookings: any[], txns: any[]): Ev[] {
   const evs: Ev[] = []
   for (const t of txns) {
     const amt = money(t.amount || 0)
-    if (t.kind === 'ADD_MONEY') evs.push({ icon: <WalletIcon size={15} />, tint: '#16a34a', title: `Wallet top-up of ${amt}`, time: t.created })
-    else if (t.kind === 'WELCOME_BONUS') evs.push({ icon: <Gift size={15} />, tint: '#5b51e8', title: `Welcome bonus ${amt}`, time: t.created })
-    else if (t.kind === 'REFUND' || /refund/i.test(t.title || '')) evs.push({ icon: <RotateCcw size={15} />, tint: '#f59e0b', title: `Refund of ${amt}`, sub: t.ref || '', time: t.created })
-    else if (t.type === 'debit') evs.push({ icon: <CreditCard size={15} />, tint: '#2e90fa', title: `Payment of ${amt} completed`, sub: t.title || t.ref || '', time: t.created })
-    else evs.push({ icon: <CreditCard size={15} />, tint: '#2e90fa', title: `${t.title || 'Credit'} ${amt}`, time: t.created })
+    if (t.kind === 'ADD_MONEY') evs.push({ kind: 'wallet', icon: <WalletIcon size={15} />, tint: '#16a34a', title: `Wallet top-up of ${amt}`, time: t.created })
+    else if (t.kind === 'WELCOME_BONUS') evs.push({ kind: 'wallet', icon: <Gift size={15} />, tint: '#5b51e8', title: `Welcome bonus ${amt}`, time: t.created })
+    else if (t.kind === 'REFUND' || /refund/i.test(t.title || '')) evs.push({ kind: 'payment', icon: <RotateCcw size={15} />, tint: '#f59e0b', title: `Refund of ${amt}`, sub: t.ref || '', time: t.created })
+    else if (t.type === 'debit') evs.push({ kind: 'payment', icon: <CreditCard size={15} />, tint: '#2e90fa', title: `Payment of ${amt} completed`, sub: t.title || t.ref || '', time: t.created })
+    else evs.push({ kind: 'payment', icon: <CreditCard size={15} />, tint: '#2e90fa', title: `${t.title || 'Credit'} ${amt}`, time: t.created })
   }
   for (const b of bookings) {
-    evs.push({ icon: <CalendarPlus size={15} />, tint: '#5b51e8', title: 'Booking created', sub: b.service || b.ref, time: b.created })
-    if (b.completed_at || b.status === 'completed') evs.push({ icon: <CheckCircle2 size={15} />, tint: '#16a34a', title: 'Booking completed', sub: b.service || b.ref, time: b.completed_at || b.created })
-    if (b.rating) evs.push({ icon: <Star size={15} />, tint: '#f59e0b', title: `Review submitted · ${b.rating}★`, sub: b.review || b.service, time: b.completed_at || b.created })
+    evs.push({ kind: 'booking', icon: <CalendarPlus size={15} />, tint: '#5b51e8', title: 'Booking created', sub: b.service || b.ref, time: b.created })
+    if (b.completed_at || b.status === 'completed') evs.push({ kind: 'booking', icon: <CheckCircle2 size={15} />, tint: '#16a34a', title: 'Booking completed', sub: b.service || b.ref, time: b.completed_at || b.created })
+    if (b.rating) evs.push({ kind: 'review', icon: <Star size={15} />, tint: '#f59e0b', title: `Review submitted · ${b.rating}★`, sub: b.review || b.service, time: b.completed_at || b.created })
   }
   return evs.filter((e) => e.time).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
 }
@@ -271,9 +271,9 @@ export default function AdminCustomerDetail() {
       {tab === 'membership' && <MembershipTab membership={d.membership} plans={d.membershipPlans || []} ledger={d.membershipLedger || []} c={c} cid={cid} paymentMethods={d.paymentMethods || []} onChanged={load} toast={toast} nav={nav} goto={setTab} />}
       {tab === 'offers' && <OffersTab bookings={m.bookings} offers={d.offers || { totalOffers: 0, coupons: [] }} c={c} nav={nav} toast={toast} goto={setTab} />}
       {tab === 'support' && <SupportTab tickets={d.tickets || []} notes={d.notes || []} c={c} cid={cid} onChanged={load} toast={toast} nav={nav} />}
-      {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} />}
-      {tab === 'notes' && <NotesTab notes={d.notes || []} onAdd={() => setNoteOpen(true)} />}
-      {tab === 'activity' && <ActivityTab activity={m.activity} />}
+      {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} bookings={m.bookings} />}
+      {tab === 'notes' && <NotesTab notes={d.notes || []} onAdd={() => setNoteOpen(true)} c={c} />}
+      {tab === 'activity' && <ActivityTab activity={m.activity} c={c} />}
 
       {/* modals */}
       {editOpen && (
@@ -1673,42 +1673,121 @@ function SupportTab({ tickets, notes, c, cid, onChanged, toast, nav }: any) {
     </div>
   )
 }
-function RatingsTab({ reviews, rating }: any) {
+function RatingsTab({ reviews, rating, bookings }: any) {
+  const [starF, setStarF] = useState(0)   // 0 = all
+  const wById = useMemo(() => { const m: Record<number, any> = {}; for (const b of bookings) m[b.id] = b; return m }, [bookings])
+  const dist = useMemo(() => { const d = [0, 0, 0, 0, 0]; for (const b of reviews) { const s = Math.round(b.rating); if (s >= 1 && s <= 5) d[s - 1]++ } return d }, [reviews])
+  const avg = reviews.length ? (reviews.reduce((a: number, b: any) => a + (b.rating || 0), 0) / reviews.length) : (rating || 0)
+  const withText = reviews.filter((b: any) => b.review).length
+  const shown = starF ? reviews.filter((b: any) => Math.round(b.rating) === starF) : reviews
+
   return (
-    <Card title={<span className="row" style={{ gap: 10, alignItems: 'center' }}>Ratings &amp; Feedback <Stars rating={rating} /> <strong>{rating ? rating.toFixed(1) : '—'}</strong></span>}>
-      <div className="grid" style={{ gap: 12 }}>
-        {reviews.map((b: any) => (
-          <div key={b.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="row" style={{ gap: 8, alignItems: 'center' }}><Stars rating={b.rating} size={13} /> <strong style={{ fontSize: 13 }}>{b.service}</strong></span>
-              <span className="muted" style={{ fontSize: 12 }}>{shortDate(b.completed_at || b.created)}</span>
+    <div className="grid" style={{ gap: 16 }}>
+      <div>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Ratings &amp; Feedback</h2>
+        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Ratings and reviews this customer left on their bookings</p>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) minmax(0, 1.6fr)', gap: 16, alignItems: 'start' }}>
+        <Card>
+          <div style={{ textAlign: 'center', padding: '6px 0' }}>
+            <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1 }}>{avg ? avg.toFixed(1) : '—'}</div>
+            <div style={{ display: 'inline-flex', margin: '8px 0 4px' }}><Stars rating={avg} size={18} /></div>
+            <div className="muted" style={{ fontSize: 12.5 }}>{reviews.length} review{reviews.length === 1 ? '' : 's'} · {withText} with a comment</div>
+          </div>
+          <div className="grid" style={{ gap: 6, marginTop: 12 }}>
+            {[5, 4, 3, 2, 1].map((s) => {
+              const n = dist[s - 1]; const pct = reviews.length ? Math.round((n / reviews.length) * 100) : 0
+              return (
+                <button key={s} onClick={() => setStarF(starF === s ? 0 : s)} style={{ display: 'flex', gap: 8, alignItems: 'center', background: starF === s ? '#f5f3ff' : 'none', border: 'none', borderRadius: 8, padding: '4px 6px', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 12, width: 28, textAlign: 'right' }}>{s}★</span>
+                  <span style={{ flex: 1, height: 7, borderRadius: 6, background: '#eef0f4', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${pct}%`, background: '#f59e0b', borderRadius: 6 }} /></span>
+                  <span className="muted" style={{ fontSize: 11.5, width: 26, textAlign: 'left' }}>{n}</span>
+                </button>
+              )
+            })}
+          </div>
+          {starF > 0 && <button className="linkbtn" style={{ ...LINK, marginTop: 8 }} onClick={() => setStarF(0)}>Clear filter</button>}
+        </Card>
+
+        <Card title={`Reviews (${shown.length})`}>
+          <div className="grid" style={{ gap: 12 }}>
+            {shown.map((b: any) => {
+              const wk = wById[b.id]
+              return (
+                <div key={b.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div className="row" style={{ gap: 8, alignItems: 'center' }}><Stars rating={b.rating} size={14} /><strong style={{ fontSize: 13 }}>{b.service}</strong></div>
+                    <span className="muted" style={{ fontSize: 12 }}>{shortDate(b.completed_at || b.created)}</span>
+                  </div>
+                  {b.review && <p style={{ margin: '8px 0 0', fontSize: 13.5 }}>{b.review}</p>}
+                  <div className="muted" style={{ fontSize: 11.5, marginTop: 6, display: 'flex', gap: 8, alignItems: 'center' }}>{b.ref}{wk?.worker && <span>· Worker: {wk.worker}</span>}</div>
+                </div>
+              )
+            })}
+            {shown.length === 0 && <Empty>{starF ? `No ${starF}★ reviews` : 'No reviews submitted yet'}</Empty>}
+          </div>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function NotesTab({ notes, onAdd, c }: any) {
+  return (
+    <div className="grid" style={{ gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Notes</h2>
+          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Internal ops notes on {c.name || c.phone || 'this customer'} — visible to admins only</p>
+        </div>
+        <button className="btn" onClick={onAdd}><Plus size={15} /> Add Note</button>
+      </div>
+      <Card title={`${notes.length} Note${notes.length === 1 ? '' : 's'}`}>
+        <div style={{ position: 'relative', paddingLeft: 8 }}>
+          {notes.map((n: any, i: number) => (
+            <div key={n.id} className="row" style={{ gap: 12, alignItems: 'flex-start', paddingBottom: i === notes.length - 1 ? 0 : 14, borderLeft: '2px solid var(--line)', marginLeft: 6, paddingLeft: 16, position: 'relative' }}>
+              <span style={{ position: 'absolute', left: -7, top: 2, width: 12, height: 12, borderRadius: '50%', background: '#5b51e8', border: '2px solid #fff' }} />
+              <div style={{ flex: 1, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 12px', fontSize: 13.5 }}>
+                <div>{n.body}</div>
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 5 }}>Added by {n.author || 'admin'} · {dateTime(n.created)}</div>
+              </div>
             </div>
-            {b.review && <p style={{ margin: '8px 0 0', fontSize: 13.5 }}>{b.review}</p>}
-            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{b.ref}</div>
-          </div>
-        ))}
-        {reviews.length === 0 && <Empty>No reviews submitted yet</Empty>}
-      </div>
-    </Card>
+          ))}
+          {notes.length === 0 && <Empty>No notes yet — add one to record a call, complaint or context.</Empty>}
+        </div>
+      </Card>
+    </div>
   )
 }
-function NotesTab({ notes, onAdd }: any) {
+
+function ActivityTab({ activity, c }: any) {
+  const [kindF, setKindF] = useState('all')
+  const counts = useMemo(() => { const k = { all: activity.length, booking: 0, payment: 0, wallet: 0, review: 0 } as Record<string, number>; for (const e of activity) k[e.kind] = (k[e.kind] || 0) + 1; return k }, [activity])
+  const shown = kindF === 'all' ? activity : activity.filter((e: Ev) => e.kind === kindF)
+  const KINDS: [string, string][] = [['all', 'All'], ['booking', 'Bookings'], ['payment', 'Payments'], ['wallet', 'Wallet'], ['review', 'Reviews']]
   return (
-    <Card title={`Notes (${notes.length})`} right={<button className="btn" onClick={onAdd}><Plus size={15} /> Add Note</button>}>
-      <div className="grid" style={{ gap: 10 }}>
-        {notes.map((n: any) => (
-          <div key={n.id} style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 12px', fontSize: 13.5 }}>
-            <div>{n.body}</div>
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 5 }}>Added by {n.author || 'admin'} · {dateTime(n.created)}</div>
+    <div className="grid" style={{ gap: 16 }}>
+      <div>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Activity Logs</h2>
+        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Everything {c.name || c.phone || 'this customer'} has done — derived from bookings and wallet activity</p>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+        {[['Total Events', counts.all, '#5b51e8', <Activity size={15} />], ['Bookings', counts.booking, '#2e90fa', <Calendar size={15} />], ['Payments', counts.payment, '#f59e0b', <CreditCard size={15} />], ['Reviews', counts.review, '#16a34a', <Star size={15} />]].map(([label, val, tint, icon]: any, i) => (
+          <div key={i} className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}><span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}</div>
+            <strong style={{ fontSize: 22, lineHeight: 1 }}>{val}</strong>
           </div>
         ))}
-        {notes.length === 0 && <Empty>No notes yet</Empty>}
       </div>
-    </Card>
+      <Card title={`Timeline (${shown.length})`} right={
+        <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+          {KINDS.map(([k, label]) => <button key={k} onClick={() => setKindF(k)} style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid var(--line)', background: kindF === k ? '#5b51e8' : '#fff', color: kindF === k ? '#fff' : '#667085', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{label}</button>)}
+        </div>
+      }>
+        <Timeline evs={shown} />
+      </Card>
+    </div>
   )
-}
-function ActivityTab({ activity }: any) {
-  return <Card title={`Activity Logs (${activity.length})`}><Timeline evs={activity} /></Card>
 }
 
 const MENU_BOX: CSSProperties = { position: 'absolute', right: 0, top: 42, zIndex: 30, background: '#fff', border: '1px solid var(--line, #e4e7ec)', borderRadius: 10, boxShadow: '0 12px 28px rgba(16,24,40,.14)', minWidth: 190, padding: 5 }
