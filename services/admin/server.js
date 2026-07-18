@@ -1231,8 +1231,16 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
     res.json(row)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
-app.patch('/api/admin/customers/:id', admin, async (req, res) => {
-  try { res.json(await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, req.body || {})) } catch (e) { res.status(500).json({ error: e.message }) }
+// Editing a customer's profile is a support/ops action — gate it on customers.edit and record who
+// changed which fields, so a name/email/city/status change is always traceable.
+app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), async (req, res) => {
+  try {
+    const body = req.body || {}
+    const result = await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, body)
+    const fields = Object.keys(body)
+    await logAudit(req.admin?.name || 'admin', 'customer.edit', `#${req.params.id}${fields.length ? ` (${fields.join(', ')})` : ''}`)
+    res.json(result)
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 // Admin wallet adjustment — credit/debit any balance (cash/promo/points), bypasses wallet status.
 // Routed through the approval matrix: executes immediately unless a rule requires sign-off, and now
