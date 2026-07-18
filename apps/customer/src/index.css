@@ -3675,8 +3675,8 @@ body { line-height: 1.45; }
 
 /* ============ Simplified booking flow (What's included + Book Instant/Schedule) ============ */
 /* Service detail — "What is included?" */
-.wi-hero { border-radius: 18px; overflow: hidden; aspect-ratio: 4 / 5; background: linear-gradient(135deg, #efeafe, #e2dbf8); margin-top: 4px; }
-.wi-hero img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.wi-hero { border-radius: 18px; overflow: hidden; aspect-ratio: 5 / 4; background: linear-gradient(135deg, #efeafe, #e2dbf8); margin-top: 4px; }
+.wi-hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 55%; display: block; }
 .wi-name { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin: 14px 0 4px; }
 .wi-chips { display: flex; gap: 10px; overflow-x: auto; padding: 6px 2px 10px; margin: 0 -2px; scrollbar-width: none; }
 .wi-chips::-webkit-scrollbar { display: none; }
