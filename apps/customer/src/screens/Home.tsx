@@ -54,7 +54,7 @@ export default function Home() {
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
   const firstName = (user?.name || 'there').split(' ')[0]
-  const popular = useMemo(() => services.filter((s) => s.available).slice(0, 8), [services])
+  const svcList = useMemo(() => services.filter((s) => s.available), [services])
   const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || bookings[0] || null, [bookings])
 
   // The greeting is always the first slide; live banners rotate in after it.
@@ -175,34 +175,7 @@ export default function Home() {
             )}
           </div>
 
-          {/* quick actions */}
-          <div className="hd-sec-head"><h3>Quick Actions</h3><button className="hd-seeall" onClick={() => nav('/quick-actions')}>See All</button></div>
-          <div className="hd-quick">
-            {QUICK.map((q) => (
-              <button key={q.key} className="hd-qa" onClick={q.on}>
-                <span className={`hd-qa-ic qa-${q.key}`}><q.Icon size={22} /></span>
-                <span className="hd-qa-l">{q.label}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* popular services */}
-          <div className="hd-sec-head"><h3>Popular Services</h3><button className="hd-seeall" onClick={() => nav('/popular-services')}>See All</button></div>
-          <div className="hd-pop">
-            {popular.map((s) => (
-              <button key={s.id} className="hd-pop-card" onClick={() => openService(s)}>
-                <span className="hd-pop-img">
-                  <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-                </span>
-                <span className="hd-pop-name">{s.name}</span>
-                <span className="hd-pop-price">From ₹{s.price}</span>
-              </button>
-            ))}
-            {popular.length === 0 && <p className="muted" style={{ padding: 12 }}>Loading services…</p>}
-          </div>
-
-          {/* continue booking */}
+          {/* continue booking — shown here (in place of Quick Actions), only if one is in progress */}
           {cont && (<>
             <div className="hd-sec-head"><h3>Continue Booking</h3></div>
             <button className="hd-cont" onClick={() => nav('/continue-booking')}>
@@ -217,6 +190,23 @@ export default function Home() {
               <span className="hd-cont-btn">View</span>
             </button>
           </>)}
+
+          {/* all services */}
+          <div className="hd-sec-head"><h3>All Services</h3></div>
+          <div className="hd-pop hd-pop-all">
+            {svcList.map((s) => (
+              <button key={s.id} className="hd-pop-card" onClick={() => openService(s)}>
+                <span className="hd-pop-img">
+                  <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                </span>
+                <span className="hd-pop-name">{s.name}</span>
+                <span className="hd-pop-price">From ₹{s.price}</span>
+              </button>
+            ))}
+            {svcList.length === 0 && <p className="muted" style={{ padding: 12 }}>Loading services…</p>}
+          </div>
+
         </>)}
       </div>
       <BottomNav />

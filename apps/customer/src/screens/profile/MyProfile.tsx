@@ -2,7 +2,7 @@
 // and family. Rows route to the Module-12 sub-screens. Bottom nav kept (Profile is a tab).
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Pencil, MapPin, CreditCard, Users, Bell, Globe, Shield, HelpCircle, Info, ChevronRight, LogOut } from 'lucide-react'
+import { Pencil, MapPin, CreditCard, Users, Bell, Globe, Shield, HelpCircle, Info, ChevronRight, LogOut, Zap } from 'lucide-react'
 import { BottomNav, Loading } from '../../components/UI'
 import { fetchMe, fetchSavedMethods, fetchFamily } from '../../api'
 import { useStore } from '../../store'
@@ -30,6 +30,7 @@ export default function MyProfile() {
   if (!user) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
 
   const ROWS = [
+    { icon: <Zap size={17} />, t: 'Quick Actions', to: '/quick-actions' },
     { icon: <Pencil size={17} />, t: 'Edit Profile', to: '/personal' },
     { icon: <MapPin size={17} />, t: 'Addresses', sub: `${counts.addr} Saved`, to: '/addresses' },
     { icon: <CreditCard size={17} />, t: 'Payment Methods', sub: `${counts.pay} Saved`, to: '/profile/payment-methods' },

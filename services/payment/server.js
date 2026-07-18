@@ -36,7 +36,10 @@ const verifiedPayments = new Map() // razorpay_payment_id -> { at } (single-use)
 
 const PAYMENT_METHODS = [
   { group: 'UPI', recommended: true, options: [
-    { id: 'upi', name: 'UPI', icon: '📲', sub: 'PhonePe, Google Pay, Paytm & more' }] },
+    { id: 'phonepe', name: 'PhonePe', icon: '📲', sub: 'UPI' },
+    { id: 'gpay', name: 'Google Pay', icon: '📲', sub: 'UPI' },
+    { id: 'paytm', name: 'Paytm', icon: '📲', sub: 'UPI' },
+    { id: 'upi', name: 'Other UPI app', icon: '📲', sub: 'BHIM, Amazon Pay & more' }] },
   { group: 'Cards', options: [{ id: 'card', name: 'Credit / Debit Card', icon: '💳', sub: 'Visa, Mastercard, RuPay' }] },
   { group: 'Net Banking', options: [{ id: 'netbanking', name: 'Net Banking', icon: '🏦', sub: 'All major banks' }] },
   { group: 'Wallets', options: [{ id: 'wallet', name: 'HomeHelp Wallet', icon: '👛', sub: 'Use your balance' }] },
