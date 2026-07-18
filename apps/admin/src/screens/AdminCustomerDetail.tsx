@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Pencil, ChevronDown, ChevronRight, Star, StarHalf, Phone, Mail, Calendar,
+  ArrowLeft, Pencil, ChevronDown, ChevronLeft, ChevronRight, Star, StarHalf, Phone, Mail, Calendar,
   Wallet as WalletIcon, Briefcase, LayoutGrid, MapPin, BadgeCheck, Tag, Headphones, StickyNote, Activity,
   User, CalendarPlus, CreditCard, RotateCcw, CheckCircle2, Gift, Plus, Ban, Send, Users2, Clock, TrendingUp, Award,
+  Search, XCircle, RefreshCw, Eye, Download,
 } from 'lucide-react'
 import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote } from '../api'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
@@ -262,7 +263,7 @@ export default function AdminCustomerDetail() {
       </div>
 
       {tab === 'overview' && <Overview m={m} c={c} nav={nav} onNote={() => setNoteOpen(true)} onMoney={() => setMoneyOpen(true)} onBlock={doBlock} onCall={dialTo} onWa={whatsApp} onComm={onComm} blocked={blocked} goto={setTab} />}
-      {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} />}
+      {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} c={c} toast={toast} />}
       {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} />}
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
       {tab === 'membership' && <MembershipTab membership={d.membership} nav={nav} />}
@@ -534,30 +535,204 @@ function BookingMini({ b, accent, heading, nav }: any) {
 }
 
 /* ============================ secondary tabs ============================ */
-function BookingsTab({ bookings, nav }: any) {
-  return (
-    <Card title={`Bookings (${bookings.length})`}>
-      <div className="tablewrap">
-        <table className="tbl">
-          <thead><tr><th>Ref</th><th>Service</th><th>Date</th><th>Worker</th><th className="num">Total</th><th>Payment</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            {bookings.map((b: any) => (
-              <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => nav(`/bookings/${b.id}`)}>
-                <td style={{ fontWeight: 600 }}>{b.ref}</td>
-                <td>{b.service || '—'}</td>
-                <td className="muted">{b.date ? shortDate(b.date) : shortDate(b.created)}</td>
-                <td>{b.worker || <span className="muted">—</span>}</td>
-                <td className="num">{money(b.total || 0)}</td>
-                <td><Badge tone={b.payment_status === 'paid' ? 'green' : 'amber'} dot={false}>{b.payment_status || '—'}</Badge></td>
-                <td><Badge>{b.status}</Badge></td>
-                <td><ChevronRight size={15} className="muted" /></td>
-              </tr>
-            ))}
-            {bookings.length === 0 && <tr><td colSpan={8}><Empty>No bookings</Empty></td></tr>}
-          </tbody>
-        </table>
+// Map a raw booking status to a display label + tone + coarse bucket used by the KPIs/pills.
+const BSTATUS: Record<string, { label: string; tone: string; bucket: string }> = {
+  completed: { label: 'Completed', tone: 'green', bucket: 'completed' },
+  cancelled: { label: 'Cancelled', tone: 'red', bucket: 'cancelled' },
+  in_progress: { label: 'In Progress', tone: 'blue', bucket: 'inprogress' },
+  on_the_way: { label: 'In Progress', tone: 'blue', bucket: 'inprogress' },
+  arrived: { label: 'In Progress', tone: 'blue', bucket: 'inprogress' },
+  worker_assigned: { label: 'Upcoming', tone: 'amber', bucket: 'upcoming' },
+  confirmed: { label: 'Upcoming', tone: 'amber', bucket: 'upcoming' },
+}
+const bStat = (s: string) => BSTATUS[s] || { label: s || '—', tone: 'gray', bucket: 'upcoming' }
+const bMs = (b: any) => { const t = Date.parse(b.date || b.created || ''); return isNaN(t) ? Date.parse(b.created || '') || 0 : t }
+const PAY_LABEL: Record<string, string> = { wallet: 'Wallet', upi: 'UPI', card: 'Card', cod: 'Cash', online: 'Online', razorpay: 'Online' }
+const payLabel = (p?: string) => (p ? (PAY_LABEL[String(p).toLowerCase()] || p.toUpperCase()) : '—')
+
+function BookingsTab({ bookings, nav, c, toast }: any) {
+  const [q, setQ] = useState('')
+  const [bucket, setBucket] = useState('all')
+  const [svc, setSvc] = useState('all')
+  const [wrk, setWrk] = useState('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [moreOpen, setMoreOpen] = useState(false)
+
+  const services = useMemo(() => [...new Set(bookings.map((b: any) => b.service).filter(Boolean))] as string[], [bookings])
+  const workers = useMemo(() => [...new Set(bookings.map((b: any) => b.worker).filter(Boolean))] as string[], [bookings])
+
+  const counts = useMemo(() => {
+    const k = { total: bookings.length, completed: 0, upcoming: 0, inprogress: 0, cancelled: 0 } as Record<string, number>
+    for (const b of bookings) k[bStat(b.status).bucket]++
+    return k
+  }, [bookings])
+  const pct = (n: number) => (counts.total ? Math.round((n / counts.total) * 100) : 0)
+
+  const filtered = useMemo(() => bookings.filter((b: any) => {
+    if (bucket !== 'all' && bStat(b.status).bucket !== bucket) return false
+    if (q && !`${b.ref} ${b.service}`.toLowerCase().includes(q.toLowerCase())) return false
+    if (svc !== 'all' && b.service !== svc) return false
+    if (wrk !== 'all' && (b.worker || '') !== wrk) return false
+    if (from && bMs(b) < Date.parse(from)) return false
+    if (to && bMs(b) > Date.parse(to) + 86400000) return false
+    return true
+  }), [bookings, bucket, q, svc, wrk, from, to])
+
+  useEffect(() => { setPage(1) }, [bucket, q, svc, wrk, from, to, pageSize])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const reset = () => { setQ(''); setBucket('all'); setSvc('all'); setWrk('all'); setFrom(''); setTo('') }
+
+  const exportCsv = () => {
+    const head = ['Booking', 'Service', 'Worker', 'Date', 'Time', 'Amount', 'Payment', 'Status']
+    const lines = filtered.map((b: any) => [b.ref, b.service || '', b.worker || 'Not Assigned', b.date || '', b.time || '', b.total || 0, `${b.payment_status || ''} ${payLabel(b.payment)}`.trim(), bStat(b.status).label])
+    const csv = [head, ...lines].map((r) => r.map((x: string | number) => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a'); a.href = url; a.download = `${c.displayId || 'customer'}-bookings.csv`; a.click(); URL.revokeObjectURL(url)
+  }
+
+  const bkpi = (icon: ReactNode, tint: string, label: string, value: ReactNode, sub: string) => (
+    <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}>
+        <span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: 8, background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>
+        {label}
       </div>
-    </Card>
+      <strong style={{ fontSize: 22, lineHeight: 1 }}>{value}</strong>
+      <span className="muted" style={{ fontSize: 11.5 }}>{sub}</span>
+    </div>
+  )
+
+  const PILLS: [string, string, number][] = [
+    ['all', 'All Bookings', counts.total], ['upcoming', 'Upcoming', counts.upcoming],
+    ['inprogress', 'In Progress', counts.inprogress], ['completed', 'Completed', counts.completed], ['cancelled', 'Cancelled', counts.cancelled],
+  ]
+
+  return (
+    <div className="grid" style={{ gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Bookings</h2>
+          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>All bookings placed by {c.name || c.phone || 'this customer'}</p>
+        </div>
+        <div className="row" style={{ gap: 8, position: 'relative' }}>
+          <button className="btn" onClick={() => { toast('Create the booking from the Bookings workspace'); nav(`/bookings?q=${encodeURIComponent(c.phone || c.name || '')}`) }}><Plus size={16} /> New Booking</button>
+          <button className="btn line" onClick={(e) => { e.stopPropagation(); setMoreOpen((v) => !v) }}>More Actions <ChevronDown size={15} /></button>
+          {moreOpen && (
+            <div className="menu" style={MENU_BOX} onClick={(e) => e.stopPropagation()}>
+              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); exportCsv() }}><Download size={15} /> Export ({filtered.length})</button>
+              <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); nav(`/bookings?q=${encodeURIComponent(c.phone || c.name || '')}`) }}><Calendar size={15} /> Open in Bookings</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* KPI cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        {bkpi(<Calendar size={15} />, '#5b51e8', 'Total Bookings', counts.total, 'All Time')}
+        {bkpi(<CheckCircle2 size={15} />, '#16a34a', 'Completed', counts.completed, `${pct(counts.completed)}% of total`)}
+        {bkpi(<Clock size={15} />, '#f59e0b', 'Upcoming', counts.upcoming, `${pct(counts.upcoming)}% of total`)}
+        {bkpi(<RefreshCw size={15} />, '#2e90fa', 'In Progress', counts.inprogress, `${pct(counts.inprogress)}% of total`)}
+        {bkpi(<XCircle size={15} />, '#e5484d', 'Cancelled', counts.cancelled, `${pct(counts.cancelled)}% of total`)}
+      </div>
+
+      <Card>
+        {/* filter bar */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.4fr) repeat(3, minmax(130px, 1fr)) minmax(200px, 1.4fr) auto', gap: 10, alignItems: 'end', marginBottom: 12 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+            <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by booking ID…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+          </div>
+          <select className="select" value={bucket} onChange={(e) => setBucket(e.target.value)}><option value="all">All Status</option><option value="upcoming">Upcoming</option><option value="inprogress">In Progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
+          <select className="select" value={svc} onChange={(e) => setSvc(e.target.value)}><option value="all">All Services</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+          <select className="select" value={wrk} onChange={(e) => setWrk(e.target.value)}><option value="all">All Workers</option>{workers.map((w) => <option key={w} value={w}>{w}</option>)}</select>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+            <span className="muted">–</span>
+            <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+          </div>
+          <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
+        </div>
+
+        {/* status pills */}
+        <div className="row" style={{ gap: 4, borderBottom: '1px solid var(--line)', marginBottom: 10, flexWrap: 'wrap' }}>
+          {PILLS.map(([k, label, n]) => (
+            <button key={k} onClick={() => setBucket(k)} style={{
+              display: 'inline-flex', gap: 6, alignItems: 'center', padding: '9px 12px', background: 'none', border: 'none',
+              borderBottom: bucket === k ? '2px solid #5b51e8' : '2px solid transparent', color: bucket === k ? '#5b51e8' : '#667085',
+              fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            }}>{label}<span style={{ background: bucket === k ? '#5b51e8' : '#eef0f4', color: bucket === k ? '#fff' : '#667085', borderRadius: 10, padding: '0 7px', fontSize: 11 }}>{n}</span></button>
+          ))}
+        </div>
+
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead><tr><th>Booking Details</th><th>Service</th><th>Worker</th><th>Date &amp; Time</th><th className="num">Amount</th><th>Payment</th><th>Status</th><th style={{ width: 60 }}>Actions</th></tr></thead>
+            <tbody>
+              {pageRows.map((b: any) => {
+                const st = bStat(b.status)
+                const item = (b.items || [])[0] || {}
+                return (
+                  <tr key={b.id}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{b.ref}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>{b.date ? shortDate(b.date) : shortDate(b.created)}{b.time ? `, ${b.time}` : ''}</div>
+                      {c.phone && <div className="muted" style={{ fontSize: 11.5, display: 'flex', gap: 4, alignItems: 'center' }}><Phone size={11} />{c.phone}</div>}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 18 }}>{item.icon || '🧹'}</span>
+                        <div>
+                          <div style={{ fontSize: 13.5 }}>{b.service || '—'}</div>
+                          <div className="muted" style={{ fontSize: 11.5 }}>{[item.category, item.durationLabel].filter(Boolean).join(' · ') || '—'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      {b.worker ? (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <Avatar name={b.worker} size={30} />
+                          <div>
+                            <div style={{ fontSize: 13.5 }}>{b.worker}</div>
+                            {b.workerRating ? <div style={{ display: 'flex', gap: 3, alignItems: 'center', fontSize: 11.5, color: '#f59e0b' }}><Star size={11} fill="#f59e0b" stroke="#f59e0b" />{Number(b.workerRating).toFixed(1)}</div> : null}
+                          </div>
+                        </div>
+                      ) : <span className="muted">Not Assigned</span>}
+                    </td>
+                    <td>
+                      <div style={{ fontSize: 13 }}>{b.date ? shortDate(b.date) : shortDate(b.created)}</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>{b.time || '—'}</div>
+                    </td>
+                    <td className="num" style={{ fontWeight: 600 }}>{money(b.total || 0)}</td>
+                    <td>
+                      <div className="row" style={{ gap: 5, alignItems: 'center', fontSize: 12.5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: b.payment_status === 'paid' ? '#16a34a' : '#f59e0b' }} />{b.payment_status === 'paid' ? 'Paid' : (b.payment_status || 'Pending')}</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>{payLabel(b.payment)}</div>
+                    </td>
+                    <td><Badge tone={st.tone}>{st.label}</Badge></td>
+                    <td>
+                      <button className="iconbtn" style={{ width: 30, height: 30 }} title="View booking" onClick={() => nav(`/bookings/${b.id}`)}><Eye size={16} /></button>
+                    </td>
+                  </tr>
+                )
+              })}
+              {filtered.length === 0 && <tr><td colSpan={8}><Empty>No bookings match these filters.</Empty></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} bookings</span>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+            <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+            <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+            <select className="select" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ height: 32 }}>{[10, 20, 50].map((s) => <option key={s} value={s}>{s} / page</option>)}</select>
+          </div>
+        </div>
+      </Card>
+    </div>
   )
 }
 function AddressesTab({ addresses }: any) {

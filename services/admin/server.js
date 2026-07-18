@@ -1174,7 +1174,8 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
     items: b.items || [],
     total: b.total, subtotal: b.subtotal, discount: b.discount, coupon: b.coupon,
     status: b.status, payment: b.payment, payment_status: b.payment_status,
-    date: b.date, time: b.time, worker: b.pro_name, worker_id: b.worker_id,
+    date: b.date, time: b.time, duration: b.duration,
+    worker: b.pro_name, worker_id: b.worker_id, workerRating: b.pro_rating,
     rating: b.rating, review: b.review, zone: b.zone_id ? (zoneName[b.zone_id] || null) : null,
     created: b.created, started_at: b.started_at, completed_at: b.completed_at,
   }))
