@@ -70,7 +70,7 @@ export default function AdminCustomerDetail() {
   const [busy, setBusy] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
-  const [editDraft, setEditDraft] = useState({ name: '', email: '', city: '' })
+  const [editDraft, setEditDraft] = useState({ name: '', email: '', city: '', gender: '', language: '' })
   const [moneyOpen, setMoneyOpen] = useState(false)
   const [mAmt, setMAmt] = useState(''); const [mNote, setMNote] = useState('')
   const [noteOpen, setNoteOpen] = useState(false); const [noteText, setNoteText] = useState('')
@@ -158,7 +158,11 @@ export default function AdminCustomerDetail() {
   }
   const dialTo = () => { if (c.phone) window.location.href = `tel:${c.phone}` }
   const whatsApp = () => { if (c.phone) window.open(`https://wa.me/${String(c.phone).replace(/\D/g, '')}`, '_blank') }
-  const openEdit = () => { setEditDraft({ name: c.name || '', email: c.email || '', city: c.city || '' }); setEditOpen(true) }
+  const openEdit = () => { setEditDraft({ name: c.name || '', email: c.email || '', city: c.city || '', gender: c.gender || '', language: c.language || '' }); setEditOpen(true) }
+  const onComm = async (key: string, val: boolean) => {
+    try { await updateCustomer(cid, { [`comm_${key}`]: val }); load() }
+    catch (e) { toast((e as Error).message, 'err') }
+  }
 
   const kpi = (icon: ReactNode, tint: string, label: string, value: ReactNode, action?: ReactNode) => (
     <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
@@ -238,7 +242,7 @@ export default function AdminCustomerDetail() {
         </div>
       </div>
 
-      {tab === 'overview' && <Overview m={m} c={c} nav={nav} onNote={() => setNoteOpen(true)} onMoney={() => setMoneyOpen(true)} onBlock={doBlock} onCall={dialTo} onWa={whatsApp} blocked={blocked} goto={setTab} />}
+      {tab === 'overview' && <Overview m={m} c={c} nav={nav} onNote={() => setNoteOpen(true)} onMoney={() => setMoneyOpen(true)} onBlock={doBlock} onCall={dialTo} onWa={whatsApp} onComm={onComm} blocked={blocked} goto={setTab} />}
       {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} />}
       {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} />}
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
@@ -256,6 +260,10 @@ export default function AdminCustomerDetail() {
             <Field label="Name"><input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} /></Field>
             <Field label="Email"><input value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} /></Field>
             <Field label="City"><input value={editDraft.city} onChange={(e) => setEditDraft({ ...editDraft, city: e.target.value })} /></Field>
+            <div className="row" style={{ gap: 12 }}>
+              <Field label="Gender"><select className="select" value={editDraft.gender} onChange={(e) => setEditDraft({ ...editDraft, gender: e.target.value })}><option value="">Not set</option><option>Male</option><option>Female</option><option>Other</option><option>Prefer not to say</option></select></Field>
+              <Field label="Preferred Language"><select className="select" value={editDraft.language} onChange={(e) => setEditDraft({ ...editDraft, language: e.target.value })}><option value="">Not set</option><option>English</option><option>Hindi</option><option>Telugu</option><option>Tamil</option><option>Kannada</option><option>Marathi</option><option>Bengali</option></select></Field>
+            </div>
           </div>
         </Modal>
       )}
@@ -278,14 +286,25 @@ export default function AdminCustomerDetail() {
 }
 
 /* ============================ Overview tab ============================ */
-function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, blocked, goto }: any) {
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!on)} aria-pressed={on} style={{
+      width: 40, height: 22, borderRadius: 22, border: 'none', cursor: 'pointer', padding: 2,
+      background: on ? '#16a34a' : '#cbd2da', transition: 'background .15s', display: 'inline-flex', justifyContent: on ? 'flex-end' : 'flex-start',
+    }}><span style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', display: 'block', boxShadow: '0 1px 2px rgba(0,0,0,.2)' }} /></button>
+  )
+}
+
+function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, onComm, blocked, goto }: any) {
+  const comm = c.comm || { whatsapp: true, sms: true, email: true, push: true, promo: true }
+  const CHANNELS: [string, string][] = [['whatsapp', 'WhatsApp'], ['sms', 'SMS'], ['email', 'Email'], ['push', 'Push Notifications'], ['promo', 'Promotional Offers']]
   const info: [string, ReactNode][] = [
     ['Full Name', c.name || '—'],
     ['Mobile Number', <span className="row" style={{ gap: 8, alignItems: 'center' }}>{c.phone || '—'}{c.phone && <Badge tone="green" dot={false}>Verified</Badge>}</span>],
     ['Email Address', <span className="row" style={{ gap: 8, alignItems: 'center' }}>{c.email || '—'}{c.provider === 'google' && c.email ? <Badge tone="green" dot={false}>Verified</Badge> : c.email ? <Badge tone="gray" dot={false}>Unverified</Badge> : null}</span>],
     ['Date of Birth', c.dob ? shortDate(c.dob) : <span className="muted">Not set</span>],
-    ['Gender', <span className="muted">Not set</span>],
-    ['Preferred Language', <span className="muted">Not set</span>],
+    ['Gender', c.gender || <span className="muted">Not set</span>],
+    ['Preferred Language', c.language || <span className="muted">Not set</span>],
     ['Registration Source', c.provider === 'google' ? 'Google' : c.provider === 'phone' ? 'Mobile App (OTP)' : (c.provider || '—')],
     ['Referred By', m.referredByName ?? <span className="muted">—</span>],
     ['Customer Segment', <Badge tone={SEG_TONE[m.segment]} dot={false}>{m.segment}</Badge>],
@@ -376,15 +395,22 @@ function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, blocked, 
           <button className="btn line" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} onClick={() => goto('bookings')}>View All Services <ChevronRight size={15} /></button>
         </Card>
 
-        {/* Reachable Channels */}
-        <Card title="Communication Channels">
-          <div className="grid" style={{ gap: 9, fontSize: 13.5 }}>
-            <Row k="WhatsApp" v={<Badge tone={c.phone ? 'green' : 'gray'} dot={false}>{c.phone ? 'Reachable' : 'No number'}</Badge>} />
-            <Row k="SMS" v={<Badge tone={c.phone ? 'green' : 'gray'} dot={false}>{c.phone ? 'Reachable' : 'No number'}</Badge>} />
-            <Row k="Email" v={<Badge tone={c.email ? 'green' : 'gray'} dot={false}>{c.email ? 'Reachable' : 'No email'}</Badge>} />
-            <Row k="Push (App)" v={<Badge tone={c.provider ? 'green' : 'gray'} dot={false}>{c.provider ? 'Installed' : '—'}</Badge>} />
+        {/* Communication Preferences (real, per-channel opt-in) */}
+        <Card title="Communication Preferences">
+          <div className="grid" style={{ gap: 11 }}>
+            {CHANNELS.map(([key, label]) => {
+              const noContact = (key === 'email' && !c.email) || ((key === 'whatsapp' || key === 'sms') && !c.phone)
+              return (
+                <div key={key} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13.5 }}>{label}{noContact && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>(no contact on file)</span>}</span>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 11.5, minWidth: 52, textAlign: 'right' }}>{comm[key] ? 'Enabled' : 'Disabled'}</span>
+                    <Toggle on={!!comm[key]} onChange={(v) => onComm(key, v)} />
+                  </div>
+                </div>
+              )
+            })}
           </div>
-          <p className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>Derived from contact details on file. Per-channel opt-in is managed in the customer app.</p>
         </Card>
 
         {/* Notes + Tags + Address rail */}

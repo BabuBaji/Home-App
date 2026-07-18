@@ -184,6 +184,15 @@ async function init() {
     `UPDATE transactions SET kind='REFUND' WHERE kind IS NULL AND title LIKE 'Refund %'`,
     `UPDATE transactions SET kind='ADD_MONEY' WHERE kind IS NULL AND title='Added to wallet'`,
     `UPDATE transactions SET kind='WELCOME_BONUS' WHERE kind IS NULL AND title='Welcome bonus'`,
+    // Profile: gender + preferred language (captured/edited from the admin profile page).
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT`,
+    // Per-channel communication opt-in. Default on — matches the previous implicit "reachable" behaviour.
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS comm_whatsapp BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS comm_sms BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS comm_email BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS comm_push BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS comm_promo BOOLEAN NOT NULL DEFAULT true`,
     // Internal ops notes an admin pins to a customer (from the Customers screen "Add Note" action).
     `CREATE TABLE IF NOT EXISTS customer_notes (
       id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
@@ -240,6 +249,11 @@ const publicUser = (u) => u && ({
   wallet: u.wallet, rating: u.rating, status: u.status, created: u.created,
   referralCode: u.referral_code, referredBy: u.referred_by, dob: u.dob || null,
   promoBalance: u.promo_balance || 0, rewardPoints: u.reward_points || 0, walletStatus: u.wallet_status || 'active',
+  gender: u.gender || null, language: u.language || null,
+  comm: {
+    whatsapp: u.comm_whatsapp ?? true, sms: u.comm_sms ?? true, email: u.comm_email ?? true,
+    push: u.comm_push ?? true, promo: u.comm_promo ?? true,
+  },
 })
 
 async function getUser(id) {
@@ -1063,13 +1077,21 @@ app.get('/api/internal/customers', internalOnly, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM users ORDER BY id DESC')
   res.json(rows.map(publicUser))
 })
+// Whitelisted columns an admin may patch. Booleans are coerced so a JSON `false` isn't lost.
+const PATCHABLE = { name: 0, email: 0, phone: 0, city: 0, status: 0, gender: 0, language: 0,
+  comm_whatsapp: 1, comm_sms: 1, comm_email: 1, comm_push: 1, comm_promo: 1 }
 app.patch('/api/internal/users/:id', internalOnly, async (req, res) => {
   const b = req.body || {}
   const u = await getUser(Number(req.params.id))
   if (!u) return res.status(404).json({ error: 'User not found' })
-  const upd = await pool.query(
-    'UPDATE users SET name=$1,email=$2,phone=$3,city=$4,status=$5 WHERE id=$6 RETURNING *',
-    [b.name ?? u.name, b.email ?? u.email, b.phone ?? u.phone, b.city ?? u.city, b.status ?? u.status, u.id])
+  const sets = [], vals = []
+  for (const [col, isBool] of Object.entries(PATCHABLE)) {
+    if (b[col] === undefined) continue
+    vals.push(isBool ? !!b[col] : b[col]); sets.push(`${col}=$${vals.length}`)
+  }
+  if (!sets.length) return res.json({ user: publicUser(u) })
+  vals.push(u.id)
+  const upd = await pool.query(`UPDATE users SET ${sets.join(',')} WHERE id=$${vals.length} RETURNING *`, vals)
   res.json({ user: publicUser(upd.rows[0]) })
 })
 
