@@ -47,6 +47,8 @@ export default function AdminBookingDetail() {
   const [aMod, setAMod] = useState('all')
   const [aRole, setARole] = useState('all')
   const [aAct, setAAct] = useState('all')
+  const [aFrom, setAFrom] = useState('')
+  const [aTo, setATo] = useState('')
   const [aPage, setAPage] = useState(1)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
@@ -577,46 +579,65 @@ export default function AdminBookingDetail() {
       })()}
       {tab === 'activity' && (!activity ? <Loading /> : (() => {
         const roleColor: Record<string, string> = { system: '#5b51e8', admin: '#5b51e8', worker: '#16a34a', customer: '#f59e0b', auto: '#9333ea' }
+        const modIcon = (m: string) => ({ Bookings: <CalendarCheck size={13} />, Payments: <IndianRupee size={13} />, Dispatch: <User size={13} />, Jobs: <PlayCircle size={13} />, Workflow: <RefreshCw size={13} />, Support: <LifeBuoy size={13} />, Notes: <StickyNote size={13} /> } as Record<string, ReactNode>)[m] || <Clock size={13} />
         const modules = Array.from(new Set(activity.activities.map((a) => a.module)))
         const actions = Array.from(new Set(activity.activities.map((a) => a.actionType)))
-        const filtered = activity.activities.filter((a) => (aMod === 'all' || a.module === aMod) && (aRole === 'all' || a.role === aRole) && (aAct === 'all' || a.actionType === aAct))
+        const filtered = activity.activities.filter((a) => (aMod === 'all' || a.module === aMod) && (aRole === 'all' || a.role === aRole) && (aAct === 'all' || a.actionType === aAct) && (!aFrom || a.at.slice(0, 10) >= aFrom) && (!aTo || a.at.slice(0, 10) <= aTo))
         const aSize = 25
         const pageRows = filtered.slice((aPage - 1) * aSize, aPage * aSize)
         const c = activity.counts
-        const td: CSSProperties = { padding: '11px 12px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top' }
+        const reset = () => { setAMod('all'); setARole('all'); setAAct('all'); setAFrom(''); setATo(''); setAPage(1) }
+        const th: CSSProperties = { textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid var(--line)', fontSize: 11, textTransform: 'uppercase', color: 'var(--muted)', whiteSpace: 'nowrap' }
+        const td: CSSProperties = { padding: '12px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'middle' }
         return (
         <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2.6fr) minmax(240px, 1fr)', gap: 16, alignItems: 'start' }}>
           <div className="grid" style={{ gap: 16 }}>
-            {/* filters + counts */}
+            {/* filters card */}
+            <Card>
+              <div className="row" style={{ gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div><label className="muted" style={{ fontSize: 11, display: 'block', marginBottom: 4, fontWeight: 600 }}>Date Range</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><input type="date" className="input" style={{ width: 140 }} value={aFrom} onChange={(e) => setAFrom(e.target.value)} /><span className="muted">–</span><input type="date" className="input" style={{ width: 140 }} value={aTo} onChange={(e) => setATo(e.target.value)} /></div></div>
+                <div><label className="muted" style={{ fontSize: 11, display: 'block', marginBottom: 4, fontWeight: 600 }}>Module</label><select className="select" style={{ minWidth: 150 }} value={aMod} onChange={(e) => { setAMod(e.target.value); setAPage(1) }}><option value="all">All Modules</option>{modules.map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
+                <div><label className="muted" style={{ fontSize: 11, display: 'block', marginBottom: 4, fontWeight: 600 }}>Performed By</label><select className="select" style={{ minWidth: 140 }} value={aRole} onChange={(e) => { setARole(e.target.value); setAPage(1) }}><option value="all">All Users</option>{['system', 'admin', 'worker', 'customer', 'auto'].map((r) => <option key={r} value={r}>{r[0].toUpperCase() + r.slice(1)}</option>)}</select></div>
+                <div><label className="muted" style={{ fontSize: 11, display: 'block', marginBottom: 4, fontWeight: 600 }}>Action Type</label><select className="select" style={{ minWidth: 140 }} value={aAct} onChange={(e) => { setAAct(e.target.value); setAPage(1) }}><option value="all">All Actions</option>{actions.map((a) => <option key={a} value={a}>{a}</option>)}</select></div>
+                <button className="btn" onClick={() => setAPage(1)}>Apply Filters</button>
+                <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
+              </div>
+              <div className="row" style={{ gap: 18, marginTop: 16, flexWrap: 'wrap', fontSize: 12.5, alignItems: 'center' }}>
+                <b>Total Activities: {c.total}</b>
+                {(['system', 'admin', 'worker', 'customer', 'auto'] as const).map((r) => <span key={r} className="row" style={{ gap: 6, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: roleColor[r], display: 'inline-block' }} /><span style={{ textTransform: 'capitalize' }}>{r} ({c[r]})</span></span>)}
+              </div>
+            </Card>
+
+            {/* table card */}
             <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={16} /> Activity Logs</span>} right={<button className="btn line sm" onClick={exportActivity}>Export Logs</button>}>
-              <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-                <select className="select flt" value={aMod} onChange={(e) => { setAMod(e.target.value); setAPage(1) }}><option value="all">All Modules</option>{modules.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-                <select className="select flt" value={aRole} onChange={(e) => { setARole(e.target.value); setAPage(1) }}><option value="all">All Users</option>{['system', 'admin', 'worker', 'customer', 'auto'].map((r) => <option key={r} value={r} style={{ textTransform: 'capitalize' }}>{r[0].toUpperCase() + r.slice(1)}</option>)}</select>
-                <select className="select flt" value={aAct} onChange={(e) => { setAAct(e.target.value); setAPage(1) }}><option value="all">All Actions</option>{actions.map((a) => <option key={a} value={a}>{a}</option>)}</select>
-                {(aMod !== 'all' || aRole !== 'all' || aAct !== 'all') && <button className="btn line sm" onClick={() => { setAMod('all'); setARole('all'); setAAct('all'); setAPage(1) }}><RefreshCw size={13} /> Reset</button>}
-              </div>
-              <div className="row" style={{ gap: 16, flexWrap: 'wrap', fontSize: 12.5, marginBottom: 8 }}>
-                <span><b>Total {c.total}</b></span>
-                {(['system', 'admin', 'worker', 'customer', 'auto'] as const).map((r) => c[r] > 0 && <span key={r} className="row" style={{ gap: 5, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: roleColor[r], display: 'inline-block' }} /><span style={{ textTransform: 'capitalize' }}>{r} ({c[r]})</span></span>)}
-              </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
-                  <thead><tr style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase' }}>{['Date & Time', 'Performed By', 'Module', 'Action', 'Details'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--line)' }}>{h}</th>)}</tr></thead>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+                  <thead><tr>{['', 'Date & Time', 'Performed By', 'Module', 'Action', 'Details', 'IP Address'].map((h, i) => <th key={i} style={{ ...th, ...(i === 0 ? { width: 28, padding: 0 } : {}) }}>{h}</th>)}</tr></thead>
                   <tbody>{pageRows.map((a, i) => (
                     <tr key={i}>
-                      <td style={td}><span className="row" style={{ gap: 8, alignItems: 'flex-start' }}><i style={{ width: 10, height: 10, borderRadius: 50, background: roleColor[a.role] || '#98a2b3', display: 'inline-block', marginTop: 3, flex: 'none' }} /><span>{fmtDateTime(a.at)}</span></span></td>
-                      <td style={td}><div style={{ fontWeight: 600 }}>{a.name}</div><div className="muted" style={{ fontSize: 11, textTransform: 'capitalize' }}>{a.role}</div></td>
-                      <td style={td}>{a.module}</td>
-                      <td style={td}><Badge tone={a.actionType.includes('Update') || a.actionType.includes('Auto') ? 'blue' : a.actionType === 'Payment' ? 'green' : a.actionType === 'Cancellation' || a.actionType === 'Escalation' ? 'red' : 'gray'} dot={false}>{a.actionType}</Badge></td>
-                      <td style={{ ...td, maxWidth: 360 }}>{a.details}</td>
+                      <td style={{ width: 28, padding: 0, position: 'relative' }}>
+                        <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, background: '#eceaf6', transform: 'translateX(-50%)' }} />
+                        <div style={{ position: 'relative', display: 'grid', placeItems: 'center', height: '100%', minHeight: 46 }}><span style={{ width: 16, height: 16, borderRadius: 50, background: roleColor[a.role] || '#98a2b3', border: '3px solid #fff', boxShadow: '0 0 0 1.5px #eceaf6', flex: 'none' }} /></div>
+                      </td>
+                      <td style={{ ...td, whiteSpace: 'nowrap' }}>{fmtDateTime(a.at)}</td>
+                      <td style={td}><div className="row" style={{ gap: 8, alignItems: 'center' }}><Avatar name={a.name} size={30} /><div><div style={{ fontWeight: 600 }}>{a.name}</div><div className="muted" style={{ fontSize: 11, textTransform: 'capitalize' }}>{a.role}</div></div></div></td>
+                      <td style={td}><span className="row" style={{ gap: 6, alignItems: 'center' }}><span style={{ color: 'var(--muted)' }}>{modIcon(a.module)}</span>{a.module}</span></td>
+                      <td style={td}><Badge tone={a.actionType.includes('Update') || a.actionType.includes('Auto') ? 'blue' : a.actionType === 'Payment' ? 'green' : a.actionType === 'Cancellation' || a.actionType === 'Escalation' ? 'red' : a.actionType === 'Assignment' ? 'violet' : 'gray'} dot={false}>{a.actionType}</Badge></td>
+                      <td style={{ ...td, maxWidth: 340 }}>{a.details}</td>
+                      <td style={{ ...td, color: 'var(--muted)', fontSize: 11.5 }}>—</td>
                     </tr>
                   ))}</tbody>
                 </table>
               </div>
-              <div className="row" style={{ justifyContent: 'space-between', marginTop: 12, alignItems: 'center' }}>
-                <span className="muted" style={{ fontSize: 12 }}>Showing {filtered.length ? (aPage - 1) * aSize + 1 : 0}–{Math.min(aPage * aSize, filtered.length)} of {filtered.length}</span>
-                {filtered.length > aSize && <div className="row" style={{ gap: 6 }}><button className="btn line sm" disabled={aPage === 1} onClick={() => setAPage(aPage - 1)}>Prev</button><button className="btn line sm" disabled={aPage * aSize >= filtered.length} onClick={() => setAPage(aPage + 1)}>Next</button></div>}
+              <div className="row" style={{ justifyContent: 'space-between', marginTop: 14, alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <span className="muted" style={{ fontSize: 12 }}>Showing {filtered.length ? (aPage - 1) * aSize + 1 : 0} to {Math.min(aPage * aSize, filtered.length)} of {filtered.length} activities</span>
+                <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  <button className="btn line sm" disabled={aPage === 1} onClick={() => setAPage(aPage - 1)}>‹ Prev</button>
+                  {Array.from({ length: Math.max(1, Math.ceil(filtered.length / aSize)) }, (_, p) => <button key={p} className={'btn ' + (aPage === p + 1 ? '' : 'line') + ' sm'} onClick={() => setAPage(p + 1)}>{p + 1}</button>)}
+                  <button className="btn line sm" disabled={aPage * aSize >= filtered.length} onClick={() => setAPage(aPage + 1)}>Next ›</button>
+                </div>
               </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>IP address isn't captured for these derived lifecycle events yet — that's a follow-up when the apps log request IPs.</div>
             </Card>
           </div>
           <div className="grid" style={{ gap: 16 }}>{summaryCard()}{customerCard()}{workerCard()}{notesCard()}</div>
