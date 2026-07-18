@@ -1231,6 +1231,15 @@ app.get('/internal/worker-comm', internalOnly, async (_q, res) => {
   res.json(map)
 })
 
+// Resolve an admin role KEY (e.g. 'super') to its display name ('Super Admin'). Prefers the DB roles
+// table (covers custom roles), falls back to the seeded system roles, then a title-cased key.
+async function roleDisplayName(key) {
+  if (!key) return 'Administrator'
+  const r = (await pool.query('SELECT name FROM roles WHERE key=$1', [key])).rows[0]
+  if (r?.name) return r.name
+  const sys = SYSTEM_ROLES.find((s) => s.key === key)
+  return sys?.name || (String(key).charAt(0).toUpperCase() + String(key).slice(1))
+}
 // Pin a typed ops note to a customer (category, optional title + related booking).
 app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
@@ -1238,7 +1247,7 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
     const row = await internalPost(U.auth, `/api/internal/users/${req.params.id}/notes`, {
       body: b.body, type: b.type || 'General', title: b.title || null,
       bookingId: b.bookingId || null, bookingRef: b.bookingRef || null,
-      author: req.admin?.name || 'Admin', authorRole: req.admin?.role || 'Administrator',
+      author: req.admin?.name || 'Admin', authorRole: await roleDisplayName(req.admin?.role),
     })
     await logAudit(req.admin?.name || 'admin', 'customer.note_add', `#${req.params.id}`)
     res.json(row)
