@@ -6,7 +6,7 @@ import {
   LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle, CalendarCheck, PlayCircle, PauseCircle, Flag, HelpCircle,
 } from 'lucide-react'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, issueRefund, updateBooking, type Zone, type Settlement } from '../api'
+import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, issueRefund, updateBooking, API_BASE, type Zone, type Settlement } from '../api'
 
 const REACHED: Record<string, number> = { confirmed: 1, worker_assigned: 2, on_the_way: 3, arrived: 4, in_progress: 6, completed: 8, cancelled: 8 }
 // Job-timeline lifecycle: current level per status (steps below it are done, the matching one is live).
@@ -36,6 +36,7 @@ export default function AdminBookingDetail() {
   const [cust, setCust] = useState<any>(null)
   const [worker, setWorker] = useState<any>(null)
   const [settle, setSettle] = useState<Settlement | null>(null)
+  const [seller, setSeller] = useState<any>(null)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
   const [tab, setTab] = useState<'overview' | 'timeline' | 'payment' | 'evidence' | 'support' | 'activity'>('overview')
@@ -56,7 +57,10 @@ export default function AdminBookingDetail() {
     }).catch((e: Error) => setErr(e.message))
     fetchSettlement(Number(id)).then(setSettle).catch(() => {})
   }
-  useEffect(() => { load(); fetchZones().then(setZones).catch(() => {}) }, [id])
+  useEffect(() => {
+    load(); fetchZones().then(setZones).catch(() => {})
+    fetch(`${API_BASE}/api/invoice-info`).then((r) => r.json()).then(setSeller).catch(() => {})
+  }, [id])
 
   const derived = useMemo(() => {
     if (!b) return null
@@ -103,14 +107,43 @@ export default function AdminBookingDetail() {
     if (!(await confirm({ title: 'Create a refund for this booking?', message: 'Routed through the approval matrix — it may execute now or queue for sign-off.', confirmLabel: 'Create refund' }))) return
     issueRefund(b.id).then((r: any) => { toast(r?.executed ? 'Refund issued' : 'Refund queued for approval', 'ok'); load() }).catch((e: Error) => toast(e.message, 'err'))
   }
+  // Generate a real PDF via a print-optimised HTML window (browser "Save as PDF") — no PDF lib needed.
   const exportDoc = (type: 'invoice' | 'receipt' | 'payout' | 'all') => {
     if (!settle) return
-    const L: string[] = []; const p = (k: string, v: any) => L.push(`"${k}","${String(v).replace(/"/g, '""')}"`)
-    if (type === 'invoice' || type === 'all') { L.push('=== TAX INVOICE ===', '"Item","Amount"'); const c = settle.customer; p(`Service (${svcName})`, c.subtotal); if (c.discount) p(c.coupon ? `Coupon ${c.coupon}` : 'Discount', -c.discount); if (c.fee) p('Platform Fee', c.fee); if (c.tax) p('GST', c.tax); p('Total Paid', c.total); L.push('') }
-    if (type === 'receipt' || type === 'all') { L.push('=== PAYMENT RECEIPT ===', '"Field","Value"'); p('Booking', b.ref); p('Paid', b.total); p('Method', payMethod); p('Status', b.payment_status); L.push('') }
-    if (type === 'payout' || type === 'all') { L.push('=== WORKER PAYOUT ===', '"Field","Value"'); const q = settle.payout; p('Worker', q.workerName); p('Amount', q.total); p('Status', q.status); p('Transaction ID', q.txnId); L.push('') }
-    const blob = new Blob([L.join('\n')], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `${String(b.ref).replace('#', '')}-${type}.csv`; a.click(); URL.revokeObjectURL(url)
+    const co = { name: seller?.name || 'HomeHelp Services Pvt. Ltd.', gstin: seller?.gstin || '', address: seller?.address || '', sac: seller?.sac || '9987' }
+    const c = settle.customer, p = settle.payout
+    const base = items[0]?.price ?? c.subtotal, addons = Math.max(0, c.subtotal - base)
+    const esc = (v: any) => String(v ?? '').replace(/[<>&]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch] || ch))
+    const inr = (n: number) => '₹' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const dt = (v?: string | null) => (v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
+    const dateOnly = b.date ? shortDate(b.date) : shortDate(b.created)
+    const head = (title: string, no: string, when: string) => `<div class="head"><div><div class="brand">${esc(co.name)}</div><div class="muted">${esc(co.address)}</div>${co.gstin ? `<div class="muted">GSTIN: ${esc(co.gstin)}</div>` : ''}</div><div class="title"><h1>${title}</h1><div class="muted">${esc(no)}</div><div class="muted">${esc(when)}</div></div></div>`
+    const invoice = `<div class="doc">${head('TAX INVOICE', settle.documents.invoice, dateOnly)}
+      <div class="grid2"><div class="box"><b>Billed To</b>${esc(b.customer)}<br>${esc(custPhone)}<br>${esc(b.address)}</div><div class="box"><b>Booking</b>${esc(b.ref)} · ${esc(svcName)}<br>${esc(dateOnly)} ${esc(b.time || '')}<br>Zone: ${esc(derived!.zone?.name || '—')}</div></div>
+      <table><thead><tr><th>Description</th><th>SAC</th><th class="r">Amount</th></tr></thead><tbody>
+      <tr><td>${esc(svcName)} (${esc(b.duration || '1 session')})</td><td>${esc(co.sac)}</td><td class="r">${inr(base)}</td></tr>
+      ${addons ? `<tr><td>Add-ons</td><td>${esc(co.sac)}</td><td class="r">${inr(addons)}</td></tr>` : ''}</tbody></table>
+      <div class="tot"><table>
+      <tr><td>Subtotal</td><td class="r">${inr(c.subtotal)}</td></tr>
+      ${c.discount ? `<tr><td>Discount${c.coupon ? ` (${esc(c.coupon)})` : ''}</td><td class="r">− ${inr(c.discount)}</td></tr>` : ''}
+      ${c.fee ? `<tr><td>Platform Fee</td><td class="r">${inr(c.fee)}</td></tr>` : ''}
+      <tr><td>CGST</td><td class="r">${inr(c.tax / 2)}</td></tr><tr><td>SGST</td><td class="r">${inr(c.tax / 2)}</td></tr>
+      <tr class="grand"><td>Total</td><td class="r">${inr(c.total)}</td></tr></table></div>
+      <div class="foot">Computer-generated tax invoice · ${esc(co.name)}${co.gstin ? ` · GSTIN ${esc(co.gstin)}` : ''}</div></div>`
+    const receipt = `<div class="doc">${head('PAYMENT RECEIPT', settle.documents.receipt, dt(settle.paidAt))}
+      <div class="grid2"><div class="box"><b>Received From</b>${esc(b.customer)}<br>${esc(custPhone)}</div><div class="box"><b>For Booking</b>${esc(b.ref)} · ${esc(svcName)}</div></div>
+      <table><tbody><tr><td>Amount Received</td><td class="r"><b>${inr(b.total)}</b></td></tr><tr><td>Payment Method</td><td class="r">${esc(payMethod)}</td></tr><tr><td>Payment Status</td><td class="r">${esc(b.payment_status || '—')}</td></tr><tr><td>Transaction ID</td><td class="r">${esc(settle.txns[0]?.txnId || '—')}</td></tr></tbody></table>
+      <div class="foot">Received with thanks · ${esc(co.name)}</div></div>`
+    const payout = `<div class="doc">${head('WORKER PAYOUT SLIP', settle.documents.payoutSlip, dt(p.paidAt))}
+      <div class="grid2"><div class="box"><b>Paid To</b>${esc(p.workerName || '—')}${p.workerId ? `<br>WRK-${p.workerId}` : ''}</div><div class="box"><b>For Booking</b>${esc(b.ref)} · ${esc(svcName)}</div></div>
+      <table><tbody><tr><td>Base Payout</td><td class="r">${inr(p.amount)}</td></tr>${p.incentive ? `<tr><td>Incentive</td><td class="r">${inr(p.incentive)}</td></tr>` : ''}<tr class="grand"><td>Total Payout</td><td class="r">${inr(p.total)}</td></tr><tr><td>Status</td><td class="r">${esc(p.status)}</td></tr><tr><td>Transaction ID</td><td class="r">${esc(p.txnId)}</td></tr></tbody></table>
+      <div class="foot">Worker payout slip · ${esc(co.name)}</div></div>`
+    const parts = type === 'all' ? [invoice, receipt, payout] : type === 'invoice' ? [invoice] : type === 'receipt' ? [receipt] : [payout]
+    const css = `*{box-sizing:border-box;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif}body{margin:0;color:#1c2033}.doc{max-width:760px;margin:0 auto;padding:40px}.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #5b51e8;padding-bottom:16px;margin-bottom:16px}.brand{font-size:19px;font-weight:800;color:#5b51e8}.muted{color:#6b7090;font-size:12px}.title{text-align:right}.title h1{margin:0;font-size:20px;letter-spacing:1px}.grid2{display:flex;justify-content:space-between;gap:24px;margin:14px 0}.box{flex:1;font-size:12.5px;line-height:1.5}.box b{display:block;margin-bottom:4px;font-size:10.5px;text-transform:uppercase;color:#6b7090}table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid #eceaf6;text-align:left}th{background:#f6f6fe;font-size:10.5px;text-transform:uppercase;color:#6b7090}td.r,th.r{text-align:right}.tot{display:flex;justify-content:flex-end}.tot table{width:300px}.tot td{border:none;padding:5px 10px}.grand td{font-weight:800;font-size:15px;border-top:2px solid #1c2033;padding-top:8px}.foot{margin-top:28px;font-size:11px;color:#6b7090;text-align:center;border-top:1px solid #eceaf6;padding-top:12px}.pagebreak{page-break-after:always}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`
+    const w = window.open('', '_blank', 'width=880,height=1000')
+    if (!w) { toast('Allow pop-ups to download the document', 'err'); return }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(String(b.ref).replace('#', ''))}-${type}</title><style>${css}</style></head><body onload="setTimeout(function(){window.print()},250)">${parts.join('<div class="pagebreak"></div>')}</body></html>`)
+    w.document.close()
   }
 
   const tel = (p: string) => p && window.open(`tel:${p}`)
@@ -516,8 +549,8 @@ export default function AdminBookingDetail() {
             <button className="btn line" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => exportDoc(type)}>Download</button>
           </div>
         ))}
-        <button className="btn line sm" style={{ marginTop: 10, width: '100%' }} onClick={() => exportDoc('all')}>Download All (CSV)</button>
-        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Documents export as CSV; formatted PDF invoices are a follow-up.</div>
+        <button className="btn line sm" style={{ marginTop: 10, width: '100%' }} onClick={() => exportDoc('all')}>Download All (PDF)</button>
+        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Opens a print-ready view — use your browser's “Save as PDF”.</div>
       </Card>
     )
   }
