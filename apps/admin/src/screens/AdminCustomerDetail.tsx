@@ -233,15 +233,20 @@ export default function AdminCustomerDetail() {
         </div>
       </div>
 
-      {/* tab bar */}
-      <div className="card" style={{ padding: '2px 6px', overflowX: 'auto' }}>
-        <div className="row" style={{ gap: 2, minWidth: 'max-content' }}>
+      {/* tab bar — all tabs share the row and shrink to fit (no horizontal scroll) */}
+      <div className="card" style={{ padding: '0 4px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
           {TABS.map(({ key, label, Icon }) => (
-            <button key={key} onClick={() => setTab(key)} style={{
-              display: 'inline-flex', gap: 7, alignItems: 'center', padding: '13px 14px', background: 'none', border: 'none',
+            <button key={key} onClick={() => setTab(key)} title={label} style={{
+              flex: '0 1 auto', minWidth: 0,
+              display: 'inline-flex', gap: 5, alignItems: 'center', justifyContent: 'center',
+              padding: '12px 8px', background: 'none', border: 'none',
               borderBottom: tab === key ? '2px solid #5b51e8' : '2px solid transparent', color: tab === key ? '#5b51e8' : '#667085',
-              fontWeight: 600, fontSize: 13.5, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}><Icon size={15} /> {label}</button>
+              fontWeight: 600, fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}>
+              <Icon size={14} style={{ flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+            </button>
           ))}
         </div>
       </div>
