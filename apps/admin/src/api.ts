@@ -119,6 +119,8 @@ export interface Evidence {
   summary: { service: string; duration: string; qty: number }
 }
 export const fetchEvidence = (id: number) => req<Evidence>(`/bookings/${id}/evidence`)
+export interface BookingActivity { at: string; role: string; name: string; module: string; actionType: string; details: string }
+export const fetchBookingActivity = (id: number) => req<{ activities: BookingActivity[]; counts: { total: number; system: number; admin: number; worker: number; customer: number; auto: number } }>(`/bookings/${id}/activity`)
 
 /* customers */
 export const fetchCustomers = (q = '', status = 'all') => req<Customer[]>(`/customers?q=${encodeURIComponent(q)}&status=${status}`)

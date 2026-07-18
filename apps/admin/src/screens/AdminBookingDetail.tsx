@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode, type CSSProperties } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Phone, MessageCircle, CalendarClock, RefreshCw, XCircle,
@@ -6,7 +6,7 @@ import {
   LifeBuoy, StickyNote, CheckCircle2, AlertTriangle, ArrowUpCircle, CalendarCheck, PlayCircle, PauseCircle, Flag, HelpCircle,
 } from 'lucide-react'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, fetchEvidence, fetchBookingTickets, fetchTicketDetail, postTicketMessage, updateTicket, createBookingComplaint, issueRefund, updateBooking, API_BASE, type Zone, type Settlement, type Evidence } from '../api'
+import { fetchBooking, fetchCustomer, fetchWorkerDetail, fetchZones, fetchWorkers, fetchSettlement, fetchEvidence, fetchBookingActivity, fetchBookingTickets, fetchTicketDetail, postTicketMessage, updateTicket, createBookingComplaint, issueRefund, updateBooking, API_BASE, type Zone, type Settlement, type Evidence, type BookingActivity } from '../api'
 
 const REACHED: Record<string, number> = { confirmed: 1, worker_assigned: 2, on_the_way: 3, arrived: 4, in_progress: 6, completed: 8, cancelled: 8 }
 // Job-timeline lifecycle: current level per status (steps below it are done, the matching one is live).
@@ -43,6 +43,11 @@ export default function AdminBookingDetail() {
   const [tkDetail, setTkDetail] = useState<any>(null)
   const [tkMsg, setTkMsg] = useState('')
   const [tkTab, setTkTab] = useState<'conversation' | 'resolution' | 'notes'>('conversation')
+  const [activity, setActivity] = useState<{ activities: BookingActivity[]; counts: any } | null>(null)
+  const [aMod, setAMod] = useState('all')
+  const [aRole, setARole] = useState('all')
+  const [aAct, setAAct] = useState('all')
+  const [aPage, setAPage] = useState(1)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
   const [tab, setTab] = useState<'overview' | 'timeline' | 'payment' | 'evidence' | 'support' | 'activity'>('overview')
@@ -64,6 +69,7 @@ export default function AdminBookingDetail() {
     fetchSettlement(Number(id)).then(setSettle).catch(() => {})
     fetchEvidence(Number(id)).then(setEv).catch(() => {})
     fetchBookingTickets(Number(id)).then((r) => { setTks(r); setSelTk((cur) => cur ?? (r.tickets[0]?.id ?? null)) }).catch(() => {})
+    fetchBookingActivity(Number(id)).then(setActivity).catch(() => {})
   }
   useEffect(() => {
     load(); fetchZones().then(setZones).catch(() => {})
@@ -113,6 +119,13 @@ export default function AdminBookingDetail() {
   const escalate = () => doUpdate({ escalated: true, escalateReason: 'Flagged from Booking Details' }, 'Booking escalated')
   const reopen = async () => { if (!(await confirm({ title: 'Reopen this service?', message: 'Moves the booking back to in-progress so the worker can resume/redo it.', confirmLabel: 'Reopen' }))) return; doUpdate({ status: 'in_progress' }, 'Service reopened') }
   const mediaAbs = (u: string) => (!u ? '' : u.startsWith('http') ? u : `${API_BASE}${u}`)
+  const exportActivity = () => {
+    if (!activity) return
+    const rows = ['Date & Time,Performed By,Role,Module,Action,Details']
+    activity.activities.forEach((a) => rows.push([new Date(a.at).toLocaleString('en-IN'), a.name, a.role, a.module, a.actionType, a.details].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')))
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob)
+    const el = document.createElement('a'); el.href = url; el.download = `${String(b.ref).replace('#', '')}-activity.csv`; el.click(); URL.revokeObjectURL(url)
+  }
   const reloadTickets = () => { if (selTk) fetchTicketDetail(selTk).then(setTkDetail).catch(() => {}); fetchBookingTickets(Number(id)).then(setTks).catch(() => {}) }
   const sendTkMsg = (internal = false) => { const body = tkMsg.trim(); if (!body || !selTk) return; postTicketMessage(selTk, { body, internal }).then(() => { setTkMsg(''); reloadTickets() }).catch((e: Error) => toast(e.message, 'err')) }
   const setTkStatus = (status: string) => { if (!selTk) return; updateTicket(selTk, { status }).then(() => { toast('Ticket updated', 'ok'); reloadTickets() }).catch((e: Error) => toast(e.message, 'err')) }
@@ -562,7 +575,54 @@ export default function AdminBookingDetail() {
         </div>
         )
       })()}
-      {tab === 'activity' && <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 16 }}>{notesCard()}</div>}
+      {tab === 'activity' && (!activity ? <Loading /> : (() => {
+        const roleColor: Record<string, string> = { system: '#5b51e8', admin: '#5b51e8', worker: '#16a34a', customer: '#f59e0b', auto: '#9333ea' }
+        const modules = Array.from(new Set(activity.activities.map((a) => a.module)))
+        const actions = Array.from(new Set(activity.activities.map((a) => a.actionType)))
+        const filtered = activity.activities.filter((a) => (aMod === 'all' || a.module === aMod) && (aRole === 'all' || a.role === aRole) && (aAct === 'all' || a.actionType === aAct))
+        const aSize = 25
+        const pageRows = filtered.slice((aPage - 1) * aSize, aPage * aSize)
+        const c = activity.counts
+        const td: CSSProperties = { padding: '11px 12px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top' }
+        return (
+        <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2.6fr) minmax(240px, 1fr)', gap: 16, alignItems: 'start' }}>
+          <div className="grid" style={{ gap: 16 }}>
+            {/* filters + counts */}
+            <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={16} /> Activity Logs</span>} right={<button className="btn line sm" onClick={exportActivity}>Export Logs</button>}>
+              <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                <select className="select flt" value={aMod} onChange={(e) => { setAMod(e.target.value); setAPage(1) }}><option value="all">All Modules</option>{modules.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+                <select className="select flt" value={aRole} onChange={(e) => { setARole(e.target.value); setAPage(1) }}><option value="all">All Users</option>{['system', 'admin', 'worker', 'customer', 'auto'].map((r) => <option key={r} value={r} style={{ textTransform: 'capitalize' }}>{r[0].toUpperCase() + r.slice(1)}</option>)}</select>
+                <select className="select flt" value={aAct} onChange={(e) => { setAAct(e.target.value); setAPage(1) }}><option value="all">All Actions</option>{actions.map((a) => <option key={a} value={a}>{a}</option>)}</select>
+                {(aMod !== 'all' || aRole !== 'all' || aAct !== 'all') && <button className="btn line sm" onClick={() => { setAMod('all'); setARole('all'); setAAct('all'); setAPage(1) }}><RefreshCw size={13} /> Reset</button>}
+              </div>
+              <div className="row" style={{ gap: 16, flexWrap: 'wrap', fontSize: 12.5, marginBottom: 8 }}>
+                <span><b>Total {c.total}</b></span>
+                {(['system', 'admin', 'worker', 'customer', 'auto'] as const).map((r) => c[r] > 0 && <span key={r} className="row" style={{ gap: 5, alignItems: 'center' }}><i style={{ width: 9, height: 9, borderRadius: 50, background: roleColor[r], display: 'inline-block' }} /><span style={{ textTransform: 'capitalize' }}>{r} ({c[r]})</span></span>)}
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+                  <thead><tr style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase' }}>{['Date & Time', 'Performed By', 'Module', 'Action', 'Details'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--line)' }}>{h}</th>)}</tr></thead>
+                  <tbody>{pageRows.map((a, i) => (
+                    <tr key={i}>
+                      <td style={td}><span className="row" style={{ gap: 8, alignItems: 'flex-start' }}><i style={{ width: 10, height: 10, borderRadius: 50, background: roleColor[a.role] || '#98a2b3', display: 'inline-block', marginTop: 3, flex: 'none' }} /><span>{fmtDateTime(a.at)}</span></span></td>
+                      <td style={td}><div style={{ fontWeight: 600 }}>{a.name}</div><div className="muted" style={{ fontSize: 11, textTransform: 'capitalize' }}>{a.role}</div></td>
+                      <td style={td}>{a.module}</td>
+                      <td style={td}><Badge tone={a.actionType.includes('Update') || a.actionType.includes('Auto') ? 'blue' : a.actionType === 'Payment' ? 'green' : a.actionType === 'Cancellation' || a.actionType === 'Escalation' ? 'red' : 'gray'} dot={false}>{a.actionType}</Badge></td>
+                      <td style={{ ...td, maxWidth: 360 }}>{a.details}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', marginTop: 12, alignItems: 'center' }}>
+                <span className="muted" style={{ fontSize: 12 }}>Showing {filtered.length ? (aPage - 1) * aSize + 1 : 0}–{Math.min(aPage * aSize, filtered.length)} of {filtered.length}</span>
+                {filtered.length > aSize && <div className="row" style={{ gap: 6 }}><button className="btn line sm" disabled={aPage === 1} onClick={() => setAPage(aPage - 1)}>Prev</button><button className="btn line sm" disabled={aPage * aSize >= filtered.length} onClick={() => setAPage(aPage + 1)}>Next</button></div>}
+              </div>
+            </Card>
+          </div>
+          <div className="grid" style={{ gap: 16 }}>{summaryCard()}{customerCard()}{workerCard()}{notesCard()}</div>
+        </div>
+        )
+      })())}
 
       {/* modals */}
       {modal === 'reassign' && (

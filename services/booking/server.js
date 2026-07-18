@@ -702,6 +702,35 @@ app.post('/api/internal/bookings/:id/evidence', internalOnly, async (req, res) =
       e.completionOtp || '', e.startSig || '', e.endSig || '', e.device || '', e.network || '', e.beforeAt || null, e.afterAt || null])
   res.json({ ok: true })
 })
+// Per-booking activity/audit feed — derived from the booking's real lifecycle (create, payment,
+// dispatch, service start, evidence upload, completion, rating, escalation, admin note). Every entry
+// has a real timestamp; nothing is invented. Counts grouped by actor role for the summary chips.
+app.get('/api/admin/bookings/:id/activity', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
+  const custName = u?.user?.name || 'Customer'
+  const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
+  const acts = []
+  const iso = (v) => (v ? new Date(v).toISOString() : null)
+  const push = (at, role, name, module, actionType, details) => { if (at) acts.push({ at: iso(at), role, name, module, actionType, details }) }
+  const total = b.total || 0
+  const method = b.payment === 'wallet' ? 'Wallet' : (b.payment || 'Razorpay')
+  push(b.created, 'customer', custName, 'Bookings', 'Create', 'Booking created from Customer App')
+  push(b.created, 'system', method === 'Wallet' ? 'Wallet' : 'Razorpay', 'Payments', 'Payment', `Payment of ₹${total} received via ${method}`)
+  if (b.pro_name) push(b.created, 'auto', 'Auto Dispatch', 'Dispatch', 'Assignment', `Job assigned to ${b.pro_name}`)
+  if (b.started_at) push(b.started_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Started service after OTP verification${b.service_otp ? ` · Start OTP ${b.service_otp}` : ''}`)
+  if (ev.after_at) push(ev.after_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Ended job and uploaded after-service photos${(ev.after_photos || []).length ? ` · ${ev.after_photos.length} photos` : ''}`)
+  if (b.completed_at) push(b.completed_at, 'system', 'System', 'Workflow', 'Auto Update', 'Job marked as Completed')
+  if (b.rating) push(b.completed_at, 'customer', custName, 'Jobs', 'Customer Action', `Confirmed the service and rated ${Number(b.rating).toFixed(1)}${b.review ? ` · ${b.review}` : ''}`)
+  if (b.escalated) push(b.created, 'admin', 'Admin', 'Support', 'Escalation', `Booking escalated${b.escalate_reason ? `: ${b.escalate_reason}` : ''}`)
+  if (b.admin_note) push(b.created, 'admin', 'Admin', 'Notes', 'Note', b.admin_note)
+  if (b.status === 'cancelled') push(b.cancel_time || b.created, 'admin', b.cancelled_by || 'Admin', 'Bookings', 'Cancellation', `Booking cancelled${b.cancel_reason ? `: ${b.cancel_reason}` : ''}`)
+  acts.sort((a, z) => new Date(z.at) - new Date(a.at))
+  const counts = { total: acts.length, system: 0, admin: 0, worker: 0, customer: 0, auto: 0 }
+  for (const a of acts) if (counts[a.role] != null) counts[a.role]++
+  res.json({ activities: acts, counts })
+})
 // Admin booking actions — used by both the Bookings screen and the Control Tower console:
 // status change, reschedule (date/time), reassign / unassign a pro, escalate + reason, and an
 // operational note. Built as a deduped column map so any subset can be sent in one call.
