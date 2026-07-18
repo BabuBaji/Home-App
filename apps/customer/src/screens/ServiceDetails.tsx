@@ -39,6 +39,12 @@ export default function ServiceDetails() {
       </div>
 
       <div className="content pad-cta">
+        <div className="wi-hero">
+          <img src={s.image || `/services/${s.id}.jpg`} alt={s.name} onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
+        </div>
+        <h1 className="wi-name">{s.name}</h1>
+        <div className="sd-rate"><Star size={15} className="sd-star" /> <b>{s.rating}</b> <span>({(s.reviewsCount ?? 0).toLocaleString()} ratings)</span></div>
+
         {chips.length > 0 && (
           <div className="wi-chips">
             {chips.map((c) => (
@@ -49,8 +55,6 @@ export default function ServiceDetails() {
             ))}
           </div>
         )}
-
-        <div className="sd-rate" style={{ marginTop: 4 }}><Star size={15} className="sd-star" /> <b>{s.rating}</b> <span>({(s.reviewsCount ?? 0).toLocaleString()} ratings)</span></div>
 
         <div className="wi-sec">The expert is trained to</div>
         <ul className="wi-list">
