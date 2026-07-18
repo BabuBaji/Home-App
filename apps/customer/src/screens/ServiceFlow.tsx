@@ -226,7 +226,7 @@ export default function ServiceFlow() {
             <div className="sf-rev-score">
               <b>{s.rating}</b>
               <div className="sf-rev-stars">{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={14} className={n <= Math.round(s.rating) ? 'f' : ''} />)}</div>
-              <small>({s.reviewsCount.toLocaleString()} ratings)</small>
+              <small>({(s.reviewsCount ?? 0).toLocaleString()} ratings)</small>
             </div>
             <div className="sf-rev-bars">
               {dist.map((p, i) => (

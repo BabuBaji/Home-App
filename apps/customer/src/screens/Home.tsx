@@ -30,7 +30,7 @@ export default function Home() {
     fetchBookings().then(setBookings).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
     fetchNotifications().then((n) => setNotifCount(n.length)).catch(() => {})
-    fetchWallet().then((w) => setWalletBal(w.available)).catch(() => {})
+    fetchWallet().then((w) => setWalletBal(typeof w?.available === 'number' ? w.available : null)).catch(() => {})
   }, [])
   useEffect(() => {
     fetchServices(pincode || undefined).then((c) => setServices(c.services)).catch(() => {})
@@ -68,7 +68,7 @@ export default function Home() {
           {/* wallet with the live available balance shown inline, like the notification count */}
           <button className="hd-wallet" onClick={() => nav('/wallet')} aria-label="Wallet">
             <WalletIcon size={18} />
-            {walletBal !== null && <span className="hd-wallet-bal">₹{walletBal.toLocaleString('en-IN')}</span>}
+            {walletBal != null && <span className="hd-wallet-bal">₹{walletBal.toLocaleString('en-IN')}</span>}
           </button>
           <button className="hd-bell" onClick={() => nav('/notifications')} aria-label="Notifications">
             <Bell size={20} />
