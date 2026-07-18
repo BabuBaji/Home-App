@@ -273,7 +273,7 @@ export default function AdminCustomerDetail() {
       {tab === 'support' && <SupportTab tickets={d.tickets || []} notes={d.notes || []} c={c} cid={cid} onChanged={load} toast={toast} nav={nav} />}
       {tab === 'ratings' && <RatingsTab reviews={m.reviews} rating={m.rating} bookings={m.bookings} />}
       {tab === 'notes' && <NotesTab notes={d.notes || []} c={c} cid={cid} bookings={m.bookings} onChanged={load} toast={toast} />}
-      {tab === 'activity' && <ActivityTab activity={m.activity} c={c} />}
+      {tab === 'activity' && <ActivityTab bookings={m.bookings} txns={m.txns} notes={d.notes || []} tickets={d.tickets || []} ledger={d.membershipLedger || []} c={c} />}
 
       {/* modals */}
       {editOpen && (
@@ -1981,31 +1981,109 @@ function NotesTab({ notes, c, cid, bookings, onChanged, toast }: any) {
   )
 }
 
-function ActivityTab({ activity, c }: any) {
+const KIND_META: Record<string, { label: string; tone: string }> = {
+  booking: { label: 'Booking', tone: 'blue' }, payment: { label: 'Payment', tone: 'amber' }, wallet: { label: 'Wallet', tone: 'green' },
+  review: { label: 'Review', tone: 'violet' }, note: { label: 'Note', tone: 'amber' }, ticket: { label: 'Support', tone: 'red' },
+  membership: { label: 'Membership', tone: 'violet' }, coupon: { label: 'Coupon', tone: 'violet' },
+}
+// The full customer activity feed — customer actions (bookings/wallet/reviews/coupons) plus ops
+// actions on record (notes, support tickets, membership changes). All from the detail payload.
+function buildFullActivity(bookings: any[], txns: any[], notes: any[], tickets: any[], ledger: any[]): Ev[] {
+  const evs: Ev[] = [...buildActivity(bookings, txns)]
+  for (const b of bookings) if (b.coupon) evs.push({ kind: 'coupon', icon: <Tag size={15} />, tint: '#7c3aed', title: `Coupon ${b.coupon} applied`, sub: `Saved ${money(b.discount || 0)} · ${b.ref}`, time: b.created })
+  for (const n of notes) evs.push({ kind: 'note', icon: <StickyNote size={15} />, tint: '#f59e0b', title: `Note added${n.type && n.type !== 'General' ? ` · ${n.type}` : ''}`, sub: `${String(n.title || n.body || '').slice(0, 90)} — ${n.author || 'admin'}`, time: n.created })
+  for (const t of tickets) evs.push({ kind: 'ticket', icon: <Headphones size={15} />, tint: '#e5484d', title: `Support ticket · ${t.subject || t.category}`, sub: `${t.status || 'Open'} · ${t.ref || `TKT${10000 + t.id}`}`, time: t.created })
+  for (const l of ledger) evs.push({ kind: 'membership', icon: <Award size={15} />, tint: '#5b51e8', title: `Membership ${l.event}`, sub: l.detail || '', time: l.created })
+  return evs.filter((e) => e.time).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
+}
+
+function ActivityTab({ bookings, txns, notes, tickets, ledger, c }: any) {
+  const [q, setQ] = useState('')
   const [kindF, setKindF] = useState('all')
-  const counts = useMemo(() => { const k = { all: activity.length, booking: 0, payment: 0, wallet: 0, review: 0 } as Record<string, number>; for (const e of activity) k[e.kind] = (k[e.kind] || 0) + 1; return k }, [activity])
-  const shown = kindF === 'all' ? activity : activity.filter((e: Ev) => e.kind === kindF)
-  const KINDS: [string, string][] = [['all', 'All'], ['booking', 'Bookings'], ['payment', 'Payments'], ['wallet', 'Wallet'], ['review', 'Reviews']]
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [page, setPage] = useState(1)
+  const pageSize = 15
+
+  const all = useMemo(() => buildFullActivity(bookings, txns, notes, tickets, ledger), [bookings, txns, notes, tickets, ledger])
+  useEffect(() => { setPage(1) }, [q, kindF, from, to])
+  const counts = useMemo(() => { const k: Record<string, number> = { all: all.length }; for (const e of all) k[e.kind] = (k[e.kind] || 0) + 1; return k }, [all])
+
+  const filtered = useMemo(() => all.filter((e) => {
+    if (kindF !== 'all' && e.kind !== kindF) return false
+    if (from && Date.parse(e.time) < Date.parse(from)) return false
+    if (to && Date.parse(e.time) > Date.parse(to) + 86400000) return false
+    if (q && !`${String(e.title)} ${e.sub || ''}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [all, kindF, from, to, q])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const reset = () => { setQ(''); setKindF('all'); setFrom(''); setTo('') }
+
+  const akpi = (label: string, val: number, tint: string, icon: ReactNode) => (
+    <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}><span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}</div>
+      <strong style={{ fontSize: 22, lineHeight: 1 }}>{val}</strong>
+    </div>
+  )
+
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div>
         <h2 style={{ margin: 0, fontSize: 20 }}>Activity Logs</h2>
-        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Everything {c.name || c.phone || 'this customer'} has done — derived from bookings and wallet activity</p>
+        <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Full activity for {c.name || c.phone || 'this customer'} — bookings, payments, reviews, notes, support and membership</p>
       </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-        {[['Total Events', counts.all, '#5b51e8', <Activity size={15} />], ['Bookings', counts.booking, '#2e90fa', <Calendar size={15} />], ['Payments', counts.payment, '#f59e0b', <CreditCard size={15} />], ['Reviews', counts.review, '#16a34a', <Star size={15} />]].map(([label, val, tint, icon]: any, i) => (
-          <div key={i} className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}><span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: '50%', background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}</div>
-            <strong style={{ fontSize: 22, lineHeight: 1 }}>{val}</strong>
-          </div>
-        ))}
+        {akpi('Total Events', counts.all, '#5b51e8', <Activity size={15} />)}
+        {akpi('Bookings', counts.booking || 0, '#2e90fa', <Calendar size={15} />)}
+        {akpi('Payments', (counts.payment || 0) + (counts.wallet || 0), '#f59e0b', <CreditCard size={15} />)}
+        {akpi('Support', counts.ticket || 0, '#e5484d', <Headphones size={15} />)}
+        {akpi('Notes', counts.note || 0, '#7c3aed', <StickyNote size={15} />)}
       </div>
-      <Card title={`Timeline (${shown.length})`} right={
-        <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-          {KINDS.map(([k, label]) => <button key={k} onClick={() => setKindF(k)} style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid var(--line)', background: kindF === k ? '#5b51e8' : '#fff', color: kindF === k ? '#fff' : '#667085', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{label}</button>)}
+
+      <Card>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1.6fr) minmax(140px, 1fr) minmax(200px, 1.4fr) auto', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search activity…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+          </div>
+          <select className="select" value={kindF} onChange={(e) => setKindF(e.target.value)}><option value="all">All Activity</option><option value="booking">Bookings</option><option value="payment">Payments</option><option value="wallet">Wallet</option><option value="review">Reviews</option><option value="note">Notes</option><option value="ticket">Support</option><option value="membership">Membership</option><option value="coupon">Coupons</option></select>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+            <span className="muted">–</span>
+            <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38, border: '1.5px solid var(--line)', borderRadius: 10, padding: '0 8px', background: '#fcfcff' }} />
+          </div>
+          <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
         </div>
-      }>
-        <Timeline evs={shown} />
+
+        <div style={{ position: 'relative' }}>
+          {pageRows.map((e: Ev, i: number) => {
+            const meta = KIND_META[e.kind] || { label: e.kind, tone: 'gray' }
+            return (
+              <div key={i} className="row" style={{ gap: 12, alignItems: 'flex-start', padding: '10px 0', borderBottom: i === pageRows.length - 1 ? 'none' : '1px solid var(--line-2, #f0f2f5)' }}>
+                <span style={{ display: 'inline-flex', width: 32, height: 32, borderRadius: '50%', background: `${e.tint}18`, color: e.tint, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{e.icon}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span style={{ fontSize: 13.5, fontWeight: 500 }}>{e.title}</span><Badge tone={meta.tone} dot={false}>{meta.label}</Badge></div>
+                  {e.sub && <div className="muted" style={{ fontSize: 12 }}>{e.sub}</div>}
+                </div>
+                <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap', flexShrink: 0 }}>{dateTime(e.time)}</span>
+              </div>
+            )
+          })}
+          {filtered.length === 0 && <Empty>No activity matches these filters.</Empty>}
+        </div>
+
+        {filtered.length > 0 && (
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>Showing {(page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} events</span>
+            <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+              <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+              <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+              <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   )
