@@ -81,6 +81,8 @@ async function init() {
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS bathrooms INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS fans INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS acs INTEGER NOT NULL DEFAULT 0`,
+    // Archived addresses stay on record (for order history) but are hidden from active pickers.
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`,
     // Three-balance wallet: `wallet` is the Cash balance; add Promo + Reward Points and a status.
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_balance INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS reward_points INTEGER NOT NULL DEFAULT 0`,
@@ -979,6 +981,41 @@ app.post('/api/internal/users/:id/membership-usage', internalOnly, async (req, r
   res.json({ ok: true })
 })
 app.get('/api/internal/users/:id/addresses', internalOnly, async (req, res) => res.json(await getAddresses(Number(req.params.id))))
+// Admin-managed address mutations (the admin BFF proxies these on the customer's behalf).
+app.post('/api/internal/users/:id/addresses', internalOnly, async (req, res) => {
+  const uid = Number(req.params.id); const a = req.body || {}
+  const line = a.line || [a.house, a.floor && `Floor ${a.floor}`, a.apartment, a.street, a.landmark, a.city, a.pincode].filter(Boolean).join(', ')
+  const existing = (await pool.query('SELECT count(*)::int n FROM addresses WHERE user_id=$1', [uid])).rows[0].n
+  const makeDefault = a.makeDefault === true || existing === 0
+  if (makeDefault) await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [uid])
+  const { rows } = await pool.query(
+    `INSERT INTO addresses (user_id,label,line,house,floor,apartment,street,landmark,city,pincode,receiver_phone,is_default)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [uid, a.label || 'Home', line, a.house || null, a.floor || null, a.apartment || null, a.street || null,
+      a.landmark || null, a.city || null, a.pincode || null, (a.receiver_phone ?? a.receiverPhone) || null, makeDefault])
+  res.status(201).json(rows[0])
+})
+app.patch('/api/internal/addresses/:aid', internalOnly, async (req, res) => {
+  const id = Number(req.params.aid); const a = req.body || {}
+  const cur = (await pool.query('SELECT * FROM addresses WHERE id=$1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Not found' })
+  const m = { ...cur, ...a }
+  const line = a.line || [m.house, m.floor && `Floor ${m.floor}`, m.apartment, m.street, m.landmark, m.city, m.pincode].filter(Boolean).join(', ')
+  const archived = a.archived === undefined ? cur.archived : !!a.archived
+  await pool.query(
+    `UPDATE addresses SET label=$1,line=$2,house=$3,floor=$4,apartment=$5,street=$6,landmark=$7,city=$8,pincode=$9,receiver_phone=$10,archived=$11 WHERE id=$12`,
+    [m.label || 'Home', line, m.house || null, m.floor || null, m.apartment || null, m.street || null, m.landmark || null,
+      m.city || null, m.pincode || null, (a.receiver_phone ?? a.receiverPhone ?? cur.receiver_phone) || null, archived, id])
+  res.json((await pool.query('SELECT * FROM addresses WHERE id=$1', [id])).rows[0])
+})
+app.post('/api/internal/addresses/:aid/default', internalOnly, async (req, res) => {
+  const id = Number(req.params.aid)
+  const cur = (await pool.query('SELECT user_id FROM addresses WHERE id=$1', [id])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Not found' })
+  await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [cur.user_id])
+  await pool.query('UPDATE addresses SET is_default=true, archived=false WHERE id=$1', [id]) // a default can't be archived
+  res.json(await getAddresses(cur.user_id))
+})
 // One default (or first) address per user — lets the admin Customers list show a locality without
 // N per-user calls. `is_default DESC` picks the default; ties fall back to the earliest address.
 app.get('/api/internal/addresses/defaults', internalOnly, async (_q, res) => {

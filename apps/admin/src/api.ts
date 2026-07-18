@@ -131,6 +131,9 @@ export const updateCustomer = (id: number, body: Record<string, unknown>) => req
 export const adjustWallet = (id: number, amount: number, note?: string, balance: 'cash' | 'promo' | 'points' = 'cash') => req<ActionResult & { balance?: number }>(`/customers/${id}/wallet`, post('', { amount, note, balance, title: note }))
 export const setWalletStatus = (id: number, status: 'active' | 'frozen' | 'blocked' | 'inactive') => req<{ ok: boolean; status: string }>(`/customers/${id}/wallet/status`, post('', { status }))
 export const addCustomerNote = (id: number, body: string) => req<{ id: number; body: string; author?: string; created: string }>(`/customers/${id}/notes`, post('', { body }))
+export const addCustomerAddress = (id: number, body: Record<string, unknown>) => req<any>(`/customers/${id}/addresses`, post('', body))
+export const updateCustomerAddress = (id: number, aid: number, body: Record<string, unknown>) => req<any>(`/customers/${id}/addresses/${aid}`, patch(body))
+export const setCustomerAddressDefault = (id: number, aid: number) => req<any>(`/customers/${id}/addresses/${aid}/default`, post('', {}))
 
 /* workers */
 export const fetchWorkers = (q = '', status = 'all', city = 'all') => req<{ stats: any; workers: Worker[] }>(`/workers?q=${encodeURIComponent(q)}&status=${status}&city=${city}`)

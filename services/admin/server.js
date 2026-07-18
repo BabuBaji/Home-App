@@ -1232,6 +1232,30 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
     res.json(row)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
+// Admin address management for a customer (support/ops action — gated + audited). Archive is a soft
+// delete (PATCH archived=true); there is no hard delete so order history keeps a valid address.
+app.post('/api/admin/customers/:id/addresses', admin, requirePerm('customers.edit'), async (req, res) => {
+  try {
+    const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/addresses`, req.body || {})
+    await logAudit(req.admin?.name || 'admin', 'customer.address_add', `#${req.params.id}`)
+    res.json(r)
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.patch('/api/admin/customers/:id/addresses/:aid', admin, requirePerm('customers.edit'), async (req, res) => {
+  try {
+    const r = await internalPatch(U.auth, `/api/internal/addresses/${req.params.aid}`, req.body || {})
+    const what = req.body?.archived === true ? 'archive' : req.body?.archived === false ? 'restore' : 'edit'
+    await logAudit(req.admin?.name || 'admin', 'customer.address_' + what, `#${req.params.id} addr#${req.params.aid}`)
+    res.json(r)
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('customers.edit'), async (req, res) => {
+  try {
+    const r = await internalPost(U.auth, `/api/internal/addresses/${req.params.aid}/default`, {})
+    await logAudit(req.admin?.name || 'admin', 'customer.address_default', `#${req.params.id} addr#${req.params.aid}`)
+    res.json(r)
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
 // Editing a customer's profile is a support/ops action — gate it on customers.edit and record who
 // changed which fields, so a name/email/city/status change is always traceable.
 app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), async (req, res) => {

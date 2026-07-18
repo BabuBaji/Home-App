@@ -4,9 +4,9 @@ import {
   ArrowLeft, Pencil, ChevronDown, ChevronLeft, ChevronRight, Star, StarHalf, Phone, Mail, Calendar,
   Wallet as WalletIcon, Briefcase, LayoutGrid, MapPin, BadgeCheck, Tag, Headphones, StickyNote, Activity,
   User, CalendarPlus, CreditCard, RotateCcw, CheckCircle2, Gift, Plus, Ban, Send, Users2, Clock, TrendingUp, Award,
-  Search, XCircle, RefreshCw, Eye, Download,
+  Search, XCircle, RefreshCw, Eye, Download, Home, Building2, Copy, Archive, MoreVertical,
 } from 'lucide-react'
-import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote } from '../api'
+import { fetchCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote, addCustomerAddress, updateCustomerAddress, setCustomerAddressDefault } from '../api'
 import { Card, Badge, Avatar, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
 
 const SEG_TONE: Record<string, string> = { New: 'blue', Repeat: 'green', Loyal: 'violet', VIP: 'amber', 'At Risk': 'red', Inactive: 'gray' }
@@ -264,7 +264,7 @@ export default function AdminCustomerDetail() {
 
       {tab === 'overview' && <Overview m={m} c={c} nav={nav} onNote={() => setNoteOpen(true)} onMoney={() => setMoneyOpen(true)} onBlock={doBlock} onCall={dialTo} onWa={whatsApp} onComm={onComm} blocked={blocked} goto={setTab} />}
       {tab === 'bookings' && <BookingsTab bookings={m.bookings} nav={nav} c={c} toast={toast} />}
-      {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} />}
+      {tab === 'addresses' && <AddressesTab addresses={d.addresses || []} bookings={m.bookings} c={c} cid={cid} onChanged={load} toast={toast} />}
       {tab === 'wallet' && <WalletTab c={c} txns={m.txns} wAmt={wAmt} setWAmt={setWAmt} wNote={wNote} setWNote={setWNote} wBal={wBal} setWBal={setWBal} busy={busy} onAdjust={walletAdjust} onStatus={async (s: 'active' | 'frozen' | 'blocked') => { try { await setWalletStatus(cid, s); toast(`Wallet ${s}`); load() } catch (e) { toast((e as Error).message, 'err') } }} />}
       {tab === 'membership' && <MembershipTab membership={d.membership} nav={nav} />}
       {tab === 'offers' && <OffersTab bookings={m.bookings} />}
@@ -735,20 +735,192 @@ function BookingsTab({ bookings, nav, c, toast }: any) {
     </div>
   )
 }
-function AddressesTab({ addresses }: any) {
+// Address "type" is derived from the label (there's no separate type field).
+const addrType = (label?: string) => {
+  const l = String(label || '').toLowerCase()
+  if (/work|office|shop/.test(l)) return 'Work'
+  if (/home|house|flat|parent|apartment/.test(l)) return 'Home'
+  return 'Other'
+}
+const norm = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+// Best-effort "last used": the customer's most recent booking whose address text matches this one
+// (by pincode + house/line). Falls back to null (→ "Never Used") rather than guessing.
+function lastUsedFor(a: any, bookings: any[]) {
+  const pin = norm(a.pincode), house = norm(a.house), line = norm(a.line)
+  const hits = bookings.filter((b) => {
+    const badr = norm(b.address)
+    if (!badr) return false
+    if (line && badr.includes(line)) return true
+    if (pin && badr.includes(pin) && (!house || badr.includes(house))) return true
+    return false
+  }).sort((x, y) => bMs(y) - bMs(x))
+  const b = hits[0]
+  return b ? { date: b.date || (b.created ? shortDate(b.created) : ''), time: b.time || '', service: b.service || '' } : null
+}
+
+type AddrDraft = { id?: number; label: string; house: string; street: string; city: string; pincode: string; receiver_phone: string }
+const EMPTY_ADDR: AddrDraft = { label: 'Home', house: '', street: '', city: '', pincode: '', receiver_phone: '' }
+
+function AddressesTab({ addresses, bookings, c, cid, onChanged, toast }: any) {
+  const [q, setQ] = useState('')
+  const [status, setStatus] = useState('all')
+  const [type, setType] = useState('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [menuId, setMenuId] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [edit, setEdit] = useState<AddrDraft | null>(null)
+
+  useEffect(() => { if (menuId == null) return; const h = () => setMenuId(null); window.addEventListener('click', h); return () => window.removeEventListener('click', h) }, [menuId])
+  useEffect(() => { setPage(1) }, [q, status, type, pageSize])
+
+  const counts = useMemo(() => ({
+    total: addresses.length,
+    active: addresses.filter((a: any) => !a.archived).length,
+    default: addresses.filter((a: any) => a.is_default).length,
+    archived: addresses.filter((a: any) => a.archived).length,
+  }), [addresses])
+
+  const filtered = useMemo(() => addresses.filter((a: any) => {
+    if (status === 'active' && a.archived) return false
+    if (status === 'archived' && !a.archived) return false
+    if (type !== 'all' && addrType(a.label) !== type) return false
+    if (q && !`${a.label} ${a.line} ${a.city} ${a.pincode} ${a.receiver_phone}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [addresses, status, type, q])
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const reset = () => { setQ(''); setStatus('all'); setType('all') }
+
+  const act = async (fn: () => Promise<any>, ok: string) => {
+    setBusy(true)
+    try { await fn(); toast(ok); onChanged() } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false); setMenuId(null) }
+  }
+  const saveAddr = async () => {
+    if (!edit) return
+    const body = { label: edit.label, house: edit.house, street: edit.street, city: edit.city, pincode: edit.pincode, receiver_phone: edit.receiver_phone }
+    await act(() => edit.id ? updateCustomerAddress(cid, edit.id, body) : addCustomerAddress(cid, body), edit.id ? 'Address updated' : 'Address added')
+    setEdit(null)
+  }
+  const openEdit = (a: any) => setEdit({ id: a.id, label: a.label || 'Home', house: a.house || '', street: a.street || '', city: a.city || '', pincode: a.pincode || '', receiver_phone: a.receiver_phone || '' })
+  const duplicate = (a: any) => setEdit({ label: `${a.label || 'Home'} (copy)`, house: a.house || '', street: a.street || '', city: a.city || '', pincode: a.pincode || '', receiver_phone: a.receiver_phone || '' })
+
+  const TypeIcon = ({ t }: { t: string }) => t === 'Work' ? <Building2 size={18} /> : t === 'Home' ? <Home size={18} /> : <MapPin size={18} />
+
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
-      {addresses.map((a: any) => (
-        <Card key={a.id} title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><MapPin size={15} /> {a.label || 'Address'}{a.is_default && <Badge tone="violet" dot={false}>Default</Badge>}</span>}>
-          <div style={{ fontSize: 13.5 }}>
-            <div>{a.line || [a.house, a.apartment, a.street, a.city].filter(Boolean).join(', ')}</div>
-            {a.pincode && <div className="muted">{a.city ? a.city + ' — ' : ''}{a.pincode}</div>}
-            {a.receiver_phone && <div className="muted" style={{ marginTop: 4 }}><Phone size={12} /> {a.receiver_phone}</div>}
-            {(a.bedrooms || a.bathrooms || a.home_size) ? <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>{a.home_size || ''} {a.bedrooms ? `· ${a.bedrooms} bed` : ''} {a.bathrooms ? `· ${a.bathrooms} bath` : ''}</div> : null}
+    <div className="grid" style={{ gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Addresses</h2>
+          <p className="muted" style={{ margin: '3px 0 0', fontSize: 13 }}>Manage all saved addresses for {c.name || c.phone || 'this customer'}</p>
+        </div>
+        <button className="btn" onClick={() => setEdit({ ...EMPTY_ADDR })}><Plus size={16} /> Add New Address</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        {[
+          [<MapPin size={15} />, '#5b51e8', 'Total Addresses', counts.total],
+          [<Home size={15} />, '#16a34a', 'Active Addresses', counts.active],
+          [<Star size={15} />, '#f59e0b', 'Default Address', counts.default],
+          [<Archive size={15} />, '#e5484d', 'Archived Addresses', counts.archived],
+        ].map(([icon, tint, label, val]: any, i) => (
+          <div key={i} className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', color: '#667085', fontSize: 12.5, fontWeight: 600 }}>
+              <span style={{ display: 'inline-flex', width: 28, height: 28, borderRadius: 8, background: `${tint}18`, color: tint, alignItems: 'center', justifyContent: 'center' }}>{icon}</span>{label}
+            </div>
+            <strong style={{ fontSize: 22, lineHeight: 1 }}>{val}</strong>
           </div>
-        </Card>
-      ))}
-      {addresses.length === 0 && <Card><Empty>No addresses saved</Empty></Card>}
+        ))}
+      </div>
+
+      <Card>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 2fr) minmax(140px, 1fr) minmax(140px, 1fr) auto', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#98a2b3' }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search addresses…" style={{ width: '100%', height: 38, padding: '0 10px 0 32px', border: '1.5px solid var(--line)', borderRadius: 10, background: '#fcfcff' }} />
+          </div>
+          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}><option value="all">All Status</option><option value="active">Active</option><option value="archived">Archived</option></select>
+          <select className="select" value={type} onChange={(e) => setType(e.target.value)}><option value="all">All Types</option><option value="Home">Home</option><option value="Work">Work</option><option value="Other">Other</option></select>
+          <button className="btn line" onClick={reset}><RefreshCw size={14} /> Reset</button>
+        </div>
+
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead><tr><th>Address Details</th><th>Type</th><th>Status</th><th>Default</th><th>Last Used</th><th style={{ width: 120 }}>Actions</th></tr></thead>
+            <tbody>
+              {pageRows.map((a: any) => {
+                const t = addrType(a.label); const lu = lastUsedFor(a, bookings)
+                return (
+                  <tr key={a.id}>
+                    <td>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <span style={{ display: 'inline-flex', width: 38, height: 38, borderRadius: 10, background: a.archived ? '#fdecec' : '#eef0ff', color: a.archived ? '#e5484d' : '#5b51e8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><TypeIcon t={t} /></span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600 }}>{a.label || 'Address'}{a.is_default && <span style={{ color: '#5b51e8', fontSize: 12, marginLeft: 6 }}>(Default)</span>}</div>
+                          <div className="muted" style={{ fontSize: 12.5 }}>{a.line || [a.house, a.street, a.city, a.pincode].filter(Boolean).join(', ')}</div>
+                          {a.receiver_phone && <div className="muted" style={{ fontSize: 11.5, display: 'flex', gap: 4, alignItems: 'center' }}><Phone size={11} />{a.receiver_phone}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td><Badge tone={t === 'Work' ? 'blue' : t === 'Home' ? 'violet' : 'gray'} dot={false}>{t}</Badge></td>
+                    <td><Badge tone={a.archived ? 'gray' : 'green'}>{a.archived ? 'Archived' : 'Active'}</Badge></td>
+                    <td>{a.is_default ? <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center', color: '#16a34a', fontSize: 13 }}><CheckCircle2 size={15} /> Yes</span> : <span className="muted" style={{ display: 'inline-flex', gap: 5, alignItems: 'center', fontSize: 13 }}><XCircle size={14} /> No</span>}</td>
+                    <td>
+                      {lu ? (
+                        <div style={{ fontSize: 12.5 }}>
+                          <div className="muted"><Calendar size={11} style={{ verticalAlign: -1 }} /> {lu.date}{lu.time ? `, ${lu.time}` : ''}</div>
+                          {lu.service && <span style={{ background: '#f2f4f7', borderRadius: 6, padding: '2px 7px', fontSize: 11.5, display: 'inline-block', marginTop: 3 }}>{lu.service}</span>}
+                        </div>
+                      ) : <span className="muted" style={{ fontSize: 12.5 }}>Never Used</span>}
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 4, position: 'relative' }}>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="Edit" onClick={() => openEdit(a)}><Pencil size={15} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="Duplicate" onClick={() => duplicate(a)}><Copy size={15} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={(e) => { e.stopPropagation(); setMenuId(menuId === a.id ? null : a.id) }}><MoreVertical size={15} /></button>
+                        {menuId === a.id && (
+                          <div className="menu" style={{ ...MENU_BOX, right: 0, top: 34 }} onClick={(e) => e.stopPropagation()}>
+                            {!a.is_default && !a.archived && <button className="menu-item" style={MENU_ITEM} disabled={busy} onClick={() => act(() => setCustomerAddressDefault(cid, a.id), 'Set as default')}><Star size={15} /> Set as Default</button>}
+                            {a.archived
+                              ? <button className="menu-item" style={MENU_ITEM} disabled={busy} onClick={() => act(() => updateCustomerAddress(cid, a.id, { archived: false }), 'Address restored')}><RotateCcw size={15} /> Restore</button>
+                              : <button className="menu-item" style={{ ...MENU_ITEM, color: '#e5484d' }} disabled={busy || a.is_default} onClick={() => act(() => updateCustomerAddress(cid, a.id, { archived: true }), 'Address archived')}><Archive size={15} /> Archive</button>}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+              {filtered.length === 0 && <tr><td colSpan={6}><Empty>No addresses match these filters.</Empty></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(filtered.length, page * pageSize)} of {filtered.length} addresses</span>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={15} /></button>
+            <span style={{ fontSize: 13, fontWeight: 600, minWidth: 22, textAlign: 'center' }}>{page}</span>
+            <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+            <select className="select" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ height: 32 }}>{[10, 20, 50].map((s) => <option key={s} value={s}>{s} / page</option>)}</select>
+          </div>
+        </div>
+      </Card>
+
+      {edit && (
+        <Modal title={edit.id ? 'Edit Address' : 'Add New Address'} onClose={() => setEdit(null)} footer={<><button className="btn line" onClick={() => setEdit(null)}>Cancel</button><button className="btn" disabled={busy || !(edit.house || edit.street) || !edit.pincode} onClick={saveAddr}>{edit.id ? 'Save' : 'Add Address'}</button></>}>
+          <div className="grid" style={{ gap: 12 }}>
+            <Field label="Label"><select className="select" value={edit.label} onChange={(e) => setEdit({ ...edit, label: e.target.value })}><option>Home</option><option>Work</option><option>Parents Home</option><option>Other</option></select></Field>
+            <Field label="House / Flat / Building"><input value={edit.house} onChange={(e) => setEdit({ ...edit, house: e.target.value })} placeholder="Flat 404, Rainbow Vistas" /></Field>
+            <Field label="Street / Area / Landmark"><input value={edit.street} onChange={(e) => setEdit({ ...edit, street: e.target.value })} placeholder="Road No 2, Erragadda" /></Field>
+            <div className="row" style={{ gap: 12 }}>
+              <Field label="City"><input value={edit.city} onChange={(e) => setEdit({ ...edit, city: e.target.value })} placeholder="Hyderabad" /></Field>
+              <Field label="Pincode"><input value={edit.pincode} onChange={(e) => setEdit({ ...edit, pincode: e.target.value })} placeholder="500018" /></Field>
+            </div>
+            <Field label="Receiver Phone"><input value={edit.receiver_phone} onChange={(e) => setEdit({ ...edit, receiver_phone: e.target.value })} placeholder="Optional" /></Field>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
