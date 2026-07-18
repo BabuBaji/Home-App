@@ -134,6 +134,14 @@ async function init() {
       result JSONB, error TEXT NOT NULL DEFAULT '',
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Worker communication opt-in lives here (not on the worker record) so the worker service/app is
+    // untouched. One row per worker; a missing row means all channels on. Drives worker broadcasts.
+    `CREATE TABLE IF NOT EXISTS worker_comm (
+      worker_id INTEGER PRIMARY KEY,
+      comm_whatsapp BOOLEAN NOT NULL DEFAULT true, comm_sms BOOLEAN NOT NULL DEFAULT true,
+      comm_email BOOLEAN NOT NULL DEFAULT true, comm_push BOOLEAN NOT NULL DEFAULT true,
+      comm_promo BOOLEAN NOT NULL DEFAULT true, updated TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
   ])
   // Seed / re-sync the four system roles. Their permission bundle is reset to canonical every boot,
   // so a new permission added to the catalog reaches them and no drift can strip their access.
@@ -1174,6 +1182,40 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   const displayId = 'CUST-' + String(100000 + id)
   res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership })
 })
+/* ---------- worker communication preferences (owned here, not on the worker record) ---------- */
+const WORKER_COMM_COLS = ['comm_whatsapp', 'comm_sms', 'comm_email', 'comm_push', 'comm_promo']
+const commRow = (r) => ({
+  whatsapp: r?.comm_whatsapp ?? true, sms: r?.comm_sms ?? true, email: r?.comm_email ?? true,
+  push: r?.comm_push ?? true, promo: r?.comm_promo ?? true,
+})
+async function getWorkerComm(id) {
+  const { rows } = await pool.query('SELECT * FROM worker_comm WHERE worker_id=$1', [id])
+  return commRow(rows[0])
+}
+app.get('/api/admin/worker-comm/:id', admin, async (req, res) => res.json(await getWorkerComm(Number(req.params.id))))
+app.patch('/api/admin/worker-comm/:id', admin, requirePerm('workers.edit'), async (req, res) => {
+  const id = Number(req.params.id)
+  const b = req.body || {}
+  const cur = await pool.query('SELECT * FROM worker_comm WHERE worker_id=$1', [id])
+  const base = cur.rows[0] || { comm_whatsapp: true, comm_sms: true, comm_email: true, comm_push: true, comm_promo: true }
+  const next = {}
+  for (const col of WORKER_COMM_COLS) next[col] = b[col] === undefined ? (base[col] ?? true) : !!b[col]
+  await pool.query(
+    `INSERT INTO worker_comm (worker_id, comm_whatsapp, comm_sms, comm_email, comm_push, comm_promo, updated)
+     VALUES ($1,$2,$3,$4,$5,$6, now())
+     ON CONFLICT (worker_id) DO UPDATE SET comm_whatsapp=$2, comm_sms=$3, comm_email=$4, comm_push=$5, comm_promo=$6, updated=now()`,
+    [id, next.comm_whatsapp, next.comm_sms, next.comm_email, next.comm_push, next.comm_promo])
+  await logAudit(req.admin?.name || 'admin', 'worker.comm', String(id))
+  res.json(commRow(next))
+})
+// Bulk map for the notification service: { [workerId]: {whatsapp,sms,email,push,promo} } — only workers
+// with a stored row appear; the notifier defaults everyone else to all-on.
+app.get('/internal/worker-comm', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM worker_comm')
+  const map = {}; for (const r of rows) map[r.worker_id] = commRow(r)
+  res.json(map)
+})
+
 // Pin an internal ops note to a customer.
 app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'), async (req, res) => {
   try {

@@ -6,7 +6,7 @@ import {
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
   FileText, AlertTriangle, UploadCloud, Plus, Award, Wrench, Trash2,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, updateWorkerComm, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, fetchWorkerComm, updateWorkerComm, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone, type WorkerComm } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -198,6 +198,7 @@ export default function WorkerDetail() {
   const toast = useToast()
   const { admin } = useStore()
   const [w, setW] = useState<WorkerDetail | null>(null)
+  const [comm, setComm] = useState<WorkerComm | null>(null)
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
   const [notes, setNotes] = useState<WorkerNote[]>([])
@@ -241,6 +242,7 @@ export default function WorkerDetail() {
 
   const load = () => { setErr(''); fetchWorkerDetail(Number(id)).then((d) => { setW(d); setNotes(d.notes || []) }).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [id])
+  useEffect(() => { if (id) fetchWorkerComm(Number(id)).then(setComm).catch(() => {}) }, [id])
   useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
   useEffect(() => { if (tab === 'earnings' && !wal && id) fetchWorkerWallet(Number(id)).then(setWal).catch(() => {}) }, [tab, wal, id])
   const submitNote = async () => {
@@ -1044,11 +1046,12 @@ export default function WorkerDetail() {
       </div>
     </Panel>
   )
-  const comm = (w.comm || { whatsapp: true, sms: true, email: true, push: true, promo: true }) as Record<string, boolean>
+  const commVals = (comm || { whatsapp: true, sms: true, email: true, push: true, promo: true }) as Record<string, boolean>
   const toggleComm = async (key: string, val: boolean) => {
     if (!w) return
-    try { const next = await updateWorkerComm(w.id, { [`comm_${key}`]: val }); setW({ ...w, comm: next }); toast('Communication preferences updated') }
-    catch (e) { toast((e as Error).message) }
+    setComm({ ...commVals, [key]: val } as WorkerComm)  // optimistic
+    try { setComm(await updateWorkerComm(w.id, { [`comm_${key}`]: val })); toast('Communication preferences updated') }
+    catch (e) { toast((e as Error).message); fetchWorkerComm(w.id).then(setComm).catch(() => {}) }
   }
   const commPanel = (
     <Panel title="Communication Preferences">
@@ -1057,8 +1060,8 @@ export default function WorkerDetail() {
           <div key={key} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 13 }}>{label}</span>
             <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span className="muted" style={{ fontSize: 12, minWidth: 50, textAlign: 'right' }}>{comm[key] ? 'Enabled' : 'Disabled'}</span>
-              <button onClick={() => toggleComm(key, !comm[key])} aria-pressed={comm[key]} style={{ width: 38, height: 20, borderRadius: 20, border: 'none', cursor: 'pointer', padding: 2, background: comm[key] ? '#16a34a' : '#cbd2da', display: 'inline-flex', justifyContent: comm[key] ? 'flex-end' : 'flex-start' }}>
+              <span className="muted" style={{ fontSize: 12, minWidth: 50, textAlign: 'right' }}>{commVals[key] ? 'Enabled' : 'Disabled'}</span>
+              <button onClick={() => toggleComm(key, !commVals[key])} aria-pressed={commVals[key]} style={{ width: 38, height: 20, borderRadius: 20, border: 'none', cursor: 'pointer', padding: 2, background: commVals[key] ? '#16a34a' : '#cbd2da', display: 'inline-flex', justifyContent: commVals[key] ? 'flex-end' : 'flex-start' }}>
                 <span style={{ width: 16, height: 16, borderRadius: '50%', background: '#fff', display: 'block', boxShadow: '0 1px 2px rgba(0,0,0,.2)' }} />
               </button>
             </span>

@@ -278,8 +278,15 @@ async function resolveRecipients(b) {
     return { kept, suppressed }
   }
   if (audience.includes('worker')) {
-    const wr = await tryGet(WORKER_URL, '/internal/workers', { workers: [] })
-    const active = (wr.workers || []).filter((w) => (w.status || 'active') === 'active')
+    // Worker roster + status come from the worker service; their comm opt-in is owned by the admin
+    // service (kept off the worker record). Default everyone to all-on when they have no stored row.
+    const [wr, commMap] = await Promise.all([
+      tryGet(WORKER_URL, '/internal/workers', { workers: [] }),
+      tryGet(ADMIN_URL, '/internal/worker-comm', {}),
+    ])
+    const active = (wr.workers || [])
+      .filter((w) => (w.status || 'active') === 'active')
+      .map((w) => ({ ...w, comm: commMap[w.id] || { whatsapp: true, sms: true, email: true, push: true, promo: true } }))
     const { kept, suppressed } = optIn(active)
     return { isPromo, sent: kept.length, suppressed, recipientIds: kept.map((w) => w.id), audienceKind: 'workers' }
   }
