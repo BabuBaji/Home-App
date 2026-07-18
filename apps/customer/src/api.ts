@@ -38,11 +38,23 @@ export function saveUser(u: User) { try { localStorage.setItem('hh_user', JSON.s
 export function loadUser(): User | null { try { return JSON.parse(localStorage.getItem('hh_user') || 'null') } catch { return null } }
 export function clearUser() { localStorage.removeItem('hh_user') }
 
+/* Self-heal on an expired/invalid session: the store registers a handler that signs the user out
+ * (so the app returns to /login) instead of dead-ending on "Not authenticated" (e.g. at payment). */
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null) { onUnauthorized = fn }
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(API_BASE + path, {
     ...opts,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
   })
+  // A 401 while we THOUGHT we were signed in means a stale/invalid token — clear it and bounce to
+  // login. Guarded on `token` so the login screen's own calls (no token) never trigger a loop.
+  if (res.status === 401 && token) {
+    clearToken(); clearUser()
+    onUnauthorized?.()
+    throw new Error('Your session expired — please sign in again.')
+  }
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Request failed (${res.status})`) }
   return res.json()
 }
