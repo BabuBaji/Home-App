@@ -805,38 +805,45 @@ async function autoAssignSweep() {
 }
 setInterval(autoAssignSweep, 15_000)
 
-/* ---------- auto-cancel: no expert accepted an instant booking in time ----------
-   Instant bookings still sitting unclaimed after `dispatch_timeout_min` (default 5) are
-   cancelled and — if the customer already paid — the FULL amount is refunded to their
-   wallet. The customer app is notified via booking:update (cancelled_by='system'), which
-   drives the "no one accepted your service" popup. Runs every 30s. */
+/* ---------- auto-cancel: no expert accepted the booking → cancel + full refund ----------
+   A booking still 'confirmed' + unassigned is auto-cancelled and — if the customer already paid —
+   the FULL amount is refunded to their wallet. Applies to BOTH booking types:
+     • instant  — sitting unclaimed past `dispatch_timeout_min` (default 5) after creation.
+     • schedule — still unclaimed once the booked slot's start time has arrived.
+   The customer app is notified via booking:update (cancelled_by='system'), which drives the
+   "no one accepted your service" popup. Runs every 30s. */
+async function cancelUnaccepted(r) {
+  const paid = r.payment_status === 'paid'
+  const refund = paid ? (r.total || 0) : 0
+  // Guarded update: skip if a worker claimed it between the SELECT and now.
+  const upd = await pool.query(
+    `UPDATE bookings SET status='cancelled', cancel_reason=$1, cancelled_by='system',
+       cancel_time=$2, refund=$3, refund_status=$4,
+       payment_status=CASE WHEN $5 THEN 'refunded' ELSE payment_status END
+     WHERE id=$6 AND status='confirmed' AND worker_id IS NULL RETURNING id`,
+    ['No expert accepted the booking in time', nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
+  if (!upd.rowCount) return
+  if (refund > 0) {
+    try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
+    catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
+  }
+  await emitBookingUpdate(r.id)
+  publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(r.id), reason: 'no_worker', autoCancelled: true })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'booking.autocancel', entityType: 'booking', entityId: r.id, ref: r.ref, detail: `Auto-cancelled — no expert accepted${refund > 0 ? ` · ₹${refund} refunded to wallet` : ''}`, meta: { refund } })
+  console.log(`[booking] auto-cancelled ${r.ref} (no expert)${refund > 0 ? `, refunded ₹${refund}` : ''}`)
+}
 async function sweepUnacceptedBookings() {
   try {
     const mins = await getSettingInt(ADMIN_URL, 'dispatch_timeout_min', 5)
-    const { rows } = await pool.query(
-      `SELECT * FROM bookings
-         WHERE status='confirmed' AND worker_id IS NULL AND type='instant'
-           AND created < now() - make_interval(mins => $1)`, [mins])
-    for (const r of rows.map(rowTo)) {
-      const paid = r.payment_status === 'paid'
-      const refund = paid ? (r.total || 0) : 0
-      // Guarded update: skip if a worker claimed it between the SELECT and now.
-      const upd = await pool.query(
-        `UPDATE bookings SET status='cancelled', cancel_reason=$1, cancelled_by='system',
-           cancel_time=$2, refund=$3, refund_status=$4,
-           payment_status=CASE WHEN $5 THEN 'refunded' ELSE payment_status END
-         WHERE id=$6 AND status='confirmed' AND worker_id IS NULL RETURNING id`,
-        ['No expert accepted the booking in time', nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
-      if (!upd.rowCount) continue
-      if (refund > 0) {
-        try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
-        catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
-      }
-      await emitBookingUpdate(r.id)
-      publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(r.id), reason: 'no_worker', autoCancelled: true })
-      publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'booking.autocancel', entityType: 'booking', entityId: r.id, ref: r.ref, detail: `Auto-cancelled — no expert accepted in ${mins} min${refund > 0 ? ` · ₹${refund} refunded to wallet` : ''}`, meta: { refund } })
-      console.log(`[booking] auto-cancelled ${r.ref} (no expert in ${mins}m)${refund > 0 ? `, refunded ₹${refund}` : ''}`)
-    }
+    const instant = (await pool.query(
+      `SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND type='instant'
+         AND created < now() - make_interval(mins => $1)`, [mins])).rows.map(rowTo)
+    // Scheduled bookings legitimately wait until near their slot — only cancel once the slot's
+    // start time has passed with still no expert assigned.
+    const sched = (await pool.query(
+      "SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND type='schedule'"))
+      .rows.map(rowTo).filter((b) => { const t = scheduledStartMs(b); return t != null && t <= Date.now() })
+    for (const r of [...instant, ...sched]) await cancelUnaccepted(r)
   } catch (e) { console.error('[booking] sweepUnacceptedBookings:', e.message) }
 }
 setInterval(sweepUnacceptedBookings, 30_000)
