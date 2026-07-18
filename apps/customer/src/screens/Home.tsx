@@ -55,7 +55,9 @@ export default function Home() {
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
   const firstName = (user?.name || 'there').split(' ')[0]
   const svcList = useMemo(() => services.filter((s) => s.available), [services])
-  const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || bookings[0] || null, [bookings])
+  // Only an in-progress booking counts as "Continue Booking" — once it's completed or cancelled it
+  // drops out (no fall-back to the most recent booking regardless of status).
+  const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || null, [bookings])
 
   // The greeting is always the first slide; live banners rotate in after it.
   const slides: Slide[] = useMemo(() => [
