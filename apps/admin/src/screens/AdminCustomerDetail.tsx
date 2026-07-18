@@ -1186,7 +1186,7 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(0, 1.7fr) minmax(260px, 1fr)', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.85fr) minmax(0, 2fr) minmax(240px, 0.95fr)', gap: 16, alignItems: 'start' }}>
         {/* Current plan */}
         <Card title="Current Plan">
           {active ? (
@@ -1216,41 +1216,41 @@ function MembershipTab({ membership, plans, ledger, c, cid, paymentMethods, onCh
           ) : <Empty>No active membership. Choose a plan from the table to enrol this customer.</Empty>}
         </Card>
 
-        {/* Compare plans */}
+        {/* Compare plans — fixed layout so all plan columns fit without a horizontal scrollbar */}
         <Card title="Choose / Compare Plan">
-          <div className="tablewrap">
-            <table className="tbl" style={{ fontSize: 13 }}>
-              <thead>
-                <tr>
-                  <th>Features</th>
-                  {plans.map((p: any) => (
-                    <th key={p.key} style={{ textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>
-                      <div className="row" style={{ gap: 5, justifyContent: 'center', alignItems: 'center' }}>{p.name}{p.popular && <span style={{ background: '#5b51e8', color: '#fff', borderRadius: 8, padding: '1px 6px', fontSize: 10 }}>Popular</span>}</div>
-                      {p.key === curKey && <div style={{ fontSize: 10, color: '#5b51e8', fontWeight: 700 }}>Current</div>}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(([label, render]) => (
-                  <tr key={label}>
-                    <td className="muted">{label}</td>
-                    {plans.map((p: any) => <td key={p.key} style={{ textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>{render(p)}</td>)}
-                  </tr>
+          <table className="tbl" style={{ fontSize: 12, tableLayout: 'fixed', width: '100%' }}>
+            <colgroup><col style={{ width: '26%' }} />{plans.map((p: any) => <col key={p.key} />)}</colgroup>
+            <thead>
+              <tr>
+                <th style={CMP_CELL}>Features</th>
+                {plans.map((p: any) => (
+                  <th key={p.key} style={{ ...CMP_CELL, textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>
+                    <div style={{ fontWeight: 700 }}>{p.name}</div>
+                    {p.popular && <div><span style={{ background: '#5b51e8', color: '#fff', borderRadius: 8, padding: '1px 6px', fontSize: 9 }}>POPULAR</span></div>}
+                    {p.key === curKey && <div style={{ fontSize: 9, color: '#5b51e8', fontWeight: 700 }}>Current</div>}
+                  </th>
                 ))}
-                <tr>
-                  <td />
-                  {plans.map((p: any) => (
-                    <td key={p.key} style={{ textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>
-                      {p.key === curKey
-                        ? <span style={{ fontSize: 12, fontWeight: 700, color: '#5b51e8' }}>Current Plan</span>
-                        : <button className="btn line" style={{ padding: '5px 10px', fontSize: 12 }} disabled={busy} onClick={() => setPick(p.key)}>Select</button>}
-                    </td>
-                  ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([label, render]) => (
+                <tr key={label}>
+                  <td className="muted" style={CMP_CELL}>{label}</td>
+                  {plans.map((p: any) => <td key={p.key} style={{ ...CMP_CELL, textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>{render(p)}</td>)}
                 </tr>
-              </tbody>
-            </table>
-          </div>
+              ))}
+              <tr>
+                <td style={CMP_CELL} />
+                {plans.map((p: any) => (
+                  <td key={p.key} style={{ ...CMP_CELL, textAlign: 'center', ...(p.key === curKey ? { background: '#f5f3ff' } : {}) }}>
+                    {p.key === curKey
+                      ? <span style={{ fontSize: 11, fontWeight: 700, color: '#5b51e8' }}>Current</span>
+                      : <button className="btn line" style={{ padding: '5px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setPick(p.key)}>Select</button>}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
         </Card>
 
         {/* Summary + upgrade */}
@@ -1388,3 +1388,4 @@ const MENU_BOX: CSSProperties = { position: 'absolute', right: 0, top: 42, zInde
 const MENU_ITEM: CSSProperties = { display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '8px 10px', background: 'none', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13, color: 'inherit' }
 const MENU_SEP: CSSProperties = { height: 1, background: 'var(--line, #eef0f3)', margin: '4px 2px' }
 const LINK: CSSProperties = { background: 'none', border: 'none', color: '#5b51e8', fontWeight: 600, fontSize: 12.5, cursor: 'pointer', padding: 0 }
+const CMP_CELL: CSSProperties = { padding: '9px 6px', verticalAlign: 'middle', wordBreak: 'break-word' }
