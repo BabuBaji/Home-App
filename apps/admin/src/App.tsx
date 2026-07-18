@@ -20,6 +20,7 @@ import ServiceAreas from './screens/ServiceAreas'
 import ZoneOnboarding from './screens/ZoneOnboarding'
 import Stores from './screens/Stores'
 import { CitiesPage, ClustersPage, ApartmentsPage, InventoryPage, PricingPage, ServiceCoveragePage } from './screens/ZoneEntities'
+import SurgePricing from './screens/SurgePricing'
 import LiveOps from './screens/LiveOps'
 import Roster from './screens/Roster'
 import Shifts from './screens/Shifts'
@@ -44,6 +45,7 @@ import Roles from './screens/Roles'
 import Approvals from './screens/Approvals'
 import OrgHierarchy from './screens/OrgHierarchy'
 import CommandCenter from './screens/CommandCenter'
+import ControlTower from './screens/ControlTower'
 
 export default function App() {
   const { admin, signIn, setAdmin } = useStore()
@@ -66,6 +68,7 @@ export default function App() {
           <Route path="/customers" element={<Page perm="customers.view"><Customers /></Page>} />
           <Route path="/workers" element={<Page perm="workers.view"><Workers /></Page>} />
           <Route path="/workers/new" element={<Page perm="workers.create"><AddWorker /></Page>} />
+          <Route path="/workers/:id/edit" element={<Page perm="workers.edit"><AddWorker /></Page>} />
           <Route path="/workers/:id" element={<Page perm="workers.view"><WorkerDetail /></Page>} />
           <Route path="/worker-wallet" element={<Page perm="wallet.view"><WorkerWallet /></Page>} />
           <Route path="/bookings" element={<Page perm="bookings.view"><Bookings /></Page>} />
@@ -79,9 +82,11 @@ export default function App() {
           <Route path="/zones/apartments" element={<Page perm="zones.view"><ApartmentsPage /></Page>} />
           <Route path="/zones/stores" element={<Page perm="zones.view"><Stores /></Page>} />
           <Route path="/zones/pricing" element={<Page perm="pricing.view"><PricingPage /></Page>} />
+          <Route path="/zones/surge" element={<Page perm="pricing.view"><SurgePricing /></Page>} />
           <Route path="/zones/coverage" element={<Page perm="zones.view"><ServiceCoveragePage /></Page>} />
           <Route path="/zones/inventory" element={<Page perm="zones.view"><InventoryPage /></Page>} />
           <Route path="/command-center" element={<Page perm="liveops.view"><CommandCenter /></Page>} />
+          <Route path="/control-tower" element={<Page perm="liveops.view"><ControlTower /></Page>} />
           <Route path="/live-ops" element={<Page perm="liveops.view"><LiveOps /></Page>} />
           <Route path="/roster" element={<Page perm="roster.view"><Roster /></Page>} />
           <Route path="/shift-plans" element={<Page perm="attendance.view"><Shifts /></Page>} />

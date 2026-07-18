@@ -101,7 +101,7 @@ export function ServiceThumb({ service, medallion = 56 }: { service: { id?: stri
   const [ok, setOk] = useState(true)
   if (service.image && ok) {
     return <img alt="" loading="lazy" decoding="async" src={service.image} onError={() => setOk(false)}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#fff' }} />
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 20%', background: '#fff' }} />
   }
   return <ServiceArt service={service} medallion={medallion} />
 }

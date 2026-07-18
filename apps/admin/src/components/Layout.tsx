@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes, GraduationCap,
-  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge,
+  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, has } from '../store'
@@ -32,11 +32,13 @@ const NAV: NavGroup[] = [
     { to: '/zones/apartments', label: 'Apartments', Icon: Boxes, perm: 'zones.view' },
     { to: '/zones/stores', label: 'Stores', Icon: Store, perm: 'zones.view' },
     { to: '/zones/pricing', label: 'Pricing', Icon: Tag, perm: 'pricing.view' },
+    { to: '/zones/surge', label: 'Surge Pricing', Icon: CloudRain, perm: 'pricing.view' },
     { to: '/zones/coverage', label: 'Service Coverage', Icon: MapIcon, perm: 'zones.view' },
     { to: '/zones/inventory', label: 'Inventory', Icon: Package, perm: 'zones.view' },
   ] },
   { section: 'Operations', items: [
     { to: '/command-center', label: 'Command Center', Icon: Gauge, perm: 'liveops.view' },
+    { to: '/control-tower', label: 'Control Tower', Icon: RadioTower, perm: 'liveops.view' },
     { to: '/live-ops', label: 'Live Ops', Icon: Radio, perm: 'liveops.view' },
     { to: '/service-areas', label: 'Service Areas', Icon: MapPin, perm: 'zones.view' },
     { to: '/roster', label: 'Shifts / Roster', Icon: CalendarClock, perm: 'roster.view' },
@@ -70,7 +72,7 @@ const NAV: NavGroup[] = [
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', payments: 'Payments', refunds: 'Refunds',
-  zones: 'Zone Operations', 'command-center': 'Operations Command Center', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', 'compensation-rules': 'Compensation Rules', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
+  zones: 'Zone Operations', 'command-center': 'Operations Command Center', 'control-tower': 'Control Tower', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', 'compensation-rules': 'Compensation Rules', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals',
 }
 

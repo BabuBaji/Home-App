@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   UserPlus, Building2, IndianRupee, Send, Check, ChevronRight, Info, Mail, Smartphone, MapPin, Briefcase, BadgeCheck, Gift, Landmark, Layers, Eye,
   Pencil, Settings as Cog, ShieldCheck, CheckCircle2, Circle, AlertTriangle, MessageSquare, Phone,
 } from 'lucide-react'
 import {
-  createWorker, inviteWorker, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdmins, fetchServices, opList,
+  createWorker, inviteWorker, updateWorker, fetchWorkerDetail, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdmins, fetchServices, opList,
   type Zone, type Store, type ShiftDef,
 } from '../api'
 import type { SalaryPlan, IncentivePlan, Admin, AdminService } from '../types'
@@ -74,6 +74,9 @@ const empty: Draft = {
 export default function AddWorker() {
   const toast = useToast()
   const nav = useNavigate()
+  const { id: editIdParam } = useParams()
+  const editId = editIdParam ? Number(editIdParam) : null
+  const isEdit = !!editId
   const [step, setStep] = useState<Step>(1)
   const [d, setD] = useState<Draft>(empty)
   const [busy, setBusy] = useState(false)
@@ -124,6 +127,35 @@ export default function AddWorker() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d.salary_plan_id])
 
+  // Edit mode: prefill the wizard from the existing worker once reference data is loaded.
+  useEffect(() => {
+    if (!isEdit || !loaded) return
+    fetchWorkerDetail(editId).then((raw) => {
+      const w = raw as unknown as Record<string, unknown> & { name?: string; services?: string[] }
+      const s = (v: unknown) => (v == null ? '' : String(v))
+      const nameParts = String(w.name || '').split(' ')
+      setD((prev) => ({
+        ...prev,
+        first_name: s(w.first_name) || nameParts[0] || '',
+        last_name: s(w.last_name) || nameParts.slice(1).join(' '),
+        phone: s(w.phone), alternate_mobile: s(w.alternate_mobile), email: s(w.email),
+        worker_category: s(w.worker_category), employment_type: s(w.employment_type),
+        joining_date: w.joining_date ? String(w.joining_date).slice(0, 10) : prev.joining_date,
+        referral_source: s(w.referral_source),
+        city: s(w.city), zone_id: s(w.zone_id), cluster_id: s(w.cluster_id), store_id: s(w.store_id),
+        reporting_manager_id: s(w.reporting_manager_id), shift_def_id: s(w.shift_def_id),
+        services: Array.isArray(w.services) ? w.services : [],
+        salary_plan_id: s(w.salary_plan_id), wallet_enabled: w.wallet_enabled !== false,
+        job_radius_km: s(w.job_radius_km), allow_outside_radius: w.allow_outside_radius !== false,
+        incentive_plan_id: s(w.incentive_plan_id),
+        salary_basic: s(w.salary_basic), salary_attendance: s(w.salary_attendance), salary_allowance: s(w.salary_allowance),
+        pf_applicable: !!w.pf_applicable, esi_applicable: !!w.esi_applicable, tds_applicable: !!w.tds_applicable,
+        salary_payment_mode: w.salary_payment_mode === 'upi' ? 'upi' : 'bank',
+      }))
+    }).catch((e: Error) => toast(e.message, 'err'))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, loaded, editId])
+
   if (!loaded) return <Loading />
 
   const set = (k: keyof Draft, v: unknown) => setD((p) => ({ ...p, [k]: v }))
@@ -132,7 +164,11 @@ export default function AddWorker() {
   const salaryTotal = (Number(d.salary_basic) || 0) + (Number(d.salary_attendance) || 0) + (Number(d.salary_allowance) || 0)
 
   // Only what the server actually requires. Everything else the worker supplies later.
-  const step1Ok = !!(d.first_name.trim() && d.phone.trim().length >= 10 && d.worker_category && d.employment_type && d.joining_date)
+  // Editing an existing worker only needs the identity basics — category/employment/joining date may
+  // legitimately be blank on older records, so don't block a save on them. Add still requires them.
+  const step1Ok = isEdit
+    ? !!(d.first_name.trim() && d.phone.trim().length >= 10)
+    : !!(d.first_name.trim() && d.phone.trim().length >= 10 && d.worker_category && d.employment_type && d.joining_date)
   const step2Ok = !!(d.city && d.zone_id)
   const canAdvance = step === 1 ? step1Ok : step === 2 ? step2Ok : true
 
@@ -163,18 +199,34 @@ export default function AddWorker() {
     status: 'pending',
   })
 
+  // Edit save: basic + operational fields only. Salary/pay is intentionally excluded — pay changes
+  // go through the approval matrix, and status is left untouched.
+  const editPayload = () => {
+    const { salary_basic, salary_attendance, salary_allowance, salary_plan_id, salary_effective_from,
+      pf_applicable, esi_applicable, tds_applicable, salary_payment_mode, salary_type, status, weekly_off, ...rest } = payload() as Record<string, unknown>
+    void salary_basic; void salary_attendance; void salary_allowance; void salary_plan_id; void salary_effective_from
+    void pf_applicable; void esi_applicable; void tds_applicable; void salary_payment_mode; void salary_type; void status; void weekly_off
+    return rest
+  }
+
   const save = async (invite: boolean) => {
     if (!step1Ok) { setStep(1); toast('Fill in the required basics first', 'err'); return }
     setBusy(true)
     try {
-      const w = await createWorker(payload())
-      if (invite) {
-        const r = await inviteWorker(w.id)
-        toast(`${w.name} created and invited — ${r.delivery}`)
+      if (isEdit) {
+        await updateWorker(editId, editPayload())
+        toast(`${[d.first_name, d.last_name].filter(Boolean).join(' ') || 'Worker'} updated`)
+        nav(`/workers/${editId}`)
       } else {
-        toast(`${w.name} saved as a draft — they can't sign in until you invite them`)
+        const w = await createWorker(payload())
+        if (invite) {
+          const r = await inviteWorker(w.id)
+          toast(`${w.name} created and invited — ${r.delivery}`)
+        } else {
+          toast(`${w.name} saved as a draft — they can't sign in until you invite them`)
+        }
+        nav(`/workers/${w.id}`)
       }
-      nav(`/workers/${w.id}`)
     } catch (e) { toast((e as Error).message, 'err') } finally { setBusy(false) }
   }
 
@@ -187,7 +239,10 @@ export default function AddWorker() {
         {/* Stepper */}
         <Card>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {STEPS.map(([n, label, sub], i) => (
+            {STEPS.map(([n, rawLabel, rawSub], i) => {
+              const label = isEdit && n === 4 ? 'Review & Save' : rawLabel
+              const sub = isEdit && n === 4 ? 'Review the changes' : rawSub
+              return (
               <div key={n} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                 <button onClick={() => setStep(n)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 0, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
                   <span style={{
@@ -202,13 +257,14 @@ export default function AddWorker() {
                 </button>
                 {i < STEPS.length - 1 && <div style={{ flex: 1, height: 1, background: 'var(--line,#e5e7eb)', margin: '0 8px' }} />}
               </div>
-            ))}
+              )
+            })}
           </div>
         </Card>
 
         {step === 1 && (
           <Card>
-            <SectionHead icon={<UserPlus size={16} />} title="Basic Information" sub="Enter basic details to create the worker profile." />
+            <SectionHead icon={<UserPlus size={16} />} title="Basic Information" sub={isEdit ? "Update the worker's basic details." : 'Enter basic details to create the worker profile.'} />
             <div style={grid4}>
               <Field label="First Name *"><input value={d.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="Enter first name" /></Field>
               <Field label="Last Name"><input value={d.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Enter last name" /></Field>
@@ -221,10 +277,10 @@ export default function AddWorker() {
             </div>
             <div style={grid4}>
               <Field label="Email Address"><input value={d.email} onChange={(e) => set('email', e.target.value)} placeholder="Optional" /></Field>
-              <Field label="Worker Category *">
+              <Field label={`Worker Category${isEdit ? '' : ' *'}`}>
                 <Dropdown value={d.worker_category} width="100%" placeholder="Select category" options={CATEGORIES.map((c) => ({ value: c, label: c }))} onChange={(v) => set('worker_category', v)} />
               </Field>
-              <Field label="Employment Type *">
+              <Field label={`Employment Type${isEdit ? '' : ' *'}`}>
                 <Dropdown value={d.employment_type} width="100%" placeholder="Select type" options={EMPLOYMENT.map((c) => ({ value: c, label: c }))} onChange={(v) => set('employment_type', v)} />
               </Field>
               <Field label="Worker ID">
@@ -232,7 +288,7 @@ export default function AddWorker() {
               </Field>
             </div>
             <div style={grid4}>
-              <Field label="Joining Date *"><input type="date" value={d.joining_date} onChange={(e) => set('joining_date', e.target.value)} /></Field>
+              <Field label={`Joining Date${isEdit ? '' : ' *'}`}><input type="date" value={d.joining_date} onChange={(e) => set('joining_date', e.target.value)} /></Field>
               <Field label="Recruiter / Added By">
                 <input value="You" disabled style={{ background: '#f8fafc', color: '#94a3b8' }} />
               </Field>
@@ -371,7 +427,26 @@ export default function AddWorker() {
           </>
         )}
 
-        {step === 3 && (() => {
+        {step === 3 && isEdit && (
+          <Card>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Salary &amp; Plan</div>
+            <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>Read-only here — pay changes are made from the worker's pay screen and go through the approval matrix.</div>
+            {([
+              ['Salary Plan', plans.find((p) => String(p.id) === d.salary_plan_id)?.name || 'Not set'],
+              ['Incentive Plan', incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name || 'None'],
+              ['Monthly Basic', d.salary_basic ? `₹${Number(d.salary_basic).toLocaleString('en-IN')}` : '—'],
+              ['Attendance Allowance', d.salary_attendance ? `₹${Number(d.salary_attendance).toLocaleString('en-IN')}` : '—'],
+              ['Other Allowance', d.salary_allowance ? `₹${Number(d.salary_allowance).toLocaleString('en-IN')}` : '—'],
+              ['Payment Mode', d.salary_payment_mode === 'upi' ? 'UPI' : 'Bank Transfer'],
+              ['Statutory', [d.pf_applicable && 'PF', d.esi_applicable && 'ESI', d.tds_applicable && 'TDS'].filter(Boolean).join(', ') || 'None'],
+            ] as [string, string][]).map(([l, v], i, arr) => (
+              <div key={l} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line-2,#f4f4fa)' : 'none' }}>
+                <span className="muted" style={{ fontSize: 13 }}>{l}</span><strong style={{ fontSize: 13 }}>{v}</strong>
+              </div>
+            ))}
+          </Card>
+        )}
+        {step === 3 && !isEdit && (() => {
           const plan = plans.find((p) => String(p.id) === d.salary_plan_id)
           const inc = incPlans.find((p) => String(p.id) === d.incentive_plan_id)
           // The three cards filter the plan list by type; picking a type clears a plan of a
@@ -663,30 +738,45 @@ export default function AddWorker() {
                 </div>
               </div>
 
-              {/* Invite bar */}
+              {/* Save bar */}
               <Card>
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span style={{ width: 46, height: 46, borderRadius: 12, background: '#eef2ff', color: '#4f46e5', display: 'grid', placeItems: 'center', flexShrink: 0 }}><Send size={20} /></span>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 700 }}>Ready to invite {fullName}?</div>
-                      <div className="muted" style={{ fontSize: 12.5 }}>An invitation with an app download link goes to their mobile number. They can then sign in to complete their profile.</div>
+                {isEdit ? (
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <span style={{ width: 46, height: 46, borderRadius: 12, background: '#eef2ff', color: '#4f46e5', display: 'grid', placeItems: 'center', flexShrink: 0 }}><Check size={20} /></span>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 700 }}>Save changes to {fullName}?</div>
+                        <div className="muted" style={{ fontSize: 12.5 }}>Basic and operational details are updated. Salary changes are made separately and go through approval.</div>
+                      </div>
+                    </div>
+                    <button className="btn" disabled={busy || !step1Ok} onClick={() => save(false)}>
+                      <Check size={15} /> {busy ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  </div>
+                ) : (<>
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <span style={{ width: 46, height: 46, borderRadius: 12, background: '#eef2ff', color: '#4f46e5', display: 'grid', placeItems: 'center', flexShrink: 0 }}><Send size={20} /></span>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 700 }}>Ready to invite {fullName}?</div>
+                        <div className="muted" style={{ fontSize: 12.5 }}>An invitation with an app download link goes to their mobile number. They can then sign in to complete their profile.</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button className="btn line" disabled={busy} onClick={() => save(false)}>Save as Draft</button>
+                      <button className="btn line" disabled title="Email invitations aren't set up — use SMS / WhatsApp" style={{ opacity: 0.5 }}>
+                        <Mail size={15} /> Send Invite via Email
+                      </button>
+                      <button className="btn" disabled={busy || !step1Ok} onClick={() => save(true)}>
+                        <Send size={15} /> {busy ? 'Sending…' : 'Send Invitation via SMS / WhatsApp'}
+                      </button>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <button className="btn line" disabled={busy} onClick={() => save(false)}>Save as Draft</button>
-                    <button className="btn line" disabled title="Email invitations aren't set up — use SMS / WhatsApp" style={{ opacity: 0.5 }}>
-                      <Mail size={15} /> Send Invite via Email
-                    </button>
-                    <button className="btn" disabled={busy || !step1Ok} onClick={() => save(true)}>
-                      <Send size={15} /> {busy ? 'Sending…' : 'Send Invitation via SMS / WhatsApp'}
-                    </button>
+                  <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
+                    Email invitations aren't set up yet, so the link is sent by SMS/WhatsApp. <strong>Save as Draft</strong> creates
+                    the worker as Pending without sending anything — you can invite them later from their profile.
                   </div>
-                </div>
-                <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
-                  Email invitations aren't set up yet, so the link is sent by SMS/WhatsApp. <strong>Save as Draft</strong> creates
-                  the worker as Pending without sending anything — you can invite them later from their profile.
-                </div>
+                </>)}
               </Card>
             </>
           )
@@ -773,7 +863,7 @@ export default function AddWorker() {
         ) : (
           <>
             <Card>
-              <strong style={{ fontSize: 14 }}>Onboarding Summary</strong>
+              <strong style={{ fontSize: 14 }}>{isEdit ? 'Worker Summary' : 'Onboarding Summary'}</strong>
               <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
                 <Summary label="Worker Name" value={[d.first_name, d.last_name].filter(Boolean).join(' ')} />
                 <Summary label="Mobile Number" value={d.phone} />
@@ -787,28 +877,34 @@ export default function AddWorker() {
                 <Summary label="Salary Plan" value={planObj ? `${planObj.name} (${TYPE_LABEL[planObj.salaryType]})` : undefined} />
                 {planObj?.paysMonthly && <Summary label="Monthly Pay" value={rupee(planObj.totalFixedPay)} />}
                 <Summary label="Incentive Plan" value={incPlans.find((p) => String(p.id) === d.incentive_plan_id)?.name} />
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="muted" style={{ fontSize: 12.5 }}>Status</span>
-                  <Badge tone="amber" dot={false}>Pending Onboarding</Badge>
-                </div>
+                {!isEdit && (
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 12.5 }}>Status</span>
+                    <Badge tone="amber" dot={false}>Pending Onboarding</Badge>
+                  </div>
+                )}
               </div>
             </Card>
 
-            <Card>
-              <strong style={{ fontSize: 14 }}>What happens next?</strong>
-              <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
-                <Next n={1} title="Invitation is sent" body="They get an SMS with a link to the app." />
-                <Next n={2} title="Worker completes registration" body="They fill in their personal details, documents, bank and skills themselves." />
-                <Next n={3} title="You verify and approve" body="Documents, background, skills, training — all on their profile." />
-                <Next n={4} title="Worker goes live" body="Once the checklist is clear, they can be assigned jobs." />
-              </div>
-            </Card>
+            {!isEdit && (
+              <Card>
+                <strong style={{ fontSize: 14 }}>What happens next?</strong>
+                <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
+                  <Next n={1} title="Invitation is sent" body="They get an SMS with a link to the app." />
+                  <Next n={2} title="Worker completes registration" body="They fill in their personal details, documents, bank and skills themselves." />
+                  <Next n={3} title="You verify and approve" body="Documents, background, skills, training — all on their profile." />
+                  <Next n={4} title="Worker goes live" body="Once the checklist is clear, they can be assigned jobs." />
+                </div>
+              </Card>
+            )}
 
             <Card>
               <strong style={{ fontSize: 13 }}>Worth knowing</strong>
               <ul style={{ fontSize: 12, color: 'var(--muted,#667085)', paddingLeft: 16, margin: '6px 0 0' }}>
                 <li>The mobile number is their login — make sure it's right. It can't be shared with another worker.</li>
-                <li>They complete their own personal details, so you don't need them here.</li>
+                {isEdit
+                  ? <li>Salary &amp; plan changes are made separately and go through approval — they're read-only here.</li>
+                  : <li>They complete their own personal details, so you don't need them here.</li>}
               </ul>
             </Card>
           </>

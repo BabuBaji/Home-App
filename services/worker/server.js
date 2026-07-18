@@ -181,6 +181,12 @@ async function init() {
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
     `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS reject_reason TEXT`,
+    // Admin-captured KYC particulars: the number printed on the document and its issue/expiry dates.
+    // Nullable — a document has none of these until an admin fills them in, and expiry alerts derive
+    // from expiry_date, so a blank date simply never alerts (rather than inventing one).
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS document_number TEXT`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS issue_date DATE`,
+    `ALTER TABLE worker_documents ADD COLUMN IF NOT EXISTS expiry_date DATE`,
     /* ---- Phase 9: equipment allocation ----
      * `required` drives Phase 12's "Equipment Issued" check and defaults to FALSE for everything:
      * which kit a worker must hold before going live is the company's call, not ours. The admin
@@ -200,6 +206,23 @@ async function init() {
       returned_at TIMESTAMPTZ, returned_by TEXT NOT NULL DEFAULT ''
     )`,
     `CREATE INDEX IF NOT EXISTS ix_worker_equipment_worker ON worker_equipment(worker_id, status)`,
+
+    /* ---- Skills & Services: professional certifications and the skill-level audit trail ---- */
+    `CREATE TABLE IF NOT EXISTS worker_certifications (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, name TEXT NOT NULL,
+      issuer TEXT NOT NULL DEFAULT '', issued_on DATE, status TEXT NOT NULL DEFAULT 'Verified',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_cert_worker ON worker_certifications(worker_id)`,
+    // Every skill-level change (admin review that changes the level) appends a row here, so the
+    // "Skill Verification History" panel shows a real old->new trail rather than an invented one.
+    `CREATE TABLE IF NOT EXISTS worker_skill_history (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, skill TEXT NOT NULL,
+      old_level TEXT NOT NULL DEFAULT '', new_level TEXT NOT NULL DEFAULT '',
+      verified_by TEXT NOT NULL DEFAULT '', remarks TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_skillhist_worker ON worker_skill_history(worker_id)`,
 
     /* ---- Phase 10: per-worker pay ----
      * commission_percent is NULL by default, meaning "use the platform-wide commission_percent
@@ -481,6 +504,16 @@ async function init() {
       from_date DATE, to_date DATE, reason TEXT,
       status TEXT NOT NULL DEFAULT 'Pending', created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Leave type (Personal / Medical / …) — the admin panel shows it; default keeps old rows valid.
+    `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS leave_type TEXT NOT NULL DEFAULT 'Personal'`,
+    // Availability change trail — shift changes, leave decisions, half-days — for the "Recent
+    // Availability Changes" panel. Appended by the admin availability/leave actions and the seed.
+    `CREATE TABLE IF NOT EXISTS worker_availability_log (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      type TEXT NOT NULL, from_val TEXT NOT NULL DEFAULT '', to_val TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Approved'
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_worker_avail_log ON worker_availability_log(worker_id, at DESC)`,
     // Support tickets raised by the worker (ops resolves — status Open|Resolved).
     `CREATE TABLE IF NOT EXISTS support_tickets (
       id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, subject TEXT, message TEXT,
@@ -1166,6 +1199,16 @@ const DOC_TYPES = [
   { name: 'Medical Certificate', required: true, hint: 'Fitness certificate from a doctor' },
   { name: 'Driving License', required: false, hint: 'Only if you drive to jobs' },
   { name: 'Passport', required: false, hint: 'Optional' },
+  // Optional supporting documents an admin may hold on file. Additive — they never gate go-live
+  // (required:false), so onboarding is unchanged, but they ARE accepted by the upload endpoint and
+  // offered in the admin upload dialog, keeping the displayed set and the uploadable set in sync.
+  { name: 'Aadhaar Card', required: false, hint: 'Combined Aadhaar (front & back)' },
+  { name: 'Bank Passbook', required: false, hint: 'Passbook or cancelled cheque' },
+  { name: 'Profile Photo', required: false, hint: 'Passport-size photograph' },
+  { name: 'ESIC Card', required: false, hint: 'Employee State Insurance card' },
+  { name: 'PF Account Proof', required: false, hint: 'Provident Fund account proof' },
+  { name: 'Vaccination Certificate', required: false, hint: 'COVID / other vaccination proof' },
+  { name: 'Resume / Bio Data', required: false, hint: 'Résumé or bio-data' },
 ]
 const DOC_NAMES = new Set(DOC_TYPES.map((d) => d.name))
 
@@ -3688,8 +3731,141 @@ app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, a
     actorType: 'admin', actorName: who, action: 'availability.review', entityType: 'worker', entityId: id,
     detail: `${approve ? 'Approved' : 'Modified'} availability for ${w.name} — ${sd ? sd.name : 'no'} shift${approve ? '' : ` (${reason})`}`,
   })
+  // Record the shift change in the availability trail.
+  const oldSd = await getShiftDef(w.shift_def_id)
+  const shiftLabel = (s) => (s ? `${toHHMM(s.start_min)} - ${toHHMM(s.end_min)}` : 'Flexible')
+  await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, 'Shift Change', shiftLabel(oldSd), shiftLabel(sd), approve ? '' : reason, who, 'Approved'])
   const after = await getWorker(id)
   res.json({ ok: true, availability: availabilityDto(after), assigned: { shiftDefId: after.shift_def_id || null, zoneId: after.zone_id ?? null } })
+})
+
+/* ================= Availability tab — consolidated overview =================
+ * One call powers the whole tab: today's status + shift, this-week summary, the month calendar,
+ * upcoming leaves, derived insights, and the recent-change trail. Everything is DERIVED from real
+ * rows — attendance (hours/lateness), the assigned shift_def, leave_requests, and the change log. */
+const minsToHM = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(Math.round(mins % 60)).padStart(2, '0')}`
+const hoursToHM = (h) => minsToHM(Math.round(h * 60))
+const DOW_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] // JS getUTCDay index -> key
+app.get('/api/admin/workers/:id/availability-overview', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const sd = await getShiftDef(w.shift_def_id)
+  const av = availabilityDto(w)
+  const weeklyOff = av.weeklyOff && av.weeklyOff.length ? av.weeklyOff : ['Sun']
+  const shiftMins = sd ? { s: sd.start_min, e: sd.end_min } : { s: toMin(av.shiftStart || '09:00'), e: toMin(av.shiftEnd || '18:00') }
+  const shiftHours = Math.max(0, (shiftMins.e - shiftMins.s) / 60)
+  const shift = { start: minsToHM(shiftMins.s), end: minsToHM(shiftMins.e), hours: Math.round(shiftHours * 10) / 10, name: sd ? sd.name : 'Flexible' }
+  const isOff = (dateStr) => weeklyOff.includes(DOW_KEYS[new Date(dateStr + 'T00:00:00Z').getUTCDay()])
+
+  // Month window (?month=YYYY-MM, default current IST month).
+  const istToday = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
+  const monthStr = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : istToday.slice(0, 7)
+  const [my, mm] = monthStr.split('-').map(Number)
+  const daysInMonth = new Date(Date.UTC(my, mm, 0)).getUTCDate()
+  const monthStart = `${monthStr}-01`, monthEnd = `${monthStr}-${String(daysInMonth).padStart(2, '0')}`
+
+  // Pull attendance + leaves spanning the month AND the current week.
+  const weekAnchor = istToday
+  const [attAll, leaves, logRows] = await Promise.all([
+    pool.query(`SELECT day, check_in, check_out, late_minutes, on_time FROM attendance WHERE worker_id=$1 AND day >= $2::date - 14 AND day <= $3::date + 1`, [id, monthStart, monthEnd]),
+    pool.query('SELECT id, from_date, to_date, reason, status, leave_type FROM leave_requests WHERE worker_id=$1 ORDER BY from_date DESC NULLS LAST, id DESC', [id]),
+    pool.query('SELECT * FROM worker_availability_log WHERE worker_id=$1 ORDER BY at DESC LIMIT 10', [id]),
+  ])
+  const ymd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10))
+  const attByDay = new Map(attAll.rows.map((a) => [ymd(a.day), a]))
+  const leaveRows = leaves.rows.map((l) => ({ id: l.id, from: ymd(l.from_date), to: ymd(l.to_date || l.from_date), reason: l.reason || '', status: l.status, type: l.leave_type || 'Personal' }))
+  const leaveOn = (dateStr) => leaveRows.find((l) => l.from && dateStr >= l.from && dateStr <= l.to)
+  const attHours = (a) => (a && a.check_in ? Math.max(0, ((a.check_out ? new Date(a.check_out) : new Date()) - new Date(a.check_in)) / 3600000) : 0)
+
+  // Calendar: one entry per day of the month.
+  const calendar = []
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${monthStr}-${String(d).padStart(2, '0')}`
+    const a = attByDay.get(ds), lv = leaveOn(ds)
+    let status = 'Off'
+    if (lv) status = /half/i.test(lv.reason) ? 'Half Day' : /train/i.test(lv.reason) ? 'Training' : 'Leave'
+    else if (isOff(ds)) status = 'Weekly Off'
+    else if (a && a.check_in) status = 'On Duty'
+    else if (ds >= istToday) status = 'On Duty' // scheduled ahead
+    else status = 'Absent'
+    calendar.push({ date: ds, status, start: status === 'On Duty' ? shift.start : '', end: status === 'On Duty' ? shift.end : '', hours: a ? Math.round(attHours(a) * 10) / 10 : 0 })
+  }
+
+  // Current IST week (Mon..Sun).
+  const jsDow = new Date(weekAnchor + 'T00:00:00Z').getUTCDay()
+  const monday = new Date(weekAnchor + 'T00:00:00Z'); monday.setUTCDate(monday.getUTCDate() - ((jsDow + 6) % 7))
+  const weekDays = Array.from({ length: 7 }, (_, i) => { const x = new Date(monday); x.setUTCDate(x.getUTCDate() + i); return x.toISOString().slice(0, 10) })
+  let completed = 0, lateArrivals = 0, leaveDays = 0
+  for (const ds of weekDays) {
+    const a = attByDay.get(ds)
+    if (a && a.check_in) { completed += attHours(a); if (a.on_time === false || (a.late_minutes || 0) > 0) lateArrivals++ }
+    if (leaveOn(ds)) leaveDays++
+  }
+  const workingDays = weekDays.filter((ds) => !isOff(ds) && !leaveOn(ds)).length
+  const scheduled = workingDays * shiftHours
+  const overtime = Math.max(0, completed - scheduled)
+  const weekSummary = {
+    rangeLabel: `${new Date(weekDays[0] + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })} – ${new Date(weekDays[6] + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`,
+    scheduledHours: hoursToHM(scheduled), completedHours: hoursToHM(completed), overtime: hoursToHM(overtime),
+    lateArrivals, leaveDays, weeklyOff: weekDays.filter(isOff).length,
+  }
+
+  // Today + next shift.
+  const todayOff = isOff(istToday), todayLeave = leaveOn(istToday)
+  const todayStatus = todayLeave ? 'On Leave' : todayOff ? 'Weekly Off' : 'On Duty'
+  let nextShiftDate = null
+  for (let i = 1; i <= 7; i++) { const x = new Date(istToday + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + i); const ds = x.toISOString().slice(0, 10); if (!isOff(ds) && !leaveOn(ds)) { nextShiftDate = ds; break } }
+
+  const upcomingLeaves = leaveRows.filter((l) => l.to >= istToday).sort((a, b) => a.from.localeCompare(b.from)).slice(0, 6)
+  const recentChanges = logRows.rows.map((r) => ({ at: r.at, type: r.type, from: r.from_val, to: r.to_val, reason: r.reason, updatedBy: r.updated_by, status: r.status }))
+
+  const insights = []
+  if (lateArrivals === 0) insights.push({ tone: 'good', text: 'Perfect punctuality this week — no late arrivals.' })
+  else insights.push({ tone: 'warn', text: `${lateArrivals} late arrival${lateArrivals === 1 ? '' : 's'} this week. Keep an eye on start times.` })
+  if (overtime > 0) insights.push({ tone: 'info', text: `Worked ${hoursToHM(overtime)} overtime this week.` })
+  if (leaveDays === 0) insights.push({ tone: 'good', text: 'No leave taken this week — full attendance.' })
+
+  res.json({
+    month: monthStr,
+    today: { status: todayStatus, shiftEnd: shift.end, shift, nextShift: nextShiftDate ? { date: nextShiftDate, start: shift.start, end: shift.end } : null },
+    weeklyOff, overtimeWeek: weekSummary.overtime, lateArrivalsWeek: lateArrivals,
+    weekSummary, calendar, upcomingLeaves, recentChanges, insights,
+  })
+})
+
+/* Admin records a leave for the worker (Create Leave Request). */
+app.post('/api/admin/workers/:id/leave', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  const from = req.body?.fromDate ? String(req.body.fromDate).slice(0, 10) : null
+  const to = req.body?.toDate ? String(req.body.toDate).slice(0, 10) : from
+  if (!from) return res.status(400).json({ error: 'A start date is required' })
+  if (to && to < from) return res.status(400).json({ error: 'End date cannot be before the start date' })
+  const type = String(req.body?.leaveType || 'Personal').trim() || 'Personal'
+  const reason = String(req.body?.reason || '').trim()
+  const status = ['Approved', 'Pending', 'Rejected'].includes(String(req.body?.status)) ? String(req.body.status) : 'Pending'
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const { rows } = await pool.query('INSERT INTO leave_requests (worker_id,from_date,to_date,reason,status,leave_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [id, from, to, reason, status, type])
+  await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, 'Leave Request', from, to === from ? from : to, reason || type, who, status])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'leave.create', entityType: 'worker', entityId: id, detail: `Recorded ${type} leave for ${w.name} (${from}${to && to !== from ? ` → ${to}` : ''})` })
+  res.json({ ok: true, id: rows[0].id })
+})
+/* Approve / reject a leave request. */
+app.post('/api/admin/workers/:id/leave/:lid/review', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id), lid = Number(req.params.lid)
+  const approve = !!req.body?.approve
+  const { rows } = await pool.query('UPDATE leave_requests SET status=$3 WHERE id=$1 AND worker_id=$2 RETURNING from_date, to_date, leave_type', [lid, id, approve ? 'Approved' : 'Rejected'])
+  if (!rows.length) return res.status(404).json({ error: 'Leave request not found' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const f = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10))
+  await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, 'Leave Request', f(rows[0].from_date), f(rows[0].to_date), rows[0].leave_type || '', who, approve ? 'Approved' : 'Rejected'])
+  res.json({ ok: true })
 })
 
 /* ---------- Phase 8: background verification ----------
@@ -4110,10 +4286,14 @@ app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
   }))
   // hasFile drives the admin's View link — rows predating the storage pipeline have no object
   // behind them, and offering a preview that 404s is worse than offering none.
+  // pg parses a DATE column into a JS Date at LOCAL midnight, so local Y/M/D reads back the exact
+  // stored day with no timezone drift — safer than toISOString(), which can roll back a day.
+  const ymd = (v) => { if (!v) return null; if (v instanceof Date) { const p = (n) => String(n).padStart(2, '0'); return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}` } return String(v).slice(0, 10) }
   const documentsOut = (docs || []).map((d) => ({
     id: d.id, name: d.name, fileName: d.file_name, status: d.status, created: d.created,
     hasFile: !!d.storage_key, mime: d.mime || '', sizeBytes: d.size_bytes || 0,
     reviewedBy: d.reviewed_by || '', reviewedAt: d.reviewed_at || null, rejectReason: d.reject_reason || '',
+    documentNumber: d.document_number || '', issueDate: ymd(d.issue_date), expiryDate: ymd(d.expiry_date),
   }))
 
   // KPIs computed from the worker's bookings.
@@ -4296,9 +4476,42 @@ app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
     : 'Rating dipping — coaching / a check-in is recommended.'
   const health = { riskScore, level, attendanceRisk, burnoutRisk, lateProbability, complaintProbability, suggestion }
 
+  /* ---- Skills & Services tab ----
+   * Skills come from the worker's own skill map + claims; services are the LIVE dispatch set,
+   * enriched with the catalogue category and the worker's real all-time completed-job count per
+   * service. Certifications, equipment issuance and the skill-level history are real rows. */
+  const fmtDate = (v) => { if (!v) return null; if (v instanceof Date) { const p = (n) => String(n).padStart(2, '0'); return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}` } return String(v).slice(0, 10) }
+  const dispLevel = (l) => (l === 'Beginner' ? 'Basic' : (l || 'Basic'))
+  const catSvc = await tryGet(CATALOG_URL, '/api/services', [])
+  const catByName = new Map((Array.isArray(catSvc) ? catSvc : (catSvc?.services || [])).map((s) => [String(s.name || '').trim(), String(s.category || '').trim()]))
+  const skillLevels = (w.profile && w.profile.skillLevels) || {}
+  const claims = (w.profile && w.profile.skills) || {}
+  const serviceStatus = (w.profile && w.profile.serviceStatus) || {}
+  const jobsBySvc = {}
+  for (const b of completed) { const s = svcOf(b); jobsBySvc[s] = (jobsBySvc[s] || 0) + 1 }
+  const skillNames = [...new Set([...Object.keys(skillLevels), ...Object.keys(claims)])]
+  const skillsList = skillNames.map((name) => ({ name, level: dispLevel(skillLevels[name] || claims[name]?.level), status: claims[name]?.status || 'Verified' }))
+  const liveSvc = Array.isArray(w.services) ? w.services : []
+  const servicesList = liveSvc.map((name) => ({
+    name, category: catByName.get(name) || '—', level: dispLevel(skillLevels[name] || claims[name]?.level),
+    jobsCompleted: jobsBySvc[name] || 0, active: serviceStatus[name] !== 'inactive',
+  }))
+  const [certRows, eqJoin, histRows] = await Promise.all([
+    pool.query('SELECT * FROM worker_certifications WHERE worker_id=$1 ORDER BY issued_on DESC NULLS LAST, id DESC', [w.id]),
+    pool.query(`SELECT t.name, e.status FROM equipment_types t LEFT JOIN worker_equipment e ON e.type_id=t.id AND e.worker_id=$1 AND e.status='issued' WHERE t.active=true ORDER BY t.sort, t.id`, [w.id]),
+    pool.query('SELECT * FROM worker_skill_history WHERE worker_id=$1 ORDER BY created DESC LIMIT 30', [w.id]),
+  ])
+  const certifications = certRows.rows.map((c) => ({ id: c.id, name: c.name, issuer: c.issuer || '', issuedOn: fmtDate(c.issued_on), status: c.status || 'Verified' }))
+  const equipment = eqJoin.rows.map((r) => ({ name: r.name, status: r.status === 'issued' ? 'Issued' : 'Not Issued' }))
+  const skillHistory = histRows.rows.map((h) => ({ skill: h.skill, oldLevel: h.old_level, newLevel: h.new_level, verifiedBy: h.verified_by, verifiedAt: h.created, remarks: h.remarks }))
+  const byLevel = { Expert: 0, Advanced: 0, Intermediate: 0, Basic: 0 }
+  for (const s of skillsList) if (byLevel[s.level] != null) byLevel[s.level]++
+  const summary = { totalSkills: skillsList.length, expert: byLevel.Expert, advanced: byLevel.Advanced, intermediate: byLevel.Intermediate, basic: byLevel.Basic, inactiveServices: servicesList.filter((s) => !s.active).length }
+  const skillsServices = { skills: skillsList, services: servicesList, certifications, equipment, skillHistory, summary }
+
   // documentTypes travels with the detail so the admin can show what's still MISSING, not just
   // what happened to be uploaded — an absent Police Verification is the thing they need to chase.
-  res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance })
+  res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance, skillsServices })
 })
 app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), scopeWorker, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), scopeWorker, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
@@ -4309,6 +4522,40 @@ app.post('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res
   if (!note) return res.status(400).json({ error: 'Note is empty' })
   const { rows } = await pool.query('INSERT INTO worker_notes (worker_id,note,author) VALUES ($1,$2,$3) RETURNING id, note, author, created', [Number(req.params.id), note, req.body?.author || 'Admin'])
   res.status(201).json(rows[0])
+})
+// System logs — the full audit stream for this worker from the activity service (every recorded
+// event: reviews, availability/leave changes, dispatch, status changes, notes, SOS, …). Each entry
+// is categorised (Job Updates / Attendance / Leave & Shift / Earnings & Payouts / Feedback / System)
+// and the source (Worker App / Web Portal / System) is derived from who acted. Also returns the
+// per-category summary and the latest device/session telemetry from the worker's heartbeat.
+const LOG_CATS = ['Job Updates', 'Attendance', 'Leave & Shift', 'Earnings & Payouts', 'Feedback', 'System']
+const logCategory = (action) => {
+  const a = String(action || '').toLowerCase()
+  if (a.includes('job') || a.startsWith('booking') || a.startsWith('dispatch')) return 'Job Updates'
+  if (a.startsWith('attendance') || a.includes('checkin') || a.includes('checkout')) return 'Attendance'
+  if (a.startsWith('availability') || a.startsWith('leave') || a.startsWith('shift') || a.startsWith('roster')) return 'Leave & Shift'
+  if (a.startsWith('incentive') || a.startsWith('wallet') || a.startsWith('payroll') || a.startsWith('salary') || a.includes('earning') || a.includes('payout')) return 'Earnings & Payouts'
+  if (a.startsWith('rating') || a.startsWith('review') || a.startsWith('feedback') || a.startsWith('complaint')) return 'Feedback'
+  return 'System'
+}
+const logSource = (actorType) => actorType === 'worker' ? 'Worker App' : actorType === 'admin' ? 'Web Portal' : actorType === 'customer' ? 'Customer App' : 'System'
+app.get('/api/admin/workers/:id/logs', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const [r, w] = await Promise.all([
+    tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=300`, { items: [] }),
+    getWorker(id),
+  ])
+  const items = (r.items || []).map((a) => ({
+    id: a.id, date: a.created, logType: logCategory(a.action), action: a.action || 'event',
+    description: a.detail || '', source: logSource(a.actor_type || 'system'),
+    performedBy: a.actor_name || (a.actor_type && a.actor_type !== 'system' ? '' : 'System'), actorType: a.actor_type || 'system', ref: a.ref || '',
+  }))
+  const counts = Object.fromEntries(LOG_CATS.map((c) => [c, 0]))
+  for (const it of items) counts[it.logType] = (counts[it.logType] || 0) + 1
+  const summary = { total: items.length, categories: LOG_CATS.map((c) => ({ label: c, count: counts[c] })) }
+  const dev = (w && w.profile && w.profile.device) || {}
+  const device = { network: dev.network || null, battery: dev.battery ?? null, lastSeen: dev.at || null, online: !!(w && w.available) }
+  res.json({ items, summary, device })
 })
 
 /* ---------- shifts / roster (admin) ---------- */
@@ -4450,6 +4697,20 @@ async function patchWorker(id, b, res) {
       first ?? null, last ?? null, b.alternate_mobile ?? w.alternate_mobile,
       b.worker_category ?? w.worker_category, b.employment_type ?? w.employment_type,
       b.joining_date ?? w.joining_date, b.recruiter ?? w.recruiter, b.referral_source ?? w.referral_source, id])
+  // Operational assignment (Edit wizard, step 2) — coalesce so an unset field keeps its value.
+  // Salary/pay money columns are deliberately NOT updated here: pay changes go through the approval
+  // matrix, never a direct worker edit.
+  if (b.shift_def_id) { if (!(await getShiftDef(Number(b.shift_def_id)))) { res.status(400); return { error: 'Unknown shift' } } }
+  const numOrKeep = (v, cur) => v === undefined ? cur : (v === null || v === '' ? null : Number(v))
+  await pool.query(
+    `UPDATE workers SET cluster_id=$1, store_id=$2, reporting_manager_id=$3, shift_def_id=$4,
+       incentive_plan_id=$5, wallet_enabled=$6, job_radius_km=$7, allow_outside_radius=$8 WHERE id=$9`,
+    [numOrKeep(b.cluster_id, w.cluster_id), numOrKeep(b.store_id, w.store_id),
+      numOrKeep(b.reporting_manager_id, w.reporting_manager_id), numOrKeep(b.shift_def_id, w.shift_def_id),
+      numOrKeep(b.incentive_plan_id, w.incentive_plan_id),
+      b.wallet_enabled === undefined ? w.wallet_enabled : !!b.wallet_enabled,
+      numOrKeep(b.job_radius_km, w.job_radius_km),
+      b.allow_outside_radius === undefined ? w.allow_outside_radius : !!b.allow_outside_radius, id])
   const profPatch = {}
   if (b.personal && typeof b.personal === 'object') profPatch.personal = { ...(w.profile?.personal || {}), ...b.personal }
   if (b.skillLevels && typeof b.skillLevels === 'object') profPatch.skillLevels = { ...(w.profile?.skillLevels || {}), ...b.skillLevels }
@@ -4566,6 +4827,7 @@ app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, async (
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const skills = w.profile?.skills || {}
   if (!skills[service]) return res.status(404).json({ error: 'That skill was not claimed' })
+  const prevLevel = skills[service].level || ''
 
   skills[service] = {
     ...skills[service],
@@ -4588,8 +4850,51 @@ app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, async (
     body: approve ? `You can now be assigned ${service} jobs (${skills[service].level}).` : `${service} was not approved: ${reason}`,
   })
   const who = req.admin?.name || req.admin?.email || 'Admin'
+  // Append to the skill-level audit trail whenever an approval sets a level different from before.
+  if (approve && level && level !== prevLevel) {
+    await pool.query('INSERT INTO worker_skill_history (worker_id,skill,old_level,new_level,verified_by,remarks) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id, service, prevLevel || 'New', level, who, String(req.body?.remarks || '').trim()])
+  }
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'skills.review', entityType: 'worker', entityId: id, detail: `${approve ? 'Approved' : 'Rejected'} ${service} for ${w.name}${approve ? ` (${skills[service].level})` : ` — ${reason}`}` })
   res.json({ ok: true, ...rowToWorker(await getWorker(id)) })
+})
+
+/* Toggle a LIVE service Active/Inactive without removing the capability. Stored in
+ * profile.serviceStatus; an inactive service still exists but shows as paused on the panel. */
+app.post('/api/admin/workers/:id/services/toggle', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const name = String(req.body?.name || '').trim()
+  const active = req.body?.active !== false
+  const w = await getWorker(id)
+  if (!w) return res.status(404).json({ error: 'Worker not found' })
+  if (!(w.services || []).includes(name)) return res.status(404).json({ error: 'That service is not offered by this worker' })
+  const serviceStatus = { ...(w.profile?.serviceStatus || {}) }
+  if (active) delete serviceStatus[name]; else serviceStatus[name] = 'inactive'
+  await mergeProfile(id, { serviceStatus })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'services.toggle', entityType: 'worker', entityId: id, detail: `${active ? 'Activated' : 'Paused'} ${name} for ${w.name}` })
+  res.json({ ok: true })
+})
+
+/* Professional certifications the admin records against the worker. */
+app.post('/api/admin/workers/:id/certifications', adminAuth, scopeWorker, async (req, res) => {
+  const id = Number(req.params.id)
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Certification name is required' })
+  const issuer = String(req.body?.issuer || '').trim()
+  const issuedOn = req.body?.issuedOn ? String(req.body.issuedOn).slice(0, 10) : null
+  const status = ['Verified', 'Pending', 'Expired'].includes(String(req.body?.status)) ? String(req.body.status) : 'Verified'
+  const { rows } = await pool.query(
+    'INSERT INTO worker_certifications (worker_id,name,issuer,issued_on,status) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [id, name, issuer, issuedOn, status])
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'certification.add', entityType: 'worker', entityId: id, detail: `Added certification "${name}"` })
+  res.json({ ok: true, id: rows[0].id })
+})
+app.delete('/api/admin/workers/:id/certifications/:cid', adminAuth, scopeWorker, async (req, res) => {
+  const r = await pool.query('DELETE FROM worker_certifications WHERE id=$1 AND worker_id=$2', [Number(req.params.cid), Number(req.params.id)])
+  if (!r.rowCount) return res.status(404).json({ error: 'Certification not found' })
+  res.json({ ok: true })
 })
 
 /* ---------- admin KYC document review ----------
@@ -4625,6 +4930,53 @@ app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, scopeWorke
   res.json({ ok: true, documents: (await documents(wid)).map((d) => ({ id: d.id, name: d.name, status: d.status })) })
 })
 
+// Admin captures/edits a document's printed number and its issue/expiry dates. Purely additive to
+// the review flow — it never changes verification status. Empty strings clear the field to NULL.
+app.post('/api/admin/workers/:id/documents/:docId/details', adminAuth, scopeWorker, async (req, res) => {
+  const wid = Number(req.params.id), docId = Number(req.params.docId)
+  const number = String(req.body?.documentNumber ?? '').trim() || null
+  const issue = req.body?.issueDate ? String(req.body.issueDate).slice(0, 10) : null
+  const expiry = req.body?.expiryDate ? String(req.body.expiryDate).slice(0, 10) : null
+  if (issue && expiry && expiry < issue) return res.status(400).json({ ok: false, error: 'Expiry date cannot be before the issue date' })
+  const { rows } = await pool.query(
+    `UPDATE worker_documents SET document_number=$3, issue_date=$4, expiry_date=$5
+     WHERE id=$1 AND worker_id=$2 RETURNING name`,
+    [docId, wid, number, issue, expiry])
+  if (!rows.length) return res.status(404).json({ ok: false, error: 'Document not found' })
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.details', entityType: 'worker', entityId: wid, detail: `Updated ${rows[0].name} particulars` })
+  res.json({ ok: true })
+})
+// Admin uploads a document on the worker's behalf: same private-storage pipeline as the worker's own
+// upload, plus the particulars (number/issue/expiry) in one shot. Admin-uploaded => Verified by that
+// admin, since the admin is the one vouching for it. Supersedes any existing doc of the same type.
+app.post('/api/admin/workers/:id/documents/upload', adminAuth, scopeWorker, upload.single('file'), async (req, res) => {
+  const wid = Number(req.params.id)
+  const name = String(req.body?.name || '').trim()
+  if (!DOC_NAMES.has(name)) return res.status(400).json({ ok: false, error: `Unknown document type: ${name}` })
+  if (!storageConfigured()) return res.status(503).json({ ok: false, error: 'Document storage is not configured. Contact support.' })
+  if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: 'Attach a photo or PDF of the document' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind) return res.status(415).json({ ok: false, error: 'Only JPG, PNG, WebP or PDF files are accepted' })
+  const number = String(req.body?.documentNumber || '').trim() || null
+  const issue = req.body?.issueDate ? String(req.body.issueDate).slice(0, 10) : null
+  const expiry = req.body?.expiryDate ? String(req.body.expiryDate).slice(0, 10) : null
+  if (issue && expiry && expiry < issue) return res.status(400).json({ ok: false, error: 'Expiry date cannot be before the issue date' })
+  const key = storageKey(`workers/${wid}/kyc`, kind.ext)
+  try { await putObject(key, req.file.buffer, kind.mime) }
+  catch (e) { console.error('[worker] admin document upload failed:', e.message); return res.status(502).json({ ok: false, error: 'Could not store the document. Please try again.' }) }
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const fileName = String(req.body?.fileName || req.file.originalname || `${name}.${kind.ext}`).slice(0, 180)
+  const old = (await pool.query('SELECT storage_key FROM worker_documents WHERE worker_id=$1 AND name=$2', [wid, name])).rows
+  await pool.query('DELETE FROM worker_documents WHERE worker_id=$1 AND name=$2', [wid, name])
+  await pool.query(
+    `INSERT INTO worker_documents (worker_id,name,file_name,status,storage_key,mime,size_bytes,checksum,reviewed_by,reviewed_at,document_number,issue_date,expiry_date)
+     VALUES ($1,$2,$3,'Verified',$4,$5,$6,$7,$8,now(),$9,$10,$11)`,
+    [wid, name, fileName, key, kind.mime, req.file.size, checksum(req.file.buffer), who, number, issue, expiry])
+  for (const o of old) if (o.storage_key) await deleteObject(o.storage_key).catch(() => {})
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.upload', entityType: 'worker', entityId: wid, detail: `Uploaded ${name}` })
+  res.json({ ok: true })
+})
 app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 app.post('/api/admin/workers/:id/bank/reject', adminAuth, scopeWorker, async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
 

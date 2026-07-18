@@ -831,6 +831,50 @@ app.get('/api/admin/command-center', admin, async (req, res) => {
   res.json({ network, demandSupply, sla, escalations: escalations.slice(0, 25), alerts, peakHours: hourly, peakHour, dailySummary, generatedAt: nowIso() })
 })
 
+/* ================= Control Tower — per-job Executive console =================
+ * Every LIVE job with the detail an executive acts on: customer + pro (with phones for click-to-call),
+ * service, zone, age + SLA state, escalation flag and operational note. Plus the in-scope pros the
+ * console offers for reassignment. Scope-aware. Actions themselves go to the booking service's
+ * PATCH /api/admin/bookings/:id (reassign / reschedule / escalate / note / cancel). */
+const CT_ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+app.get('/api/admin/control-tower', admin, async (req, res) => {
+  const [bookingsAll, customers, wres, zonesAll] = await Promise.all([
+    tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.auth, '/api/internal/customers', []),
+    tryGet(U.worker, '/internal/workers', { workers: [] }),
+    tryGet(U.catalog, '/api/internal/zones', []),
+  ])
+  const scope = req.admin?.scope
+  const custById = new Map((customers || []).map((c) => [c.id, c]))
+  const wById = new Map((wres.workers || []).map((w) => [w.id, w]))
+  const zById = new Map((zonesAll || []).map((z) => [z.id, z]))
+  const jobs = (bookingsAll || [])
+    .filter((b) => CT_ACTIVE.includes(b.status) && inScope(scope, { zoneId: b.zone_id }))
+    .map((b) => {
+      const cu = custById.get(b.user_id) || {}
+      const w = b.worker_id ? (wById.get(b.worker_id) || {}) : null
+      const age = ageMin(b.created)
+      const unassigned = !b.worker_id && b.status === 'confirmed'
+      const limit = unassigned ? UNASSIGNED_SLA_MIN : ACTIVE_SLA_MIN
+      return {
+        id: b.id, ref: b.ref || `#${b.id}`, status: b.status,
+        service: (Array.isArray(b.items) ? b.items.map((i) => i.name).join(', ') : '') || b.type || '—',
+        customer: cu.name || 'Customer', customerPhone: cu.phone || '',
+        worker: b.pro_name || (w && w.name) || '', workerPhone: w ? (w.phone || '') : '', workerId: b.worker_id || null,
+        zoneId: b.zone_id || null, zone: zById.get(b.zone_id)?.name || (b.zone_id ? `Zone ${b.zone_id}` : 'Unzoned'),
+        date: b.date || '', time: b.time || '', total: b.total || 0,
+        ageMin: age, sla: age >= limit ? 'breached' : age >= limit * 0.7 ? 'atRisk' : 'onTime',
+        escalated: !!b.escalated, escalateReason: b.escalate_reason || '', adminNote: b.admin_note || '',
+      }
+    })
+    .sort((a, b) => (Number(b.escalated) - Number(a.escalated)) || (b.id - a.id))
+  const pros = (wres.workers || [])
+    .filter((w) => w.status === 'active' && inScope(scope, { zoneId: w.zone_id, city: w.city }))
+    .map((w) => ({ id: w.id, name: w.name, zoneId: w.zone_id, available: !!w.available }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  res.json({ jobs, pros, generatedAt: nowIso() })
+})
+
 app.get('/api/admin/dashboard', admin, async (req, res) => {
   const [customersAll, bookingsAll, workersResp] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),

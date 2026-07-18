@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { StoreProvider } from './store'
 import { initApiBase } from './api'
 import { Capacitor } from '@capacitor/core'
@@ -23,11 +24,13 @@ import './index.css'
 function start() {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <BrowserRouter>
-        <StoreProvider>
-          <App />
-        </StoreProvider>
-      </BrowserRouter>
+      <ErrorBoundary>
+        <BrowserRouter>
+          <StoreProvider>
+            <App />
+          </StoreProvider>
+        </BrowserRouter>
+      </ErrorBoundary>
     </React.StrictMode>,
   )
 }

@@ -3,7 +3,7 @@ import type {
   Admin, DashboardData, Customer, Worker, WorkerDetail, WorkerNote, AdminBooking, AdminService,
   Complaint, Ticket, Settings, TrainingModule, TrainingQuestion, TrainingAdminState, WorkerTrainingState,
   EquipmentType, IssuedEquipment, WorkerEquipmentState, WorkerPay, GoLiveChecklist, BackgroundState, BgStatus, WorkerAvailabilityState, SalaryPlan, SalaryPlansState, WorkerCoverage, IncentivePlan, PayrollRun, RuleMeta, IncentiveRule,
-  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter,
+  PermGroup, Role, ApprovalRequest, ApprovalRuleRow, ActionResult, CommandCenter, ControlTowerData, AvailabilityOverview, WorkerLog, WorkerLogsData, SurgeZone,
 } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the app
@@ -136,11 +136,27 @@ export const rejectWorkerBank = (id: number, reason: string) => req<any>(`/worke
 export const inviteWorker = (id: number) => req<{ ok: boolean; delivery: string; worker: Worker }>(`/workers/${id}/invite`, post(''))
 /* Approving a skill ADDS the service to the worker's live set (what dispatch matches on);
    rejecting removes it. `level` may differ from what the worker claimed — that's the review. */
+export const toggleWorkerService = (id: number, name: string, active: boolean) =>
+  req<{ ok: boolean }>(`/workers/${id}/services/toggle`, post('', { name, active }))
+export const addWorkerCertification = (id: number, body: { name: string; issuer?: string; issuedOn?: string | null; status?: string }) =>
+  req<{ ok: boolean; id: number }>(`/workers/${id}/certifications`, post('', body))
+export const deleteWorkerCertification = (id: number, cid: number) =>
+  req<{ ok: boolean }>(`/workers/${id}/certifications/${cid}`, { method: 'DELETE' })
 export const reviewWorkerSkill = (id: number, service: string, approve: boolean, level?: string, reason?: string) =>
   req<WorkerDetail>(`/workers/${id}/skills/review`, post('', { service, approve, level, reason }))
 export const workerDocUrl = (id: number, docId: number) => req<{ ok: boolean; url: string }>(`/workers/${id}/documents/${docId}/url`)
 export const reviewWorkerDoc = (id: number, docId: number, approve: boolean, reason?: string) =>
   req<any>(`/workers/${id}/documents/${docId}/review`, post('', { approve, reason }))
+export const saveWorkerDocDetails = (id: number, docId: number, body: { documentNumber?: string; issueDate?: string | null; expiryDate?: string | null }) =>
+  req<{ ok: boolean }>(`/workers/${id}/documents/${docId}/details`, post('', body))
+// Multipart upload — must NOT set Content-Type, so the browser writes the multipart boundary itself.
+export async function uploadWorkerDoc(id: number, form: FormData): Promise<{ ok: boolean }> {
+  const res = await fetch(API_BASE + `/api/admin/workers/${id}/documents/upload`, {
+    method: 'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: form,
+  })
+  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || 'Upload failed')
+  return res.json()
+}
 /* training & assessment (Phase 7). Modules ship as empty unpublished drafts — the content is the
    company's own policy, so an admin writes it here. A module can't be published until it has a
    body, and the quiz needs `quizSize` active questions in the bank before a worker can sit it. */
@@ -213,6 +229,14 @@ export const approvePayroll = (id: number) => req<ActionResult & { run?: Payroll
 export const fetchWorkerAvailability = (id: number) => req<WorkerAvailabilityState>(`/workers/${id}/availability`)
 export const reviewWorkerAvailability = (id: number, body: { approve: boolean; shiftDefId?: number | null; zoneId?: number | null; reason?: string }) =>
   req<{ ok: boolean; availability: WorkerAvailabilityState['availability']; assigned: WorkerAvailabilityState['assigned'] }>(`/workers/${id}/availability/review`, post('', body))
+/* Availability tab — consolidated overview + leave actions. */
+export const fetchWorkerLogs = (id: number) => req<WorkerLogsData>(`/workers/${id}/logs`)
+export const fetchAvailabilityOverview = (id: number, month?: string) =>
+  req<AvailabilityOverview>(`/workers/${id}/availability-overview${month ? `?month=${month}` : ''}`)
+export const createWorkerLeave = (id: number, body: { fromDate: string; toDate?: string; leaveType?: string; reason?: string; status?: string }) =>
+  req<{ ok: boolean; id: number }>(`/workers/${id}/leave`, post('', body))
+export const reviewWorkerLeave = (id: number, lid: number, approve: boolean) =>
+  req<{ ok: boolean }>(`/workers/${id}/leave/${lid}/review`, post('', { approve }))
 
 /* background verification (Phase 8). The five document-backed points are DERIVED from the document
    review — verify a document once, on the Documents tab, and this follows. Only the previous
@@ -348,6 +372,11 @@ export const issueRefund = (bookingId: number) => req<ActionResult>('/actions/re
 
 /* operations command center — live network operating picture */
 export const fetchCommandCenter = () => req<CommandCenter>('/command-center')
+/* surge pricing — live per-zone surge + ops manual override */
+export const fetchSurge = () => req<SurgeZone[]>('/surge')
+export const setSurge = (body: { zoneId: number | 'all'; pct: number; minutes?: number }) => req<{ ok: boolean }>('/surge', post('', body))
+/* control tower — per-job executive console (actions reuse updateBooking) */
+export const fetchControlTower = () => req<ControlTowerData>('/control-tower')
 
 /* approvals (maker-checker) */
 export const fetchApprovals = (status: 'pending' | 'all' = 'pending') => req<{ ok: boolean; requests: ApprovalRequest[]; meId: number }>(`/approvals?status=${status}`)

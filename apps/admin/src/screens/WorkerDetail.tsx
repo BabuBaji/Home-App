@@ -4,13 +4,15 @@ import {
   ChevronLeft, ChevronRight, Phone, MessageSquare, MapPin, Star, CheckCircle2, BadgeCheck,
   Briefcase, XCircle, Wallet, ShieldAlert, Zap, Activity as ActivityIcon,
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
+  FileText, AlertTriangle, UploadCloud, Plus, Award, Wrench, Trash2,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, type Zone } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
 import WorkerApproval from './WorkerApproval'
-import WorkerAvailability from './WorkerAvailability'
+import WorkerAvailabilityTab from './WorkerAvailabilityTab'
+import WorkerLogs from './WorkerLogs'
 import WorkerOnboarding from './WorkerOnboarding'
 
 const rupee = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
@@ -188,7 +190,7 @@ function PerfTile({ label, value, sub, subTone }: { label: string; value: ReactN
 }
 
 const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
-const TABS = [['overview', 'Overview'], ['onboarding', 'Onboarding'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['approval', 'Approval & Go Live'], ['notes', 'Notes & Activity']] as const
+const TABS = [['overview', 'Overview'], ['onboarding', 'Onboarding'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity'], ['logs', 'Logs']] as const
 
 export default function WorkerDetail() {
   const { id } = useParams()
@@ -214,6 +216,21 @@ export default function WorkerDetail() {
   const [payView, setPayView] = useState<WalletWithdrawal | null>(null)
   const [docBusy, setDocBusy] = useState<number | null>(null)
   const [skillBusy, setSkillBusy] = useState<string | null>(null)
+  // Documents tab: list filters, pagination, and the upload dialog.
+  const [docType, setDocType] = useState('all')
+  const [docStatus, setDocStatus] = useState('all')
+  const [docTime, setDocTime] = useState('all')
+  const [docQuery, setDocQuery] = useState('')
+  const [docPage, setDocPage] = useState(1)
+  const [upOpen, setUpOpen] = useState(false)
+  const [upBusy, setUpBusy] = useState(false)
+  const [upForm, setUpForm] = useState<{ name: string; documentNumber: string; issueDate: string; expiryDate: string; file: File | null }>({ name: '', documentNumber: '', issueDate: '', expiryDate: '', file: null })
+  // Skills & Services tab: service toggles, the add-certification dialog, and all-certs view.
+  const [svcBusy, setSvcBusy] = useState<string | null>(null)
+  const [certOpen, setCertOpen] = useState(false)
+  const [certBusy, setCertBusy] = useState(false)
+  const [certForm, setCertForm] = useState({ name: '', issuer: '', issuedOn: '', status: 'Verified' })
+  const [certAll, setCertAll] = useState(false)
   // Advanced filters, behind the "Filters" toggle.
   const [showFilters, setShowFilters] = useState(false)
   const [earnMin, setEarnMin] = useState('')
@@ -257,6 +274,57 @@ export default function WorkerDetail() {
     setDocBusy(docId)
     try { const r = await workerDocUrl(w.id, docId); window.open(r.url, '_blank', 'noopener,noreferrer') }
     catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
+  }
+  // Download uses the same short-lived signed URL, but as an anchor download rather than a new tab.
+  const downloadDoc = async (docId: number, name: string) => {
+    setDocBusy(docId)
+    try {
+      const r = await workerDocUrl(w.id, docId)
+      const a = document.createElement('a')
+      a.href = r.url; a.download = name || `document-${docId}`; a.rel = 'noopener'
+      document.body.appendChild(a); a.click(); a.remove()
+    } catch (e) { toast((e as Error).message) } finally { setDocBusy(null) }
+  }
+  const submitUpload = async () => {
+    if (!w) return
+    if (!upForm.name) return toast('Choose a document type')
+    if (!upForm.file) return toast('Attach a file')
+    const fd = new FormData()
+    fd.append('name', upForm.name)
+    fd.append('file', upForm.file)
+    if (upForm.documentNumber.trim()) fd.append('documentNumber', upForm.documentNumber.trim())
+    if (upForm.issueDate) fd.append('issueDate', upForm.issueDate)
+    if (upForm.expiryDate) fd.append('expiryDate', upForm.expiryDate)
+    setUpBusy(true)
+    try {
+      await uploadWorkerDoc(w.id, fd)
+      toast('Document uploaded')
+      setUpOpen(false); setUpForm({ name: '', documentNumber: '', issueDate: '', expiryDate: '', file: null })
+      load()
+    } catch (e) { toast((e as Error).message) } finally { setUpBusy(false) }
+  }
+  const toggleSvc = async (name: string, active: boolean) => {
+    if (!w) return
+    setSvcBusy(name)
+    try { await toggleWorkerService(w.id, name, active); load() }
+    catch (e) { toast((e as Error).message) } finally { setSvcBusy(null) }
+  }
+  const submitCert = async () => {
+    if (!w) return
+    if (!certForm.name.trim()) return toast('Certification name is required')
+    setCertBusy(true)
+    try {
+      await addWorkerCertification(w.id, { name: certForm.name.trim(), issuer: certForm.issuer.trim(), issuedOn: certForm.issuedOn || null, status: certForm.status })
+      toast('Certification added')
+      setCertOpen(false); setCertForm({ name: '', issuer: '', issuedOn: '', status: 'Verified' })
+      load()
+    } catch (e) { toast((e as Error).message) } finally { setCertBusy(false) }
+  }
+  const delCert = async (cid: number, name: string) => {
+    if (!w) return
+    if (!window.confirm(`Remove the certification "${name}"?`)) return
+    try { await deleteWorkerCertification(w.id, cid); toast('Certification removed'); load() }
+    catch (e) { toast((e as Error).message) }
   }
   /* Approving a skill is what makes the worker dispatchable for it — the claim alone never does.
      `level` lets the admin approve at a different level than claimed; that's the point of a review. */
@@ -572,6 +640,163 @@ export default function WorkerDetail() {
       ))}
     </Panel>
   )
+
+  /* ===== Documents tab — the full KYC console. Every figure below is derived from the real
+     document rows: statuses drive the count cards, and expiry_date (admin-entered) drives the
+     expiring/expired cards and the alerts panel. A document with no expiry_date simply never
+     alerts — nothing here is invented. ===== */
+  const docs = w.documents || []
+  const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0)
+  const daysUntil = (iso: string) => Math.round((new Date(iso + 'T00:00:00').getTime() - todayMid.getTime()) / 86400000)
+  const expiryState = (d: import('../types').WorkerDoc): '' | 'Expiring' | 'Expired' => {
+    if (!d.expiryDate) return ''
+    const n = daysUntil(d.expiryDate)
+    return n < 0 ? 'Expired' : n <= 30 ? 'Expiring' : ''
+  }
+  const docStat = {
+    total: docs.length,
+    verified: docs.filter((d) => d.status === 'Verified').length,
+    pending: docs.filter((d) => !d.status || d.status === 'Pending').length,
+    rejected: docs.filter((d) => d.status === 'Rejected').length,
+    expiring: docs.filter((d) => expiryState(d) === 'Expiring').length,
+    expired: docs.filter((d) => expiryState(d) === 'Expired').length,
+  }
+  // Alerts: everything already expired or expiring within 30 days, soonest first.
+  const docAlerts = docs.filter((d) => expiryState(d)).sort((a, b) => daysUntil(a.expiryDate!) - daysUntil(b.expiryDate!))
+  const docTypeOpts = [...new Set(docs.map((d) => d.name))].sort()
+  const uploadTypeOpts = (w.documentTypes?.length ? w.documentTypes.map((t) => t.name) : docTypeOpts)
+  const dq = docQuery.trim().toLowerCase()
+  // Time filter runs on the issue date (else the uploaded date), so "Last 30 days" means issued/added recently.
+  const docRefDate = (d: import('../types').WorkerDoc) => d.issueDate || (d.created ? String(d.created).slice(0, 10) : '')
+  const withinTime = (d: import('../types').WorkerDoc) => { if (docTime === 'all') return true; const rd = docRefDate(d); return !!rd && daysUntil(rd) >= -Number(docTime) }
+  const docRows = docs.filter((d) =>
+    (docType === 'all' || d.name === docType)
+    && (docStatus === 'all'
+      || (docStatus === 'Expiring' || docStatus === 'Expired' ? expiryState(d) === docStatus : (d.status || 'Pending') === docStatus))
+    && withinTime(d)
+    && (!dq || `${d.name} ${d.documentNumber || ''}`.toLowerCase().includes(dq)))
+  const DOC_PAGE_SIZE = 20
+  const docPages = Math.max(1, Math.ceil(docRows.length / DOC_PAGE_SIZE))
+  const curDocPage = Math.min(docPage, docPages)
+  const docPageRows = docRows.slice((curDocPage - 1) * DOC_PAGE_SIZE, curDocPage * DOC_PAGE_SIZE)
+  const dtd: CSSProperties = { padding: '11px 14px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 13 }
+  // Status shows the expiry state when there is one (a verified-but-expiring doc reads "Expiring Soon"),
+  // otherwise the verification status — same precedence the reference screen uses.
+  const statusBadge = (d: import('../types').WorkerDoc) => {
+    const st = expiryState(d)
+    if (st === 'Expired') return <Badge tone="red" dot={false}>Expired</Badge>
+    if (st === 'Expiring') return <Badge tone="amber" dot={false}>Expiring Soon</Badge>
+    return <Badge tone={d.status === 'Verified' ? 'green' : d.status === 'Rejected' ? 'red' : 'amber'} dot={false}>{d.status || 'Pending'}</Badge>
+  }
+  // One stat cell in the bordered strip (label over a big number), divider on all but the first.
+  const StatCell = ({ label, value, tone, first }: { label: string; value: number; tone?: string; first?: boolean }) => (
+    <div style={{ padding: '12px 16px', minWidth: 0, borderLeft: first ? 'none' : '1px solid var(--line,#eef0f4)' }}>
+      <div style={{ fontSize: 11.5, color: 'var(--muted,#667085)', marginBottom: 6, lineHeight: 1.25 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: value ? (tone || 'var(--ink,#101828)') : 'var(--muted,#98a2b3)' }}>{value}</div>
+    </div>
+  )
+  const actionBtn = (title: string, tone: string, icon: ReactNode, onClick: () => void, enabled: boolean) => (
+    <button className="iconbtn" title={enabled ? title : 'No file uploaded'} style={{ width: 30, height: 30, color: enabled ? tone : '#b6bcc6', cursor: enabled ? 'pointer' : 'not-allowed' }} disabled={!enabled} onClick={onClick}>{icon}</button>
+  )
+  const documentsTab = (
+    <Card>
+      {/* Header — title + the Upload Document action, matching the reference layout. */}
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
+        <div>
+          <strong style={{ fontSize: 16 }}>Worker Documents</strong>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>All documents uploaded by the worker and verified by admin.</div>
+        </div>
+        <button className="btn line" style={{ whiteSpace: 'nowrap' }} onClick={() => setUpOpen(true)}><UploadCloud size={15} /> Upload Document</button>
+      </div>
+
+      {/* Stat strip (left) + expiry alerts (right), side by side. */}
+      <div style={{ display: 'grid', gridTemplateColumns: docAlerts.length ? 'minmax(0, 1.8fr) minmax(260px, 1fr)' : '1fr', gap: 16, marginBottom: 16 }}>
+        <div style={{ border: '1px solid var(--line,#eef0f4)', borderRadius: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))' }}>
+          <StatCell first label="Total Documents" value={docStat.total} />
+          <StatCell label="Verified" value={docStat.verified} tone="#16a34a" />
+          <StatCell label="Pending Verification" value={docStat.pending} tone="#d97706" />
+          <StatCell label="Rejected" value={docStat.rejected} tone="#dc2626" />
+          <StatCell label="Expiring in 30 Days" value={docStat.expiring} tone="#d97706" />
+          <StatCell label="Expired" value={docStat.expired} tone="#dc2626" />
+        </div>
+        {docAlerts.length > 0 && (
+          <div style={{ border: '1px solid var(--line,#eef0f4)', borderRadius: 12, padding: '12px 16px' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>Document Expiry Alerts</div>
+            {docAlerts.slice(0, 4).map((d) => {
+              const n = daysUntil(d.expiryDate!)
+              return (
+                <div key={d.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '5px 0' }}>
+                  <span className="row" style={{ gap: 7, alignItems: 'center', minWidth: 0 }}>
+                    <FileText size={13} style={{ color: 'var(--muted,#98a2b3)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                  </span>
+                  <span className="row" style={{ gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                    <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>Expires {shortDate(d.expiryDate!)}</span>
+                    <Badge tone={n < 0 ? 'red' : 'amber'} dot={false}>{n < 0 ? 'Expired' : `${n} day${n === 1 ? '' : 's'} left`}</Badge>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Filters — type / status / time on the left, search on the right. */}
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <Dropdown value={docType} onChange={(v) => { setDocType(v); setDocPage(1) }} width={180}
+          options={[{ value: 'all', label: 'All Document Types' }, ...docTypeOpts.map((t) => ({ value: t, label: t }))]} />
+        <Dropdown value={docStatus} onChange={(v) => { setDocStatus(v); setDocPage(1) }} width={160}
+          options={[{ value: 'all', label: 'All Status' }, { value: 'Verified', label: 'Verified' }, { value: 'Pending', label: 'Pending' }, { value: 'Rejected', label: 'Rejected' }, { value: 'Expiring', label: 'Expiring Soon' }, { value: 'Expired', label: 'Expired' }]} />
+        <Dropdown value={docTime} onChange={(v) => { setDocTime(v); setDocPage(1) }} width={150}
+          options={[{ value: 'all', label: 'All Time' }, { value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }, { value: '365', label: 'Last year' }]} />
+        <div style={{ marginLeft: 'auto' }}><SearchBox value={docQuery} onChange={(v) => { setDocQuery(v); setDocPage(1) }} placeholder="Search documents…" /></div>
+      </div>
+
+      {docs.length === 0 ? (
+        <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No documents uploaded yet. Use “Upload Document” to add one.</div>
+      ) : docRows.length === 0 ? (
+        <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>No documents match these filters.</div>
+      ) : (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 940 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                  {['Document Type', 'Document Number', 'Issue Date', 'Expiry Date', 'Status', 'Verified By', 'Verified On', 'Actions'].map((h) => (
+                    <th key={h} style={{ padding: '9px 14px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {docPageRows.map((d) => (
+                  <tr key={d.id}>
+                    <td style={{ ...dtd, fontWeight: 600 }}>
+                      <span className="row" style={{ gap: 8, alignItems: 'center' }}><FileText size={14} style={{ color: 'var(--violet,#5b51e8)', flexShrink: 0 }} />{d.name}</span>
+                    </td>
+                    <td style={dtd}>{d.documentNumber || <span className="muted">—</span>}</td>
+                    <td style={dtd}>{d.issueDate ? shortDate(d.issueDate) : <span className="muted">—</span>}</td>
+                    <td style={dtd}>{d.expiryDate ? shortDate(d.expiryDate) : <span className="muted">—</span>}</td>
+                    <td style={dtd}>{statusBadge(d)}</td>
+                    <td style={dtd}>{d.reviewedBy || <span className="muted">—</span>}</td>
+                    <td style={dtd}>{d.reviewedAt ? shortDate(String(d.reviewedAt).slice(0, 10)) : <span className="muted">—</span>}</td>
+                    <td style={{ ...dtd, whiteSpace: 'nowrap' }}>
+                      <span className="row" style={{ gap: 2 }}>
+                        {actionBtn('View document', '#5b51e8', <Eye size={15} />, () => openDoc(d.id), !!d.hasFile && docBusy !== d.id)}
+                        {d.status === 'Verified' && actionBtn('Download document', '#5b51e8', <Download size={15} />, () => downloadDoc(d.id, d.name), !!d.hasFile && docBusy !== d.id)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Pagination page={curDocPage} pageSize={DOC_PAGE_SIZE} total={docRows.length} noun="documents" onPage={setDocPage} />
+          </div>
+        </>
+      )}
+    </Card>
+  )
   /* Skills the worker CLAIMED (profile.skills) vs services they're actually approved for
      (w.services — what dispatch matches on). Approving is what promotes one into the other, so the
      panel is built from the claims, not from the live set. Legacy skillLevels rows have no claim. */
@@ -626,6 +851,132 @@ export default function WorkerDetail() {
       }) : <span className="muted" style={{ fontSize: 13 }}>None assigned.</span>}
     </Panel>
   )
+
+  /* ===== Skills & Services tab — the full console. Skills + services come from the worker's profile
+     and live dispatch set; job counts are real completed-booking counts; certifications, equipment
+     and the level-change history are their own rows. Nothing here is invented. ===== */
+  const ss = w.skillsServices
+  const LEVEL_HEX: Record<string, string> = { Expert: '#16a34a', Advanced: '#3b82f6', Intermediate: '#f59e0b', Basic: '#94a3b8' }
+  const levelBadge = (l: string) => <Badge tone={l === 'Expert' ? 'green' : l === 'Advanced' ? 'blue' : l === 'Intermediate' ? 'amber' : 'gray'} dot={false}>{l}</Badge>
+  const sstd: CSSProperties = { padding: '10px 12px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 13 }
+  const skillsServicesTab = !ss ? <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>Skills data unavailable.</div> : (() => {
+    const donutSegs = [
+      { level: 'Expert', count: ss.summary.expert }, { level: 'Advanced', count: ss.summary.advanced },
+      { level: 'Intermediate', count: ss.summary.intermediate }, { level: 'Basic', count: ss.summary.basic },
+    ].filter((s) => s.count > 0)
+    const certs = certAll ? ss.certifications : ss.certifications.slice(0, 5)
+    // Equal-height panels per row (stretch) so the cards align top and bottom.
+    const row3: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)', gap: 10, alignItems: 'stretch' }
+    // Row 2 gives the wide history table more room and keeps the compact Skill Summary narrow.
+    const row3b: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.8fr) minmax(0,0.7fr)', gap: 10, alignItems: 'stretch' }
+    const hth: CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line,#eef0f4)', whiteSpace: 'nowrap', fontWeight: 600 }
+    const htd: CSSProperties = { padding: '8px 10px', borderBottom: '1px solid var(--line-2,#f4f4fa)', fontSize: 12.5, verticalAlign: 'top', whiteSpace: 'nowrap' }
+    const workerSkillsPanel = (
+      <Panel title={`Worker Skills (${ss.summary.totalSkills})`} action={<span className="muted" style={{ fontSize: 11 }}>verified by admin</span>}>
+        <div className="row" style={{ gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <DonutChart segments={donutSegs} total={ss.summary.totalSkills} colorFor={(i) => LEVEL_HEX[donutSegs[i].level]} centerValue={String(ss.summary.totalSkills)} centerLabel="Total Skills" />
+          <div style={{ minWidth: 120, flex: 1 }}>
+            {ss.skills.length ? ss.skills.map((s) => (
+              <div key={s.name} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                <span className="row" style={{ gap: 7, alignItems: 'center', minWidth: 0 }}><span style={{ width: 8, height: 8, borderRadius: 8, background: LEVEL_HEX[s.level] || '#94a3b8', flexShrink: 0 }} /><span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span></span>
+                {levelBadge(s.level)}
+              </div>
+            )) : <div className="muted" style={{ fontSize: 12.5 }}>No skills recorded yet.</div>}
+          </div>
+        </div>
+      </Panel>
+    )
+    const toolsPanel = (
+      <Panel title="Tools & Equipment">
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase' }}><th style={hth}>Item</th><th style={hth}>Status</th></tr></thead>
+          <tbody>{ss.equipment.map((e) => (
+            <tr key={e.name}><td style={sstd}><span className="row" style={{ gap: 7, alignItems: 'center' }}><Wrench size={13} style={{ color: 'var(--muted,#98a2b3)' }} />{e.name}</span></td><td style={sstd}><Badge tone={e.status === 'Issued' ? 'green' : 'gray'} dot={false}>{e.status}</Badge></td></tr>
+          ))}</tbody>
+        </table>
+      </Panel>
+    )
+    const servicesPanel = (
+      <Panel title="Services Offered">
+        {ss.services.length ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                {['Service', 'Category', 'Level', 'Jobs', 'Status', 'Action'].map((h) => <th key={h} style={hth}>{h}</th>)}
+              </tr></thead>
+              <tbody>{ss.services.map((s) => (
+                <tr key={s.name}>
+                  <td style={{ ...htd, fontWeight: 600 }}>{s.name}</td>
+                  <td style={htd}>{s.category}</td>
+                  <td style={htd}>{levelBadge(s.level)}</td>
+                  <td style={htd}>{s.jobsCompleted}</td>
+                  <td style={htd}><Badge tone={s.active ? 'green' : 'red'} dot={false}>{s.active ? 'Active' : 'Inactive'}</Badge></td>
+                  <td style={htd}><button className={'switch' + (s.active ? ' on' : '')} disabled={svcBusy === s.name} onClick={() => toggleSvc(s.name, !s.active)} title={s.active ? 'Pause service' : 'Activate service'} /></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        ) : <div className="muted" style={{ fontSize: 12.5 }}>No approved services yet.</div>}
+      </Panel>
+    )
+    const historyPanel = (
+      <Panel title="Skill Verification History">
+        {ss.skillHistory.length ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, tableLayout: 'fixed' }}>
+            <thead><tr style={{ textAlign: 'left', color: 'var(--muted,#667085)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+              <th style={{ ...hth, width: '16%' }}>Skill</th><th style={{ ...hth, width: '25%' }}>Level Change</th><th style={{ ...hth, width: '18%' }}>Verified By</th><th style={{ ...hth, width: '17%' }}>On</th><th style={{ ...hth, width: '24%', whiteSpace: 'normal' }}>Remarks</th>
+            </tr></thead>
+            <tbody>{ss.skillHistory.map((h, i) => (
+              <tr key={i}>
+                <td style={{ ...htd, fontWeight: 600, whiteSpace: 'normal' }}>{h.skill}</td>
+                <td style={htd}><span className="muted">{h.oldLevel || '—'}</span> → {levelBadge(h.newLevel)}</td>
+                <td style={{ ...htd, whiteSpace: 'normal' }}>{h.verifiedBy || '—'}</td>
+                <td style={{ ...htd, overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.verifiedAt ? shortDate(String(h.verifiedAt).slice(0, 10)) : '—'}</td>
+                <td style={{ ...htd, whiteSpace: 'normal' }}>{h.remarks || '—'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        ) : <div className="muted" style={{ fontSize: 12.5 }}>No skill-level changes recorded yet.</div>}
+      </Panel>
+    )
+    const certPanel = (
+      <Panel title="Certifications" action={<button className="btn line" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setCertOpen(true)}><Plus size={13} /> Add</button>}>
+        {ss.certifications.length ? (<>
+          {certs.map((c) => (
+            <div key={c.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--line-2,#f4f4fa)' }}>
+              <span className="row" style={{ gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
+                <Award size={15} style={{ color: '#5b51e8', flexShrink: 0, marginTop: 1 }} />
+                <span style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.name}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{c.issuer ? `${c.issuer} · ` : ''}{c.issuedOn ? `Issued ${shortDate(c.issuedOn)}` : '—'}</div>
+                </span>
+              </span>
+              <span className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                <Badge tone={c.status === 'Verified' ? 'green' : c.status === 'Expired' ? 'red' : 'amber'} dot={false}>{c.status}</Badge>
+                <button className="iconbtn" title="Remove" style={{ width: 26, height: 26, color: '#dc2626' }} onClick={() => delCert(c.id, c.name)}><Trash2 size={13} /></button>
+              </span>
+            </div>
+          ))}
+          {ss.certifications.length > 5 && <button className="btn line" style={{ width: '100%', marginTop: 10, justifyContent: 'center', fontSize: 12.5 }} onClick={() => setCertAll(!certAll)}>{certAll ? 'Show less' : `View All Certifications (${ss.certifications.length})`}</button>}
+        </>) : <div className="muted" style={{ fontSize: 12.5 }}>No certifications on file.</div>}
+      </Panel>
+    )
+    const summaryPanel = (
+      <Panel title="Skill Summary">
+        {([['Total Skills', ss.summary.totalSkills], ['Expert Level', ss.summary.expert], ['Advanced Level', ss.summary.advanced], ['Intermediate Level', ss.summary.intermediate], ['Basic Level', ss.summary.basic], ['Inactive Services', ss.summary.inactiveServices]] as [string, number][]).map(([l, v], i, arr) => (
+          <div key={l} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line-2,#f4f4fa)' : 'none' }}>
+            <span style={{ fontSize: 13, color: 'var(--muted,#667085)' }}>{l}</span><strong style={{ fontSize: 15 }}>{v}</strong>
+          </div>
+        ))}
+      </Panel>
+    )
+    return (
+      <div className="tab-dense grid" style={{ gap: 10 }}>
+        <div style={row3}>{workerSkillsPanel}{servicesPanel}{certPanel}</div>
+        <div style={row3b}>{toolsPanel}{historyPanel}{summaryPanel}</div>
+      </div>
+    )
+  })()
   const recentJobsPanel = (
     <Panel title={`Recent Jobs (${w.recentJobs?.length ?? 0})`} action={<button className="btn ghost" onClick={() => nav('/bookings')}>View All</button>}>
       {(w.recentJobs && w.recentJobs.length > 0) ? w.recentJobs.map((j) => (
@@ -894,12 +1245,16 @@ export default function WorkerDetail() {
         </div>
       )}
 
-      {(show('docs') || show('skills')) && (
+      {/* Overview shows the compact document + skills panels side by side; the dedicated Documents
+          tab gets the full KYC console, and Skills its own panel. */}
+      {tab === 'overview' && (
         <div style={grid3}>
-          {(show('docs')) && documentsPanel}
-          {(show('skills')) && skillsPanel}
+          {documentsPanel}
+          {skillsPanel}
         </div>
       )}
+      {tab === 'docs' && documentsTab}
+      {tab === 'skills' && skillsServicesTab}
 
       {/* Phase 12. Reloads the worker on success so the header's status pill follows the go-live. */}
       {tab === 'onboarding' && <WorkerOnboarding w={w} onTab={setTab} onChanged={load} />}
@@ -1437,8 +1792,8 @@ export default function WorkerDetail() {
         </>
       )}
 
-      {tab === 'avail' && <WorkerAvailability workerId={Number(id)} />}
-      {(show('avail')) && <div style={grid3}>{availabilityPanel}
+      {tab === 'avail' && <WorkerAvailabilityTab workerId={Number(id)} />}
+      {tab === 'overview' && <div style={grid3}>{availabilityPanel}
         <Panel title="Attendance & Shift">
           <Info label="On Shift" value={<Badge tone={w.on_shift ? 'green' : 'gray'} dot={false}>{w.on_shift ? 'On shift' : 'Off'}</Badge>} />
           <Info label="Shift Assigned" value={w.shift_def_id ? `Shift #${w.shift_def_id}` : '—'} />
@@ -1447,6 +1802,78 @@ export default function WorkerDetail() {
       </div>}
 
       {(show('notes')) && <div style={grid3}>{notesPanel}{activityPanel}</div>}
+      {tab === 'logs' && <WorkerLogs workerId={Number(id)} />}
+
+      {upOpen && (
+        <Modal
+          title="Upload Document"
+          onClose={() => setUpOpen(false)}
+          footer={<>
+            <button className="btn line" onClick={() => setUpOpen(false)}>Cancel</button>
+            <button className="btn" disabled={upBusy} onClick={submitUpload}>{upBusy ? 'Uploading…' : 'Upload'}</button>
+          </>}
+        >
+          <div className="grid" style={{ gap: 12 }}>
+            <label style={{ display: 'grid', gap: 5 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Document Type</span>
+              <Dropdown value={upForm.name} width="100%" placeholder="Choose a type"
+                options={uploadTypeOpts.map((t) => ({ value: t, label: t }))}
+                onChange={(v) => setUpForm({ ...upForm, name: v })} />
+            </label>
+            <label style={{ display: 'grid', gap: 5 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>File <span className="muted">(JPG, PNG, WebP or PDF)</span></span>
+              <input type="file" accept="image/*,application/pdf" onChange={(e) => setUpForm({ ...upForm, file: e.target.files?.[0] || null })} />
+            </label>
+            <label style={{ display: 'grid', gap: 5 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Document Number <span className="muted">(optional)</span></span>
+              <input value={upForm.documentNumber} onChange={(e) => setUpForm({ ...upForm, documentNumber: e.target.value })} placeholder="As printed on the document" />
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Issue Date <span className="muted">(optional)</span></span>
+                <input type="date" value={upForm.issueDate} onChange={(e) => setUpForm({ ...upForm, issueDate: e.target.value })} />
+              </label>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Expiry Date <span className="muted">(optional)</span></span>
+                <input type="date" value={upForm.expiryDate} onChange={(e) => setUpForm({ ...upForm, expiryDate: e.target.value })} />
+              </label>
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>Uploading records the document as Verified by you. Expiry alerts use the expiry date.</div>
+          </div>
+        </Modal>
+      )}
+
+      {certOpen && (
+        <Modal
+          title="Add Certification"
+          onClose={() => setCertOpen(false)}
+          footer={<>
+            <button className="btn line" onClick={() => setCertOpen(false)}>Cancel</button>
+            <button className="btn" disabled={certBusy} onClick={submitCert}>{certBusy ? 'Saving…' : 'Add'}</button>
+          </>}
+        >
+          <div className="grid" style={{ gap: 12 }}>
+            <label style={{ display: 'grid', gap: 5 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Certification Name</span>
+              <input value={certForm.name} onChange={(e) => setCertForm({ ...certForm, name: e.target.value })} placeholder="e.g. Deep Cleaning Certified" autoFocus />
+            </label>
+            <label style={{ display: 'grid', gap: 5 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Issued By <span className="muted">(optional)</span></span>
+              <input value={certForm.issuer} onChange={(e) => setCertForm({ ...certForm, issuer: e.target.value })} placeholder="Issuing body" />
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Issued On</span>
+                <input type="date" value={certForm.issuedOn} onChange={(e) => setCertForm({ ...certForm, issuedOn: e.target.value })} />
+              </label>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--muted,#667085)' }}>Status</span>
+                <Dropdown value={certForm.status} width="100%" options={[{ value: 'Verified', label: 'Verified' }, { value: 'Pending', label: 'Pending' }, { value: 'Expired', label: 'Expired' }]} onChange={(v) => setCertForm({ ...certForm, status: v })} />
+              </label>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

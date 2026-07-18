@@ -30,7 +30,7 @@ export default function ServiceDetails() {
       </div>
       <div className="content">
         <h1 className="sd-name">{s.name}</h1>
-        <div className="sd-rate"><Star size={15} className="sd-star" /> <b>{s.rating}</b> <span>({s.reviewsCount.toLocaleString()} ratings)</span></div>
+        <div className="sd-rate"><Star size={15} className="sd-star" /> <b>{s.rating}</b> <span>({(s.reviewsCount ?? 0).toLocaleString()} ratings)</span></div>
         {s.description && <p className="sd-desc">{s.description}</p>}
 
         <ul className="sd-bullets">

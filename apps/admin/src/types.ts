@@ -76,6 +76,8 @@ export interface WorkerDoc {
   // hasFile is false for rows predating the storage pipeline — they have no object to preview.
   hasFile?: boolean; mime?: string; sizeBytes?: number
   reviewedBy?: string; reviewedAt?: string | null; rejectReason?: string
+  // Admin-captured KYC particulars — null/empty until an admin fills them in.
+  documentNumber?: string; issueDate?: string | null; expiryDate?: string | null
 }
 export interface WorkerJob { id: number; ref: string; service: string; status: string; total: number; date?: string; time?: string }
 export interface WorkerMetrics {
@@ -146,7 +148,42 @@ export interface WorkerDetail extends Worker {
   documents?: WorkerDoc[]; documentTypes?: WorkerDocType[]; recentJobs?: WorkerJob[]; notes?: WorkerNote[]
   metrics?: WorkerMetrics; liveJob?: WorkerLiveJob | null; wallet?: WorkerWalletSummary | null
   activity?: ActivityItem[]; earningsTrend?: TrendPoint[]; timeline?: TimelineStep[]; device?: WorkerDevice; health?: WorkerHealth
-  jobsPerformance?: JobsPerformance
+  jobsPerformance?: JobsPerformance; skillsServices?: SkillsServices
+}
+
+/* Surge pricing — live per-zone surge (weather-driven or a manual ops override). */
+export interface SurgeZone { zoneId: number; zone: string; city: string; active: boolean; pct: number; reason: string; prob: number | null; precipMm: number | null; at: number | null }
+
+/* Logs tab — the worker's audit stream from the activity service, categorised + summarised. */
+export interface WorkerLog { id: number; date: string; logType: string; action: string; description: string; source: string; performedBy: string; actorType: string; ref: string }
+export interface WorkerLogsData {
+  items: WorkerLog[]
+  summary: { total: number; categories: { label: string; count: number }[] }
+  device: { network: string | null; battery: number | null; lastSeen: string | null; online: boolean }
+}
+
+/* Availability tab — derived from real attendance, the assigned shift, leaves and the change log. */
+export interface AvailabilityOverview {
+  month: string
+  today: { status: string; shiftEnd: string; shift: { start: string; end: string; hours: number; name: string }; nextShift: { date: string; start: string; end: string } | null }
+  weeklyOff: string[]
+  overtimeWeek: string; lateArrivalsWeek: number
+  weekSummary: { rangeLabel: string; scheduledHours: string; completedHours: string; overtime: string; lateArrivals: number; leaveDays: number; weeklyOff: number }
+  calendar: { date: string; status: string; start: string; end: string; hours: number }[]
+  upcomingLeaves: { id: number; from: string; to: string; reason: string; status: string; type: string }[]
+  recentChanges: { at: string; type: string; from: string; to: string; reason: string; updatedBy: string; status: string }[]
+  insights: { tone: string; text: string }[]
+}
+
+/* Skills & Services tab. Everything here is real: skills/services from the worker's profile + live
+   dispatch set, job counts from bookings, certifications/equipment/history from their own tables. */
+export interface SkillsServices {
+  skills: { name: string; level: string; status: string }[]
+  services: { name: string; category: string; level: string; jobsCompleted: number; active: boolean }[]
+  certifications: { id: number; name: string; issuer: string; issuedOn: string | null; status: string }[]
+  equipment: { name: string; status: string }[]
+  skillHistory: { skill: string; oldLevel: string; newLevel: string; verifiedBy: string; verifiedAt: string; remarks: string }[]
+  summary: { totalSkills: number; expert: number; advanced: number; intermediate: number; basic: number; inactiveServices: number }
 }
 
 /* Training & assessment (Phase 7). Content is admin-authored: a module starts as an empty
@@ -363,6 +400,19 @@ export interface CommandCenter {
   dailySummary: { orders: number; completed: number; cancelled: number; active: number; revenue: number; newWorkers: number }
   generatedAt: string
 }
+
+/* Control Tower — per-job Executive console. */
+export interface CTJob {
+  id: number; ref: string; status: string; service: string
+  customer: string; customerPhone: string
+  worker: string; workerPhone: string; workerId: number | null
+  zoneId: number | null; zone: string
+  date: string; time: string; total: number
+  ageMin: number; sla: 'onTime' | 'atRisk' | 'breached'
+  escalated: boolean; escalateReason: string; adminNote: string
+}
+export interface CTPro { id: number; name: string; zoneId: number | null; available: boolean }
+export interface ControlTowerData { jobs: CTJob[]; pros: CTPro[]; generatedAt: string }
 export interface ActionResult { ok: boolean; executed?: boolean; pending?: boolean; request?: ApprovalRequest; result?: unknown }
 export interface IncentiveRule {
   id: number; code: string; name: string; description: string; category: string

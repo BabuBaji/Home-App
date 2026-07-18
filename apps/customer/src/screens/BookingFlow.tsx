@@ -63,8 +63,11 @@ export default function BookingFlow() {
 
   const dateStr = fmtDate(date)
   useEffect(() => {
-    if (!pincode || !s) return
-    fetchSlots(dateStr, pincode, s.name).then((r) => setSlotData(r.slots)).catch(() => setSlotData([]))
+    // Wait only for the service to load — the pincode is optional. Without one the backend returns
+    // the default slot grid, so we must NOT gate on pincode or slotData stays null forever ("Loading
+    // slots…"). Any failure resolves to an empty list rather than an infinite spinner.
+    if (!s) return
+    fetchSlots(dateStr, pincode || '', s.name).then((r) => setSlotData(r.slots)).catch(() => setSlotData([]))
   }, [dateStr, pincode, s])
 
   // Real workers offering this service (from the worker service), nearest first.
@@ -205,9 +208,17 @@ export default function BookingFlow() {
           <div className="bf-sumrow"><span>Worker</span><b>{worker === 'any' ? 'Any available' : (workers.find((w) => String(w.id) === worker)?.name || 'Any available')}</b></div>
           <div className="bf-sumrow"><span>Address</span><b className="bf-addr">{addr?.line || 'Set address'}</b></div>
           <div className="bf-div" />
+          {(quote?.surgeAmount || 0) > 0 && (
+            <div className="note-box" style={{ background: '#eef4ff', borderColor: '#bcd0ff', color: '#1d4ed8', marginBottom: 10 }}>
+              {quote?.surgeReason === 'rain'
+                ? `🌧️ Rain incoming — demand is high, so prices are up ${quote?.surgePct}% right now.`
+                : `⚡ High demand right now — prices are up ${quote?.surgePct}%.`}
+            </div>
+          )}
           <div className="bf-lbl">Price Details</div>
           <div className="bf-sumrow sm"><span>Service Charges</span><b>₹{quote?.subtotal ?? dur.price}</b></div>
           {(quote?.discount || 0) > 0 && <div className="bf-sumrow sm disc"><span>Coupon ({coupon})</span><b>−₹{quote!.discount}</b></div>}
+          {(quote?.surgeAmount || 0) > 0 && <div className="bf-sumrow sm"><span>{quote?.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'}{quote?.surgePct ? ` (+${quote.surgePct}%)` : ''}</span><b>+₹{quote!.surgeAmount}</b></div>}
           {(quote?.fee || 0) > 0 && <div className="bf-sumrow sm"><span>Platform Fee</span><b>₹{quote!.fee}</b></div>}
           {(quote?.tax || 0) > 0 && <div className="bf-sumrow sm"><span>GST{quote!.gstPct ? ` (${quote!.gstPct}%)` : ''}</span><b>₹{quote!.tax}</b></div>}
           <div className="bf-div" />
