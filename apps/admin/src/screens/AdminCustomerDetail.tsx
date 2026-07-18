@@ -1388,7 +1388,7 @@ function OffersTab({ bookings, offers, c, nav, toast }: any) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2.2fr) minmax(260px, 1fr)', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 16, alignItems: 'start' }}>
         {/* Available coupons */}
         <Card title="Available Coupons">
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr)', gap: 10, marginBottom: 12 }}>
