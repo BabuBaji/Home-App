@@ -198,9 +198,10 @@ export default function AdminCustomerDetail() {
 
       {/* header + KPI */}
       <div className="card" style={{ padding: 20 }}>
-        <div className="row" style={{ gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <Avatar name={c.name || 'Customer'} size={72} />
-          <div style={{ flex: 1, minWidth: 240 }}>
+        <div className="row" style={{ gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="row" style={{ gap: 16, alignItems: 'flex-start', flex: '1 1 300px', minWidth: 260 }}>
+            <Avatar name={c.name || 'Customer'} size={72} />
+            <div style={{ minWidth: 0 }}>
             <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'nowrap' }}>
               <h2 style={{ margin: 0, fontSize: 22, whiteSpace: 'nowrap' }}>{c.name || 'Profile Incomplete'}</h2>
               <Badge tone={blocked ? 'red' : 'green'}>{blocked ? (c.status || 'Inactive') : 'Active'}</Badge>
@@ -220,14 +221,15 @@ export default function AdminCustomerDetail() {
               <span>Customer ID: <strong style={{ color: '#344054' }}>{c.displayId}</strong></span>
               <span>Joined on: <strong style={{ color: '#344054' }}>{dateTime(c.created)}</strong></span>
             </div>
+            </div>
           </div>
-        </div>
 
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 18 }}>
-          {kpi(<Calendar size={16} />, '#5b51e8', 'Total Bookings', m.bookings.length, <span className="muted" style={{ fontSize: 12 }}>All Time</span>)}
-          {kpi(<CreditCard size={16} />, '#16a34a', 'Total Spent', money(m.spend), <span className="muted" style={{ fontSize: 12 }}>All Time</span>)}
-          {kpi(<WalletIcon size={16} />, '#2e90fa', 'Wallet Balance', money(c.wallet || 0), <button className="linkbtn" style={LINK} onClick={() => setMoneyOpen(true)}>+ Add Money</button>)}
-          {kpi(<Briefcase size={16} />, '#f59e0b', 'Active Bookings', m.active.length, <button className="linkbtn" style={LINK} onClick={() => setTab('bookings')}>View Details</button>)}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))', gap: 12, flex: '2 1 540px' }}>
+            {kpi(<Calendar size={16} />, '#5b51e8', 'Total Bookings', m.bookings.length, <span className="muted" style={{ fontSize: 12 }}>All Time</span>)}
+            {kpi(<CreditCard size={16} />, '#16a34a', 'Total Spent', money(m.spend), <span className="muted" style={{ fontSize: 12 }}>All Time</span>)}
+            {kpi(<WalletIcon size={16} />, '#2e90fa', 'Wallet Balance', money(c.wallet || 0), <button className="linkbtn" style={LINK} onClick={() => setMoneyOpen(true)}>+ Add Money</button>)}
+            {kpi(<Briefcase size={16} />, '#f59e0b', 'Active Bookings', m.active.length, <button className="linkbtn" style={LINK} onClick={() => setTab('bookings')}>View Details</button>)}
+          </div>
         </div>
       </div>
 
