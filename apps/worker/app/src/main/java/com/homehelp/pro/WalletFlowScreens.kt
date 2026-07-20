@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -54,7 +55,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -693,7 +696,7 @@ fun WithdrawalHistoryScreen(vm: AppViewModel, nav: NavHostController) {
 fun BankAccountsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     var confirmDelete by remember { mutableStateOf<BankAccount?>(null) }
-    LaunchedEffect(Unit) { vm.loadBankAccounts() }
+    LaunchedEffect(Unit) { vm.loadBankAccounts(); vm.loadDocumentTypes() }
 
     confirmDelete?.let { acct ->
         AlertDialog(
@@ -716,12 +719,14 @@ fun BankAccountsScreen(vm: AppViewModel, nav: NavHostController) {
                 Text(it, color = RedCancel, fontSize = 13.5.sp)
             }
         }
+        // KYC status pinned at the top — stays until verification completes.
+        Box(Modifier.padding(horizontal = Space.l).padding(top = Space.m)) { KycStatusBanner(vm) }
         if (vm.bankAccounts.isEmpty()) {
             EmptyState("🏦", "No payout accounts", "Add a bank account to receive your earnings.")
         } else {
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
-                verticalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 vm.bankAccounts.forEach { a -> BankCard(a, onDefault = { vm.makeBankDefault(a.id) }, onManage = {
                     SelectedBank.id = a.id; nav.navigate(Routes.BANK_MANAGE)
@@ -741,51 +746,121 @@ object SelectedBank { var id by mutableIntStateOf(0) }
 
 @Composable
 private fun BankCard(a: BankAccount, onDefault: () -> Unit, onManage: () -> Unit, onDelete: () -> Unit) {
-    Card(padding = Dp16.S) {
-        if (a.isDefault) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Default Account", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(6.dp))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(Primary50),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Purple, modifier = Modifier.size(21.dp)) }
-            Spacer(Modifier.width(Space.m))
-            Column(Modifier.weight(1f)) {
-                Text(a.bankName.ifBlank { "Bank account" }, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(a.accountMasked, color = TextGray, fontSize = 13.5.sp)
-                Text(a.holder, color = TextMuted, fontSize = 12.5.sp)
-            }
-            StatusPill(
-                if (a.verified) "Verified" else a.status,
-                if (a.verified) GreenLight else GoldLight,
-                if (a.verified) GreenSuccess else Amber,
-            )
-        }
-        Spacer(Modifier.height(Space.s))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!a.isDefault) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(18.dp))) {
+        // ── Gradient card face (looks like a real payment card) ──
+        Box(
+            Modifier.fillMaxWidth()
+                .background(Brush.linearGradient(listOf(Color(0xFF6D4AFF), Color(0xFF9D7BFF))))
+                .padding(16.dp),
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(Color.White.copy(alpha = 0.22f)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp)) }
+                    Spacer(Modifier.width(Space.m))
+                    Text(a.bankName.ifBlank { "Bank Account" }, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
+                    if (a.verified) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.22f)).padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text("Verified", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Box(Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.22f)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Text(a.status, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                // Masked account number, spaced like a card PAN.
                 Text(
-                    "Make Default", color = if (a.verified) Purple else TextMuted, fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable(enabled = a.verified, onClick = onDefault),
+                    a.accountMasked.ifBlank { "•••• •••• ••••" }, color = Color.White,
+                    fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
                 )
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("ACCOUNT HOLDER", color = Color.White.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(a.holder.ifBlank { "—" }, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                    if (a.isDefault) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White).padding(horizontal = 9.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text("Default", color = Purple, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+        // ── Action bar under the card face ──
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!a.isDefault) {
+                Row(
+                    Modifier.clickable(enabled = a.verified, onClick = onDefault), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Star, contentDescription = null, tint = if (a.verified) Gold else TextMuted, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Make Default", color = if (a.verified) Purple else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
                 Spacer(Modifier.width(Space.l))
             }
             Row(Modifier.clickable(onClick = onManage), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(3.dp))
-                Text("Manage", color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Manage", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.weight(1f))
             Row(Modifier.clickable(onClick = onDelete), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Delete, contentDescription = null, tint = RedCancel, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(3.dp))
-                Text("Delete", color = RedCancel, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Filled.Delete, contentDescription = null, tint = RedCancel, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Delete", color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/** KYC status banner — green "Verified" once every required document is approved, otherwise an
+ *  amber "Complete your KYC" reminder that stays until it completes. Shared by the bank screens. */
+@Composable
+private fun KycStatusBanner(vm: AppViewModel) {
+    val requiredDocs = vm.documents.filter { vm.documentRequired[it.name] != false }
+    val kycDone = requiredDocs.isNotEmpty() &&
+        requiredDocs.all { it.status.equals("Verified", true) || it.status.equals("Approved", true) }
+    if (kycDone) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(GreenLight).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text("KYC Verified", color = GreenSuccess, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Your identity documents are approved.", color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
+            }
+        }
+    } else {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(GoldLight).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = Amber, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text("Complete your KYC", color = Amber, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Verify your documents to start receiving payouts.", color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
             }
         }
     }
@@ -820,6 +895,8 @@ fun AddBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
     }
     // Leave once the account lands in the list.
     LaunchedEffect(vm.bankAccounts.size) { if (submitted && !vm.walletBusy) nav.popBackStack() }
+    // Pull the document set so the KYC banner reflects real verification status.
+    LaunchedEffect(Unit) { vm.loadDocumentTypes() }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         WalletTopBar("Add Bank Account", onBack = { nav.popBackStack() })
@@ -827,6 +904,7 @@ fun AddBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
+            KycStatusBanner(vm)
             BankField("Full Name", holder) { holder = it }
             // Bank Name — searchable dropdown over the full bank list, as requested.
             BankNamePicker(bankName) { bankName = it }
