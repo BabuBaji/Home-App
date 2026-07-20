@@ -363,14 +363,36 @@ app.post('/api/bookings', auth, async (req, res) => {
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
+  // Address: explicit id/text, else the customer's default (from the auth service). We resolve the
+  // saved-address id so it can be stamped on the booking ("last used" becomes exact, not a text match).
+  // Resolved BEFORE the gates below: pincode is client-supplied and optional, and every gate used to
+  // be skipped outright when it was missing — an out-of-hours instant booking went through and was
+  // auto-assigned. The address carries the pincode, so derive it here and gate on that.
+  let address = body.address
+  let addressId = body.addressId ?? body.address_id ?? null
+  if (addressId == null || !address) {
+    const addrs = await tryGet(AUTH_URL, `/api/internal/users/${req.user.id}/addresses`, [])
+    let chosen = addressId != null ? addrs.find((a) => a.id === Number(addressId)) : null
+    if (!chosen && address) chosen = addrs.find((a) => a.line && a.line === address)   // match free text to a saved one
+    if (!chosen) chosen = addrs.find((a) => a.is_default) || addrs[0] || null
+    if (chosen) {
+      if (!address) address = chosen.line || ''
+      if (addressId == null) addressId = chosen.id
+    }
+  }
+  // The pincode every gate below is judged on: explicit if sent, else the 6-digit PIN in the address.
+  // Still empty (no address, no PIN in it) → no zone to check, so the gates fall open, matching
+  // /api/serviceable which also serves everywhere when zones can't be resolved.
+  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+
   // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
   // before any wallet debit).
   // For INSTANT the time is "right now", so derive it from the SERVER clock — body.at is the
   // device's clock and a skewed or crafted one would otherwise book a 3 AM job no worker can take.
   // For SCHEDULE the customer genuinely chose a future slot, so body.date/at is the real intent.
   const isInstant = (body.type || 'instant') !== 'schedule'
-  if (body.pincode) {
-    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
+  if (pincode) {
+    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(pincode)}`, null)
     if (hours && !hours.is247) {
       const dateStr = isInstant ? istDateStr() : (body.date || istDateStr())
       const win = dayWindow(hours, dateStr)
@@ -393,8 +415,8 @@ app.post('/api/bookings', auth, async (req, res) => {
   }
 
   // Daily capacity gate: reject once the zone hits its configured Max Orders/Day (excludes cancellations).
-  if (body.pincode) {
-    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
+  if (pincode) {
+    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(pincode)}`, null)
     const maxOrders = Number(zc?.capacity?.maxOrders) || 0
     if (zc?.zoneId && maxOrders > 0) {
       const { rows } = await pool.query(`SELECT count(*)::int n FROM bookings WHERE zone_id=$1 AND created::date = CURRENT_DATE AND status <> 'cancelled'`, [zc.zoneId])
@@ -404,23 +426,8 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
   if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
-    const avail = await slotAvailability(body.date, body.time, body.pincode || '', priced.items.map((i) => i.name))
+    const avail = await slotAvailability(body.date, body.time, pincode || '', priced.items.map((i) => i.name))
     if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
-  }
-
-  // Address: explicit id/text, else the customer's default (from the auth service). We resolve the
-  // saved-address id so it can be stamped on the booking ("last used" becomes exact, not a text match).
-  let address = body.address
-  let addressId = body.addressId ?? body.address_id ?? null
-  if (addressId == null || !address) {
-    const addrs = await tryGet(AUTH_URL, `/api/internal/users/${req.user.id}/addresses`, [])
-    let chosen = addressId != null ? addrs.find((a) => a.id === Number(addressId)) : null
-    if (!chosen && address) chosen = addrs.find((a) => a.line && a.line === address)   // match free text to a saved one
-    if (!chosen) chosen = addrs.find((a) => a.is_default) || addrs[0] || null
-    if (chosen) {
-      if (!address) address = chosen.line || ''
-      if (addressId == null) addressId = chosen.id
-    }
   }
 
   const payment = body.payment || 'phonepe'
@@ -433,9 +440,8 @@ app.post('/api/bookings', auth, async (req, res) => {
     catch (e) { return res.status(402).json({ error: e.message || 'Insufficient wallet balance' }) }
   }
 
-  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops).
-  // Prefer an explicit pincode; else pull a 6-digit PIN out of the address text.
-  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops) — same `pincode`
+  // the gates above were judged on, so what was enforced is what gets recorded.
   let zoneId = null
   if (pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null); zoneId = zr?.zoneId ?? null }
 
