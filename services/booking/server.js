@@ -177,6 +177,14 @@ const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 
 
 // ── zone working-hours enforcement ──
 const _minOf = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null }
+// Working hours are configured in IST, but the containers run with TZ unset (UTC), so a bare
+// new Date() here is 5.5h behind the business day. Shift explicitly rather than relying on the
+// host zone — same approach as admin's istDay(). If TZ is ever pinned to Asia/Kolkata this still
+// holds, because we derive from the UTC epoch, not from the local zone.
+const IST_MS = 5.5 * 3600000
+const istNow = () => new Date(Date.now() + IST_MS)
+const istMinutes = () => { const d = istNow(); return d.getUTCHours() * 60 + d.getUTCMinutes() }
+const istDateStr = () => istNow().toISOString().slice(0, 10)
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']   // JS getDay() 0=Sun … 6=Sat
 // Resolve a date's effective open window from a zone's working-hours config.
 // A special-hours entry for that exact date overrides the weekday schedule.
@@ -355,37 +363,11 @@ app.post('/api/bookings', auth, async (req, res) => {
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
-  // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
-  // before any wallet debit). Uses the chosen date for scheduled bookings, else today for instant.
-  if (body.pincode) {
-    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
-    if (hours && !hours.is247) {
-      const dateStr = body.date || nowIso().slice(0, 10)
-      const win = dayWindow(hours, dateStr)
-      if (win.closed) return res.status(422).json({ error: 'This area is closed on the selected day. Please pick another date.' })
-      const tMin = _minOf(body.at)   // 24h "HH:MM" — scheduled slot or the instant-now time
-      if (tMin != null && !withinWindow(win, tMin)) return res.status(422).json({ error: 'That time is outside working hours for this area. Please choose a slot within working hours.' })
-    }
-  }
-
-  // Daily capacity gate: reject once the zone hits its configured Max Orders/Day (excludes cancellations).
-  if (body.pincode) {
-    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
-    const maxOrders = Number(zc?.capacity?.maxOrders) || 0
-    if (zc?.zoneId && maxOrders > 0) {
-      const { rows } = await pool.query(`SELECT count(*)::int n FROM bookings WHERE zone_id=$1 AND created::date = CURRENT_DATE AND status <> 'cancelled'`, [zc.zoneId])
-      if (rows[0].n >= maxOrders) return res.status(422).json({ error: 'This area has reached its maximum bookings for today. Please try again tomorrow.' })
-    }
-  }
-
-  // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
-  if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
-    const avail = await slotAvailability(body.date, body.time, body.pincode || '', priced.items.map((i) => i.name))
-    if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
-  }
-
   // Address: explicit id/text, else the customer's default (from the auth service). We resolve the
   // saved-address id so it can be stamped on the booking ("last used" becomes exact, not a text match).
+  // Resolved BEFORE the gates below: pincode is client-supplied and optional, and every gate used to
+  // be skipped outright when it was missing — an out-of-hours instant booking went through and was
+  // auto-assigned. The address carries the pincode, so derive it here and gate on that.
   let address = body.address
   let addressId = body.addressId ?? body.address_id ?? null
   if (addressId == null || !address) {
@@ -398,6 +380,55 @@ app.post('/api/bookings', auth, async (req, res) => {
       if (addressId == null) addressId = chosen.id
     }
   }
+  // The pincode every gate below is judged on: explicit if sent, else the 6-digit PIN in the address.
+  // Still empty (no address, no PIN in it) → no zone to check, so the gates fall open, matching
+  // /api/serviceable which also serves everywhere when zones can't be resolved.
+  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+
+  // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
+  // before any wallet debit).
+  // For INSTANT the time is "right now", so derive it from the SERVER clock — body.at is the
+  // device's clock and a skewed or crafted one would otherwise book a 3 AM job no worker can take.
+  // For SCHEDULE the customer genuinely chose a future slot, so body.date/at is the real intent.
+  const isInstant = (body.type || 'instant') !== 'schedule'
+  if (pincode) {
+    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(pincode)}`, null)
+    if (hours && !hours.is247) {
+      const dateStr = isInstant ? istDateStr() : (body.date || istDateStr())
+      const win = dayWindow(hours, dateStr)
+      if (win.closed) {
+        return res.status(422).json({
+          error: isInstant
+            ? 'Instant booking is closed right now. Please schedule this for later.'
+            : 'This area is closed on the selected day. Please pick another date.',
+        })
+      }
+      const tMin = isInstant ? istMinutes() : _minOf(body.at)
+      if (tMin != null && !withinWindow(win, tMin)) {
+        return res.status(422).json({
+          error: isInstant
+            ? 'Instant booking is closed right now. Please schedule this for later.'
+            : 'That time is outside working hours for this area. Please choose a slot within working hours.',
+        })
+      }
+    }
+  }
+
+  // Daily capacity gate: reject once the zone hits its configured Max Orders/Day (excludes cancellations).
+  if (pincode) {
+    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(pincode)}`, null)
+    const maxOrders = Number(zc?.capacity?.maxOrders) || 0
+    if (zc?.zoneId && maxOrders > 0) {
+      const { rows } = await pool.query(`SELECT count(*)::int n FROM bookings WHERE zone_id=$1 AND created::date = CURRENT_DATE AND status <> 'cancelled'`, [zc.zoneId])
+      if (rows[0].n >= maxOrders) return res.status(422).json({ error: 'This area has reached its maximum bookings for today. Please try again tomorrow.' })
+    }
+  }
+
+  // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
+  if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
+    const avail = await slotAvailability(body.date, body.time, pincode || '', priced.items.map((i) => i.name))
+    if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
+  }
 
   const payment = body.payment || 'phonepe'
   const isCash = payment === 'cash', isWallet = payment === 'wallet'
@@ -409,9 +440,8 @@ app.post('/api/bookings', auth, async (req, res) => {
     catch (e) { return res.status(402).json({ error: e.message || 'Insufficient wallet balance' }) }
   }
 
-  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops).
-  // Prefer an explicit pincode; else pull a 6-digit PIN out of the address text.
-  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops) — same `pincode`
+  // the gates above were judged on, so what was enforced is what gets recorded.
   let zoneId = null
   if (pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null); zoneId = zr?.zoneId ?? null }
 

@@ -828,21 +828,22 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 .screen.m2 .content.no-pad { padding: 0 0 18px; }
 .sheet-back.overlay { background: rgba(255,255,255,.92); box-shadow: 0 2px 10px rgba(0,0,0,.18); }
 
-/* Full-bleed hero: edge-to-edge, no side margin, no radius. Sized in vh so it keeps the
-   same proportion of the screen on every phone, clamped so it never dwarfs small devices
-   or eats a tablet. `cover` (not contain) so the photo fills the frame with no letterbox. */
-/* Full-bleed hero: edge-to-edge, no side margin, no radius. The source photos are PORTRAIT
-   (~1200x1500, ratio .8) in a landscape box, so `cover` always crops vertically — anchor near
-   the top so the worker's head is never cut. Kept short so the name, price, rating and the
-   Schedule / Book Instant bar stay visible without scrolling. */
+/* Hero: edge-to-edge, no side margin, no radius. Sized in vh and kept short so the body below
+   still has room for the "trained to" list above the pinned Schedule / Book Instant bar.
+   The source photos are PORTRAIT (~1200x1500) in this landscape box, so `contain` is deliberate:
+   it shows the COMPLETE photo — whole person, nothing cropped — and leaves space either side.
+   That space is a flat --primary-50 block, NOT a blurred copy of the photo (tried; rejected as
+   noisy). Switching to `cover` here would fill the sides but crop the person off at the hips. */
 .sd2-hero { position: relative; width: 100%; height: 36vh; min-height: 270px; max-height: 330px; overflow: hidden; background: var(--primary-50, #efeafe); border-radius: 0; }
-/* The photos are PORTRAIT (~1200x1500) in a full-width landscape hero. `contain` shows the
-   WHOLE frame so nothing is ever cut, and a blurred, scaled copy of the same photo fills the
-   space either side so the hero still reads edge-to-edge instead of as bars. */
-.sd2-hero-bg { position: absolute; inset: 0; background-size: cover; background-position: center; filter: blur(20px) saturate(1.15); transform: scale(1.2); }
-.sd2-img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; object-position: center; display: block; }
+/* The photos are PORTRAIT in a landscape box, so `contain` letterboxes: the complete photo shows,
+   uncropped and undistorted, and the container's flat --primary-50 fills the strips either side.
+   A blurred copy of the photo was tried in that space twice and rejected both times as noisy —
+   keep the sides flat. The only way to fill the width with no filler is landscape source photos. */
+.sd2-img { width: 100%; height: 100%; object-fit: contain; object-position: center; display: block; }
 .sd2-emoji { display: grid; place-items: center; font-size: 90px; background: linear-gradient(135deg, #d5f3f1, #eafbfa); }
-.sd2-iconbtn { position: absolute; top: 16px; width: 40px; height: 40px; border-radius: 50%; background: rgba(38,38,38,.55); color: #fff; font-size: 19px; line-height: 1; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.2); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+/* z-index keeps these above the hero image box, which spans the full hero even when `contain`
+   letterboxes it — otherwise the image can stack over them and eat their taps. */
+.sd2-iconbtn { position: absolute; z-index: 2; top: 16px; width: 40px; height: 40px; border-radius: 50%; background: rgba(38,38,38,.55); color: #fff; font-size: 19px; line-height: 1; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.2); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .sd2-iconbtn.back { left: 16px; }
 .sd2-iconbtn.share { right: 16px; }
 
@@ -864,7 +865,7 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 .sd2-star { color: #f5a623; font-size: 16px; }
 .sd2-rate-val { font-weight: 500; color: var(--ink); font-size: 15px; }
 .sd2-rate-count { color: var(--muted); font-size: 15px; }
-.sd2-headline { font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: -.3px; margin: 4px 0 8px; line-height: 1.3; }
+.sd2-headline { font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: -.3px; margin: 2px 0 6px; line-height: 1.3; }
 .sd2-desc { font-size: 14.5px; color: var(--muted); line-height: 1.55; margin-bottom: 4px; }
 
 /* Duration + Additional information rows */
@@ -873,8 +874,10 @@ button.card:hover:not(.off) { transform: translateY(-2px); box-shadow: 0 12px 26
 .sd2-term p { font-size: 14px; color: var(--muted); line-height: 1.5; }
 
 /* flat includes / does-not-include sections (Pronto/UC style) */
-.incl-sec { margin-top: 24px; }
-.incl-sec .incl-head { font-size: 19px; font-weight: 700; color: var(--ink); margin: 0 0 14px; letter-spacing: -.3px; }
+/* Tight vertical rhythm: the service detail body has to clear the pinned Schedule / Book
+   Instant bar, so the full "trained to" list is readable without scrolling. */
+.incl-sec { margin-top: 16px; }
+.incl-sec .incl-head { font-size: 19px; font-weight: 700; color: var(--ink); margin: 0 0 10px; letter-spacing: -.3px; }
 
 .info-card { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 18px; margin-bottom: 14px; box-shadow: var(--shadow-sm); }
 .info-card .incl-head { margin: 0 0 14px; display: flex; align-items: center; gap: 9px; }
@@ -3705,7 +3708,7 @@ body { line-height: 1.45; }
 .wi-hero { border-radius: 18px; overflow: hidden; aspect-ratio: 5 / 4; background: linear-gradient(135deg, #efeafe, #e2dbf8); margin-top: 4px; }
 .wi-hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 55%; display: block; }
 .wi-name { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin: 14px 0 4px; }
-.wi-chips { display: flex; gap: 10px; overflow-x: auto; padding: 6px 2px 10px; margin: 0 -2px; scrollbar-width: none; }
+.wi-chips { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 8px; margin: 0 -2px; scrollbar-width: none; }
 .wi-chips::-webkit-scrollbar { display: none; }
 .wi-chip { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; padding: 8px 14px 8px 8px; border: 1.5px solid var(--line); border-radius: 14px; background: #fff; font-size: 13.5px; font-weight: 600; color: var(--ink-2); max-width: 200px; }
 .wi-chip img { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; flex: 0 0 auto; background: var(--primary-50); }
@@ -3713,7 +3716,7 @@ body { line-height: 1.45; }
 .wi-chip.sel { border-color: var(--primary); color: var(--primary-dark); background: var(--primary-50); }
 
 .wi-sec { font-size: 17px; font-weight: 700; letter-spacing: -.2px; margin: 20px 0 12px; }
-.wi-list { list-style: none; display: flex; flex-direction: column; gap: 13px; }
+.wi-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .wi-item { display: flex; align-items: flex-start; gap: 11px; font-size: 15px; color: var(--ink-2); line-height: 1.3; }
 .wi-ic { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: #fff; margin-top: 1px; }
 .wi-ic.ok { background: var(--green); }
@@ -3721,7 +3724,15 @@ body { line-height: 1.45; }
 .wi-note { display: flex; align-items: center; gap: 12px; background: var(--surface-2, #f6f6fa); border-radius: 14px; padding: 14px; margin-top: 20px; font-size: 13.5px; color: var(--ink-2); }
 .wi-note-ic { font-size: 22px; flex: 0 0 auto; }
 
-.wi-foot { display: flex; gap: 12px; }
+/* The body scrolls behind this bar, so whatever row happens to sit at the boundary gets cut
+   mid-height. A soft fade above the bar makes that read as "there is more below" instead of
+   as a broken layout; position/z-index put the fade over the scrolled content, not under it. */
+.wi-foot { display: flex; flex-wrap: wrap; gap: 12px; position: relative; z-index: 2; }
+/* Full-width row above the two CTAs (flex-wrap + 100% basis), shown when the zone is off-shift. */
+.wi-closed-note { flex: 0 0 100%; font-size: 13px; line-height: 1.45; color: #c2410c; background: #fff4ec; border: 1px solid #fed7aa; border-radius: 12px; padding: 9px 12px; }
+/* Instant outside the zone's shift: dimmed, but still tappable so the tap can explain itself. */
+.wi-instant.off { background: #cdc9f3; box-shadow: none; cursor: not-allowed; }
+.wi-foot::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(to top, #fff, rgba(255,255,255,0)); pointer-events: none; }
 .wi-schedule, .wi-instant { flex: 1; height: 54px; border-radius: 15px; font-weight: 700; font-size: 16px; transition: transform .12s; }
 .wi-schedule:active, .wi-instant:active { transform: scale(.98); }
 .wi-schedule { border: 1.6px solid var(--primary); color: var(--primary); background: #fff; }
