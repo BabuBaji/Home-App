@@ -46,10 +46,10 @@ object RetrofitClient {
 
     /** Pull the live backend URL from the public config. Blocking — call off the main thread. */
     fun refreshBaseUrl() {
-        // Local USB testing: pin to FALLBACK_URL (localhost:8080 via `adb reverse`) and skip the
-        // remote config, so the stale GitHub apiBase (a dead quick-tunnel) can't repoint the app at
-        // an unreachable host. Remove this line to restore config-driven URLs for real deployments.
-        if (true) return
+        // Config-driven: the app follows whatever apiBase go-live.ps1 published, so it works on any
+        // network (Wi-Fi or mobile data) with no cable and no `adb reverse`. If the config can't be
+        // fetched we keep FALLBACK_URL (localhost:8080 via `adb reverse`) for USB testing.
+        // Re-add `if (true) return` here to pin to USB-only when the published tunnel is dead.
         if (refreshed) return
         try {
             val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()
