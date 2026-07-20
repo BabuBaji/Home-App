@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Admin } from './types'
 import { clearToken, setToken, saveAdmin, loadAdmin, clearAdmin } from './api'
 
@@ -16,6 +16,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback((t: string, a: Admin) => { setToken(t); saveAdmin(a); setAdminState(a) }, [])
   const signOut = useCallback(() => { clearToken(); clearAdmin(); setAdminState(null) }, [])
   const setAdmin = useCallback((a: Admin) => { saveAdmin(a); setAdminState(a) }, [])
+
+  // Any request rejecting our session drops us to the login screen. Without this the token is
+  // cleared but `admin` stays set, so the guard keeps us on a page where every call 401s.
+  useEffect(() => {
+    const onUnauthorized = () => setAdminState(null)
+    window.addEventListener('hha:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('hha:unauthorized', onUnauthorized)
+  }, [])
+
   return <Ctx.Provider value={{ admin, signIn, signOut, setAdmin }}>{children}</Ctx.Provider>
 }
 
@@ -25,6 +34,18 @@ export function useStore() {
   return c
 }
 
-// role helper: super > admin > manager > support
+// role helper: super > admin > manager > support. Retained for legacy call sites; new code should
+// gate on has(admin, 'perm.key') instead — permissions are authoritative, role rank is not.
 const RANK: Record<string, number> = { super: 4, admin: 3, manager: 2, support: 1 }
 export const can = (role: string | undefined, min: string) => (RANK[role || ''] || 0) >= (RANK[min] || 0)
+
+// Permission gate — the one the UI should use. super always passes (holds every permission);
+// otherwise the resolved permission list from /me decides. Missing list → denied (fail closed).
+export const has = (admin: Admin | null | undefined, perm: string): boolean => {
+  if (!admin) return false
+  if (admin.role === 'super') return true
+  return Array.isArray(admin.permissions) && admin.permissions.includes(perm)
+}
+// True if the admin holds ANY of the given perms — for a screen reachable via several actions.
+export const hasAny = (admin: Admin | null | undefined, perms: string[]): boolean =>
+  admin?.role === 'super' || perms.some((p) => has(admin, p))

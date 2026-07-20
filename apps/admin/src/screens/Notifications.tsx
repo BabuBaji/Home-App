@@ -17,6 +17,8 @@ interface Notif {
   audience: string
   channel: string
   sent: number
+  suppressed?: number
+  promotional?: boolean
   admin: string
   created: string
 }
@@ -75,7 +77,7 @@ export default function Notifications() {
     setSending(true)
     try {
       const r = await broadcast({ type: cType, title, body, audience: cAudience, channel: cChannel })
-      toast('Notification sent to ' + (r.sent ?? 0) + ' customers', 'ok')
+      toast(`Sent to ${r.sent ?? 0} recipients${r.suppressed ? ` · ${r.suppressed} skipped (opted out)` : ''}`, 'ok')
       setCompose(false)
       setTitle(''); setBody('')
       load()
@@ -189,7 +191,7 @@ export default function Notifications() {
                     </td>
                     <td>
                       <strong style={{ fontSize: 13, display: 'block' }}>{n.audience}</strong>
-                      <small className="muted">{n.sent} recipients</small>
+                      <small className="muted">{n.sent} recipients{n.suppressed ? ` · ${n.suppressed} skipped` : ''}</small>
                     </td>
                     <td><Badge tone={channelTone(n.channel)} dot={false}>{n.channel}</Badge></td>
                     <td>

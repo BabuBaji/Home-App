@@ -81,8 +81,8 @@ export default function WorkerWallet() {
     if (!(amt > 0)) { toast('Enter a valid amount', 'err'); return }
     setSaving(true)
     try {
-      await adjustWallet(Number(custId), amt, desc)
-      toast('Funds added', 'ok')
+      const res = await adjustWallet(Number(custId), amt, desc)
+      toast(res.pending ? 'Sent for approval — a second admin must sign off' : 'Funds added', 'ok')
       resetForm()
       await Promise.all([fetchCustomers().then(setCustomers), loadTxns()])
     } catch (e) {

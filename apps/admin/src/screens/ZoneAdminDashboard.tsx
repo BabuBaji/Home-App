@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
@@ -43,7 +44,8 @@ function Kpi({ icon, tint, label, value, sub, delta, up }: { icon: ReactNode; ti
   )
 }
 
-export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zones: BZone[]; onCreate: () => void; onOpenZone: (z: BZone) => void }) {
+export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone, onViewAllZones }: { zones: BZone[]; onCreate: () => void; onOpenZone: (z: BZone) => void; onViewAllZones?: () => void }) {
+  const nav = useNavigate()
   // Real per-zone figures (bookings/revenue/apartments) from the backend; kept alongside the
   // modelled worker-status / trend visuals which have no live per-zone source yet.
   const [real, setReal] = useState<Record<number, Record<string, number>>>({})
@@ -108,10 +110,10 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
             </div>
           )}
         </Card>
-        <Card title="Bookings by Zone" right={<span style={{ fontSize: 12, color: 'var(--zi)', fontWeight: 700 }}>View All</span>}>
+        <Card title="Bookings by Zone" right={<button onClick={() => onViewAllZones?.()} style={{ fontSize: 12, color: 'var(--zi)', fontWeight: 700, cursor: 'pointer', background: 'none', border: 'none' }}>View All</button>}>
           <table className="zo-table"><thead><tr><th>Zone</th><th>Bookings</th><th>Revenue</th><th>ETA</th></tr></thead>
             <tbody>{per.slice(0, 7).map(({ z, m }) => (
-              <tr key={z.id} onClick={() => onOpenZone(z)}><td><b>{z.name}</b></td><td>{m.orders}</td><td>{money(m.revenue)}</td><td>{m.eta}m</td></tr>
+              <tr key={z.id} style={{ cursor: 'pointer' }} onClick={() => onOpenZone(z)}><td><b>{z.name}</b></td><td>{m.orders}</td><td>{money(m.revenue)}</td><td>{m.eta}m</td></tr>
             ))}</tbody>
           </table>
         </Card>
@@ -122,9 +124,9 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
       <div className="zo-grid" style={{ gridTemplateColumns: '1fr 1fr 1.3fr', gap: 16, marginBottom: 16 }}>
         <Card title="Top Services"><Donut data={topServices.length ? topServices : [{ label: 'No data', value: 1, color: '#e5e7eb' }]} size={180} /></Card>
         <Card title="Worker Status"><Donut data={workerDonut} size={180} /></Card>
-        <Card title="Recent Bookings" right={<span style={{ fontSize: 12, color: 'var(--zi)', fontWeight: 700 }}>View All</span>}>
+        <Card title="Recent Bookings" right={<button onClick={() => nav('/bookings')} style={{ fontSize: 12, color: 'var(--zi)', fontWeight: 700, cursor: 'pointer', background: 'none', border: 'none' }}>View All</button>}>
           {recent.map((b) => (
-            <div key={b.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--line)' }}>
+            <div key={b.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' }} onClick={() => nav(`/bookings?q=${encodeURIComponent(b.id)}`)}>
               <div><div style={{ fontWeight: 700, fontSize: 12.5 }}>{b.id}</div><div style={{ fontSize: 12, color: 'var(--zmut)' }}>{b.svc} · {b.zone}</div></div>
               <div style={{ textAlign: 'right' }}><Badge>{b.status}</Badge><div style={{ fontSize: 11, color: 'var(--zmut)', marginTop: 3 }}>{b.time}</div></div>
             </div>
@@ -147,7 +149,7 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone }: { zo
         </Card>
         <Card title="Quick Actions">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[['New Zone', <Plus size={15} key="a" />, onCreate], ['Add Worker', <UserPlus size={15} key="b" />], ['Bulk Assign', <Zap size={15} key="c" />], ['Inventory', <Package size={15} key="d" />], ['Reports', <BarChart3 size={15} key="e" />], ['Booking', <CalendarDays size={15} key="f" />]].map((x, i) => (
+            {[['New Zone', <Plus size={15} key="a" />, onCreate], ['Add Worker', <UserPlus size={15} key="b" />, () => nav('/workers/new')], ['Bulk Assign', <Zap size={15} key="c" />, () => nav('/command-center')], ['Inventory', <Package size={15} key="d" />, () => nav('/zones/inventory')], ['Reports', <BarChart3 size={15} key="e" />, () => nav('/reports')], ['Booking', <CalendarDays size={15} key="f" />, () => nav('/bookings')]].map((x, i) => (
               <button key={i} className="zo-btn line" style={{ justifyContent: 'flex-start' }} onClick={x[2] as (() => void) | undefined}>{x[1] as ReactNode} {x[0] as string}</button>
             ))}
           </div>

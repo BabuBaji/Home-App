@@ -10,9 +10,14 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import {
-  makePool, migrate, makeCustomerAuth, makeAdminAuth, internalOnly, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, internalOnly, subscribeEvents, invalidateSettings,
   publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('payment') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4008)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5438/payment'
@@ -31,7 +36,10 @@ const verifiedPayments = new Map() // razorpay_payment_id -> { at } (single-use)
 
 const PAYMENT_METHODS = [
   { group: 'UPI', recommended: true, options: [
-    { id: 'upi', name: 'UPI', icon: '📲', sub: 'PhonePe, Google Pay, Paytm & more' }] },
+    { id: 'phonepe', name: 'PhonePe', icon: '📲', sub: 'UPI' },
+    { id: 'gpay', name: 'Google Pay', icon: '📲', sub: 'UPI' },
+    { id: 'paytm', name: 'Paytm', icon: '📲', sub: 'UPI' },
+    { id: 'upi', name: 'Other UPI app', icon: '📲', sub: 'BHIM, Amazon Pay & more' }] },
   { group: 'Cards', options: [{ id: 'card', name: 'Credit / Debit Card', icon: '💳', sub: 'Visa, Mastercard, RuPay' }] },
   { group: 'Net Banking', options: [{ id: 'netbanking', name: 'Net Banking', icon: '🏦', sub: 'All major banks' }] },
   { group: 'Wallets', options: [{ id: 'wallet', name: 'HomeHelp Wallet', icon: '👛', sub: 'Use your balance' }] },
@@ -322,7 +330,7 @@ app.post('/api/payment/wallet/topup', auth, async (req, res) => {
   if (dup.rowCount) return res.json({ ok: true, duplicate: true })
   let balance = null
   try {
-    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: 'Added to wallet', amount, ref: paymentId })
+    const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'ADD_MONEY', title: 'Added to wallet', amount, ref: paymentId })
     balance = credited?.balance ?? null
   } catch { return res.status(502).json({ error: 'Could not credit wallet' }) }
   await pool.query("INSERT INTO payments (customer_id,amount,mode,gateway,payment_id,status) VALUES ($1,$2,'wallet_topup','razorpay',$3,'SUCCESS')", [req.user.id, amount, paymentId])
@@ -470,9 +478,20 @@ app.get('/api/admin/refunds', adminAuth, async (_q, res) => {
     payment_status: b.payment_status ?? null, created: b.created,
   })))
 })
-app.post('/api/admin/refunds/:id', adminAuth, async (req, res) => {
-  await internalPost(BOOKING_URL, `/api/internal/bookings/${Number(req.params.id)}/refund`, {})
-  res.json({ ok: true })
+// Legacy refund path. Rather than refunding directly, forward to the approval matrix (admin service)
+// with the caller's session, so this endpoint can't bypass an approval rule any more than the panel's
+// /api/admin/actions/refund can. The admin service decides: execute now, or queue for sign-off, and
+// its response (200 executed / 202 pending / 4xx) is relayed back unchanged.
+app.post('/api/admin/refunds/:id', adminAuth, requirePerm('refunds.approve'), async (req, res) => {
+  try {
+    const r = await fetch(`${ADMIN_URL}/api/admin/actions/refund`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: req.headers.authorization || '' },
+      body: JSON.stringify({ bookingId: Number(req.params.id) }),
+    })
+    const body = await r.json().catch(() => ({}))
+    res.status(r.status).json(body)
+  } catch { res.status(502).json({ error: 'Approval service unavailable' }) }
 })
 
 /* ---------- event consumers ---------- */

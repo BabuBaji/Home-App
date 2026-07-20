@@ -235,6 +235,9 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
     const pkg = PKG[id]
     const real = pkg ? icons[pkg]?.icon : undefined
     if (real) return <img src={real} alt="" width={26} height={26} style={{ borderRadius: 6 }} />
+    if (id === 'phonepe') return <PhonePeLogo s={26} />
+    if (id === 'gpay') return <GPayLogo s={26} />
+    if (id === 'paytm') return <span style={{ display: 'inline-flex' }}><PaytmLogo s={18} /></span>
     if (id === 'upi') return <UpiLogo />
     if (id === 'card') return <CardLogo />
     const b = BRAND[id]

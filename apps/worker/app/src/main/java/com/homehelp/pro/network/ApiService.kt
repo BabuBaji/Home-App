@@ -1,9 +1,14 @@
 package com.homehelp.pro.network
 
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 
 interface ApiService {
@@ -34,6 +39,9 @@ interface ApiService {
 
     @PUT("api/worker/availability")
     suspend fun updateAvailability(@Body body: AvailabilityBody): WorkerDto
+
+    @GET("api/worker/availability")
+    suspend fun getAvailability(): AvailabilityResponse
 
     @POST("api/worker/attendance/checkin")
     suspend fun checkIn(@Body body: AttendanceBody): AttendanceDto
@@ -74,11 +82,73 @@ interface ApiService {
     @PUT("api/worker/notifications")
     suspend fun updateNotifications(@Body body: NotificationsBody): WorkerDto
 
+    @GET("api/worker/comm")
+    suspend fun getComm(): CommDto
+
+    @PUT("api/worker/comm")
+    suspend fun updateComm(@Body body: CommDto): CommDto
+
     @GET("api/worker/documents")
     suspend fun getDocuments(): List<DocumentDto>
 
+    // Multipart: the file's actual BYTES go up, not just its name. `name` identifies which KYC
+    // document this is (Aadhaar Card, PAN Card…); `fileName` is only a display label.
+    @Multipart
     @POST("api/worker/documents/upload")
-    suspend fun uploadDocument(@Body body: UploadDocBody): DocumentsResponse
+    suspend fun uploadDocument(
+        @Part("name") name: RequestBody,
+        @Part("fileName") fileName: RequestBody,
+        @Part file: MultipartBody.Part,
+    ): DocumentsResponse
+
+    @GET("api/worker/documents/{id}/url")
+    suspend fun documentUrl(@Path("id") id: Int): SignedUrlResponse
+
+    @GET("api/worker/documents/types")
+    suspend fun documentTypes(): DocTypesResponse
+
+    /* Phase 6 — service skills */
+    @GET("api/worker/services")
+    suspend fun serviceCatalogue(): ServicesResponse
+
+    @GET("api/worker/skills")
+    suspend fun getSkills(): SkillsResponse
+
+    @PUT("api/worker/skills")
+    suspend fun saveSkills(@Body body: SkillsBody): SkillsResponse
+
+    @Multipart
+    @POST("api/worker/skills/certificate")
+    suspend fun uploadSkillCertificate(@Part("service") service: RequestBody, @Part file: MultipartBody.Part): SkillsResponse
+
+    /* Phase 7 — training & assessment */
+    @GET("api/worker/training")
+    suspend fun getTraining(): TrainingResponse
+
+    @POST("api/worker/training/{id}/complete")
+    suspend fun completeModule(@Path("id") id: Int): TrainingResponse
+
+    @GET("api/worker/training/quiz")
+    suspend fun getQuizPaper(): QuizPaperResponse
+
+    @POST("api/worker/training/quiz")
+    suspend fun submitQuiz(@Body body: QuizSubmitBody): QuizResultResponse
+
+    /* Onboarding wizard */
+    @GET("api/worker/onboarding")
+    suspend fun getOnboarding(): OnboardingResponse
+
+    @POST("api/worker/onboarding/submit")
+    suspend fun submitOnboarding(): OnboardingResponse
+
+    /* Phase 9 — equipment issued to me (read-only) */
+    @GET("api/worker/equipment")
+    suspend fun getEquipment(): EquipmentResponse
+
+    // Profile photo. Public bucket (customers see it), so the DTO carries a stable URL.
+    @Multipart
+    @POST("api/worker/profile/photo")
+    suspend fun uploadProfilePhoto(@Part file: MultipartBody.Part): WorkerDto
 
     // ---- job lifecycle ----
     @GET("api/worker/jobs/available")
@@ -107,6 +177,80 @@ interface ApiService {
 
     @POST("api/worker/jobs/end")
     suspend fun endService(@Body body: EndBody): StatusResponse
+
+    // ---- in-service job state (checklist · photos · extras · pause · chat) ----
+    // ---- wallet module: bank accounts · PIN · payout settings ----
+    @GET("api/worker/bank-accounts")
+    suspend fun bankAccounts(): BankAccountsResponse
+
+    @POST("api/worker/bank-accounts")
+    suspend fun addBankAccount(@Body body: BankAccountBody): BankAccountsResponse
+
+    @PUT("api/worker/bank-accounts/{id}")
+    suspend fun updateBankAccount(@Path("id") id: Int, @Body body: BankAccountBody): BankAccountsResponse
+
+    @POST("api/worker/bank-accounts/{id}/default")
+    suspend fun makeBankDefault(@Path("id") id: Int): BankAccountsResponse
+
+    @DELETE("api/worker/bank-accounts/{id}")
+    suspend fun deleteBankAccount(@Path("id") id: Int): BankAccountsResponse
+
+    @GET("api/worker/payout-settings")
+    suspend fun payoutSettings(): PayoutSettingsResponse
+
+    @PUT("api/worker/payout-settings")
+    suspend fun savePayoutSettings(@Body body: PayoutSettingsDto): PayoutSettingsResponse
+
+    @GET("api/worker/wallet/pin/status")
+    suspend fun pinStatus(): PinStatusResponse
+
+    @POST("api/worker/wallet/pin/set")
+    suspend fun setPin(@Body body: PinBody): PinResult
+
+    @POST("api/worker/wallet/pin/verify")
+    suspend fun verifyPin(@Body body: PinBody): PinResult
+
+    @POST("api/worker/wallet/withdraw/request")
+    suspend fun requestWithdrawalPin(@Body body: WithdrawRequestBody): WithdrawResult
+
+    @GET("api/worker/wallet/analytics")
+    suspend fun walletAnalytics(): WalletAnalyticsResponse
+
+    @GET("api/worker/jobs/state")
+    suspend fun jobState(): JobStateResponse
+
+    @POST("api/worker/jobs/checklist")
+    suspend fun saveChecklist(@Body body: ChecklistBody): JobStateResponse
+
+    @POST("api/worker/jobs/photos")
+    suspend fun addJobPhoto(@Body body: PhotoBody): JobStateResponse
+
+    @POST("api/worker/jobs/photos/remove")
+    suspend fun removeJobPhoto(@Body body: PhotoRemoveBody): JobStateResponse
+
+    @POST("api/worker/jobs/notes")
+    suspend fun saveJobNotes(@Body body: NotesBody): JobStateResponse
+
+    @POST("api/worker/jobs/signature")
+    suspend fun saveSignature(@Body body: SignatureBody): JobStateResponse
+
+    @POST("api/worker/jobs/extras")
+    suspend fun addExtra(@Body body: ExtraBody): JobStateResponse
+
+    @POST("api/worker/jobs/extras/remove")
+    suspend fun removeExtra(@Body body: ExtraRemoveBody): JobStateResponse
+
+    @POST("api/worker/jobs/pause")
+    suspend fun pauseJob(@Body body: PauseBody): JobStateResponse
+
+    @POST("api/worker/jobs/resume")
+    suspend fun resumeJob(): JobStateResponse
+
+    @GET("api/worker/jobs/messages")
+    suspend fun jobMessages(): MessagesResponse
+
+    @POST("api/worker/jobs/messages")
+    suspend fun sendJobMessage(@Body body: MessageBody): StatusResponse
 
     @POST("api/worker/jobs/settle")
     suspend fun settle(): SettleResponse

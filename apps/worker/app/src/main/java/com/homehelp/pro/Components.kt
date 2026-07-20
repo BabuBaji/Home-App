@@ -105,7 +105,10 @@ fun GradientBanner(
     }
 }
 
-enum class Dp16(val value: Dp) { S(12.dp), M(16.dp) }
+// XS matches the 1_home design frame, where cards carry ~8dp of inner padding. Home has to fit
+// its whole dashboard without scrolling, so padding it doesn't need is padding that shrinks the
+// type (see FitToScreen).
+enum class Dp16(val value: Dp) { XS(8.dp), S(12.dp), M(16.dp) }
 
 // Opens the app-wide side drawer (provided by AppRoot). Default no-op so previews don't crash.
 val LocalDrawerOpen = staticCompositionLocalOf<() -> Unit> { {} }

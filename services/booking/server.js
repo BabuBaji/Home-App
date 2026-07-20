@@ -9,10 +9,15 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeCustomerAuth, makeAdminAuth, internalOnly,
+  makePool, migrate, nowIso, makeAdminAuth, inScope, internalOnly,
   internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep.
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
 import { quoteCancellation, scheduledStartMs } from './cancellation.js'
+
+assertJwtSecret('booking') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4006)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5436/booking'
@@ -91,6 +96,34 @@ async function init() {
     )`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pincode TEXT`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
+    // The saved address this booking was placed to — stamped at checkout so "last used" is exact
+    // rather than a text match. Null on legacy rows and free-typed addresses.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS address_id INTEGER`,
+    // Control Tower: an executive can flag a live job as escalated and leave operational notes.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS escalate_reason TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
+    // Module 10 · Phase 2 — membership discount applied to this booking (₹), for the invoice breakdown.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS member_discount INTEGER NOT NULL DEFAULT 0`,
+    // Service evidence captured by the worker during/after the job (before/after photos, checklist,
+    // notes, completion OTP, signatures + capture metadata). One row per booking; upserted by the
+    // worker app and read by the admin Service Evidence tab.
+    `CREATE TABLE IF NOT EXISTS booking_evidence (
+      booking_id INTEGER PRIMARY KEY,
+      before_photos JSONB NOT NULL DEFAULT '[]',   -- [{url, at}]
+      after_photos  JSONB NOT NULL DEFAULT '[]',
+      checklist     JSONB NOT NULL DEFAULT '[]',   -- [{task, required, completed}]
+      worker_notes  TEXT NOT NULL DEFAULT '',
+      materials     TEXT NOT NULL DEFAULT '',
+      completion_otp TEXT NOT NULL DEFAULT '',
+      start_sig     TEXT NOT NULL DEFAULT '',
+      end_sig       TEXT NOT NULL DEFAULT '',
+      device        TEXT NOT NULL DEFAULT '',
+      network       TEXT NOT NULL DEFAULT '',
+      before_at     TIMESTAMPTZ, after_at TIMESTAMPTZ,
+      created       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -144,6 +177,14 @@ const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 
 
 // ── zone working-hours enforcement ──
 const _minOf = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null }
+// Working hours are configured in IST, but the containers run with TZ unset (UTC), so a bare
+// new Date() here is 5.5h behind the business day. Shift explicitly rather than relying on the
+// host zone — same approach as admin's istDay(). If TZ is ever pinned to Asia/Kolkata this still
+// holds, because we derive from the UTC epoch, not from the local zone.
+const IST_MS = 5.5 * 3600000
+const istNow = () => new Date(Date.now() + IST_MS)
+const istMinutes = () => { const d = istNow(); return d.getUTCHours() * 60 + d.getUTCMinutes() }
+const istDateStr = () => istNow().toISOString().slice(0, 10)
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']   // JS getDay() 0=Sun … 6=Sat
 // Resolve a date's effective open window from a zone's working-hours config.
 // A special-hours entry for that exact date overrides the weekday schedule.
@@ -223,6 +264,27 @@ app.get('/api/bookings', auth, async (req, res) => {
   res.json(rows.map((r) => publicBooking(rowTo(r))))
 })
 
+// Refund history — every booking that produced a refund, newest first. The wallet ledger has the
+// money side (kind='REFUND'); this is the booking side, which is what the customer recognises.
+// status: 'completed' (credited) | 'failed' (credit did not go through) | 'pending' (owed, not yet run).
+app.get('/api/refunds', auth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, ref, items, refund, refund_status, cancel_time, cancel_reason, created
+     FROM bookings WHERE user_id=$1 AND coalesce(refund,0) > 0
+     ORDER BY coalesce(cancel_time, created) DESC`, [req.user.id])
+  res.json(rows.map((r) => {
+    const items = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : (r.items || [])
+    const st = r.refund_status === 'refunded' ? 'completed' : r.refund_status === 'failed' ? 'failed' : 'pending'
+    return {
+      id: r.id, ref: r.ref, amount: r.refund, status: st,
+      title: items.map((i) => i.name).join(', ') || 'Booking refund',
+      serviceId: items[0]?.id || null,
+      reason: r.cancel_reason || null,
+      created: r.cancel_time || r.created,
+    }
+  }))
+})
+
 // Public: real customer reviews for a service — pulled from completed/reviewed bookings that
 // included this service. Read-only; defined before /api/bookings/:id so "service-reviews" isn't
 // treated as an id. Enriches with the reviewer's name from auth (best-effort).
@@ -276,7 +338,9 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
 })
 
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
-app.get('/api/slots', auth, async (req, res) => {
+// Public: slot availability is not user-specific (uses only date/pincode/services), and gating it
+// behind a token meant a stale/invalid session silently showed "no slots" instead of the grid.
+app.get('/api/slots', async (req, res) => {
   const date = String(req.query.date || ''), pincode = String(req.query.pincode || ''), services = String(req.query.services || '')
   const srv = pincode ? await tryGet(CATALOG_URL, `/api/serviceable?pincode=${encodeURIComponent(pincode)}`, { serviceable: true }) : { serviceable: true }
   const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent(services)}`, { count: 0 })
@@ -299,22 +363,60 @@ app.post('/api/bookings', auth, async (req, res) => {
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
+  // Address: explicit id/text, else the customer's default (from the auth service). We resolve the
+  // saved-address id so it can be stamped on the booking ("last used" becomes exact, not a text match).
+  // Resolved BEFORE the gates below: pincode is client-supplied and optional, and every gate used to
+  // be skipped outright when it was missing — an out-of-hours instant booking went through and was
+  // auto-assigned. The address carries the pincode, so derive it here and gate on that.
+  let address = body.address
+  let addressId = body.addressId ?? body.address_id ?? null
+  if (addressId == null || !address) {
+    const addrs = await tryGet(AUTH_URL, `/api/internal/users/${req.user.id}/addresses`, [])
+    let chosen = addressId != null ? addrs.find((a) => a.id === Number(addressId)) : null
+    if (!chosen && address) chosen = addrs.find((a) => a.line && a.line === address)   // match free text to a saved one
+    if (!chosen) chosen = addrs.find((a) => a.is_default) || addrs[0] || null
+    if (chosen) {
+      if (!address) address = chosen.line || ''
+      if (addressId == null) addressId = chosen.id
+    }
+  }
+  // The pincode every gate below is judged on: explicit if sent, else the 6-digit PIN in the address.
+  // Still empty (no address, no PIN in it) → no zone to check, so the gates fall open, matching
+  // /api/serviceable which also serves everywhere when zones can't be resolved.
+  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+
   // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
-  // before any wallet debit). Uses the chosen date for scheduled bookings, else today for instant.
-  if (body.pincode) {
-    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
+  // before any wallet debit).
+  // For INSTANT the time is "right now", so derive it from the SERVER clock — body.at is the
+  // device's clock and a skewed or crafted one would otherwise book a 3 AM job no worker can take.
+  // For SCHEDULE the customer genuinely chose a future slot, so body.date/at is the real intent.
+  const isInstant = (body.type || 'instant') !== 'schedule'
+  if (pincode) {
+    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(pincode)}`, null)
     if (hours && !hours.is247) {
-      const dateStr = body.date || nowIso().slice(0, 10)
+      const dateStr = isInstant ? istDateStr() : (body.date || istDateStr())
       const win = dayWindow(hours, dateStr)
-      if (win.closed) return res.status(422).json({ error: 'This area is closed on the selected day. Please pick another date.' })
-      const tMin = _minOf(body.at)   // 24h "HH:MM" — scheduled slot or the instant-now time
-      if (tMin != null && !withinWindow(win, tMin)) return res.status(422).json({ error: 'That time is outside working hours for this area. Please choose a slot within working hours.' })
+      if (win.closed) {
+        return res.status(422).json({
+          error: isInstant
+            ? 'Instant booking is closed right now. Please schedule this for later.'
+            : 'This area is closed on the selected day. Please pick another date.',
+        })
+      }
+      const tMin = isInstant ? istMinutes() : _minOf(body.at)
+      if (tMin != null && !withinWindow(win, tMin)) {
+        return res.status(422).json({
+          error: isInstant
+            ? 'Instant booking is closed right now. Please schedule this for later.'
+            : 'That time is outside working hours for this area. Please choose a slot within working hours.',
+        })
+      }
     }
   }
 
   // Daily capacity gate: reject once the zone hits its configured Max Orders/Day (excludes cancellations).
-  if (body.pincode) {
-    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
+  if (pincode) {
+    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(pincode)}`, null)
     const maxOrders = Number(zc?.capacity?.maxOrders) || 0
     if (zc?.zoneId && maxOrders > 0) {
       const { rows } = await pool.query(`SELECT count(*)::int n FROM bookings WHERE zone_id=$1 AND created::date = CURRENT_DATE AND status <> 'cancelled'`, [zc.zoneId])
@@ -324,15 +426,8 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
   if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
-    const avail = await slotAvailability(body.date, body.time, body.pincode || '', priced.items.map((i) => i.name))
+    const avail = await slotAvailability(body.date, body.time, pincode || '', priced.items.map((i) => i.name))
     if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
-  }
-
-  // Address: explicit, else the customer's default (from the auth service).
-  let address = body.address
-  if (!address) {
-    const addrs = await tryGet(AUTH_URL, `/api/internal/users/${req.user.id}/addresses`, [])
-    address = addrs.find((a) => a.is_default)?.line || addrs[0]?.line || ''
   }
 
   const payment = body.payment || 'phonepe'
@@ -345,20 +440,19 @@ app.post('/api/bookings', auth, async (req, res) => {
     catch (e) { return res.status(402).json({ error: e.message || 'Insufficient wallet balance' }) }
   }
 
-  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops).
-  // Prefer an explicit pincode; else pull a 6-digit PIN out of the address text.
-  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+  // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops) — same `pincode`
+  // the gates above were judged on, so what was enforced is what gets recorded.
   let zoneId = null
   if (pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null); zoneId = zr?.zoneId ?? null }
 
   const ins = await pool.query(
     `INSERT INTO bookings (ref,user_id,type,freq,note,date,time,address,payment,payment_status,items,duration,
-       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24) RETURNING *`,
+       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created,address_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
     [ref(), req.user.id, body.type || 'instant', body.freq ?? null, body.note ?? null, body.date ?? null, body.time ?? null,
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
-      body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso()])
+      body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso(), addressId ?? null])
   let booking = rowTo(ins.rows[0])
 
   // Assign an expert immediately: the customer's chosen worker, else the nearest ONLINE worker
@@ -402,6 +496,14 @@ app.post('/api/bookings', auth, async (req, res) => {
     internalPost(CATALOG_URL, '/api/internal/campaign-usage', {
       customerId: req.user.id, bookingId: booking.id, campaignIds: priced.appliedCampaignIds || [], couponCode: priced.coupon || null,
     }).catch(() => {})
+  }
+
+  // Membership: persist the applied discount on the booking and bump the member's monthly usage +
+  // lifetime savings. Best-effort — never fails the booking.
+  if ((priced.memberDiscount || 0) > 0) {
+    pool.query('UPDATE bookings SET member_discount=$1 WHERE id=$2', [priced.memberDiscount, booking.id]).catch(() => {})
+    booking.member_discount = priced.memberDiscount
+    internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/membership-usage`, { saved: priced.memberDiscount }).catch(() => {})
   }
 
   // Events: dispatch starts matching; notification logs; payment records the collected money.
@@ -479,7 +581,14 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
        payment_status=CASE WHEN $3 > 0 THEN 'refunded' ELSE payment_status END WHERE id=$7`,
     [req.body?.reason || 'Not specified', q.fee, refundable, nowIso(), q.workerComp, refundable > 0 ? 'refunded' : 'none', b.id])
   if (refundable > 0) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref }) } catch { /* refund best-effort */ }
+    // The credit is best-effort, so record what actually happened: claiming 'refunded' when the
+    // wallet call failed would tell the customer they were paid when they were not.
+    try {
+      await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref })
+    } catch (e) {
+      console.error('[booking] refund credit failed:', e?.message || e)
+      await pool.query("UPDATE bookings SET refund_status='failed' WHERE id=$1", [b.id])
+    }
   }
   await emitBookingUpdate(b.id)
   publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(b.id), quote: q })
@@ -512,7 +621,9 @@ app.delete('/api/favourites/:id', auth, async (req, res) => {
 /* ---------- notifications feed + policy ---------- */
 const STATUS_TITLES = { confirmed: 'Booking confirmed', worker_assigned: 'Expert assigned', on_the_way: 'Your expert is on the way', arrived: 'Your expert has arrived', in_progress: 'Service in progress', completed: 'Service completed', cancelled: 'Booking cancelled' }
 app.get('/api/notifications', auth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM bookings WHERE user_id=$1 ORDER BY id DESC LIMIT 6', [req.user.id])
+  // Booking notifications auto-clear once the service is finished: a completed or cancelled booking
+  // drops out of the feed automatically, so only live/in-progress bookings show up.
+  const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
   const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
   items.push({ id: 'o1', type: 'offer', title: '20% off this weekend', body: 'Use code CLEAN20 on any service. Limited time!', time: null })
   items.push({ id: 'o2', type: 'cashback', title: 'Earn ₹150 per friend', body: 'Share code HOMEHELP150 and earn on every referral.', time: null })
@@ -526,7 +637,13 @@ app.get('/api/policy/cancellation', async (_q, res) => {
 
 /* ================= admin ================= */
 app.get('/api/admin/bookings', adminAuth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
+  // Data scope: bookings are zone-tagged (no city), so a scoped admin filters by their zone ids.
+  // Filter in SQL, before the LIMIT, so they get their full 500 rather than 500-then-filtered.
+  const scope = req.admin?.scope
+  const zids = scope && scope.type !== 'all' && Array.isArray(scope.zoneIds) ? scope.zoneIds : null
+  const { rows } = zids
+    ? await pool.query('SELECT * FROM bookings WHERE zone_id = ANY($1) ORDER BY id DESC LIMIT 500', [zids])
+    : await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
   const bookings = rows.map(rowTo)
   // Enrich with customer name from the auth service (best-effort).
   const ids = [...new Set(bookings.map((b) => b.user_id))]
@@ -535,16 +652,146 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
   // Admin Bookings list reads `pro` (worker name) and `service` (joined item names) directly.
   res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer', pro: b.pro_name || '', service: (b.items || []).map((i) => i.name).join(', ') })))
 })
+// Data scope: bookings are zone-tagged; a scoped admin can't touch one outside their zones. 404
+// (not 403) so they can't probe which booking ids exist outside their scope.
+const bookingInScope = (req, b) => inScope(req.admin?.scope, { zoneId: b.zone_id })
 app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
-  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   res.json({ ...b, customer: u?.user?.name || 'Customer' })
 })
+// Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
+// actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp
+// (or the commission split); ops/marketing cost rates are configurable and default to 0 so nothing
+// is invented; company margin is whatever's left. Transactions + document refs are derived.
+app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const r2 = (n) => Math.round(n * 100) / 100
+  const pgFeePct = Number(await getSetting(ADMIN_URL, 'pg_fee_percent', '2.36')) || 2.36
+  const pgGstPct = Number(await getSetting(ADMIN_URL, 'pg_fee_gst_percent', '18')) || 18
+  const opsCostPct = Number(await getSetting(ADMIN_URL, 'operational_cost_percent', '0')) || 0
+  const mktgCostPct = Number(await getSetting(ADMIN_URL, 'marketing_cost_percent', '0')) || 0
+  const incentivePct = Number(await getSetting(ADMIN_URL, 'worker_incentive_percent', '0')) || 0
+  const commissionPct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
+
+  const total = b.total || 0
+  const isWallet = b.payment === 'wallet'
+  const pgFee = isWallet ? 0 : r2(total * pgFeePct / 100)
+  const pgGst = r2(pgFee * pgGstPct / 100)
+  const net = r2(total - pgFee - pgGst)
+  const workerPayout = b.worker_comp || Math.round((b.subtotal || 0) * (100 - commissionPct) / 100)
+  const incentive = r2((b.subtotal || 0) * incentivePct / 100)
+  const opsCost = r2(total * opsCostPct / 100)
+  const mktgCost = r2(total * mktgCostPct / 100)
+  const companyMargin = r2(net - workerPayout - incentive - opsCost - mktgCost)
+  const marginPct = total ? Math.round((companyMargin / total) * 1000) / 10 : 0
+  const short = String(b.ref || b.id).replace(/[#\s]/g, '')
+
+  const txns = [{ at: b.created, type: 'Customer Payment', status: 'success', amount: total, method: b.payment || 'razorpay', txnId: `pay_${short}` }]
+  if (pgFee) txns.push({ at: b.created, type: 'PG Fee Deducted', status: 'success', amount: -pgFee, method: 'Razorpay', txnId: `fee_${short}` })
+  if (pgGst) txns.push({ at: b.created, type: 'GST on PG Fee', status: 'success', amount: -pgGst, method: 'Razorpay', txnId: `tax_${short}` })
+  if (b.settled) txns.push({ at: b.completed_at || b.created, type: 'Worker Payout', status: 'success', amount: -workerPayout, method: 'Wallet Transfer', txnId: `PAYOUT_${short}` })
+
+  res.json({
+    total, paymentMethod: b.payment || '', paymentStatus: b.payment_status || '', paidAt: b.created,
+    customer: { subtotal: b.subtotal || 0, discount: b.discount || 0, coupon: b.coupon || '', fee: b.fee || 0, tax: b.tax || 0, total },
+    settlement: { collected: total, pgFee, pgFeePct, pgGst, pgGstPct, net, workerPayout, incentive, opsCost, mktgCost, companyMargin, marginPct },
+    payout: { workerName: b.pro_name || '', workerId: b.worker_id || null, amount: workerPayout, incentive, total: workerPayout + incentive, status: b.settled ? 'paid' : 'pending', paidAt: b.settled ? (b.completed_at || null) : null, txnId: `PAYOUT_${short}` },
+    txns,
+    documents: { invoice: `INV-${short}`, receipt: `RCPT-${short}`, payoutSlip: `PAYOUT-${short}` },
+    refund: { amount: b.refund || 0, status: b.refund_status || '' },
+  })
+})
+// Service evidence for the admin Service Evidence tab — merges the worker-captured evidence row
+// (before/after photos, checklist, notes, completion OTP, signatures) with the booking's own
+// timestamps/OTP/rating. Fields with no captured data come back empty (never invented).
+app.get('/api/admin/bookings/:id/evidence', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
+  const durMin = b.started_at && b.completed_at ? Math.max(0, Math.round((new Date(b.completed_at) - new Date(b.started_at)) / 60000)) : null
+  const before = (ev.before_photos && ev.before_photos.length) ? ev.before_photos : []
+  const after = (ev.after_photos && ev.after_photos.length) ? ev.after_photos : (b.work_photo ? [{ url: b.work_photo, at: b.completed_at }] : [])
+  res.json({
+    worker: { name: b.pro_name || '', id: b.worker_id || null, rating: b.pro_rating || 0 },
+    checkIn: { at: b.started_at || null, otp: b.service_otp || '', verified: !!b.started_at, sig: ev.start_sig || '' },
+    checkOut: { at: b.completed_at || null, otp: ev.completion_otp || '', verified: b.status === 'completed', sig: ev.end_sig || '' },
+    durationMin: durMin, status: b.status,
+    location: { address: b.address || '', lat: b.cust_lat ?? null, lng: b.cust_lng ?? null },
+    beforePhotos: before, afterPhotos: after, beforeAt: ev.before_at || null, afterAt: ev.after_at || b.completed_at || null,
+    checklist: ev.checklist || [],
+    workerNotes: ev.worker_notes || '',
+    materials: ev.materials || '',
+    feedback: { rating: b.rating || 0, review: b.review || '' },
+    device: ev.device || '', network: ev.network || '',
+    instructions: b.note || '',
+    summary: { service: (b.items || []).map((i) => i.name).join(', '), duration: b.duration || '', qty: (b.items || []).length || 1 },
+  })
+})
+// Worker-app / service-to-service upsert of a booking's evidence (photos, checklist, notes).
+app.post('/api/internal/bookings/:id/evidence', internalOnly, async (req, res) => {
+  const id = Number(req.params.id), e = req.body || {}
+  await pool.query(
+    `INSERT INTO booking_evidence (booking_id, before_photos, after_photos, checklist, worker_notes, materials, completion_otp, start_sig, end_sig, device, network, before_at, after_at, updated)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+     ON CONFLICT (booking_id) DO UPDATE SET before_photos=EXCLUDED.before_photos, after_photos=EXCLUDED.after_photos, checklist=EXCLUDED.checklist,
+       worker_notes=EXCLUDED.worker_notes, materials=EXCLUDED.materials, completion_otp=EXCLUDED.completion_otp, start_sig=EXCLUDED.start_sig,
+       end_sig=EXCLUDED.end_sig, device=EXCLUDED.device, network=EXCLUDED.network, before_at=EXCLUDED.before_at, after_at=EXCLUDED.after_at, updated=now()`,
+    [id, JSON.stringify(e.beforePhotos || []), JSON.stringify(e.afterPhotos || []), JSON.stringify(e.checklist || []), e.workerNotes || '', e.materials || '',
+      e.completionOtp || '', e.startSig || '', e.endSig || '', e.device || '', e.network || '', e.beforeAt || null, e.afterAt || null])
+  res.json({ ok: true })
+})
+// Per-booking activity/audit feed — derived from the booking's real lifecycle (create, payment,
+// dispatch, service start, evidence upload, completion, rating, escalation, admin note). Every entry
+// has a real timestamp; nothing is invented. Counts grouped by actor role for the summary chips.
+app.get('/api/admin/bookings/:id/activity', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
+  const custName = u?.user?.name || 'Customer'
+  const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
+  const acts = []
+  const iso = (v) => (v ? new Date(v).toISOString() : null)
+  const push = (at, role, name, module, actionType, details) => { if (at) acts.push({ at: iso(at), role, name, module, actionType, details }) }
+  const total = b.total || 0
+  const method = b.payment === 'wallet' ? 'Wallet' : (b.payment || 'Razorpay')
+  push(b.created, 'customer', custName, 'Bookings', 'Create', 'Booking created from Customer App')
+  push(b.created, 'system', method === 'Wallet' ? 'Wallet' : 'Razorpay', 'Payments', 'Payment', `Payment of ₹${total} received via ${method}`)
+  if (b.pro_name) push(b.created, 'auto', 'Auto Dispatch', 'Dispatch', 'Assignment', `Job assigned to ${b.pro_name}`)
+  if (b.started_at) push(b.started_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Started service after OTP verification${b.service_otp ? ` · Start OTP ${b.service_otp}` : ''}`)
+  if (ev.after_at) push(ev.after_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Ended job and uploaded after-service photos${(ev.after_photos || []).length ? ` · ${ev.after_photos.length} photos` : ''}`)
+  if (b.completed_at) push(b.completed_at, 'system', 'System', 'Workflow', 'Auto Update', 'Job marked as Completed')
+  if (b.rating) push(b.completed_at, 'customer', custName, 'Jobs', 'Customer Action', `Confirmed the service and rated ${Number(b.rating).toFixed(1)}${b.review ? ` · ${b.review}` : ''}`)
+  if (b.escalated) push(b.created, 'admin', 'Admin', 'Support', 'Escalation', `Booking escalated${b.escalate_reason ? `: ${b.escalate_reason}` : ''}`)
+  if (b.admin_note) push(b.created, 'admin', 'Admin', 'Notes', 'Note', b.admin_note)
+  if (b.status === 'cancelled') push(b.cancel_time || b.created, 'admin', b.cancelled_by || 'Admin', 'Bookings', 'Cancellation', `Booking cancelled${b.cancel_reason ? `: ${b.cancel_reason}` : ''}`)
+  acts.sort((a, z) => new Date(z.at) - new Date(a.at))
+  const counts = { total: acts.length, system: 0, admin: 0, worker: 0, customer: 0, auto: 0 }
+  for (const a of acts) if (counts[a.role] != null) counts[a.role]++
+  res.json({ activities: acts, counts })
+})
+// Admin booking actions — used by both the Bookings screen and the Control Tower console:
+// status change, reschedule (date/time), reassign / unassign a pro, escalate + reason, and an
+// operational note. Built as a deduped column map so any subset can be sent in one call.
 app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
-  if (!b) return res.status(404).json({ error: 'Not found' })
-  if (req.body?.status) { await pool.query('UPDATE bookings SET status=$1 WHERE id=$2', [req.body.status, b.id]); await emitBookingUpdate(b.id) }
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const body = req.body || {}
+  const u = {}
+  if (body.status) u.status = String(body.status)
+  if (body.date !== undefined) u.date = body.date || null
+  if (body.time !== undefined) u.time = body.time || null
+  if (body.adminNote !== undefined) u.admin_note = String(body.adminNote || '')
+  if (body.escalated !== undefined) { u.escalated = !!body.escalated; u.escalate_reason = body.escalated ? String(body.escalateReason || '') : '' }
+  if (body.unassign) { u.worker_id = null; u.pro_name = ''; u.status = 'confirmed' }
+  else if (body.workerId) { u.worker_id = Number(body.workerId); u.pro_name = String(body.workerName || ''); if (b.status === 'confirmed' && !body.status) u.status = 'worker_assigned' }
+  const cols = Object.keys(u)
+  if (cols.length) {
+    await pool.query(`UPDATE bookings SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')} WHERE id=$${cols.length + 1}`, [...cols.map((c) => u[c]), b.id])
+    await emitBookingUpdate(b.id)
+  }
   res.json(await getBooking(b.id))
 })
 
@@ -729,38 +976,51 @@ async function autoAssignSweep() {
 }
 setInterval(autoAssignSweep, 15_000)
 
-/* ---------- auto-cancel: no expert accepted an instant booking in time ----------
-   Instant bookings still sitting unclaimed after `dispatch_timeout_min` (default 5) are
-   cancelled and — if the customer already paid — the FULL amount is refunded to their
-   wallet. The customer app is notified via booking:update (cancelled_by='system'), which
-   drives the "no one accepted your service" popup. Runs every 30s. */
+/* ---------- auto-cancel: no expert accepted the booking → cancel + full refund ----------
+   A booking still 'confirmed' + unassigned is auto-cancelled and — if the customer already paid —
+   the FULL amount is refunded to their wallet. Applies to BOTH booking types:
+     • instant  — sitting unclaimed past `dispatch_timeout_min` (default 5) after creation.
+     • schedule — still unclaimed once the booked slot's start time has arrived.
+   The customer app is notified via booking:update (cancelled_by='system'), which drives the
+   "no one accepted your service" popup. Runs every 30s. */
+// Grace after a scheduled slot's start before we treat it as "the expert never turned up".
+const SCHED_NOSHOW_GRACE_MS = 20 * 60 * 1000
+async function autoCancelNoService(r, reason) {
+  const paid = r.payment_status === 'paid'
+  const refund = paid ? (r.total || 0) : 0
+  // Cancel ONLY while the service never actually started — still 'confirmed' (unclaimed) or merely
+  // 'worker_assigned' (assigned but the expert didn't head out). If it reached on_the_way/arrived/
+  // in_progress/completed between the SELECT and now, this update matches 0 rows and we skip.
+  const upd = await pool.query(
+    `UPDATE bookings SET status='cancelled', cancel_reason=$1, cancelled_by='system',
+       cancel_time=$2, refund=$3, refund_status=$4,
+       payment_status=CASE WHEN $5 THEN 'refunded' ELSE payment_status END
+     WHERE id=$6 AND status IN ('confirmed','worker_assigned') RETURNING id`,
+    [reason, nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
+  if (!upd.rowCount) return
+  if (refund > 0) {
+    try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
+    catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
+  }
+  await emitBookingUpdate(r.id)
+  publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(r.id), reason: 'no_worker', autoCancelled: true })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'booking.autocancel', entityType: 'booking', entityId: r.id, ref: r.ref, detail: `Auto-cancelled — ${reason}${refund > 0 ? ` · ₹${refund} refunded to wallet` : ''}`, meta: { refund } })
+  console.log(`[booking] auto-cancelled ${r.ref} (${reason})${refund > 0 ? `, refunded ₹${refund}` : ''}`)
+}
 async function sweepUnacceptedBookings() {
   try {
     const mins = await getSettingInt(ADMIN_URL, 'dispatch_timeout_min', 5)
-    const { rows } = await pool.query(
-      `SELECT * FROM bookings
-         WHERE status='confirmed' AND worker_id IS NULL AND type='instant'
-           AND created < now() - make_interval(mins => $1)`, [mins])
-    for (const r of rows.map(rowTo)) {
-      const paid = r.payment_status === 'paid'
-      const refund = paid ? (r.total || 0) : 0
-      // Guarded update: skip if a worker claimed it between the SELECT and now.
-      const upd = await pool.query(
-        `UPDATE bookings SET status='cancelled', cancel_reason=$1, cancelled_by='system',
-           cancel_time=$2, refund=$3, refund_status=$4,
-           payment_status=CASE WHEN $5 THEN 'refunded' ELSE payment_status END
-         WHERE id=$6 AND status='confirmed' AND worker_id IS NULL RETURNING id`,
-        ['No expert accepted the booking in time', nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
-      if (!upd.rowCount) continue
-      if (refund > 0) {
-        try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
-        catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
-      }
-      await emitBookingUpdate(r.id)
-      publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(r.id), reason: 'no_worker', autoCancelled: true })
-      publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'booking.autocancel', entityType: 'booking', entityId: r.id, ref: r.ref, detail: `Auto-cancelled — no expert accepted in ${mins} min${refund > 0 ? ` · ₹${refund} refunded to wallet` : ''}`, meta: { refund } })
-      console.log(`[booking] auto-cancelled ${r.ref} (no expert in ${mins}m)${refund > 0 ? `, refunded ₹${refund}` : ''}`)
-    }
+    // Instant: still unclaimed past the dispatch timeout.
+    const instant = (await pool.query(
+      `SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND type='instant'
+         AND created < now() - make_interval(mins => $1)`, [mins])).rows.map(rowTo)
+    // Scheduled: still not in active service ~20 min past the booked slot — covers both "no expert
+    // accepted" (unclaimed) and "expert assigned but never showed up" (worker_assigned).
+    const sched = (await pool.query(
+      "SELECT * FROM bookings WHERE type='schedule' AND status IN ('confirmed','worker_assigned')"))
+      .rows.map(rowTo).filter((b) => { const t = scheduledStartMs(b); return t != null && t + SCHED_NOSHOW_GRACE_MS <= Date.now() })
+    for (const r of instant) await autoCancelNoService(r, 'No expert accepted the booking in time')
+    for (const r of sched) await autoCancelNoService(r, r.worker_id ? 'Expert did not arrive for your slot' : 'No expert accepted the booking in time')
   } catch (e) { console.error('[booking] sweepUnacceptedBookings:', e.message) }
 }
 setInterval(sweepUnacceptedBookings, 30_000)

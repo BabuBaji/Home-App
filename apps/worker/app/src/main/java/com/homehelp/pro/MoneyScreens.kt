@@ -16,35 +16,50 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SentimentSatisfiedAlt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.WorkOutline
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -63,8 +78,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -559,107 +578,9 @@ fun StatusListRow(
     }
 }
 
-@Composable
-fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
-    var tab by remember { mutableStateOf("Upcoming") }
-    val tabs = listOf("Upcoming", "Completed", "Cancelled")
-    val counts = tabs.associateWith { t -> vm.bookings.count { it.status == t } }
-    val filtered = vm.bookings.filter { it.status == tab }
-    var detail by remember { mutableStateOf<Booking?>(null) }
-
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        BellHeader("My Bookings") { nav.navigate(Routes.P_NOTIFICATIONS) }
-        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            SegmentedTabs(tabs, tab, counts = counts) { tab = it }
-            // Aligned summary strip for the selected filter.
-            if (filtered.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("${filtered.size} ${tab.lowercase()} ${if (filtered.size == 1) "booking" else "bookings"}", fontSize = 13.sp, color = TextGray)
-                    Text("₹${filtered.sumOf { it.amount }} total", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
-                }
-            }
-        }
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            if (filtered.isEmpty()) {
-                val (emoji, msg) = when (tab) {
-                    "Upcoming" -> "🗓️" to "New bookings will appear here once customers book you."
-                    "Completed" -> "✅" to "Jobs you finish will be listed here."
-                    else -> "🚫" to "Cancelled bookings will show up here."
-                }
-                EmptyState(emoji, "No $tab bookings", msg)
-            } else {
-                filtered.forEach { b -> BookingCard(b) { detail = b } }
-            }
-            Spacer(Modifier.height(Space.l))
-        }
-    }
-
-    // Tap a booking → full details.
-    detail?.let { b ->
-        val (bg, fg) = statusChipColors(b.status)
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { detail = null },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { detail = null }) { Text(tr("Close")) } },
-            title = { Text(b.service ?: "Booking", fontWeight = FontWeight.Bold, color = TextDark) },
-            text = {
-                Column {
-                    Row(Modifier.padding(bottom = Space.s)) { StatusPill(b.status ?: "", bg, fg) }
-                    LabeledRow("Customer", b.customerName ?: "—")
-                    LabeledRow("Address", b.address ?: "—")
-                    LabeledRow("Date / Time", b.timeInfo ?: "—")
-                    LabeledRow("Amount", "₹${b.amount}", GreenSuccess)
-                }
-            },
-        )
-    }
-}
-
-private fun statusChipColors(status: String?): Pair<Color, Color> = when (status) {
-    "Upcoming" -> PurpleLight to Purple
-    "Completed" -> GreenLight to GreenSuccess
-    else -> Color(0xFFFDE7E7) to RedCancel
-}
-
-// Status icon + tint + tinted background for a booking's state (activity-row visuals).
-private fun bookingStatusVisual(status: String?): Triple<ImageVector, Color, Color> = when (status) {
-    "Upcoming" -> Triple(Icons.Filled.Schedule, Purple, PurpleLight)
-    "Completed" -> Triple(Icons.Filled.Check, GreenSuccess, GreenLight)
-    else -> Triple(Icons.Filled.Close, RedCancel, RedLight)
-}
-
-// Premium booking card — service icon chip, customer + time meta, amount and a status pill.
-@Composable
-private fun BookingCard(b: Booking, onClick: () -> Unit) {
-    val (icon, tint, tintBg) = bookingStatusVisual(b.status)
-    Card(modifier = Modifier.clickable { onClick() }) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(tintBg),
-                contentAlignment = Alignment.Center,
-            ) { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp)) }
-            Spacer(Modifier.width(Space.m))
-            Column(Modifier.weight(1f)) {
-                Text(b.service ?: "Booking", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp, maxLines = 1)
-                if (!b.customerName.isNullOrBlank()) {
-                    Spacer(Modifier.height(1.dp))
-                    Text(b.customerName!!, color = TextGray, fontSize = 12.5.sp, maxLines = 1)
-                }
-                if (!b.timeInfo.isNullOrBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text("🕐 ${b.timeInfo}", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                }
-            }
-            Spacer(Modifier.width(Space.s))
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (b.amount > 0) Text("₹${b.amount}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 16.sp)
-                StatusPill(b.status ?: "", tintBg, tint)
-            }
-        }
-    }
-}
+// BookingsScreen moved to JobsListScreen.kt and rebuilt as the Jobs tab (2_job.png):
+// Active / Upcoming / History, with a live active-job card. The old Upcoming/Completed/Cancelled
+// list had no way to reach the job in progress.
 
 // ---- Today's Schedule (timeline) ------------------------------------------------------------
 private fun scheduleColor(s: String) = when (s) { "Completed" -> GreenSuccess; "In progress" -> Purple; else -> Gold }
@@ -735,93 +656,230 @@ private fun ScheduleRow(item: com.homehelp.pro.network.ScheduleItem) {
     }
 }
 
+private val ProfBlue = Color(0xFF3B82F6)
+private val ProfBlueBg = Color(0xFFEAF1FE)
+
 @Composable
 fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
-    val ctx = LocalContext.current
     val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
-    val verified = vm.bankApproved
+    val tier = vm.tier
+    val nextTier = WorkerTier.next(tier)
+    val progressCur = if (nextTier != null) vm.jobsCompleted.coerceAtMost(nextTier.minJobs) else vm.jobsCompleted
+    val progressMax = nextTier?.minJobs ?: vm.jobsCompleted.coerceAtLeast(1)
+    val progressFrac = if (nextTier != null) (progressCur.toFloat() / progressMax).coerceIn(0f, 1f) else 1f
+    val kycVerified = vm.workerStatus.equals("active", true) || vm.bankApproved
+
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        BellHeader("Profile") { nav.navigate(Routes.P_NOTIFICATIONS) }
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
-            verticalArrangement = Arrangement.spacedBy(Space.l),
+        // Clean white header — title + bell(badge) + settings, as the reference draws it.
+        Row(
+            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.l).padding(top = 8.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Identity hero + overview figures (shown once there's activity to report).
-            GradientBanner {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(initials, size = 56, bg = Color.White.copy(alpha = 0.18f), fg = Color.White)
-                    Spacer(Modifier.width(Space.m))
-                    Column(Modifier.weight(1f)) {
-                        Text(vm.workerName.ifBlank { "HomeHelp Partner" }, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-                        if (verified) {
-                            Spacer(Modifier.height(Space.xs))
+            Text("Profile", color = TextDark, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, modifier = Modifier.weight(1f))
+            Box(Modifier.clip(CircleShape).clickable { nav.navigate(Routes.P_NOTIFICATIONS) }.padding(2.dp)) {
+                Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(24.dp))
+                if (vm.unreadNotifications > 0) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(15.dp).clip(CircleShape).background(RedCancel),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("${vm.unreadNotifications.coerceAtMost(9)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+            Spacer(Modifier.width(Space.l))
+            Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = TextDark, modifier = Modifier.size(24.dp).clip(CircleShape).clickable { nav.navigate(Routes.SETTINGS) })
+        }
+
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = 6.dp, bottom = Space.s),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // ── Identity card
+            Surface(shape = RoundedCornerShape(Radius.card), color = Primary50, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(11.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box {
+                            Box(
+                                Modifier.size(52.dp).clip(CircleShape).background(Color.White).border(2.dp, Purple, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (vm.avatarUrl.isNotBlank()) {
+                                    // Show the photo when it loads; fall back to initials while loading or if the URL can't be reached.
+                                    SubcomposeAsyncImage(
+                                        model = vm.avatarUrl,
+                                        contentDescription = "Profile photo",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop,
+                                        loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                                        error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                                    )
+                                } else {
+                                    Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                }
+                            }
+                            Box(
+                                Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(Purple)
+                                    .border(2.dp, Primary50, CircleShape).clickable { nav.navigate(Routes.P_PERSONAL) },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(10.dp)) }
+                        }
+                        Spacer(Modifier.width(Space.s))
+                        Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Verified, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(Space.xs))
-                                Text(tr("Verified Partner"), fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f))
+                                Text(vm.workerName.ifBlank { "HomeHelp Partner" }, color = TextDark, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                                if (kycVerified) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp)) }
+                            }
+                            Spacer(Modifier.height(3.dp))
+                            if (vm.workerPhone.isNotBlank()) { ProfileIconLine(Icons.Filled.Phone, vm.workerPhone); Spacer(Modifier.height(1.dp)) }
+                            if (vm.workerCity.isNotBlank()) { ProfileIconLine(Icons.Filled.LocationOn, vm.workerCity); Spacer(Modifier.height(1.dp)) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(13.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("${vm.workerRating}", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                if (vm.jobsCompleted > 0) { Spacer(Modifier.width(4.dp)); Text("(${vm.jobsCompleted} Ratings)", color = TextGray, fontSize = 11.5.sp) }
                             }
                         }
+                        Spacer(Modifier.width(Space.s))
+                        Box(
+                            Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White).border(1.dp, Purple, RoundedCornerShape(Radius.pill))
+                                .clickable { nav.navigate(Routes.P_PERSONAL) }.padding(horizontal = 9.dp, vertical = 6.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Edit", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Level banner
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF4A34C7), Color(0xFF6D4BE0)))).padding(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                    }
+                    Spacer(Modifier.width(Space.s))
+                    Column(Modifier.weight(1f)) {
+                        Text("Level ${tier.label}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            if (vm.jobsCompleted > 0) "${vm.workerRating} ★  •  ${vm.jobsCompleted} jobs completed" else "New partner",
-                            fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f),
+                            if (nextTier != null) "Keep going to reach ${nextTier.label}" else "You're at the top tier",
+                            color = Color.White.copy(alpha = 0.85f), fontSize = 11.5.sp,
                         )
                     }
+                    Row(Modifier.clip(RoundedCornerShape(Radius.pill)).clickable { nav.navigate(Routes.PERFORMANCE) }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("View Benefits", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
                 }
-                if (vm.monthEarnings > 0 || vm.jobsCompleted > 0 || vm.walletBalance > 0) {
-                    Spacer(Modifier.height(Space.l))
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.22f)))
-                    Spacer(Modifier.height(Space.l))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        SplitStat("₹${vm.monthEarnings}", "This Month")
-                        SplitStat("${vm.jobsCompleted}", "Jobs Done")
-                        SplitStat("₹${vm.walletBalance}", "Balance")
+                Spacer(Modifier.height(11.dp))
+                Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(Radius.pill)).background(Color.White.copy(alpha = 0.22f))) {
+                    Box(Modifier.fillMaxWidth(progressFrac).height(7.dp).clip(RoundedCornerShape(Radius.pill)).background(Brush.horizontalGradient(listOf(Color(0xFFF7B733), Color(0xFFFC7B2D)))))
+                }
+                Spacer(Modifier.height(7.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (nextTier != null) "Progress to ${nextTier.label}" else "Highest tier reached", color = Color.White.copy(alpha = 0.85f), fontSize = 11.5.sp)
+                    Text(if (nextTier != null) "$progressCur / $progressMax jobs" else "$progressCur jobs", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // ── Stat cards
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                ProfileStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, "Jobs Completed", "${vm.jobsCompleted}", "Total")
+                ProfileStat(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, "Acceptance Rate", vm.acceptancePct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStat(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, "Completion Rate", vm.completionPct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStat(Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "Customer Rating", "${vm.workerRating}", "Out of 5")
+            }
+
+            // ── Menu list
+            Card(padding = Dp16.XS) {
+                ProfileMenuRow(Icons.Filled.Person, "Personal Information", "View and update your personal details") { nav.navigate(Routes.P_PERSONAL) }
+                HairlineDivider()
+                ProfileMenuRow(Icons.Filled.VerifiedUser, "KYC Verification", "Aadhaar, PAN, Bank & other documents", verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
+                HairlineDivider()
+                ProfileMenuRow(Icons.Filled.AccountBalance, "Bank Account", "Manage your bank account details") { nav.navigate(Routes.P_BANK) }
+                HairlineDivider()
+                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, "Wallet & Earnings", "View earnings, incentives & withdrawals") { nav.navigate(Routes.WALLET) }
+                HairlineDivider()
+                ProfileMenuRow(Icons.Filled.CalendarMonth, "My Shifts", "View your shifts and availability") { nav.navigate(Routes.P_AVAILABILITY) }
+                HairlineDivider()
+                ProfileMenuRow(Icons.Filled.WorkspacePremium, "Performance", "View your performance and stats") { nav.navigate(Routes.PERFORMANCE) }
+                HairlineDivider()
+                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support", "FAQs, help center & contact support") { nav.navigate(Routes.P_HELP) }
+            }
+
+            // ── Logout
+            Surface(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).clickable {
+                    vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
+                },
+                shape = RoundedCornerShape(Radius.card), color = RedLight,
+            ) {
+                Row(Modifier.fillMaxWidth().padding(Space.m), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(36.dp).clip(RoundedCornerShape(Radius.field)).background(Color.White), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column {
+                        Text("Logout", color = RedCancel, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Logout from your account", color = RedCancel.copy(alpha = 0.72f), fontSize = 12.sp)
                     }
                 }
             }
-            // Quick stats strip — real figures at a glance.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.History, "₹${vm.weekEarnings}", "This Week", Purple, PurpleLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.EmojiEvents, "${vm.jobsCompleted}", "Jobs Done", GreenSuccess, GreenLight)
-            }
+            Spacer(Modifier.height(2.dp))
+        }
+    }
+}
 
-            SectionTitle("Account")
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                MenuItem(Icons.Filled.Person, "Personal Information") { nav.navigate(Routes.P_PERSONAL) }
-                MenuItem(Icons.Filled.Description, "Documents") { nav.navigate(Routes.P_DOCUMENTS) }
-                MenuItem(Icons.Filled.AccountBalance, "Bank Details") { nav.navigate(Routes.P_BANK) }
-                MenuItem(Icons.Filled.Schedule, "Availability & Shifts") { nav.navigate(Routes.P_AVAILABILITY) }
-            }
+@Composable
+private fun ProfileIconLine(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = TextGray, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = TextGray, fontSize = 13.sp)
+    }
+}
 
-            SectionTitle("Growth & Rewards")
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                MenuItem(Icons.Filled.EmojiEvents, "Performance") { nav.navigate(Routes.PERFORMANCE) }
-                MenuItem(Icons.Filled.CardGiftcard, "Refer & Earn") { shareInvite(ctx) }
-                MenuItem(Icons.Filled.Tune, "Preferences") { nav.navigate(Routes.P_PREFERENCES) }
-                MenuItem(Icons.Filled.Notifications, "Notification Settings") { nav.navigate(Routes.P_NOTIFICATIONS) }
+/** One compact stat card in the profile's four-up strip (icon chip + label + big value + caption). */
+@Composable
+private fun ProfileStat(modifier: Modifier, icon: ImageVector, tint: Color, tintBg: Color, label: String, value: String, caption: String) {
+    Card(modifier = modifier, padding = Dp16.XS) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Box(Modifier.size(26.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
             }
+            Spacer(Modifier.height(3.dp))
+            Text(label, color = TextGray, fontSize = 9.5.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 11.sp)
+            Spacer(Modifier.height(1.dp))
+            Text(value, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(caption, color = TextMuted, fontSize = 9.sp)
+        }
+    }
+}
 
-            SectionTitle("Support")
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                MenuItem(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { nav.navigate(Routes.P_HELP) }
-                MenuItem(Icons.Filled.Settings, "Settings") { nav.navigate(Routes.SETTINGS) }
-                MenuItem(Icons.Filled.Info, "About Us", divider = false) { nav.navigate(Routes.P_ABOUT) }
-            }
-            Surface(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).clickable {
-                    vm.logout()
-                    nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
-                },
-                shape = RoundedCornerShape(Radius.card),
-                color = RedLight,
-            ) {
-                Row(Modifier.fillMaxWidth().padding(Space.l), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(20.dp))
+/** Menu row: plain leading icon + title (with optional Verified pill) + subtitle + chevron. */
+@Composable
+private fun ProfileMenuRow(icon: ImageVector, title: String, subtitle: String, verified: Boolean = false, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(Space.s))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                if (verified) {
                     Spacer(Modifier.width(Space.s))
-                    Text(tr("Logout"), color = RedCancel, fontWeight = FontWeight.SemiBold)
+                    StatusPill("Verified", GreenLight, GreenSuccess)
                 }
             }
-            Spacer(Modifier.height(Space.s))
+            Text(subtitle, color = TextGray, fontSize = 11.5.sp)
         }
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
     }
 }
 

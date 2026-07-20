@@ -8,6 +8,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.runtime.mutableLongStateOf
+import com.homehelp.pro.network.ChecklistBody
+import com.homehelp.pro.network.ChecklistTask
+import com.homehelp.pro.network.ExtraBody
+import com.homehelp.pro.network.ExtraRemoveBody
+import com.homehelp.pro.network.JobExtra
+import com.homehelp.pro.network.JobMessage
+import com.homehelp.pro.network.JobStateResponse
+import com.homehelp.pro.network.JobPhoto
+import com.homehelp.pro.network.MessageBody
+import com.homehelp.pro.network.NotesBody
+import com.homehelp.pro.network.SignatureBody
+import com.homehelp.pro.network.PauseBody
+import com.homehelp.pro.network.PhotoBody
+import com.homehelp.pro.network.PhotoRemoveBody
 import com.homehelp.pro.network.AdvanceBody
 import com.homehelp.pro.network.AdvanceEligibilityDto
 import com.homehelp.pro.network.AdvanceEntry
@@ -36,9 +51,32 @@ import com.homehelp.pro.network.PreferencesBody
 import com.homehelp.pro.network.ProfileBody
 import com.homehelp.pro.network.ReasonBody
 import com.homehelp.pro.network.RetrofitClient
-import com.homehelp.pro.network.UploadDocBody
+import com.homehelp.pro.network.BankAccount
+import com.homehelp.pro.network.BankAccountBody
+import com.homehelp.pro.network.PayoutSettingsDto
+import com.homehelp.pro.network.PinBody
+import com.homehelp.pro.network.WithdrawRequestBody
+import com.homehelp.pro.network.WithdrawResult
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import com.homehelp.pro.network.LeaderboardDto
+import com.homehelp.pro.network.ServiceWiseDto
+import com.homehelp.pro.network.SettlementDto
+import com.homehelp.pro.network.TrendPoint
 import com.homehelp.pro.network.WalletStateResponse
 import com.homehelp.pro.network.WalletSummaryDto
+import com.homehelp.pro.network.SkillDto
+import com.homehelp.pro.network.SkillClaim
+import com.homehelp.pro.network.SkillsBody
+import com.homehelp.pro.network.TrainingModuleDto
+import com.homehelp.pro.network.TrainingProgress
+import com.homehelp.pro.network.QuizState
+import com.homehelp.pro.network.QuizQuestionDto
+import com.homehelp.pro.network.QuizSubmitBody
+import com.homehelp.pro.network.QuizResultResponse
+import com.homehelp.pro.network.IssuedEquipmentDto
+import com.homehelp.pro.network.WorkerDto
 import com.homehelp.pro.network.WithdrawBody
 import com.homehelp.pro.network.WithdrawalEntry
 import kotlinx.coroutines.Dispatchers
@@ -77,6 +115,9 @@ data class Job(
     val id: String,
     val customerName: String,
     val initials: String,
+    val customerAvatar: String = "",
+    val customerType: String = "Residential",
+    val note: String = "",
     val customerPhone: String,
     val customerRating: Double,
     val services: List<String>,
@@ -125,7 +166,7 @@ data class WalletTxn(
 )
 
 /** A verification document and its current review status. */
-data class DocItem(val name: String, val status: String, val fileName: String = "")
+data class DocItem(val name: String, val status: String, val fileName: String = "", val rejectReason: String = "")
 
 class AppViewModel : ViewModel() {
 
@@ -177,6 +218,18 @@ class AppViewModel : ViewModel() {
         private set
     var todayCompleted by mutableIntStateOf(0)
         private set
+    var todayCancelled by mutableIntStateOf(0)
+        private set
+    // Lifetime performance rates from the backend; null until it reports history, so the
+    // Home Performance Overview can show "—" instead of a misleading 0%.
+    var completionPct by mutableStateOf<Int?>(null)
+        private set
+    var cancellationPct by mutableStateOf<Int?>(null)
+        private set
+    var punctualityPct by mutableStateOf<Int?>(null)
+        private set
+    var acceptancePct by mutableStateOf<Int?>(null)
+        private set
     var walletBalance by mutableIntStateOf(0)
         private set
     var totalEarned by mutableIntStateOf(0)
@@ -203,6 +256,162 @@ class AppViewModel : ViewModel() {
     val deductionDetail = mutableStateListOf<DeductionEntry>()
     var deductionTotal by mutableIntStateOf(0)
         private set
+    // ─── Wallet analytics (3_wallet.png): trend · service split · settlement · leaderboard ───
+    var yesterdayEarnings by mutableIntStateOf(0)
+        private set
+    var lastWeekEarnings by mutableIntStateOf(0)
+        private set
+    var lastMonthEarnings by mutableIntStateOf(0)
+        private set
+    val earningsTrend = mutableStateListOf<TrendPoint>()
+    var serviceWise by mutableStateOf<ServiceWiseDto?>(null)
+        private set
+    var settlement by mutableStateOf<SettlementDto?>(null)
+        private set
+    var leaderboard by mutableStateOf<LeaderboardDto?>(null)
+        private set
+
+    /** Percentage change vs the previous period, or null when there's no base to compare with. */
+    fun changePct(now: Int, before: Int): Int? =
+        if (before <= 0) null else Math.round(((now - before) * 100f) / before)
+
+    fun loadWalletAnalytics() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.walletAnalytics()
+                earningsTrend.clear(); earningsTrend.addAll(r.trend)
+                serviceWise = r.serviceWise
+                settlement = r.settlement
+                leaderboard = r.leaderboard
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    // ─── Wallet module: bank accounts · payout settings · PIN · withdrawal ───────────────
+    val bankAccounts = mutableStateListOf<BankAccount>()
+    var payoutSettings by mutableStateOf(PayoutSettingsDto())
+        private set
+    var pinIsSet by mutableStateOf(false)
+        private set
+    var walletBusy by mutableStateOf(false)
+        private set
+    var walletError by mutableStateOf<String?>(null)
+        private set
+    /** The result of the last withdrawal — drives the success screen. */
+    var lastWithdrawal by mutableStateOf<WithdrawResult?>(null)
+        private set
+
+    fun clearWalletError() { walletError = null }
+
+    val defaultBank: BankAccount? get() = bankAccounts.firstOrNull { it.isDefault } ?: bankAccounts.firstOrNull()
+
+    private fun bankCall(block: suspend () -> List<BankAccount>) {
+        walletBusy = true; walletError = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val list = block()
+                bankAccounts.clear(); bankAccounts.addAll(list)
+                backendConnected = true
+            } catch (e: Exception) {
+                walletError = httpMessage(e) ?: "Couldn't reach the server"
+                backendConnected = false
+            }
+            walletBusy = false
+        }
+    }
+
+    /** Surfaces the server's own message (e.g. "That account is already added") instead of a generic error. */
+    private fun httpMessage(e: Exception): String? = runCatching {
+        val he = e as? retrofit2.HttpException ?: return@runCatching null
+        val body = he.response()?.errorBody()?.string() ?: return@runCatching null
+        Regex("""\"error\"\s*:\s*\"([^\"]+)\"""").find(body)?.groupValues?.get(1)
+    }.getOrNull()
+
+    fun loadBankAccounts() = bankCall { api.bankAccounts().accounts }
+    fun addBankAccount(holder: String, bankName: String, account: String, ifsc: String, upi: String, type: String) =
+        bankCall { api.addBankAccount(BankAccountBody(holder, bankName, account, ifsc, upi, type)).accounts }
+    fun updateBankAccount(id: Int, holder: String, bankName: String, upi: String, type: String) =
+        bankCall { api.updateBankAccount(id, BankAccountBody(holder = holder, bankName = bankName, upi = upi, accountType = type)).accounts }
+    fun makeBankDefault(id: Int) = bankCall { api.makeBankDefault(id).accounts }
+    fun deleteBankAccount(id: Int) = bankCall { api.deleteBankAccount(id).accounts }
+
+    fun loadPayoutSettings() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.payoutSettings().settings?.let { payoutSettings = it }
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun savePayoutSettings(next: PayoutSettingsDto) {
+        payoutSettings = next            // optimistic; the server reply is adopted below
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.savePayoutSettings(next).settings?.let { payoutSettings = it }
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun loadPinStatus() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                pinIsSet = api.pinStatus().isSet
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    /** Sets or resets the wallet PIN. [otp] is required by the server when a PIN already exists. */
+    fun setWalletPin(pin: String, otp: String? = null, onDone: (Boolean, String?) -> Unit) {
+        walletBusy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.setPin(PinBody(pin, otp))
+                pinIsSet = r.isSet
+                onDone(r.ok, r.error)
+            } catch (e: Exception) { onDone(false, httpMessage(e) ?: "Couldn't reach the server") }
+            walletBusy = false
+        }
+    }
+
+    fun verifyWalletPin(pin: String, onDone: (Boolean, String?) -> Unit) {
+        walletBusy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.verifyPin(PinBody(pin))
+                onDone(r.ok, r.error)
+            } catch (e: Exception) { onDone(false, httpMessage(e) ?: "Couldn't reach the server") }
+            walletBusy = false
+        }
+    }
+
+    fun requestWithdrawalWithPin(amount: Int, pin: String, bankAccountId: Int?, onDone: (Boolean, String?) -> Unit) {
+        walletBusy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.requestWithdrawalPin(WithdrawRequestBody(amount, pin, bankAccountId))
+                if (r.ok) {
+                    lastWithdrawal = r
+                    r.walletSummary?.let { applyWalletSummary(it) }
+                    withdrawals.clear(); withdrawals.addAll(r.withdrawals)
+                }
+                onDone(r.ok, r.error)
+            } catch (e: Exception) { onDone(false, httpMessage(e) ?: "Couldn't reach the server") }
+            walletBusy = false
+        }
+    }
+
     val walletHistory = mutableStateListOf<LedgerEntry>()
     val withdrawals = mutableStateListOf<WithdrawalEntry>()
     val advances = mutableStateListOf<AdvanceEntry>()
@@ -217,6 +426,10 @@ class AppViewModel : ViewModel() {
 
     // ---- editable profile state (Profile sub-screens) — empty until the backend loads it ----
     var workerName by mutableStateOf("")
+    /* 'onboarding' until an admin approves them; 'active' means dispatchable. The app used to have
+     * no idea, so an onboarding worker saw a home built around jobs they cannot accept. */
+    var workerStatus by mutableStateOf("")
+        private set
     var workerPhone by mutableStateOf("")
     var workerEmail by mutableStateOf("")
     var workerCity by mutableStateOf("")
@@ -278,14 +491,55 @@ class AppViewModel : ViewModel() {
     var notifPromotions by mutableStateOf(false)
     var notifRatings by mutableStateOf(true)
 
+    // ---- communication channel opt-in (stored in the admin service; proxied by the worker service) ----
+    var commWhatsapp by mutableStateOf(true)
+    var commSms by mutableStateOf(true)
+    var commEmail by mutableStateOf(true)
+    var commPush by mutableStateOf(true)
+    var commPromo by mutableStateOf(true)
+
     // ---- verification documents ----
     // The required-document checklist. Statuses start as "Pending" and are replaced by the
     // backend's real review status on load (no document is shown as verified until it is).
+    // Phase 4. Seeded from the SERVER's list (loadDocumentTypes) rather than hardcoded here — the
+    // server validates uploads against the same list, so a second copy would drift. These three are
+    // only a first paint for an offline start; the real set replaces them on load.
     val documents = mutableStateListOf(
-        DocItem("Aadhaar Card", "Pending"),
-        DocItem("PAN Card", "Pending"),
-        DocItem("Passport Size Photo", "Pending"),
+        DocItem("Aadhaar Front", "Missing"),
+        DocItem("Aadhaar Back", "Missing"),
+        DocItem("PAN Card", "Missing"),
     )
+    /** name -> required?  Drives the Required/Optional pill and the completion counter. */
+    val documentRequired = mutableStateMapOf<String, Boolean>()
+    val documentHints = mutableStateMapOf<String, String>()
+
+    /** Required documents the worker still hasn't had approved. Empty = KYC done. */
+    val pendingRequiredDocs: List<String>
+        get() = documents.filter { documentRequired[it.name] != false && it.status != "Verified" }.map { it.name }
+
+    /**
+     * Pull the canonical document set, then overlay what this worker has actually uploaded.
+     * A type with no row yet is "Missing" — the app used to invent its own three-item list and
+     * show them all as "Pending", implying they'd been submitted when nothing had.
+     */
+    fun loadDocumentTypes() = sync {
+        val types = api.documentTypes().types
+        if (types.isNotEmpty()) {
+            documentRequired.clear(); documentHints.clear()
+            types.forEach { documentRequired[it.name] = it.required; documentHints[it.name] = it.hint }
+            val mine = api.getDocuments().associateBy { it.name }
+            documents.clear()
+            documents.addAll(types.map { t ->
+                val d = mine[t.name]
+                DocItem(t.name, d?.status?.ifBlank { "Missing" } ?: "Missing", d?.fileName ?: "", d?.rejectReason ?: "")
+            })
+        }
+    }
+
+    /** True only when every required document has been reviewed and approved — drives the
+     *  verified badge on the Home profile header. */
+    val isKycVerified: Boolean
+        get() = documents.isNotEmpty() && documents.all { it.status == "Approved" }
 
     // ---- networking helpers ----
     /** Fire a backend call without blocking the UI; failures degrade to offline mode. */
@@ -309,37 +563,7 @@ class AppViewModel : ViewModel() {
         // Remember the auth token so every later call is attached to this worker, and
         // persist it so the session survives the app process being killed/backgrounded.
         b.token?.let { RetrofitClient.token = it; Session.token = it }
-        b.worker?.let { w ->
-            workerName = w.name
-            workerPhone = w.phone
-            workerEmail = w.email
-            workerCity = w.city
-            if (w.jobsCompleted > 0) jobsCompleted = w.jobsCompleted
-            if (w.rating > 0) workerRating = w.rating
-            bankName = w.bankName
-            bankAccount = w.bankAccount
-            bankIfsc = w.bankIfsc
-            bankHolder = w.bankHolder
-            bankUpi = w.bankUpi
-            bankAccountType = w.bankAccountType
-            bankStatus = w.bankStatus
-            bankRemarks = w.bankRemarks
-            bankRegisteredName = w.bankRegisteredName
-            bankNameMatch = w.bankNameMatch
-            shiftStart = w.shiftStart
-            shiftEnd = w.shiftEnd
-            if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
-            if (w.availableDays.isNotEmpty()) {
-                availableDays.clear(); availableDays.putAll(w.availableDays)
-            }
-            if (w.jobPreferences.isNotEmpty()) {
-                jobPreferences.clear(); jobPreferences.putAll(w.jobPreferences)
-            }
-            notifNewJobs = w.notifNewJobs
-            notifPayments = w.notifPayments
-            notifPromotions = w.notifPromotions
-            notifRatings = w.notifRatings
-        }
+        b.worker?.let { applyWorker(it) }
         b.wallet?.let { wl ->
             walletBalance = wl.balance
             totalEarned = wl.totalEarned
@@ -352,19 +576,22 @@ class AppViewModel : ViewModel() {
         if (b.bookings.isNotEmpty()) { bookings.clear(); bookings.addAll(b.bookings) }
         schedule.clear(); schedule.addAll(b.schedule)
         b.attendance?.let { attendance = it }
-        b.shift?.let { shifts.clear(); shifts.addAll(it.shifts); selectedShiftId = it.selectedId }
+        b.shift?.let { shifts.clear(); shifts.addAll(it.shifts); selectedShiftId = it.selectedId; requestedShiftId = it.requestedId; shiftStatus = it.shiftStatus }
         leaves.clear(); leaves.addAll(b.leaves)
         tickets.clear(); tickets.addAll(b.tickets)
         if (b.earnings.isNotEmpty()) { earnings.clear(); earnings.addAll(b.earnings) }
         if (b.walletTxns.isNotEmpty()) { walletTxns.clear(); walletTxns.addAll(b.walletTxns) }
         if (b.documents.isNotEmpty()) {
             documents.clear()
-            documents.addAll(b.documents.map { DocItem(it.name, it.status, it.fileName) })
+            documents.addAll(b.documents.map { DocItem(it.name, it.status, it.fileName, it.rejectReason) })
         }
         // Restore any job the worker is mid-way through, so relaunching the app (or coming
         // back to Home) keeps the active/in-progress job visible instead of losing it.
         activeJob = b.activeJob
         jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
+        // Re-hydrate the in-service working state (ticks/photos/extras/pause) for a job that was
+        // already running when the app was killed — this is what makes it survive a restart.
+        if (activeJob != null) loadJobState()
     }
 
     // ---- lifecycle transitions ----
@@ -376,6 +603,39 @@ class AppViewModel : ViewModel() {
     var loggingIn by mutableStateOf(false)
         private set
     fun clearLoginError() { loginError = null }
+
+    /** True once the backend has actually issued a code — the OTP field only appears after this. */
+    var otpRequested by mutableStateOf(false)
+        private set
+    var requestingOtp by mutableStateOf(false)
+        private set
+    /** Only populated in demo mode (WORKER_DEV_OTP set server-side); pre-fills the field. */
+    var devOtp by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Ask the backend to issue a login code. This has to happen for real — the server stores the
+     * code hashed and compares it on verify, so a locally-flipped "OTP sent" flag would leave the
+     * worker typing a code that was never issued.
+     */
+    fun requestLoginOtp(phone: String) {
+        val p = phone.trim()
+        loginError = null
+        requestingOtp = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.requestOtp(AuthRequest(phone = p))
+                backendConnected = true
+                otpRequested = true
+                devOtp = r["devOtp"] as? String
+            } catch (e: retrofit2.HttpException) {
+                loginError = httpErrorMessage(e)   // surfaces the server's rate-limit message
+            } catch (e: Exception) {
+                loginError = "Could not reach the server. Check your connection and try again."
+            } finally { requestingOtp = false }
+        }
+    }
 
     fun login(phone: String, otp: String) {
         val p = phone.trim()
@@ -399,6 +659,27 @@ class AppViewModel : ViewModel() {
             } finally {
                 loggingIn = false
             }
+        }
+    }
+
+    /**
+     * DEBUG ONLY — headless auto-login for on-device UI verification when ADB input injection is
+     * blocked (e.g. HyperOS). Does the two-step demo auth (request-otp → verify) so `am start` can
+     * drive the app without anyone tapping. Never called outside a BuildConfig.DEBUG intent path.
+     */
+    fun debugLogin(phone: String, otp: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.requestOtp(AuthRequest(phone = phone))
+                val b = api.verify(AuthRequest(phone = phone, otp = otp))
+                Session.phone = phone
+                applyBootstrap(b)
+                loadDailyGoal()
+                backendConnected = true
+                isLoggedIn = true
+                onDone(true)
+            } catch (e: Exception) { onDone(false) }
         }
     }
 
@@ -526,7 +807,9 @@ class AppViewModel : ViewModel() {
     fun acceptJob() {
         jobStatus = JobStatus.ACCEPTED
         jobAcceptedAtMs = System.currentTimeMillis()
+        clearJobState()          // never inherit the previous job's ticks/photos/extras
         sync { api.acceptJob() }
+        loadJobState()           // seeds the checklist for this job's services
     }
 
     fun rejectJob() {
@@ -574,6 +857,168 @@ class AppViewModel : ViewModel() {
         return true
     }
 
+    // ─── In-service job state: checklist · before/after photos · extras · pause ───────────
+    // All server-owned (dispatch `job_state`, keyed by booking), so ticks, photos and extras
+    // survive navigation, process death and reinstalls. Every mutator posts and adopts the
+    // server's reply as the new truth rather than editing local copies optimistically.
+
+    var checklist by mutableStateOf<List<ChecklistTask>>(emptyList())
+        private set
+    /** The named shots this job requires (step 5/7), seeded server-side from the booked service. */
+    var photoSlots by mutableStateOf<List<String>>(emptyList())
+        private set
+    var beforePhotos by mutableStateOf<List<JobPhoto>>(emptyList())
+        private set
+    var afterPhotos by mutableStateOf<List<JobPhoto>>(emptyList())
+        private set
+    var beforeNotes by mutableStateOf("")
+        private set
+    var afterNotes by mutableStateOf("")
+        private set
+    var signature by mutableStateOf<String?>(null)
+        private set
+    var customerSigned by mutableStateOf(false)
+        private set
+    var customerRating by mutableIntStateOf(0)
+        private set
+    var customerNotes by mutableStateOf("")
+        private set
+    var extras by mutableStateOf<List<JobExtra>>(emptyList())
+        private set
+    var extrasTotal by mutableIntStateOf(0)
+        private set
+    var jobPaused by mutableStateOf(false)
+        private set
+    /** Total time the service has been paused, including a pause still in flight. */
+    var pausedMs by mutableLongStateOf(0L)
+        private set
+    var jobStateLoading by mutableStateOf(false)
+        private set
+    /**
+     * When [pausedMs] was last read from the server. [pausedMs] already counts an in-flight pause
+     * up to that instant, so a live timer must measure the running pause from here — not from now —
+     * or it would double-count it.
+     */
+    var stateAtMs by mutableLongStateOf(0L)
+        private set
+
+    val checklistDone: Int get() = checklist.count { it.done }
+
+    /** Total paused time as of [nowMs], extending an in-flight pause in real time. */
+    fun pausedMsAt(nowMs: Long): Long =
+        pausedMs + if (jobPaused && stateAtMs > 0) (nowMs - stateAtMs).coerceAtLeast(0L) else 0L
+
+    private fun adopt(s: JobStateResponse) {
+        stateAtMs = System.currentTimeMillis()
+        checklist = s.checklist
+        photoSlots = s.photoSlots
+        beforePhotos = s.beforePhotos
+        afterPhotos = s.afterPhotos
+        beforeNotes = s.beforeNotes
+        afterNotes = s.afterNotes
+        signature = s.signature
+        customerSigned = s.signed
+        customerRating = s.customerRating
+        customerNotes = s.customerNotes
+        extras = s.extras
+        extrasTotal = s.extrasTotal
+        jobPaused = s.paused
+        pausedMs = s.pausedMs
+    }
+
+    /** Pulls the active job's working state. Safe to call when there's no active job (409 → no-op). */
+    fun loadJobState() {
+        if (activeJob == null) return
+        jobStateLoading = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                adopt(api.jobState())
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+            jobStateLoading = false
+        }
+    }
+
+    private fun mutateState(block: suspend () -> JobStateResponse) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                adopt(block())
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun toggleTask(id: Int) {
+        val next = checklist.map { if (it.id == id) it.copy(done = !it.done) else it }
+        checklist = next                                    // instant tick; server reply confirms
+        mutateState { api.saveChecklist(ChecklistBody(next)) }
+    }
+
+    fun addJobPhoto(phase: String, slot: String, dataUrl: String) =
+        mutateState { api.addJobPhoto(PhotoBody(phase, slot, dataUrl)) }
+    fun removeJobPhoto(phase: String, slot: String) =
+        mutateState { api.removeJobPhoto(PhotoRemoveBody(phase, slot)) }
+    fun saveJobNotes(phase: String, text: String) = mutateState { api.saveJobNotes(NotesBody(phase, text)) }
+    fun saveSignature(dataUrl: String, rating: Int, notes: String) =
+        mutateState { api.saveSignature(SignatureBody(dataUrl, rating, notes)) }
+
+    /** How many of the required slots have a shot for this phase — drives "Photos Required (2/3)". */
+    fun photosDone(phase: String): Int {
+        val taken = (if (phase == "after") afterPhotos else beforePhotos).map { it.slot }.toSet()
+        return photoSlots.count { it in taken }
+    }
+    fun photoFor(phase: String, slot: String): JobPhoto? =
+        (if (phase == "after") afterPhotos else beforePhotos).firstOrNull { it.slot == slot }
+    fun addExtra(name: String, price: Int) = mutateState { api.addExtra(ExtraBody(name, price)) }
+    fun removeExtra(id: Long) = mutateState { api.removeExtra(ExtraRemoveBody(id)) }
+    fun pauseJob(reason: String?) = mutateState { api.pauseJob(PauseBody(reason)) }
+    fun resumeJob() = mutateState { api.resumeJob() }
+
+    // ─── Customer chat (module: Chat / Call Customer) ─────────────────────────────────────
+    val messages = mutableStateListOf<JobMessage>()
+    var chatSending by mutableStateOf(false)
+        private set
+
+    fun loadMessages() {
+        if (activeJob == null) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.jobMessages()
+                messages.clear(); messages.addAll(r.messages)
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    fun sendMessage(text: String) {
+        val body = text.trim()
+        if (body.isEmpty() || activeJob == null) return
+        chatSending = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                api.sendJobMessage(MessageBody(body))
+                val r = api.jobMessages()
+                messages.clear(); messages.addAll(r.messages)
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+            chatSending = false
+        }
+    }
+
+    /** Clears per-job working state so a finished job never bleeds into the next one. */
+    private fun clearJobState() {
+        checklist = emptyList(); photoSlots = emptyList()
+        beforePhotos = emptyList(); afterPhotos = emptyList()
+        beforeNotes = ""; afterNotes = ""; signature = null; customerSigned = false
+        customerRating = 0; customerNotes = ""
+        extras = emptyList(); extrasTotal = 0; jobPaused = false; pausedMs = 0L
+        messages.clear(); beforePhoto = null
+    }
+
     // Before-photo captured on arrival (module: Start Job → Before Photos). Held locally and
     // attached to the completion payload; cleared when a new job starts.
     var beforePhoto: String? = null
@@ -604,6 +1049,7 @@ class AppViewModel : ViewModel() {
         activeJob = null
         jobStatus = JobStatus.NONE
         jobAcceptedAtMs = 0L
+        clearJobState()
         // Reconcile with the authoritative server totals (earnings stay 0 until the customer confirms).
         sync {
             val r = api.settle()
@@ -620,6 +1066,7 @@ class AppViewModel : ViewModel() {
         activeJob = null
         jobStatus = JobStatus.NONE
         jobAcceptedAtMs = 0L
+        clearJobState()
         sync { api.cancel(ReasonBody(reason)) }
     }
 
@@ -631,8 +1078,17 @@ class AppViewModel : ViewModel() {
         todayEarnings = s.todayEarnings
         todayJobs = s.todayJobs
         todayCompleted = s.todayCompleted
+        todayCancelled = s.todayCancelled
+        completionPct = s.completionPct
+        cancellationPct = s.cancellationPct
+        punctualityPct = s.punctualityPct
+        acceptancePct = s.acceptancePct
         weekEarnings = s.weekEarnings
         monthEarnings = s.monthEarnings
+        yesterdayEarnings = s.yesterdayEarnings
+        lastWeekEarnings = s.lastWeekEarnings
+        lastMonthEarnings = s.lastMonthEarnings
+        totalEarned = s.totalEarned
         withdrawnTotal = s.totalWithdrawn
         advanceOutstanding = s.advanceOutstanding
         nextPayout = s.nextPayout
@@ -737,7 +1193,318 @@ class AppViewModel : ViewModel() {
     val lastWithdrawalId: Int get() = withdrawals.firstOrNull()?.id ?: 0
 
     // ---- profile persistence (called from the Save buttons) ----
-    fun saveProfile() = sync { api.updateProfile(ProfileBody(workerName, workerPhone, workerEmail, workerCity)) }
+    /**
+     * Hydrate every worker-scoped field from a WorkerDto. Extracted from applyBootstrap so the
+     * profile/photo/bank saves — which all return the same DTO — refresh state through ONE path
+     * instead of each repeating the field list and drifting.
+     */
+    private fun applyWorker(w: WorkerDto) {
+        workerName = w.name
+        if (w.status.isNotBlank()) workerStatus = w.status
+        onboardingSubmittedAt = w.onboarding?.submittedAt
+        workerPhone = w.phone
+        workerEmail = w.email
+        workerCity = w.city
+        if (w.jobsCompleted > 0) jobsCompleted = w.jobsCompleted
+        if (w.rating > 0) workerRating = w.rating
+        bankName = w.bankName
+        bankAccount = w.bankAccount
+        bankIfsc = w.bankIfsc
+        bankHolder = w.bankHolder
+        bankUpi = w.bankUpi
+        bankAccountType = w.bankAccountType
+        bankStatus = w.bankStatus
+        bankRemarks = w.bankRemarks
+        bankRegisteredName = w.bankRegisteredName
+        bankNameMatch = w.bankNameMatch
+        // Phase 2/3
+        gender = w.gender
+        dob = w.dob
+        bloodGroup = w.bloodGroup
+        maritalStatus = w.maritalStatus
+        fatherName = w.fatherName
+        motherName = w.motherName
+        emergencyName = w.emergencyName
+        emergencyPhone = w.emergencyPhone
+        currentAddress = w.address
+        permanentAddress = w.permanentAddress
+        languages = w.languages
+        qualification = w.qualification
+        experienceYears = w.experienceYears
+        previousCompany = w.previousCompany
+        avatarUrl = w.avatar.orEmpty()
+        shiftStart = w.shiftStart
+        shiftEnd = w.shiftEnd
+        if (w.availabilityState.isNotBlank()) availabilityState = w.availabilityState
+        if (w.availableDays.isNotEmpty()) { availableDays.clear(); availableDays.putAll(w.availableDays) }
+        if (w.jobPreferences.isNotEmpty()) { jobPreferences.clear(); jobPreferences.putAll(w.jobPreferences) }
+        notifNewJobs = w.notifNewJobs
+        notifPayments = w.notifPayments
+        notifPromotions = w.notifPromotions
+        notifRatings = w.notifRatings
+    }
+
+    /* ---- Phase 6: service skills ----
+     * `skills` is what the worker CLAIMS; `approvedServices` is what an admin has granted and what
+     * actually brings work. They are separate on purpose — claiming a skill does not make you
+     * dispatchable for it, and the screen says so rather than implying otherwise.
+     */
+    val serviceCatalogue = mutableStateListOf<String>()
+    val skillLevels = mutableStateListOf<String>()
+    val skills = mutableStateMapOf<String, SkillDto>()
+    val approvedServices = mutableStateListOf<String>()
+    var savingSkills by mutableStateOf(false)
+        private set
+    var skillsError by mutableStateOf<String?>(null)
+    fun clearSkillsError() { skillsError = null }
+
+    fun loadSkills() = sync {
+        val cat = api.serviceCatalogue()
+        serviceCatalogue.clear(); serviceCatalogue.addAll(cat.services)
+        skillLevels.clear(); skillLevels.addAll(cat.levels)
+        val s = api.getSkills()
+        skills.clear(); skills.putAll(s.skills)
+        approvedServices.clear(); approvedServices.addAll(s.approved)
+    }
+
+    /** Claim/withdraw skills. Any edit to an approved skill sends it back for review — the server
+     *  enforces that; this just reflects whatever comes back. */
+    fun saveSkills(claims: Map<String, SkillClaim>, onDone: () -> Unit = {}) {
+        skillsError = null
+        savingSkills = true
+        viewModelScope.launch {
+            try {
+                val r = withContext(Dispatchers.IO) { api.saveSkills(SkillsBody(claims)) }
+                skills.clear(); skills.putAll(r.skills)
+                approvedServices.clear(); approvedServices.addAll(r.approved)
+                backendConnected = true
+                onDone()
+            } catch (e: retrofit2.HttpException) { skillsError = httpErrorMessage(e) }
+            catch (e: Exception) { skillsError = "Could not save. Check your connection and try again." }
+            finally { savingSkills = false }
+        }
+    }
+
+    fun uploadSkillCertificate(ctx: android.content.Context, service: String, uri: android.net.Uri) {
+        skillsError = null
+        savingSkills = true
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+                    ?: throw IllegalStateException("Could not read that file")
+                if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("File is too large (max 8 MB)")
+                val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                val part = MultipartBody.Part.createFormData("file", "certificate", bytes.toRequestBody(mime.toMediaTypeOrNull()))
+                val r = withContext(Dispatchers.IO) {
+                    api.uploadSkillCertificate(service.toRequestBody("text/plain".toMediaTypeOrNull()), part)
+                }
+                skills.clear(); skills.putAll(r.skills)
+            } catch (e: retrofit2.HttpException) { skillsError = httpErrorMessage(e) }
+            catch (e: Exception) { skillsError = e.message ?: "Upload failed." }
+            finally { savingSkills = false }
+        }
+    }
+
+    /* ---- Phase 7: training & assessment ----
+     * Modules are written by the admin; unpublished ones simply aren't in the list, so an empty
+     * list means "nothing published yet", not an error. The paper carries no answer key and the
+     * score comes back from the server — there is nothing to check locally.
+     */
+    val trainingModules = mutableStateListOf<TrainingModuleDto>()
+    var trainingProgress by mutableStateOf(TrainingProgress())
+        private set
+    var quizState by mutableStateOf(QuizState())
+        private set
+    var quizPaper by mutableStateOf<List<QuizQuestionDto>>(emptyList())
+        private set
+    var quizResult by mutableStateOf<QuizResultResponse?>(null)
+    var loadingQuiz by mutableStateOf(false)
+        private set
+    var trainingError by mutableStateOf<String?>(null)
+    fun clearTrainingError() { trainingError = null }
+
+    private fun applyTraining(modules: List<TrainingModuleDto>, progress: TrainingProgress, quiz: QuizState) {
+        trainingModules.clear(); trainingModules.addAll(modules)
+        trainingProgress = progress
+        quizState = quiz
+    }
+
+    fun loadTraining() = sync {
+        val t = api.getTraining()
+        applyTraining(t.modules, t.progress, t.quiz)
+    }
+
+    fun completeModule(id: Int) {
+        trainingError = null
+        viewModelScope.launch {
+            try {
+                val t = withContext(Dispatchers.IO) { api.completeModule(id) }
+                applyTraining(t.modules, t.progress, t.quiz)
+                backendConnected = true
+            } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
+            catch (e: Exception) { trainingError = "Could not save your progress. Check your connection." }
+        }
+    }
+
+    /** Fetch a paper. The server refuses with a clear reason (modules unread, cooldown, bank too
+     *  small) — show that rather than a generic failure. */
+    fun startQuiz(onReady: () -> Unit = {}) {
+        trainingError = null
+        loadingQuiz = true
+        quizResult = null
+        viewModelScope.launch {
+            try {
+                val p = withContext(Dispatchers.IO) { api.getQuizPaper() }
+                quizPaper = p.questions
+                backendConnected = true
+                onReady()
+            } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
+            catch (e: Exception) { trainingError = "Could not load the assessment. Check your connection." }
+            finally { loadingQuiz = false }
+        }
+    }
+
+    fun submitQuiz(answers: Map<Int, Int>, onDone: () -> Unit = {}) {
+        trainingError = null
+        loadingQuiz = true
+        viewModelScope.launch {
+            try {
+                val r = withContext(Dispatchers.IO) { api.submitQuiz(QuizSubmitBody(answers.mapKeys { it.key.toString() })) }
+                quizResult = r
+                trainingProgress = r.progress
+                quizState = r.quiz
+                quizPaper = emptyList()
+                onDone()
+            } catch (e: retrofit2.HttpException) { trainingError = httpErrorMessage(e) }
+            catch (e: Exception) { trainingError = "Could not submit. Check your connection and try again." }
+            finally { loadingQuiz = false }
+        }
+    }
+
+    /* ---- Onboarding wizard ----
+     * Step completion is computed by the server from real data; the app renders it and nothing more.
+     * Submitting says "I've done my part" — it is not an approval, and the screen says so.
+     */
+    val onboardingSteps = mutableStateListOf<com.homehelp.pro.network.OnboardingStep>()
+    var onboardingDone by mutableStateOf(0)
+        private set
+    var onboardingTotal by mutableStateOf(0)
+        private set
+    var canSubmitOnboarding by mutableStateOf(false)
+        private set
+    var onboardingSubmittedAt by mutableStateOf<String?>(null)
+        private set
+    var submittingOnboarding by mutableStateOf(false)
+        private set
+    var onboardingError by mutableStateOf<String?>(null)
+    fun clearOnboardingError() { onboardingError = null }
+
+    private fun applyOnboarding(r: com.homehelp.pro.network.OnboardingResponse) {
+        onboardingSteps.clear(); onboardingSteps.addAll(r.steps)
+        onboardingDone = r.completed
+        onboardingTotal = r.total
+        canSubmitOnboarding = r.canSubmit
+        onboardingSubmittedAt = r.submittedAt
+    }
+
+    fun loadOnboarding() = sync { applyOnboarding(api.getOnboarding()) }
+
+    fun submitOnboarding(onDone: () -> Unit = {}) {
+        onboardingError = null
+        submittingOnboarding = true
+        viewModelScope.launch {
+            try {
+                applyOnboarding(withContext(Dispatchers.IO) { api.submitOnboarding() })
+                backendConnected = true
+                onDone()
+            } catch (e: retrofit2.HttpException) { onboardingError = httpErrorMessage(e) }
+            catch (e: Exception) { onboardingError = "Could not submit. Check your connection and try again." }
+            finally { submittingOnboarding = false }
+        }
+    }
+
+    /* ---- Phase 9: equipment ----
+     * Read-only. An admin issues the kit; a worker ticking "I have a vacuum" would make Phase 12's
+     * Go Live check worthless. The app just shows what's on their record.
+     */
+    val equipment = mutableStateListOf<IssuedEquipmentDto>()
+    fun loadEquipment() = sync {
+        val r = api.getEquipment()
+        equipment.clear(); equipment.addAll(r.issued)
+    }
+
+    /* ---- Phase 2/3: the worker's own profile ----
+     * These were admin-entered and invisible to the app. Held as plain state and sent together;
+     * the server allow-lists and MERGES, so sending a subset never blanks the rest. */
+    var gender by mutableStateOf("")
+    var dob by mutableStateOf("")
+    var bloodGroup by mutableStateOf("")
+    var maritalStatus by mutableStateOf("")
+    var fatherName by mutableStateOf("")
+    var motherName by mutableStateOf("")
+    var emergencyName by mutableStateOf("")
+    var emergencyPhone by mutableStateOf("")
+    var currentAddress by mutableStateOf("")
+    var permanentAddress by mutableStateOf("")
+    var languages by mutableStateOf("")
+    var qualification by mutableStateOf("")
+    var experienceYears by mutableStateOf("")
+    var previousCompany by mutableStateOf("")
+    var avatarUrl by mutableStateOf("")
+        private set
+
+    var savingProfile by mutableStateOf(false)
+        private set
+    var profileError by mutableStateOf<String?>(null)
+    fun clearProfileError() { profileError = null }
+
+    fun saveProfile(onDone: () -> Unit = {}) {
+        profileError = null
+        savingProfile = true
+        viewModelScope.launch {
+            try {
+                val w = withContext(Dispatchers.IO) {
+                    api.updateProfile(ProfileBody(
+                        name = workerName, phone = workerPhone, email = workerEmail, city = workerCity,
+                        gender = gender, dob = dob, bloodGroup = bloodGroup, maritalStatus = maritalStatus,
+                        fatherName = fatherName, motherName = motherName,
+                        emergencyName = emergencyName, emergencyPhone = emergencyPhone,
+                        address = currentAddress, permanentAddress = permanentAddress, languages = languages,
+                        qualification = qualification, experienceYears = experienceYears, previousCompany = previousCompany,
+                    ))
+                }
+                applyWorker(w)
+                backendConnected = true
+                onDone()
+            } catch (e: retrofit2.HttpException) {
+                profileError = httpErrorMessage(e)
+            } catch (e: Exception) {
+                profileError = "Could not save. Check your connection and try again."
+            } finally { savingProfile = false }
+        }
+    }
+
+    /** Upload a profile photo (public bucket — customers see it on their job screen). */
+    fun uploadPhoto(ctx: android.content.Context, uri: android.net.Uri) {
+        profileError = null
+        savingProfile = true
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+                    ?: throw IllegalStateException("Could not read that image")
+                if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("Image is too large (max 8 MB)")
+                val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
+                val part = MultipartBody.Part.createFormData("file", "avatar.jpg", bytes.toRequestBody(mime.toMediaTypeOrNull()))
+                val w = withContext(Dispatchers.IO) { api.uploadProfilePhoto(part) }
+                applyWorker(w)
+                backendConnected = true
+            } catch (e: retrofit2.HttpException) {
+                profileError = httpErrorMessage(e)
+            } catch (e: Exception) {
+                profileError = e.message ?: "Could not upload the photo."
+            } finally { savingProfile = false }
+        }
+    }
 
     /** Resolve bank + branch from the IFSC (auto-fills the bank name and confirms the code is real).
      *  Only the penny-drop on save can prove the ACCOUNT NUMBER itself — this just validates the IFSC. */
@@ -777,21 +1544,95 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun saveAvailability() = sync {
-        api.updateAvailability(AvailabilityBody(availableDays.toMap(), shiftStart, shiftEnd))
+    /* ---- Phase 11: availability ----
+     * These are PREFERENCES. An admin approves them or assigns something else, so the screen shows
+     * the review status and what was actually assigned rather than implying the request took effect.
+     */
+    var maxWeeklyHours by mutableStateOf("")
+    var hoursThisWeek by mutableStateOf(0.0)
+        private set
+    var availabilityStatus by mutableStateOf("Pending")
+        private set
+    var availabilityReason by mutableStateOf("")
+        private set
+    var assignedShiftId by mutableStateOf<Int?>(null)
+        private set
+    var availabilityError by mutableStateOf<String?>(null)
+    fun clearAvailabilityError() { availabilityError = null }
+
+    fun loadAvailability() = sync {
+        val r = api.getAvailability()
+        availableDays.clear(); availableDays.putAll(r.availability.availableDays)
+        shiftStart = r.availability.shiftStart
+        shiftEnd = r.availability.shiftEnd
+        maxWeeklyHours = r.availability.maxWeeklyHours?.toString() ?: ""
+        availabilityStatus = r.availability.status
+        availabilityReason = r.availability.reason
+        assignedShiftId = r.assigned.shiftDefId
+        hoursThisWeek = r.hoursThisWeek
     }
 
-    // ---- shift plans (min-guarantee) ----
+    /** The server validates (at least one day, HH:MM, 1..90 hours) and reports why on rejection. */
+    fun saveAvailability(onDone: () -> Unit = {}) {
+        availabilityError = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    api.updateAvailability(AvailabilityBody(
+                        availableDays.toMap(), shiftStart, shiftEnd,
+                        maxWeeklyHours.trim().toIntOrNull(),
+                    ))
+                }
+                backendConnected = true
+                loadAvailability()
+                onDone()
+            } catch (e: retrofit2.HttpException) { availabilityError = httpErrorMessage(e) }
+            catch (e: Exception) { availabilityError = "Could not save. Check your connection and try again." }
+        }
+    }
+
+    /* ---- shift plans (min-guarantee) ----
+     * `selectedShiftId` is the shift an ADMIN assigned — it's what the earnings guarantee hangs on.
+     * `requestedShiftId` is what the worker asked for. Picking a shift only requests it: the app
+     * must not show it as selected before an admin approves, or a worker will count on a guarantee
+     * they haven't been given.
+     */
     val shifts = mutableStateListOf<com.homehelp.pro.network.ShiftDto>()
     var selectedShiftId by mutableStateOf<Int?>(null)
         private set
-    /** Sign the worker up for a shift plan; the server re-derives attendance/guarantee status. */
+    var requestedShiftId by mutableStateOf<Int?>(null)
+        private set
+    var shiftStatus by mutableStateOf("Pending")
+        private set
+
+    fun loadShifts() = sync {
+        val r = api.getShifts()
+        shifts.clear(); shifts.addAll(r.shifts)
+        selectedShiftId = r.selectedId
+        requestedShiftId = r.requestedId
+        shiftStatus = r.shiftStatus
+    }
+
+    /** Ask for a shift. The admin grants it — this does NOT assign it. */
     fun selectShift(id: Int, onDone: () -> Unit = {}) {
-        selectedShiftId = id
+        requestedShiftId = id
+        shiftStatus = "Pending"
         viewModelScope.launch {
-            try { attendance = api.selectShift(com.homehelp.pro.network.SelectShiftBody(id)); backendConnected = true } catch (_: Exception) {}
+            try {
+                attendance = api.selectShift(com.homehelp.pro.network.SelectShiftBody(id))
+                backendConnected = true
+                runCatching { loadShiftsNow() }
+            } catch (_: Exception) {}
             onDone()
         }
+    }
+
+    private suspend fun loadShiftsNow() {
+        val r = withContext(Dispatchers.IO) { api.getShifts() }
+        shifts.clear(); shifts.addAll(r.shifts)
+        selectedShiftId = r.selectedId
+        requestedShiftId = r.requestedId
+        shiftStatus = r.shiftStatus
     }
 
     // ---- geofence (assigned-apartment radius) ----
@@ -877,16 +1718,68 @@ class AppViewModel : ViewModel() {
         api.updateNotifications(NotificationsBody(notifNewJobs, notifPayments, notifPromotions, notifRatings))
     }
 
+    /** Pull the worker's communication channel opt-in (from the admin service via the worker proxy). */
+    fun loadComm() {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val c = api.getComm()
+                commWhatsapp = c.whatsapp; commSms = c.sms; commEmail = c.email; commPush = c.push; commPromo = c.promo
+                backendConnected = true
+            } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    /** Persist the current channel opt-in; adopts the server's returned state as truth. */
+    fun saveComm() = sync {
+        val c = api.updateComm(com.homehelp.pro.network.CommDto(commWhatsapp, commSms, commEmail, commPush, commPromo))
+        commWhatsapp = c.whatsapp; commSms = c.sms; commEmail = c.email; commPush = c.push; commPromo = c.promo
+    }
+
     /** Record a picked document: flip to "Under Review" locally, then persist to the backend. */
-    fun uploadDocument(name: String, fileName: String) {
-        val i = documents.indexOfFirst { it.name == name }
-        if (i >= 0) documents[i] = documents[i].copy(status = "Under Review", fileName = fileName)
-        sync {
-            val r = api.uploadDocument(UploadDocBody(name, fileName))
-            if (r.documents.isNotEmpty()) {
-                documents.clear()
-                documents.addAll(r.documents.map { DocItem(it.name, it.status, it.fileName) })
-            }
+    /** Set while a document is uploading, so the row can show progress instead of lying about status. */
+    var uploadingDoc by mutableStateOf<String?>(null)
+        private set
+    var uploadError by mutableStateOf<String?>(null)
+        private set
+    fun clearUploadError() { uploadError = null }
+
+    /**
+     * Upload a KYC document's actual BYTES. Reads the picked content Uri and posts it as multipart.
+     *
+     * This previously sent only {name, fileName} — two strings — and flipped the row to
+     * "Under Review" locally, which was a lie the next refresh silently overwrote. The status
+     * shown now is whatever the server says.
+     */
+    fun uploadDocument(ctx: android.content.Context, name: String, fileName: String, uri: android.net.Uri) {
+        uploadError = null
+        uploadingDoc = name
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } ?: throw IllegalStateException("Could not read that file")
+                // 8 MB is the server's limit — fail here with a clear message rather than upload
+                // for 30s and have it rejected.
+                if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("File is too large (max 8 MB)")
+                val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                val part = MultipartBody.Part.createFormData(
+                    "file", fileName, bytes.toRequestBody(mime.toMediaTypeOrNull()),
+                )
+                val plain = "text/plain".toMediaTypeOrNull()
+                val r = withContext(Dispatchers.IO) {
+                    api.uploadDocument(name.toRequestBody(plain), fileName.toRequestBody(plain), part)
+                }
+                backendConnected = true
+                if (r.documents.isNotEmpty()) {
+                    documents.clear()
+                    documents.addAll(r.documents.map { DocItem(it.name, it.status, it.fileName, it.rejectReason) })
+                }
+            } catch (e: retrofit2.HttpException) {
+                uploadError = httpErrorMessage(e)   // e.g. wrong file type, too large, storage down
+            } catch (e: Exception) {
+                uploadError = e.message ?: "Upload failed. Please try again."
+            } finally { uploadingDoc = null }
         }
     }
 

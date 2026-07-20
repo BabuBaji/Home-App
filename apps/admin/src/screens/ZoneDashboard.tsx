@@ -83,8 +83,8 @@ export default function ZoneDashboard({ zone, onBack, onEdit }: { zone: BZone; o
         <button className="zo-btn"><Download size={15} /> Export</button>
       </div>
 
-      {/* KPI row 1 */}
-      <div className="zo-kpis" style={{ marginBottom: 14 }}>
+      {/* KPI row 1 — all six on a single line */}
+      <div className="zo-kpis" style={{ gridTemplateColumns: 'repeat(6,1fr)', marginBottom: 14 }}>
         <StatCard icon={<Users size={20} />} tint="#22C55E" label="Workers Online" value={d.online} sub={`of ${d.total}`} delta="15%" />
         <StatCard icon={<Briefcase size={20} />} tint="#F59E0B" label="Workers Busy" value={d.busy} sub={`of ${d.total}`} delta="8%" />
         <StatCard icon={<UserX size={20} />} tint="#94A3B8" label="Workers Offline" value={d.offline} sub={`of ${d.total}`} delta="5%" down />

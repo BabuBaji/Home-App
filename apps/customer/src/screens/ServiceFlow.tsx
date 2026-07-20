@@ -84,8 +84,12 @@ export default function ServiceFlow() {
   const base = dur?.price ?? 0
   const subtotal = base + addonsTotal
   const fee = quote?.fee ?? 19
-  const gst = Math.round((subtotal + fee) * 0.18)
-  const total = subtotal + fee + gst
+  // Live demand/weather surge from the same authoritative quote the final booking screen uses,
+  // so this preview matches what the customer is actually charged on Booking Summary.
+  const surgePct = quote?.surgePct || 0
+  const surgeAmount = surgePct ? Math.round(subtotal * surgePct / 100) : 0
+  const gst = Math.round((subtotal + surgeAmount + fee) * 0.18)
+  const total = subtotal + surgeAmount + fee + gst
   const savings = (dur?.original ? dur.original - dur.price : 0)
   if (!s || !dur) return <div className="screen m2"><Loading /></div>
 
@@ -206,10 +210,18 @@ export default function ServiceFlow() {
       {step === 'pricing' && (<>
         <div className="content">
           <p className="sf-sub">Review your selection</p>
+          {surgeAmount > 0 && (
+            <div className="note-box" style={{ background: '#eef4ff', borderColor: '#bcd0ff', color: '#1d4ed8', marginBottom: 12 }}>
+              {quote?.surgeReason === 'rain'
+                ? `🌧️ Rain incoming — demand is high, so prices are up ${surgePct}% right now.`
+                : `⚡ High demand right now — prices are up ${surgePct}%.`}
+            </div>
+          )}
           <div className="sf-price-row"><span>{s.name} ({dur.label})</span><b>₹{base}</b></div>
           {addonList.map((a) => <div key={a.id} className="sf-price-row"><span>{a.name} (Add-on)</span><b>₹{a.price}</b></div>)}
           <div className="sf-div" />
           <div className="sf-price-row"><span>Subtotal</span><b>₹{subtotal}</b></div>
+          {surgeAmount > 0 && <div className="sf-price-row"><span>{quote?.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'} (+{surgePct}%)</span><b>+₹{surgeAmount}</b></div>}
           <div className="sf-price-row"><span>Platform Fee</span><b>₹{fee}</b></div>
           <div className="sf-price-row"><span>GST (18%)</span><b>₹{gst}</b></div>
           <div className="sf-div" />
@@ -226,7 +238,7 @@ export default function ServiceFlow() {
             <div className="sf-rev-score">
               <b>{s.rating}</b>
               <div className="sf-rev-stars">{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={14} className={n <= Math.round(s.rating) ? 'f' : ''} />)}</div>
-              <small>({s.reviewsCount.toLocaleString()} ratings)</small>
+              <small>({(s.reviewsCount ?? 0).toLocaleString()} ratings)</small>
             </div>
             <div className="sf-rev-bars">
               {dist.map((p, i) => (

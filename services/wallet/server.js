@@ -10,8 +10,12 @@ const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
-  makeAdminAuth, getSetting, getSettingInt,
+  makeAdminAuth, requirePerm, getSetting, getSettingInt,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: it carries the jsonwebtoken dep.
+import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('wallet') // refuse to boot without a signing secret rather than trust forgeable tokens
 
 const PORT = Number(process.env.PORT || 4009)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5439/wallet'
@@ -47,6 +51,18 @@ async function init() {
     // so `INSERT ... ON CONFLICT (worker_id, ref_id)` can use it as the arbiter for idempotent settlement.
     `DROP INDEX IF EXISTS ux_income_ref`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_income_ref ON worker_income(worker_id, ref_id)`,
+    // Wallet PIN gates withdrawals (step 2 of the withdraw flow). Stored as a salted SHA-256
+    // digest — never the PIN itself — with a lockout counter so a 4-digit space can't be walked.
+    `CREATE TABLE IF NOT EXISTS worker_wallet_pin (
+       worker_id INTEGER PRIMARY KEY,
+       pin_hash TEXT NOT NULL,
+       salt TEXT NOT NULL,
+       fails INTEGER NOT NULL DEFAULT 0,
+       locked_until TIMESTAMPTZ,
+       updated TIMESTAMPTZ DEFAULT now()
+     )`,
+    `ALTER TABLE worker_withdrawals ADD COLUMN IF NOT EXISTS bank_account_id INTEGER`,
+    `ALTER TABLE worker_withdrawals ADD COLUMN IF NOT EXISTS reference TEXT`,
     // Who credited this row: 'System' for the event-driven incentives/earnings the platform calculates
     // itself, or an admin's name for a manually granted bonus. Existing rows are all system-generated.
     `ALTER TABLE worker_income ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'System'`,
@@ -64,6 +80,34 @@ async function init() {
 }
 
 const commission = () => getSettingInt(ADMIN_URL, 'commission_percent', 20)
+
+/* Phase 10: a worker may have their own commission, which overrides the platform-wide one.
+ * The worker service owns the worker, so we ASK rather than keep a copy that drifts.
+ *
+ * On failure this falls back to the platform rate — the same number used before Phase 10 existed.
+ * That matters: settleBooking runs on booking.completed, and a worker who finished a job must be
+ * paid even if the worker service is briefly unreachable. Erring toward the default pays them;
+ * erring toward zero would silently swallow their earnings.
+ */
+async function payConfig(workerId) {
+  const platform = await commission()
+  const cfg = await tryGet(WORKER_URL, `/api/internal/workers/${workerId}/pay-config`, null)
+  if (!cfg) {
+    console.error(`[wallet] pay-config unavailable for worker ${workerId} — settling at the platform rate (${platform}%)`)
+    return { pct: platform, walletEnabled: true, inherited: true }
+  }
+  const own = cfg.commissionPercent
+  const valid = Number.isInteger(own) && own >= 0 && own <= 100
+  return {
+    pct: valid ? own : platform,
+    // A FIXED-salary worker earns no per-job share — payroll pays them monthly instead. Defaults to
+    // true so an older/partial response behaves exactly as it did before fixed salaries existed.
+    paysPerJob: cfg.paysPerJob !== false,
+    perJobIncentive: Number(cfg.perJobIncentive) || 0,
+    walletEnabled: cfg.walletEnabled !== false,
+    inherited: !valid,
+  }
+}
 const minPayoutLimit = () => getSettingInt(ADMIN_URL, 'min_payout_limit', 500)
 
 /* ---------- payout policy ----------
@@ -104,22 +148,45 @@ const serviceOf = (b) => (Array.isArray(b?.items) && b.items[0]?.name) || b?.typ
 // Credit a worker's earnings for a completed booking (idempotent on ref_id).
 async function settleBooking(b) {
   if (!b?.worker_id) return
-  const pct = await commission()
-  const share = Math.max(0, Math.round(((b.total || 0) * (100 - pct)) / 100))
-  if (share <= 0) return
+  // Per-worker commission if one is set, else the platform rate. This is the number that decides
+  // what the worker is actually paid, so Phase 10's setting has to be read HERE or it means nothing.
+  const { pct, paysPerJob, perJobIncentive } = await payConfig(b.worker_id)
+  // A fixed-salary worker earns no share — payroll pays them monthly, and also paying a share here
+  // would pay them twice for the same work. The job is still recorded: the row is what makes this
+  // idempotent, and their job count feeds metrics and their attendance bonus.
+  const share = paysPerJob ? Math.max(0, Math.round(((b.total || 0) * (100 - pct)) / 100)) : 0
+  if (paysPerJob && share <= 0) return
   // Label reads "Kitchen Cleaning · #HH10234" — the service name is what makes a ledger row
   // legible to an admin; the ref alone doesn't say what the worker was paid for.
   const svc = serviceOf(b)
   const ref = b.ref || `#${b.id}`
+  // A ₹0 "Job Earnings" row would read as a job they weren't paid for. Say what it actually is.
+  const category = paysPerJob ? 'Job Earnings' : 'Job Completed'
+  const label = (svc ? `${svc} · ${ref}` : ref) + (paysPerJob ? '' : ' · covered by your salary')
   const ins = await pool.query(
-    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Job Earnings',$2,$3,$4,'available')
+    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,$2,$3,$4,$5,'available')
      ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [b.worker_id, svc ? `${svc} · ${ref}` : ref, share, String(b.id)])
+    [b.worker_id, category, label, share, String(b.id)])
   if (!ins.rowCount) return // already settled
   await adjustBalance(b.worker_id, { balance: share, earnings: share, jobs: 1 })
+
+  // Per Job Incentive — a flat amount from the worker's incentive plan, on top of any share.
+  // Idempotent on its own ref so it can't double-credit with the share.
+  if (perJobIncentive > 0) {
+    const incIns = await pool.query(
+      `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Incentive',$2,$3,$4,'available')
+       ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+      [b.worker_id, `Per-job incentive · ${ref}`, perJobIncentive, `perjob-${b.id}`])
+    if (incIns.rowCount) {
+      await adjustBalance(b.worker_id, { balance: perJobIncentive, earnings: perJobIncentive })
+      await notify(b.worker_id, 'Incentive credited', `+₹${perJobIncentive} for ${ref}`)
+    }
+  }
   await internalPost((process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''), `/api/internal/bookings/${b.id}/settled`, {}).catch(() => {})
-  await notify(b.worker_id, 'Earnings credited', `₹${share} for ${b.ref || b.id}`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: b.worker_id, detail: `Credited ₹${share} for ${b.ref || b.id}`, meta: { amount: share } })
+  if (share > 0) {
+    await notify(b.worker_id, 'Earnings credited', `₹${share} for ${b.ref || b.id}`)
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.credit', entityType: 'worker', entityId: b.worker_id, detail: `Credited ₹${share} for ${b.ref || b.id}`, meta: { amount: share } })
+  }
 }
 
 /* ---------- on-time-start incentive / late-start penalty ---------- */
@@ -235,20 +302,6 @@ async function deductionsDto(wid) {
 }
 
 // Credit a month-end Shakti Bonus (idempotent per worker per month via ref_id).
-async function creditShaktiBonus(d) {
-  const amt = Math.max(0, Number(d.amount) || 0)
-  if (!d.workerId || amt <= 0) return
-  const ref = `shakti-${d.workerId}-${d.month}`
-  const ins = await pool.query(
-    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
-     VALUES ($1, 'Sitara Bonus', $2, $3, $4, 'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [d.workerId, `${d.tier || ''} Sitara Bonus · ${d.month}`, amt, ref])
-  if (!ins.rowCount) return // already paid this month
-  await adjustBalance(d.workerId, { balance: amt, earnings: amt })
-  await notify(d.workerId, 'Sitara Bonus credited', `₹${amt} ${d.tier || ''} bonus for ${d.month}`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.sitara', entityType: 'worker', entityId: d.workerId, detail: `Sitara Bonus ₹${amt} (${d.tier}) for ${d.month}`, meta: { amount: amt } })
-}
-
 // Everything is derived from the real LEDGER (worker_income / withdrawals / deductions), so the
 // balance reflects only actual completed-service earnings — never a stale/seeded snapshot.
 // Field names match the worker app's WalletSummaryDto (weekEarnings/monthEarnings/todayEarnings/
@@ -270,10 +323,17 @@ async function summary(wid) {
   const payoutDay = await getSettingInt(ADMIN_URL, 'payout_day', 4)
   const minPayout = await minPayoutLimit()
   const nextPayout = nextPayoutDate(freq, payoutDay)
+  // Prior periods, so the wallet can show "+15% vs yesterday" honestly. Each window is the same
+  // LENGTH as the one it compares against (rolling, matching weekEarnings/monthEarnings above) —
+  // comparing a rolling 30 days against a calendar month would flatter or punish at random.
+  const yesterdayEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND (created AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date - 1")
+  const lastWeekEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '14 days' AND created <= now()-interval '7 days'")
+  const lastMonthEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '60 days' AND created <= now()-interval '30 days'")
   return {
     available, pending: 0, hold, onHold: hold,
     totalEarned: earned, totalWithdrawn, withdrawn: totalWithdrawn,
     advanceOutstanding, todayEarnings, weekEarnings, monthEarnings,
+    yesterdayEarnings, lastWeekEarnings, lastMonthEarnings,
     thisWeek: weekEarnings, thisMonth: monthEarnings,
     // Payout policy (see nextPayoutDate). nextPayout is an ESTIMATE from the configured schedule,
     // not a commitment — nothing pays automatically. nextPayoutEst is what would be withdrawable,
@@ -291,6 +351,107 @@ async function summary(wid) {
 async function setPayoutReference(withdrawalId, reference, utr) {
   if (!reference && !utr) return
   await pool.query('UPDATE worker_withdrawals SET reference=COALESCE($2, reference), utr=COALESCE($3, utr) WHERE id=$1', [withdrawalId, reference || null, utr || null])
+}
+
+// ── Wallet analytics (3_wallet.png): trend · service-wise · settlement · leaderboard ──────────
+
+/** Daily earnings for the last [days] days, oldest first. Days with nothing earned return 0. */
+async function earningsTrend(wid, days = 30) {
+  const q = await pool.query(
+    `SELECT to_char(d.day, 'YYYY-MM-DD') date,
+            COALESCE(SUM(i.amount), 0)::int amount
+       FROM generate_series(
+              ((now() AT TIME ZONE 'Asia/Kolkata')::date - ($2::int - 1)),
+              (now() AT TIME ZONE 'Asia/Kolkata')::date,
+              interval '1 day') d(day)
+       LEFT JOIN worker_income i
+         ON i.worker_id = $1
+        AND (i.created AT TIME ZONE 'Asia/Kolkata')::date = d.day
+      GROUP BY d.day ORDER BY d.day`,
+    [wid, days])
+  return q.rows
+}
+
+/**
+ * Earnings grouped by the service that produced them.
+ *
+ * `label` on a Job Earnings row comes in three shapes, because the format has changed over time:
+ *   "Kitchen Cleaning · #HH42064"  — current: settleBooking() writes "<service> · <ref>"
+ *   "#HH42064"                     — older rows: the booking ref alone
+ *   "Kitchen Cleaning"             — older/seeded rows: the service name outright
+ * Take the service name straight off the current shape, resolve a bare ref against the booking,
+ * and treat anything else at face value. Whatever is still unresolved groups as "Other Services"
+ * rather than being dropped, so the parts always sum to the total the worker actually earned.
+ */
+const looksLikeRef = (v) => /^(#|SEED-)/i.test(String(v || '').trim())
+// "<service> · <ref>" → "<service>". Returns '' for any other shape.
+const serviceFromLabel = (v) => {
+  const [head, ...rest] = String(v || '').split(' · ')
+  return rest.length && !looksLikeRef(head) ? head.trim() : ''
+}
+
+async function serviceWiseEarnings(wid) {
+  const rows = (await pool.query(
+    "SELECT label, SUM(amount)::int amount FROM worker_income WHERE worker_id=$1 AND category='Job Earnings' GROUP BY label", [wid])).rows
+  if (!rows.length) return { total: 0, services: [] }
+  const byRef = new Map()
+  if (rows.some((r) => looksLikeRef(r.label))) {
+    const bookings = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wid}`, [])
+    for (const b of bookings || []) byRef.set(String(b.ref || `#${b.id}`), (b.items || []).map((i) => i.name).join(', '))
+  }
+  const acc = new Map()
+  for (const r of rows) {
+    const label = String(r.label || '').trim()
+    const name = serviceFromLabel(label) || (looksLikeRef(label) ? byRef.get(label) : label) || 'Other Services'
+    acc.set(name, (acc.get(name) || 0) + Number(r.amount || 0))
+  }
+  const total = [...acc.values()].reduce((t, v) => t + v, 0)
+  const services = [...acc.entries()]
+    .map(([service, amount]) => ({ service, amount, pct: total ? Math.round((amount * 100) / total) : 0 }))
+    .sort((a, b) => b.amount - a.amount)
+  return { total, services }
+}
+
+/** Payout rules + the worker's payout destination, as the Settlement Info card shows them. */
+async function settlementInfo(wid) {
+  // Source of truth is the worker service's payout view: the worker's chosen rules plus their
+  // real payout accounts (worker_bank_accounts). The legacy profile.bank blob is no longer written
+  // by the wallet flow — reading it here is what made the card claim "Settlement Mode: Not set"
+  // while showing a verified account beside it.
+  const payout = await tryGet(WORKER_URL, `/internal/workers/${wid}/payout`, null)
+  const st = payout?.settings || {}
+  const acct = payout?.default || (payout?.accounts || []).find((a) => a.verified) || (payout?.accounts || [])[0] || null
+  // The card MUST show the minimum the withdrawal endpoint actually enforces — the higher of the
+  // admin's global limit and the worker's own setting — or it would promise a smaller minimum than
+  // the server will accept.
+  const adminMin = await minPayoutLimit()
+  return {
+    dailyTime: st.settlementTime || '07:00 AM',
+    frequency: st.weeklySettlement ? 'Weekly' : (st.dailySettlement ? 'Daily' : 'Manual'),
+    minPayout: Math.max(adminMin, Number(st.minPayout) || 0),
+    autoWithdraw: !!st.autoWithdraw,
+    mode: acct ? (acct.upi && !acct.account ? 'UPI' : 'Bank Transfer') : 'Not set',
+    bankAccount: acct ? acct.accountMasked || acct.upi : '',
+    bankName: acct?.bankName || '',
+    bankVerified: !!acct?.verified,
+    bankStatus: acct ? acct.status : 'Not added',
+  }
+}
+
+/**
+ * Where this worker sits against the others this month, by earnings. Real ranking over the
+ * ledger — "Top 20%" means 80% of active earners earned less. Returns null when there aren't
+ * enough peers for the claim to mean anything.
+ */
+async function leaderboard(wid) {
+  const rows = (await pool.query(
+    `SELECT worker_id, SUM(amount)::int total FROM worker_income
+      WHERE created > now()-interval '30 days' GROUP BY worker_id ORDER BY total DESC`)).rows
+  if (rows.length < 3) return null
+  const idx = rows.findIndex((r) => Number(r.worker_id) === Number(wid))
+  if (idx < 0) return null
+  const topPct = Math.max(1, Math.round(((idx + 1) / rows.length) * 100))
+  return { rank: idx + 1, of: rows.length, topPercent: topPct }
 }
 
 // Finalize a withdrawal once the payout service reports back. Idempotent (terminal states are
@@ -334,9 +495,10 @@ const app = express()
 app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'wallet', ok: true }))
 
+// Verifies the SIGNED token. This used to parse the id out of `worker-<id>`, so `Bearer worker-6`
+// handed over another worker's entire earnings ledger — the same hole the other services had.
 function auth(req, res, next) {
-  const t = (req.headers.authorization || '').replace('Bearer ', '')
-  const id = t.startsWith('worker-') ? Number(t.slice(7)) : NaN
+  const id = tokenSubject(req.headers.authorization, 'worker')
   if (!Number.isFinite(id)) return res.status(401).json({ ok: false, error: 'Not authenticated' })
   req.wid = id
   next()
@@ -370,6 +532,13 @@ async function rewardsDto(wid) {
 /* ---------- worker wallet ---------- */
 app.get('/api/worker/wallet/summary', auth, async (req, res) => res.json(await summary(req.wid)))
 app.get('/api/worker/wallet/state', auth, async (req, res) => res.json(await walletState(req.wid)))
+app.get('/api/worker/wallet/analytics', auth, async (req, res) => res.json({
+  ok: true,
+  trend: await earningsTrend(req.wid, 30),
+  serviceWise: await serviceWiseEarnings(req.wid),
+  settlement: await settlementInfo(req.wid),
+  leaderboard: await leaderboard(req.wid),
+}))
 app.get('/api/worker/wallet/earnings-breakup', auth, async (req, res) => res.json(await earningsBreakupDto(req.wid)))
 app.get('/api/worker/wallet/deductions', auth, async (req, res) => res.json(await deductionsDto(req.wid)))
 app.get('/api/worker/wallet/history', auth, async (req, res) => res.json(await historyLedger(req.wid)))
@@ -414,15 +583,36 @@ app.get('/api/worker/wallet/payslip', auth, async (req, res) => { const s = awai
 app.get('/api/worker/wallet/payslips', auth, async (req, res) => res.json(await rowsFor('worker_payslips', req.wid)))
 app.post('/api/worker/wallet/payslip/generate', auth, async (req, res) => { const s = await summary(req.wid); const { rows } = await pool.query('INSERT INTO worker_payslips (worker_id,month,gross,deductions,net) VALUES ($1,$2,$3,0,$3) RETURNING *', [req.wid, req.body?.month || 'This month', s.thisMonth]); res.json(rows[0]) })
 
-app.post('/api/worker/wallet/withdraw/request-otp', auth, (_q, res) => res.json({ ok: true, devOtp: process.env.WORKER_DEV_OTP || '1234' }))
+// Single source for the withdraw/PIN-reset OTP — the endpoint below hands it out in dev, and
+// the PIN reset checks against the same value.
+const WITHDRAW_OTP = process.env.WORKER_DEV_OTP || '1234'
+app.post('/api/worker/wallet/withdraw/request-otp', auth, (_q, res) => res.json({ ok: true, devOtp: WITHDRAW_OTP }))
 app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)
   const avail = (await summary(req.wid)).available
   if (!amount || amount <= 0) return res.json({ ok: false, error: 'Enter a valid amount' })
+  // Phase 10: an admin can put a wallet on hold. Earnings keep accruing — this stops money leaving,
+  // it doesn't confiscate it. Checked here rather than only hidden in the UI, since the app isn't
+  // the only thing that can call this.
+  const { walletEnabled } = await payConfig(req.wid)
+  if (!walletEnabled) return res.json({ ok: false, error: 'Withdrawals are on hold on your account. Please contact the admin.' })
   // Enforce the configured minimum — a payout costs the same to process whatever its size.
   const minAmt = await minPayoutLimit()
   if (amount < minAmt) return res.json({ ok: false, error: `Minimum payout is ₹${minAmt}` })
   if (amount > avail) return res.json({ ok: false, error: 'Amount exceeds available balance' })
+  // The PIN is checked HERE, not just on the PIN screen: a client can always skip a screen, so the
+  // money must not move without it.
+  const pin = await verifyPin(req.wid, String(req.body?.pin || ''))
+  if (!pin.ok) return res.status(403).json(pin)
+  // Payout rules + destination come from the worker service, so the minimum a worker set in Payout
+  // Settings is enforced server-side rather than only in the UI.
+  const payout = await tryGet(WORKER_URL, `/internal/workers/${req.wid}/payout`, null)
+  const minPayout = Number(payout?.settings?.minPayout) || 200
+  if (amount < minPayout) return res.json({ ok: false, error: `Minimum withdrawal is ₹${minPayout}` })
+  const accounts = payout?.accounts || []
+  const wanted = req.body?.bankAccountId ? accounts.find((a) => a.id === Number(req.body.bankAccountId)) : (payout?.default || null)
+  if (accounts.length && !wanted) return res.json({ ok: false, error: 'Choose a payout account' })
+  if (wanted && !wanted.verified) return res.json({ ok: false, error: 'That account is still being verified' })
   const autoBelow = await getSettingInt(ADMIN_URL, 'auto_approve_withdrawal_below', 2000)
   const method = req.body?.method || 'bank'
   // Auto-approved small amounts go straight to payout ('Processing'); larger amounts wait for an
@@ -430,15 +620,97 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   // payout lands (payout.completed) — or refunded to balance if it fails (payout.failed).
   const auto = amount <= autoBelow
   const status = auto ? 'Processing' : 'Pending'
-  // Snapshot the destination account now — this is where the money is going, and the worker may
-  // change their bank details before or after it lands.
-  const snapshot = await workerSnapshot(req.wid)
-  const destination = formatDest((snapshot && snapshot.profile && snapshot.profile.bank) || {}, method)
-  const { rows } = await pool.query('INSERT INTO worker_withdrawals (worker_id,amount,method,status,destination) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.wid, amount, method, status, destination])
+  // Snapshot the destination now — this is where the money is going, and the worker may change
+  // their bank details before or after it lands. The chosen account (from worker_bank_accounts)
+  // is the source of truth; fall back to the legacy profile.bank snapshot if none was selected.
+  const ref = 'WD' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + String(Date.now()).slice(-5)
+  const destination = wanted
+    ? `${wanted.bankName} ${wanted.accountMasked}`.trim()
+    : formatDest(((await workerSnapshot(req.wid))?.profile?.bank) || {}, method)
+  const { rows } = await pool.query(
+    'INSERT INTO worker_withdrawals (worker_id,amount,method,status,bank_account_id,reference,destination) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+    [req.wid, amount, method, status, wanted?.id || null, ref, destination])
   await adjustBalance(req.wid, { balance: -amount, hold: amount })
   if (auto) publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: rows[0].id, workerId: req.wid, amount, method })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'wallet.withdraw', entityType: 'wallet', entityId: req.wid, detail: `Requested withdrawal ₹${amount} (${status})`, meta: { amount } })
-  res.json({ ok: true, ...(await walletState(req.wid)) })
+  res.json({
+    ok: true,
+    withdrawalId: rows[0].id,
+    reference: ref,
+    status,
+    destination: wanted ? `${wanted.bankName} ${wanted.accountMasked}` : '',
+    expectedCredit: auto ? 'Within 30 minutes' : 'After admin approval',
+    ...(await walletState(req.wid)),
+  })
+})
+
+// ─── Wallet PIN ───────────────────────────────────────────────────────────────────────────
+// A 4-digit PIN over a 10k space is brute-forceable in seconds, so: salted digest at rest, and
+// five wrong tries locks the PIN for 15 minutes rather than letting a thief walk the keyspace.
+
+const crypto = require('crypto')
+const pinDigest = (pin, salt) => crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex')
+const PIN_MAX_FAILS = 5
+const PIN_LOCK_MIN = 15
+
+const pinRow = async (wid) => (await pool.query('SELECT * FROM worker_wallet_pin WHERE worker_id=$1', [wid])).rows[0] || null
+
+/** Result: { ok } or { ok:false, error, lockedFor? } — never leaks whether a PIN exists. */
+async function verifyPin(wid, pin) {
+  const row = await pinRow(wid)
+  if (!row) return { ok: false, error: 'Set a wallet PIN first' }
+  if (row.locked_until && new Date(row.locked_until) > new Date()) {
+    const mins = Math.ceil((new Date(row.locked_until) - Date.now()) / 60000)
+    return { ok: false, error: `Too many wrong attempts. Try again in ${mins} min`, lockedFor: mins }
+  }
+  if (pinDigest(String(pin), row.salt) !== row.pin_hash) {
+    const fails = (row.fails || 0) + 1
+    const lock = fails >= PIN_MAX_FAILS ? `now() + interval '${PIN_LOCK_MIN} minutes'` : 'NULL'
+    await pool.query(`UPDATE worker_wallet_pin SET fails=$2, locked_until=${lock} WHERE worker_id=$1`, [wid, fails >= PIN_MAX_FAILS ? 0 : fails])
+    return {
+      ok: false,
+      error: fails >= PIN_MAX_FAILS
+        ? `Too many wrong attempts. Try again in ${PIN_LOCK_MIN} min`
+        : `Incorrect PIN. ${PIN_MAX_FAILS - fails} attempt${PIN_MAX_FAILS - fails === 1 ? '' : 's'} left`,
+      attemptsLeft: Math.max(0, PIN_MAX_FAILS - fails),
+    }
+  }
+  await pool.query('UPDATE worker_wallet_pin SET fails=0, locked_until=NULL WHERE worker_id=$1', [wid])
+  return { ok: true }
+}
+
+app.get('/api/worker/wallet/pin/status', auth, async (req, res) => {
+  const row = await pinRow(req.wid)
+  const locked = !!(row?.locked_until && new Date(row.locked_until) > new Date())
+  res.json({ ok: true, isSet: !!row, locked })
+})
+
+/** Set or reset the PIN. Reset needs the OTP from /wallet/withdraw/request-otp — that OTP is the
+ *  only thing standing between a stolen unlocked phone and the balance. */
+app.post('/api/worker/wallet/pin/set', auth, async (req, res) => {
+  const pin = String(req.body?.pin || '')
+  if (!/^\d{4}$/.test(pin)) return res.status(400).json({ ok: false, error: 'PIN must be 4 digits' })
+  if (/^(\d)\1{3}$/.test(pin) || ['1234', '0123', '4321'].includes(pin)) {
+    return res.status(400).json({ ok: false, error: 'Choose a less guessable PIN' })
+  }
+  const existing = await pinRow(req.wid)
+  if (existing) {
+    const otp = String(req.body?.otp || '')
+    if (otp !== WITHDRAW_OTP) return res.status(403).json({ ok: false, error: 'Enter the OTP sent to your phone to reset the PIN' })
+  }
+  const salt = crypto.randomBytes(8).toString('hex')
+  await pool.query(
+    `INSERT INTO worker_wallet_pin (worker_id, pin_hash, salt, fails, locked_until, updated)
+     VALUES ($1,$2,$3,0,NULL,now())
+     ON CONFLICT (worker_id) DO UPDATE SET pin_hash=$2, salt=$3, fails=0, locked_until=NULL, updated=now()`,
+    [req.wid, pinDigest(pin, salt), salt])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'wallet.pin', entityType: 'wallet', entityId: req.wid, detail: existing ? 'Wallet PIN reset' : 'Wallet PIN set' })
+  res.json({ ok: true, isSet: true })
+})
+
+app.post('/api/worker/wallet/pin/verify', auth, async (req, res) => {
+  const r = await verifyPin(req.wid, String(req.body?.pin || ''))
+  res.status(r.ok ? 200 : 403).json(r)
 })
 
 app.get('/api/worker/wallet/advance/eligibility', auth, async (req, res) => {
@@ -458,23 +730,76 @@ app.post('/api/worker/wallet/advance/request', auth, async (req, res) => {
 /* ---------- admin wallet ---------- */
 app.get('/api/admin/workers/:id/wallet', adminAuth, async (req, res) => res.json(await walletState(Number(req.params.id))))
 // A manually granted bonus records the admin who granted it; everything else is credited by 'System'.
-app.post('/api/admin/workers/:id/wallet/bonus', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,bucket,source) VALUES ($1,'Bonus',$2,$3,'available',$4)", [wid, req.body?.label || 'Admin bonus', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: amt, earnings: amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/penalty', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_deductions (worker_id,category,label,amount,source) VALUES ($1,'Penalty',$2,$3,$4)", [wid, req.body?.label || 'Admin penalty', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: -amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/hold', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: -amt, hold: amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: amt, hold: -amt }); res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/bonus', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,bucket,source) VALUES ($1,'Bonus',$2,$3,'available',$4)", [wid, req.body?.label || 'Admin bonus', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: amt, earnings: amt }); res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/penalty', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_deductions (worker_id,category,label,amount,source) VALUES ($1,'Penalty',$2,$3,$4)", [wid, req.body?.label || 'Admin penalty', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: -amt }); res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: -amt, hold: amt }); res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: amt, hold: -amt }); res.json(await walletState(wid)) })
 // Approve → trigger the real payout (money is already held from the request). Status becomes
 // 'Processing'; the payout.completed/failed event finalizes it. Do NOT mark Paid directly here.
 app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
+
+/**
+ * An APPROVED payroll line. The worker service computes and an admin approves; the wallet only
+ * credits what it's told, keyed on the run so a re-approve or a redelivered event cannot pay twice.
+ * The deductions are recorded alongside so the payslip shows gross, what was taken, and net —
+ * a bare net figure gives a worker no way to check their own pay.
+ */
+async function creditPayroll(d) {
+  if (!d?.workerId || !d?.runId) return
+  const net = Number(d.net) || 0
+  if (net <= 0) return
+  // A per-job worker's line is bonuses only — categorise it 'Incentive', not 'Salary', so their
+  // wallet doesn't claim a monthly salary they're not on.
+  const isBonus = d.kind === 'bonus'
+  const category = isBonus ? 'Incentive' : 'Salary'
+  const ref = `payroll-${d.runId}-${d.workerId}`
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
+     VALUES ($1,$2,$3,$4,$5,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [d.workerId, category, d.label || `Salary ${d.month}`, net, ref])
+  if (!ins.rowCount) return // already credited — a re-approve or a redelivered event
+  await adjustBalance(d.workerId, { balance: net, earnings: net })
+  for (const ded of (d.deductions || [])) {
+    if (!ded?.amount) continue
+    await pool.query(
+      `INSERT INTO worker_deductions (worker_id, category, label, amount, source) VALUES ($1,'Statutory',$2,$3,'Payroll')`,
+      [d.workerId, `${ded.label} · ${d.month}`, ded.amount])
+  }
+  await notify(d.workerId, isBonus ? 'Bonus credited' : 'Salary credited', `₹${net} for ${d.month} is in your wallet.`)
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'system', actorName: 'Payroll', action: isBonus ? 'wallet.bonus' : 'wallet.salary', entityType: 'worker', entityId: d.workerId,
+    detail: `${isBonus ? 'Bonus' : 'Salary'} ₹${net} credited for ${d.month}`, meta: { amount: net },
+  })
+}
+
+/**
+ * A payout the Compensation Rule Engine decided (job_completed trigger). The engine already keyed
+ * it idempotently in its own ledger; this credits the wallet, idempotent again on `ref`, so a
+ * redelivered event pays nothing twice.
+ */
+async function creditEngineIncentive(d) {
+  const amt = Math.max(0, Math.round(Number(d.amount) || 0))
+  if (!d.workerId || amt <= 0 || !d.ref) return
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
+     VALUES ($1,'Incentive',$2,$3,$4,'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [d.workerId, d.label || 'Incentive', amt, d.ref])
+  if (!ins.rowCount) return
+  await adjustBalance(d.workerId, { balance: amt, earnings: amt })
+  await notify(d.workerId, 'Incentive credited', `+₹${amt}${d.label ? ` — ${d.label}` : ''}`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Incentive Engine', action: 'wallet.incentive', entityType: 'worker', entityId: d.workerId, detail: `Incentive ₹${amt} credited${d.label ? ` (${d.label})` : ''}`, meta: { amount: amt } })
+}
 
 /* ---------- event consumers ---------- */
 subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'settings.updated') return invalidateSettings()
+  if (type === 'payroll.credit') return creditPayroll(data)
+  if (type === 'incentive.credit') return creditEngineIncentive(data)
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
   else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })
   else if (type === 'job.start') await resolveOnStart({ bookingId: data.bookingId })
-  else if (type === 'shakti.bonus') await creditShaktiBonus(data)
   else if (type === 'booking.cancelled' && data.booking?.worker_id && data.quote?.workerComp > 0) {
     const b = data.booking, comp = data.quote.workerComp
     const cSvc = serviceOf(b)
@@ -487,6 +812,10 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   } else if (type === 'payout.processing' && data.withdrawalId) {
     // In-flight at the gateway: record the reference now, leave the status for the webhook to finalize.
     await setPayoutReference(data.withdrawalId, data.reference, data.utr)
+  } else if (type === 'worker.notify' && data.workerId && data.title) {
+    // This service owns worker_notifications, so other services ask over the bus rather than
+    // reaching into its database (e.g. the worker service on a KYC document approve/reject).
+    await notify(data.workerId, data.title, data.body || '')
   } else if (type === 'shift.late') await applyShiftLatePenalty(data)
   else if (type === 'shift.settle') await settleMinGuarantee(data)
   else if (type === 'geofence.breach') await notifyGeofenceBreach(data)

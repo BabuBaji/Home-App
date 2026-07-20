@@ -1,21 +1,37 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
-import { fetchBookings, fetchBooking, updateBooking, fetchWorkers } from '../api'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical, UserX, AlertTriangle } from 'lucide-react'
+import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones } from '../api'
 import type { AdminBooking } from '../types'
 import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 
-const ONGOING = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+// Mutually-exclusive lifecycle buckets, so the KPI cards actually sum to Total:
+//   Ongoing = being serviced now · Upcoming = scheduled, not started · Completed · Cancelled
+const ONGOING = ['on_the_way', 'arrived', 'in_progress']
 const UPCOMING = ['confirmed', 'worker_assigned']
 const STATUSES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress', 'completed', 'cancelled']
+// Attention overlays cross-cut the lifecycle — an active booking needs action when it has no
+// worker, its payment failed/pending, or it's been escalated.
+const isActive = (b: AdminBooking) => b.status !== 'cancelled' && b.status !== 'completed'
+const isUnassigned = (b: AdminBooking) => isActive(b) && !b.pro
+const attentionReason = (b: AdminBooking): string => {
+  if (!isActive(b)) return ''
+  if (!b.pro) return 'Unassigned'
+  const pay = (b.payment_status || '').toLowerCase()
+  if (pay === 'failed') return 'Payment failed'
+  if (pay === 'pending') return 'Payment pending'
+  if ((b as any).escalated) return 'Escalated'
+  return ''
+}
 
-function TabPill({ n, active }: { n: number; active: boolean }) {
+function TabPill({ n, active, alert }: { n: number; active: boolean; alert?: boolean }) {
+  const hot = alert && n > 0
   return (
     <span style={{
       marginLeft: 8, padding: '1px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-      background: active ? '#eef0ff' : '#eeeef5',
-      color: active ? '#5b51e8' : '#6b7090',
+      background: hot ? '#fdecec' : active ? '#eef0ff' : '#eeeef5',
+      color: hot ? '#d92d20' : active ? '#5b51e8' : '#6b7090',
     }}>{n.toLocaleString('en-IN')}</span>
   )
 }
@@ -31,11 +47,12 @@ const paymentTone = (p: string): string => {
 
 export default function Bookings() {
   const { admin } = useStore()
+  const nav = useNavigate()
   const toast = useToast()
   const confirm = useConfirm()
   const [rows, setRows] = useState<AdminBooking[] | null>(null)
   const [err, setErr] = useState('')
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get('q') || '')
   const [tab, setTab] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -44,13 +61,15 @@ export default function Bookings() {
   const [status, setStatus] = useState('all')
   const [service, setService] = useState('all')
   const [worker, setWorker] = useState(params.get('worker') || 'all')
-  const [city, setCity] = useState('all')
+  const [zone, setZone] = useState('all')
+  const [zoneNames, setZoneNames] = useState<Record<number, string>>({})
+  useEffect(() => { fetchZones().then((zs) => setZoneNames(Object.fromEntries(zs.map((z) => [z.id, z.name])))).catch(() => {}) }, [])
 
   const [modal, setModal] = useState<null | 'view' | 'more'>(null)
   const [active, setActive] = useState<AdminBooking | null>(null)
   const [detail, setDetail] = useState<any>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [workerList, setWorkerList] = useState<string[]>([])
+  const [workerList, setWorkerList] = useState<{ id: number; name: string }[]>([])
   const [assignTo, setAssignTo] = useState('')
   const [changeStatus, setChangeStatus] = useState('')
   const [saving, setSaving] = useState(false)
@@ -62,18 +81,22 @@ export default function Bookings() {
 
   const counts = {
     all: rows.length,
+    unassigned: rows.filter(isUnassigned).length,
     ongoing: rows.filter((b) => ONGOING.includes(b.status)).length,
     upcoming: rows.filter((b) => UPCOMING.includes(b.status)).length,
     completed: rows.filter((b) => b.status === 'completed').length,
     cancelled: rows.filter((b) => b.status === 'cancelled').length,
+    attention: rows.filter((b) => !!attentionReason(b)).length,
   }
 
-  const TABS: { label: string; count: number; filter: (b: AdminBooking) => boolean }[] = [
-    { label: 'All Bookings', count: counts.all, filter: () => true },
+  const TABS: { label: string; count: number; filter: (b: AdminBooking) => boolean; alert?: boolean }[] = [
+    { label: 'All', count: counts.all, filter: () => true },
+    { label: 'Unassigned', count: counts.unassigned, filter: isUnassigned, alert: true },
     { label: 'On Going', count: counts.ongoing, filter: (b) => ONGOING.includes(b.status) },
     { label: 'Upcoming', count: counts.upcoming, filter: (b) => UPCOMING.includes(b.status) },
     { label: 'Completed', count: counts.completed, filter: (b) => b.status === 'completed' },
     { label: 'Cancelled', count: counts.cancelled, filter: (b) => b.status === 'cancelled' },
+    { label: 'Needs Attention', count: counts.attention, filter: (b) => !!attentionReason(b), alert: true },
   ]
 
   const services = Array.from(new Set(rows.map((b) => b.service).filter(Boolean)))
@@ -83,12 +106,14 @@ export default function Bookings() {
   const filtered = rows.filter(TABS[tab].filter)
     .filter((b) => service === 'all' || b.service === service)
     .filter((b) => worker === 'all' || b.pro === worker)
-    .filter((b) => city === 'all' || (b as any).city === city)
+    .filter((b) => zone === 'all' || String((b as any).zone_id) === zone)
     .filter((b) =>
       !ql || b.ref.toLowerCase().includes(ql) || b.customer.toLowerCase().includes(ql) || (b.pro || '').toLowerCase().includes(ql) || (b.service || '').toLowerCase().includes(ql))
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  const cities = Array.from(new Set(rows.map((b) => (b as any).city).filter(Boolean)))
+  // Zones present in the bookings, labelled by name (falls back to the id if the name isn't loaded).
+  const zoneIds = Array.from(new Set(rows.map((b) => (b as any).zone_id).filter((z: unknown) => z != null))) as number[]
+  const zoneLabel = (id: number) => zoneNames[id] || `Zone ${id}`
 
   const exportCsv = () => {
     const head = ['Booking ID', 'Customer', 'Worker', 'Service', 'Type', 'Date', 'Time', 'Amount', 'Status', 'Payment']
@@ -111,7 +136,7 @@ export default function Bookings() {
 
   const openMore = (b: AdminBooking) => {
     setActive(b); setAssignTo(''); setChangeStatus(b.status); setModal('more')
-    if (!workerList.length) fetchWorkers().then((r) => setWorkerList((r.workers || []).map((w: any) => w.name))).catch(() => {})
+    if (!workerList.length) fetchWorkers().then((r) => setWorkerList((r.workers || []).map((w: any) => ({ id: w.id, name: w.name })))).catch(() => {})
   }
 
   const close = () => { setModal(null); setActive(null); setDetail(null); setSaving(false) }
@@ -124,18 +149,25 @@ export default function Bookings() {
       .catch((e: Error) => { toast(e.message, 'err'); setSaving(false) })
   }
 
-  const assignWorker = () => { if (!assignTo) { toast('Select a worker', 'err'); return } doUpdate({ pro_name: assignTo }, 'Worker assigned') }
+  const assignWorker = () => {
+    if (!assignTo) { toast('Select a worker', 'err'); return }
+    const w = workerList.find((x) => String(x.id) === assignTo)
+    doUpdate({ workerId: Number(assignTo), workerName: w?.name || '' }, 'Worker assigned')
+  }
   const applyStatus = () => { if (!changeStatus) { toast('Select a status', 'err'); return } doUpdate({ status: changeStatus }, 'Status updated') }
+  const escalate = () => doUpdate({ escalated: true, escalateReason: 'Flagged from Bookings' }, 'Booking escalated')
   const cancelBooking = async () => { if (!(await confirm({ title: 'Cancel this booking?', message: 'The customer will be notified and refunded per policy.', confirmLabel: 'Cancel booking', cancelLabel: 'Keep', danger: true }))) return; doUpdate({ status: 'cancelled' }, 'Booking cancelled') }
 
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div className="stat-row">
-        <StatCard icon={<CalendarCheck size={22} />} tint="#5b51e8" label="Total Bookings" value={counts.all.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Completed Bookings" value={counts.completed.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Clock size={22} />} tint="#2e90fa" label="On Going Bookings" value={counts.ongoing.toLocaleString('en-IN')} sub="currently active" />
-        <StatCard icon={<CalendarClock size={22} />} tint="#f59e0b" label="Upcoming Bookings" value={counts.upcoming.toLocaleString('en-IN')} sub="scheduled" />
-        <StatCard icon={<XCircle size={22} />} tint="#f04438" label="Cancelled Bookings" value={counts.cancelled.toLocaleString('en-IN')} sub="all time" />
+        <StatCard icon={<CalendarCheck size={22} />} tint="#5b51e8" label="Total Bookings" value={counts.all.toLocaleString('en-IN')} sub="all bookings" />
+        <StatCard icon={<UserX size={22} />} tint="#f04438" label="Unassigned" value={counts.unassigned.toLocaleString('en-IN')} sub="need a worker" />
+        <StatCard icon={<Clock size={22} />} tint="#2e90fa" label="On Going" value={counts.ongoing.toLocaleString('en-IN')} sub="in service now" />
+        <StatCard icon={<CalendarClock size={22} />} tint="#f59e0b" label="Upcoming" value={counts.upcoming.toLocaleString('en-IN')} sub="scheduled" />
+        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Completed" value={counts.completed.toLocaleString('en-IN')} sub="finished" />
+        <StatCard icon={<XCircle size={22} />} tint="#98a2b3" label="Cancelled" value={counts.cancelled.toLocaleString('en-IN')} sub="cancelled" />
+        <StatCard icon={<AlertTriangle size={22} />} tint="#f04438" label="Needs Attention" value={counts.attention.toLocaleString('en-IN')} sub="action required" />
       </div>
 
       <Card>
@@ -153,9 +185,9 @@ export default function Bookings() {
             <option value="all">All Workers</option>
             {workers.map((w) => <option key={w} value={w}>{w}</option>)}
           </select>
-          <select className="select flt" value={city} onChange={(e) => { setCity(e.target.value); setPage(1) }}>
-            <option value="all">All Cities</option>
-            {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+          <select className="select flt" value={zone} onChange={(e) => { setZone(e.target.value); setPage(1) }}>
+            <option value="all">All Zones</option>
+            {zoneIds.map((z) => <option key={z} value={String(z)}>{zoneLabel(z)}</option>)}
           </select>
           <div className="tb-spacer" />
           <button className="btn line"><Funnel size={16} /> Filters</button>
@@ -165,7 +197,7 @@ export default function Bookings() {
         <div className="tabs">
           {TABS.map((t, i) => (
             <button key={t.label} className={'tab' + (tab === i ? ' active' : '')} onClick={() => { setTab(i); setPage(1) }}>
-              {t.label}<TabPill n={t.count} active={tab === i} />
+              {t.label}<TabPill n={t.count} active={tab === i} alert={t.alert} />
             </button>
           ))}
         </div>
@@ -190,15 +222,15 @@ export default function Bookings() {
                 <tr key={r.id}>
                   <td className="muted">{r.ref}</td>
                   <td><div className="cell-user"><Avatar name={r.customer} size={34} /><div><strong>{r.customer}</strong></div></div></td>
-                  <td>{r.pro ? <div className="cell-user"><Avatar name={r.pro} size={34} /><div><strong>{r.pro}</strong></div></div> : <span className="muted">Unassigned</span>}</td>
-                  <td><strong>{r.service || '—'}</strong>{r.type && <small style={{ display: 'block', color: '#6b7090' }}>{r.type}</small>}</td>
+                  <td>{r.pro ? <div className="cell-user"><Avatar name={r.pro} size={34} /><div><strong>{r.pro}</strong></div></div> : <Badge tone={isActive(r) ? 'red' : 'gray'} dot={false}>Unassigned</Badge>}</td>
+                  <td><strong>{r.service || '—'}</strong>{r.type && <small style={{ display: 'block', color: '#6b7090' }}>{r.type}</small>}{(r as any).zone_id != null && <small style={{ display: 'block', color: '#9aa0ad' }}>📍 {zoneLabel((r as any).zone_id)}</small>}</td>
                   <td><strong>{r.date ? shortDate(r.date) : shortDate(r.created)}</strong>{r.time && <small style={{ display: 'block', color: '#6b7090' }}>{r.time}</small>}</td>
                   <td className="num">{money(r.total)}</td>
-                  <td><Badge>{r.status}</Badge></td>
+                  <td><Badge>{r.status}</Badge>{attentionReason(r) && <small style={{ display: 'block', marginTop: 4, color: '#d92d20', fontWeight: 700, fontSize: 11 }}>⚠ {attentionReason(r)}</small>}</td>
                   <td><Badge tone={paymentTone(r.payment_status)}>{r.payment_status || r.payment || '—'}</Badge></td>
                   <td>
                     <div className="actions">
-                      <button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => openView(r)}><Eye size={16} /></button>
+                      <button className="iconbtn" style={{ width: 30, height: 30 }} title="Open booking" onClick={() => nav(`/bookings/${r.id}`)}><Eye size={16} /></button>
                       <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={() => openMore(r)}><MoreVertical size={16} /></button>
                     </div>
                   </td>
@@ -272,22 +304,25 @@ export default function Bookings() {
 
       {modal === 'more' && active && (
         <Modal title={`Manage Booking · ${active.ref}`} onClose={close} footer={<button className="btn line" onClick={close}>Close</button>}>
-          <Field label="Assign Worker">
+          <Field label={active.pro ? 'Reassign Worker' : 'Assign Worker'}>
             <select className="select" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
               <option value="">Select worker…</option>
-              {workerList.map((w) => <option key={w} value={w}>{w}</option>)}
+              {workerList.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
             </select>
           </Field>
-          <button className="btn" onClick={assignWorker} disabled={saving || !can(admin?.role, 'manager')} style={{ marginBottom: 12 }}>Assign</button>
+          <button className="btn" onClick={assignWorker} disabled={saving || !has(admin, 'bookings.assign')} style={{ marginBottom: 12 }}>{active.pro ? 'Reassign' : 'Assign'}</button>
 
           <Field label="Change Status">
             <select className="select" value={changeStatus} onChange={(e) => setChangeStatus(e.target.value)}>
               {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
           </Field>
-          <button className="btn" onClick={applyStatus} disabled={saving || !can(admin?.role, 'manager')} style={{ marginBottom: 12 }}>Update Status</button>
+          <button className="btn" onClick={applyStatus} disabled={saving || !has(admin, 'bookings.update_status')} style={{ marginBottom: 12 }}>Update Status</button>
 
-          <button className="btn line" onClick={cancelBooking} disabled={saving || !can(admin?.role, 'manager')} style={{ color: 'var(--red)' }}>Cancel Booking</button>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn line" onClick={escalate} disabled={saving || (active as any).escalated} style={{ flex: 1 }}>{(active as any).escalated ? 'Escalated' : 'Escalate'}</button>
+            <button className="btn line" onClick={cancelBooking} disabled={saving || !has(admin, 'bookings.cancel')} style={{ flex: 1, color: 'var(--red)' }}>Cancel Booking</button>
+          </div>
         </Modal>
       )}
     </div>

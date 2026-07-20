@@ -11,8 +11,15 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, requireRole, internalOnly, tryGet, publishRealtime, getSetting, parseToken, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requireRole, requirePerm, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
 } from '@homehelp/shared'
+// Imported directly, not via the shared index: they carry the jsonwebtoken dep. Catalog only reads
+// the id (browsing stays anonymous), but it must read it from a SIGNED token — otherwise anyone
+// could claim another customer's id and get their personalised pricing.
+import { parseToken } from '@homehelp/shared/customer-auth.js'
+import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+
+assertJwtSecret('catalog') // refuse to boot without a signing secret rather than trust forgeable tokens
 import {
   CATEGORIES, SERVICES_SEED, SERVICE_IMAGES, descFor, durationMinFor, SERVICE_DURATION, detailsFor, durationsFor,
   REFERRAL, TRUST_BADGES, COUPONS, applyCoupon, priceBreakdown,
@@ -20,6 +27,10 @@ import {
 import {
   loadActiveCampaigns, loadUsage, recordUsage, resolvePricing, rawDiscount, withinWindow, customerEligible,
 } from './pricing-engine.js'
+import { startWeatherPoller, getSurgeForZone, setManualSurge, surgeSnapshot } from './weather.js'
+import { ensurePublicBucket, storageConfigured, sniffType, storageKey, putPublicObject, getObjectStream } from '@homehelp/shared/storage.js'
+import multer from 'multer'
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }) // 5 MB banner images
 
 const PORT = Number(process.env.PORT || 4001)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@localhost:5432/catalog'
@@ -30,6 +41,20 @@ const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/
 
 const pool = makePool(DATABASE_URL)
 const adminAuth = makeAdminAuth(ADMIN_URL)
+
+// A single malformed request must never take the whole service down. Without this, a bad numeric
+// route param that reaches a Postgres int cast rejects unhandled → the process exits → the gateway
+// 502s EVERY catalog route until a manual restart. Log and keep serving instead.
+process.on('unhandledRejection', (err) => console.error('[catalog] unhandledRejection:', err))
+process.on('uncaughtException', (err) => console.error('[catalog] uncaughtException:', err))
+
+// Parse a numeric route id; on a non-number respond 400 and return null so it can't reach SQL.
+// Usage: `const id = intId(req, res); if (id === null) return`
+const intId = (req, res, name = 'id') => {
+  const n = Number(req.params[name])
+  if (!Number.isFinite(n)) { res.status(400).json({ error: 'Invalid id' }); return null }
+  return n
+}
 
 async function init() {
   await migrate(pool, [
@@ -75,6 +100,40 @@ async function init() {
       id SERIAL PRIMARY KEY, zone_id INTEGER NOT NULL, service_id TEXT NOT NULL,
       price INTEGER NOT NULL DEFAULT 0, discount INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true
     )`,
+    // ── Membership plans (Module 10) — the admin-configurable catalog of paid benefit plans. This is
+    // the pricing/benefit AUTHORITY: the customer app renders these, auth prices subscriptions from
+    // `price`, and the Phase-2 pricing engine reads the benefit-rule columns to discount bookings.
+    // `plan_key` is the stable id a purchased membership references. Eligibility JSONB arrays: [] = all.
+    `CREATE TABLE IF NOT EXISTS membership_plans (
+      id SERIAL PRIMARY KEY, plan_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tagline TEXT NOT NULL DEFAULT '',
+      popular BOOLEAN NOT NULL DEFAULT false, price INTEGER NOT NULL DEFAULT 0, features JSONB NOT NULL DEFAULT '[]',
+      discount_pct INTEGER NOT NULL DEFAULT 0, max_discount_per_order INTEGER NOT NULL DEFAULT 0,
+      discounted_orders_per_month INTEGER NOT NULL DEFAULT 0, platform_fee_waiver BOOLEAN NOT NULL DEFAULT false,
+      cashback_pct INTEGER NOT NULL DEFAULT 0, cashback_max INTEGER NOT NULL DEFAULT 0,
+      free_cancellations INTEGER NOT NULL DEFAULT 0, priority_booking BOOLEAN NOT NULL DEFAULT false,
+      min_order_value INTEGER NOT NULL DEFAULT 0, eligible_services JSONB NOT NULL DEFAULT '[]',
+      eligible_zones JSONB NOT NULL DEFAULT '[]', customer_segment TEXT NOT NULL DEFAULT 'all',
+      starts_at DATE, ends_at DATE, status TEXT NOT NULL DEFAULT 'published', sort INTEGER NOT NULL DEFAULT 0,
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    // Seed the launch line-up (Silver/Gold/Platinum). ON CONFLICT keeps admin edits on restart.
+    `INSERT INTO membership_plans (plan_key,name,tagline,popular,price,features,discount_pct,max_discount_per_order,discounted_orders_per_month,cashback_pct,cashback_max,platform_fee_waiver,priority_booking,sort) VALUES
+      ('silver','Silver','Best for small homes',false,299,'["Up to ₹1,000 off on bookings","Priority customer support","Exclusive member offers"]',10,30,5,0,0,false,true,1),
+      ('gold','Gold','Great for regular users',true,599,'["Up to ₹2,500 off on bookings","Free add-ons every month","Priority support","Exclusive member offers"]',10,30,6,5,20,false,true,2),
+      ('platinum','Platinum','Best value for family',false,999,'["Up to ₹5,000 off on bookings","Free add-ons every month","Priority support","Exclusive member offers","No convenience fees"]',12,40,8,5,20,true,true,3)
+      ON CONFLICT (plan_key) DO NOTHING`,
+    // Module 10 · Phase 3 — global discount stacking policy + margin guard (single-row config).
+    // `stacking`: 'stack' = membership adds on top of offers; 'exclusive' = membership only applies
+    // when no offer/coupon discount is present. `max_discount_pct`: cap total discount at N% of the
+    // subtotal (0 = off). `min_service_amount`: total discount can't drop the service value below ₹N.
+    `CREATE TABLE IF NOT EXISTS pricing_rules (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      stacking TEXT NOT NULL DEFAULT 'stack',
+      max_discount_pct INTEGER NOT NULL DEFAULT 0,
+      min_service_amount INTEGER NOT NULL DEFAULT 0,
+      updated TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `INSERT INTO pricing_rules (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
     // Stores (dark-stores) inside a zone: a service point with a lat/lng centre + service radius.
     // Overlap/coverage between stores is guarded at create time (only super-admin may override).
     `CREATE TABLE IF NOT EXISTS stores (
@@ -126,6 +185,23 @@ async function init() {
       UNIQUE (customer_id, campaign_id, booking_id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_ccu_cust_camp ON customer_campaign_usage (customer_id, campaign_id)`,
+    // Scheduled Home hero banners (festival wishes / promos) shown in the rotating hero carousel.
+    `CREATE TABLE IF NOT EXISTS home_banners (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      subtitle TEXT NOT NULL DEFAULT '',
+      emoji TEXT NOT NULL DEFAULT '',
+      theme TEXT NOT NULL DEFAULT 'purple',       -- preset gradient key rendered by the app
+      cta_label TEXT NOT NULL DEFAULT '',
+      cta_link TEXT NOT NULL DEFAULT '',
+      starts DATE, ends DATE,                     -- active window (NULL = open-ended)
+      zone_id INTEGER,                            -- NULL = all zones
+      priority INTEGER NOT NULL DEFAULT 50,
+      status TEXT NOT NULL DEFAULT 'active',      -- active | paused
+      kind TEXT NOT NULL DEFAULT 'festival',      -- festival | promo | announcement
+      created TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `ALTER TABLE home_banners ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS duration_min INTEGER`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS gst_pct INTEGER`,   // GST rate per service (SAC-based); default 18%
   ])
@@ -330,6 +406,40 @@ async function priceCart({ items: rawItems, coupon, zoneId, customerId, applyCou
   const items = r.items.map((it) => ({ id: it.serviceId, name: it.name, icon: it.icon, category: it.category, durationId: it.durationId, durationLabel: it.durationLabel, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount }))
   return { items, subtotal: r.subtotal, discount: r.discount, total: r.total, coupon: r.coupon, savings: r.savings, appliedCampaignIds: r.appliedCampaignIds }
 }
+// Membership benefit for a customer on this order (Module 10 · Phase 2). Reads the customer's active
+// plan (auth) + the plan RULES from our membership_plans → a capped, limit-aware discount. Never
+// throws — pricing must not fail on a benefit lookup. `netBase` = service value after campaign discount.
+async function memberBenefit(customerId, netBase) {
+  if (!customerId || netBase <= 0) return { discount: 0 }
+  try {
+    const m = await tryGet(AUTH_URL, `/api/internal/users/${customerId}/membership`, null)
+    if (!m || !m.active) return { discount: 0 }
+    const { rows } = await pool.query('SELECT * FROM membership_plans WHERE plan_key=$1', [m.planKey])
+    const plan = rows[0]
+    if (!plan) return { discount: 0 }
+    if (netBase < (plan.min_order_value || 0)) return { discount: 0, planName: plan.name, reason: 'below-min' }
+    const cap = plan.discounted_orders_per_month || 0            // 0 = unlimited
+    if (cap > 0 && (m.usedThisMonth || 0) >= cap) return { discount: 0, planName: plan.name, reason: 'limit', remaining: 0 }
+    let d = Math.round(netBase * (plan.discount_pct || 0) / 100)
+    if (plan.max_discount_per_order > 0) d = Math.min(d, plan.max_discount_per_order)   // margin cap per order
+    d = Math.max(0, Math.min(d, netBase))
+    return { discount: d, planName: plan.name, planKey: plan.plan_key, remaining: cap > 0 ? Math.max(0, cap - (m.usedThisMonth || 0)) : null }
+  } catch { return { discount: 0 } }
+}
+
+// Global pricing rules (stacking policy + margin guard), cached briefly. Falls back to safe defaults.
+let _rulesCache = { at: 0, val: null }
+async function pricingRules() {
+  if (_rulesCache.val && Date.now() - _rulesCache.at < 30000) return _rulesCache.val
+  try {
+    const { rows } = await pool.query('SELECT stacking, max_discount_pct, min_service_amount FROM pricing_rules WHERE id=1')
+    const val = rows[0] || { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 }
+    _rulesCache = { at: Date.now(), val }
+    return val
+  } catch { return { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 } }
+}
+const invalidatePricingRules = () => { _rulesCache = { at: 0, val: null } }
+
 async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const zoneId = await zoneIdForPincode(pincode)
   const q = await priceCart({ items, coupon, zoneId, customerId, applyCoupons: true })
@@ -341,6 +451,34 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   const onPeak = isPeakAt(peak, at)
   const peakPct = onPeak ? (Number(peak.upliftPct) || 0) : 0
   const peakSurcharge = onPeak ? Math.round(q.subtotal * peakPct / 100) : 0
+  // Weather (rain) surge: a demand-driven % uplift on the subtotal, from the cached weather signal
+  // for this zone (or an ops manual override). Same allocation model as the peak surcharge.
+  const surge = getSurgeForZone(zoneId)
+  const surgePct = surge.active ? surge.pct : 0
+  const surgeSurcharge = surgePct ? Math.round(q.subtotal * surgePct / 100) : 0
+  // Membership benefit: % off the post-campaign service value, capped per-order and per-month by the
+  // admin-configured plan rules. Optional admin margin floor caps it further so the service value can't
+  // be discounted below `membership_min_service_amount`. Preview + booking share this path.
+  const memberBase = Math.max(0, q.subtotal - q.discount)
+  const member = await memberBenefit(customerId, memberBase)
+  let memberDiscount = member.discount || 0
+  // Phase 3 — stacking policy + margin guard (admin-configurable).
+  const rules = await pricingRules()
+  // Stacking: 'exclusive' means membership does NOT stack on top of an offer/coupon discount.
+  if (rules.stacking === 'exclusive' && q.discount > 0) memberDiscount = 0
+  // Margin guard: cap the COMBINED discount (offers + membership) so an order can't be over-discounted.
+  // Trim the membership benefit first, then the offer discount if still over the cap.
+  const caps = []
+  if (rules.max_discount_pct > 0) caps.push(Math.round(q.subtotal * rules.max_discount_pct / 100))
+  if (rules.min_service_amount > 0) caps.push(Math.max(0, q.subtotal - rules.min_service_amount))
+  if (caps.length) {
+    const cap = Math.min(...caps)
+    let over = (q.discount + memberDiscount) - cap
+    if (over > 0) {
+      const cutMember = Math.min(memberDiscount, over); memberDiscount -= cutMember; over -= cutMember
+      if (over > 0) q.discount = Math.max(0, q.discount - over)
+    }
+  }
   // Convenience fee stays zone-level; GST rate is per-service; inclusive/exclusive display is platform-wide.
   const ex = (cfg && cfg.pricingExtras) || {}
   const fee = Math.round(Number(ex.convenienceFee) || 0)
@@ -353,18 +491,23 @@ async function quote({ items, coupon, pincode, customerId = null, at = null }) {
   let taxF = 0
   for (const it of q.items) {
     const share = gross > 0 ? (it.price / gross) : (1 / (q.items.length || 1))
-    const net = Math.max(0, it.price - q.discount * share + peakSurcharge * share)
+    const net = Math.max(0, it.price - (q.discount + memberDiscount) * share + peakSurcharge * share + surgeSurcharge * share)
     const g = gmap[it.id] ?? 18
     taxF += gstIncluded ? (net - net / (1 + g / 100)) : (net * g / 100)
   }
   const tax = Math.round(taxF)
-  const serviceAmount = Math.max(0, q.subtotal - q.discount + peakSurcharge)
+  const serviceAmount = Math.max(0, q.subtotal - q.discount - memberDiscount + peakSurcharge + surgeSurcharge)
   const total = gstIncluded ? (serviceAmount + fee) : (serviceAmount + tax + fee)
   const gstBase = gstIncluded ? (serviceAmount - tax) : serviceAmount
   const gstPct = gstBase > 0 ? Math.round((tax / gstBase) * 100) : 0   // blended rate for display
   return {
     status: 200,
-    body: { items: q.items, coupon: q.coupon, subtotal: q.subtotal, discount: q.discount, peakPct, peakSurcharge, isPeak: onPeak, fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds },
+    body: {
+      items: q.items, coupon: q.coupon, subtotal: q.subtotal, discount: q.discount, peakPct, peakSurcharge, isPeak: onPeak,
+      surgePct, surgeAmount: surgeSurcharge, surgeReason: surgeSurcharge ? surge.reason : '',
+      memberDiscount, memberPlan: memberDiscount > 0 ? (member.planName || '') : '', memberRemaining: member.remaining ?? null,
+      fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds,
+    },
   }
 }
 
@@ -429,7 +572,112 @@ app.post('/api/coupons/validate', async (req, res) => {
   if (r.error) return res.status(400).json(r)
   res.json(r)
 })
+// Admin customer-profile Offers tab: active manual coupons + THIS customer's per-coupon usage/status.
+app.get('/api/internal/customers/:id/offers', internalOnly, async (req, res) => {
+  const cid = Number(req.params.id)
+  const camps = await pool.query(
+    `SELECT m.campaign_id, m.campaign_name, m.discount_type, m.discount_value, m.max_discount, m.min_subtotal,
+            m.banner_title, m.banner_subtitle, m.ends, c.coupon_code, c.expiry,
+            r.max_usage AS per_customer_limit, r.segment
+       FROM campaign_master m
+       JOIN coupon c ON c.campaign_id = m.campaign_id
+       LEFT JOIN campaign_customer_rule r ON r.campaign_id = m.campaign_id
+      WHERE m.status='active' AND c.auto_apply=false
+      ORDER BY m.min_subtotal, m.campaign_id`)
+  const usage = await pool.query('SELECT campaign_id, COUNT(*)::int n FROM customer_campaign_usage WHERE customer_id=$1 GROUP BY campaign_id', [cid])
+  const uBy = Object.fromEntries(usage.rows.map((u) => [u.campaign_id, u.n]))
+  const now = Date.now()
+  const coupons = camps.rows.map((r) => {
+    const used = uBy[r.campaign_id] || 0
+    const limit = r.per_customer_limit || 0                 // 0 = unlimited
+    const validTill = r.expiry || r.ends || null
+    const expired = validTill ? new Date(validTill).getTime() < now : false
+    const exhausted = limit > 0 && used >= limit
+    return {
+      campaignId: r.campaign_id, code: r.coupon_code, name: r.campaign_name, subtitle: r.banner_subtitle,
+      bannerTitle: r.banner_title, discountType: r.discount_type, discountValue: r.discount_value,
+      maxDiscount: r.max_discount, minSubtotal: r.min_subtotal, validTill,
+      perCustomerLimit: limit, usedByCustomer: used, segment: r.segment || 'all',
+      status: expired ? 'Expired' : exhausted ? 'Used' : 'Available',
+    }
+  })
+  res.json({ totalOffers: new Set(camps.rows.map((r) => r.campaign_id)).size, coupons })
+})
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
+// Live surge for the customer's zone (public, pincode-keyed) — powers the "rain incoming" heads-up
+// on Home so a customer sees it on open, before starting a booking. Silent (no surge) when the
+// pincode isn't in a live zone or there's no active surge.
+app.get('/api/surge', async (req, res) => {
+  const zoneId = await zoneIdForPincode(req.query.pincode)
+  if (!zoneId) return res.json({ active: false, pct: 0, reason: '' })
+  const s = getSurgeForZone(zoneId)
+  res.json({ active: !!s.active, pct: s.pct || 0, reason: s.active ? s.reason : '', prob: s.prob ?? null })
+})
+// Dynamic Home hero slides (public) — merges scheduled festival/promo banners (in their date window),
+// live offers (campaigns with a banner), and the weather surge, ranked by priority. The app prepends
+// its own greeting slide and rotates through them. Everything here is real, dated, targeted data.
+app.get('/api/home-banners', async (req, res) => {
+  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const customerId = customerIdFromReq(req)
+  const slides = []
+
+  // 1) scheduled banners currently in their active window, for this zone (or all zones)
+  const scheduled = await pool.query(
+    `SELECT * FROM home_banners
+      WHERE status='active'
+        AND (starts IS NULL OR starts <= CURRENT_DATE)
+        AND (ends   IS NULL OR ends   >= CURRENT_DATE)
+        AND (zone_id IS NULL OR zone_id = $1)
+      ORDER BY priority DESC, id DESC`, [zoneId])
+  for (const b of scheduled.rows) slides.push({
+    key: `banner-${b.id}`, kind: b.kind || 'festival', title: b.title, subtitle: b.subtitle || '',
+    emoji: b.emoji || '', theme: b.theme || 'purple', ctaLabel: b.cta_label || '', ctaLink: b.cta_link || '',
+    image: b.image_url || '', priority: b.priority ?? 50,
+  })
+
+  // 2) live offers — campaigns with a banner that are in-window and eligible for this customer
+  try {
+    const zmap = await zonePriceMap(zoneId)
+    const [campaigns, ctx] = await Promise.all([campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId)])
+    const now = new Date()
+    for (const c of campaigns) {
+      if (!c.banner_title || !withinWindow(c, now)) continue
+      if (c.campaign_type === 'customer' && !customerEligible(c, ctx)) continue
+      const badge = c.discount_type === 'percent' ? `${c.discount_value}% OFF` : `₹${c.discount_value} OFF`
+      slides.push({
+        key: `offer-${c.campaign_id}`, kind: 'offer', title: c.banner_title, subtitle: c.banner_subtitle || badge,
+        emoji: '🎁', theme: 'sunset', ctaLabel: c.coupon ? `Use ${c.coupon.coupon_code}` : 'View offers',
+        ctaLink: '/offers', priority: 60,
+      })
+    }
+  } catch { /* offers are best-effort — never block the hero */ }
+
+  // 3) live weather surge slide (rendered with the rain animation by the app)
+  if (zoneId) {
+    const s = getSurgeForZone(zoneId)
+    if (s.active && s.pct > 0) slides.push({
+      key: 'weather', kind: 'weather', reason: s.reason, pct: s.pct, prob: s.prob ?? null,
+      title: s.reason === 'rain' ? 'Rain incoming' : 'High demand right now',
+      subtitle: s.reason === 'rain'
+        ? `${s.prob != null ? s.prob + '% chance — ' : ''}prices up ${s.pct}%. Book soon.`
+        : `Prices up ${s.pct}%. Book soon.`,
+      emoji: s.reason === 'rain' ? '🌧️' : '⚡', theme: 'rain', ctaLabel: '', ctaLink: '', priority: 70,
+    })
+  }
+
+  slides.sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  res.json(slides)
+})
+// Public proxy for banner background images — streams the object from the media bucket so the phone
+// (which can't reach the localhost-bound MinIO port) loads it through the gateway instead.
+app.get('/api/banner-media/:key(*)', async (req, res) => {
+  try {
+    const { body, contentType } = await getObjectStream(req.params.key)
+    res.set('Content-Type', contentType)
+    res.set('Cache-Control', 'public, max-age=604800')
+    body.pipe(res)
+  } catch { res.status(404).end() }
+})
 // Seller details for the customer tax invoice (from admin settings). Public — GSTIN is on every invoice anyway.
 app.get('/api/invoice-info', async (_q, res) => res.json({
   name: await getSetting(ADMIN_URL, 'company_name', 'HomeHelp Services Pvt. Ltd.'),
@@ -813,7 +1061,7 @@ app.get('/api/admin/services', adminAuth, async (_q, res) => {
   const [rows, counts] = await Promise.all([allServices(), bookingCounts()])
   res.json(rows.map((s) => ({ ...s, bookings: counts[s.id] || 0 })))
 })
-app.post('/api/admin/services', adminAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/admin/services', adminAuth, requirePerm('services.create'), async (req, res) => {
   const b = req.body || {}
   const id = String(b.id || b.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24)
   if (!id || !b.name) return res.status(400).json({ error: 'Name is required' })
@@ -825,7 +1073,7 @@ app.post('/api/admin/services', adminAuth, requireRole('manager'), async (req, r
   await broadcastServices()
   res.status(201).json({ ok: true, id })
 })
-app.patch('/api/admin/services/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/admin/services/:id', adminAuth, requirePerm('services.edit'), async (req, res) => {
   const b = req.body || {}
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Not found' })
@@ -837,7 +1085,7 @@ app.patch('/api/admin/services/:id', adminAuth, requireRole('manager'), async (r
   await broadcastServices()
   res.json({ ok: true })
 })
-app.delete('/api/admin/services/:id', adminAuth, requireRole('admin'), async (req, res) => {
+app.delete('/api/admin/services/:id', adminAuth, requirePerm('services.delete'), async (req, res) => {
   await pool.query('DELETE FROM services WHERE id=$1', [req.params.id])
   await broadcastServices()
   res.json({ ok: true })
@@ -848,7 +1096,70 @@ app.get('/api/admin/zones', adminAuth, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
   res.json(rows.map(zoneOut))
 })
-app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) => {
+
+/* ---------- surge pricing (weather-driven + ops override) ---------- */
+// Current surge per live zone: the weather signal, the derived %, and whether it's automatic or a
+// manual override. Enriched with the zone name for display.
+app.get('/api/admin/surge', adminAuth, async (_q, res) => {
+  const snap = surgeSnapshot()
+  const names = new Map((await pool.query('SELECT id, name FROM zones')).rows.map((r) => [r.id, r.name]))
+  res.json(snap.map((s) => ({ ...s, zone: names.get(s.zoneId) || `Zone ${s.zoneId}` })).sort((a, b) => (b.pct - a.pct) || a.zone.localeCompare(b.zone)))
+})
+// Ops override: force a surge % on a zone (or "all") for N minutes; pct 0 clears it. Takes precedence
+// over the automatic weather surge until it expires.
+app.post('/api/admin/surge', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  const scope = b.zoneId === 'all' || b.zoneId === '*' ? '*' : Number(b.zoneId)
+  if (scope !== '*' && !Number.isFinite(scope)) return res.status(400).json({ error: 'zoneId (a zone id or "all") is required' })
+  const pct = Math.max(0, Math.min(50, Number(b.pct) || 0))
+  const minutes = b.minutes != null ? Math.max(0, Number(b.minutes)) : 120
+  setManualSurge(scope, pct, minutes)
+  res.json({ ok: true, scope: scope === '*' ? 'all' : scope, pct, minutes })
+})
+
+/* ---------- admin: Home hero banners (festival / promo scheduling) ---------- */
+const HB_COLS = ['title', 'subtitle', 'emoji', 'theme', 'cta_label', 'cta_link', 'starts', 'ends', 'zone_id', 'priority', 'status', 'kind', 'image_url']
+const hbDefaults = { subtitle: '', emoji: '', theme: 'purple', cta_label: '', cta_link: '', starts: null, ends: null, zone_id: null, priority: 50, status: 'active', kind: 'festival', image_url: '' }
+// Upload a banner background image → public media bucket. Returns a gateway-relative URL the phone
+// can load (streamed back through /api/banner-media, since MinIO itself isn't reachable off-host).
+app.post('/api/admin/banners/image', adminAuth, requirePerm('campaigns.edit'), upload.single('file'), async (req, res) => {
+  if (!storageConfigured()) return res.status(503).json({ error: 'Image storage is not configured' })
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind || !kind.mime.startsWith('image/')) return res.status(400).json({ error: 'Please upload a JPG, PNG or WebP image' })
+  const key = storageKey('banners', kind.ext)
+  try { await putPublicObject(key, req.file.buffer, kind.mime) }
+  catch (e) { return res.status(502).json({ error: 'Upload failed: ' + e.message }) }
+  res.status(201).json({ url: `/api/banner-media/${key}` })
+})
+const hbClean = (b) => ({ ...b, zone_id: b.zone_id === '' || b.zone_id == null ? null : Number(b.zone_id), starts: b.starts || null, ends: b.ends || null })
+app.get('/api/admin/banners', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM home_banners ORDER BY priority DESC, id DESC')
+  res.json(rows)
+})
+app.post('/api/admin/banners', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
+  const b = hbClean(req.body || {})
+  if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'Title is required' })
+  const vals = HB_COLS.map((c) => (b[c] !== undefined ? b[c] : hbDefaults[c]))
+  const ph = HB_COLS.map((_, i) => `$${i + 1}`).join(',')
+  const { rows } = await pool.query(`INSERT INTO home_banners (${HB_COLS.join(',')}) VALUES (${ph}) RETURNING id`, vals)
+  res.status(201).json({ ok: true, id: rows[0].id })
+})
+app.patch('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
+  const id = Number(req.params.id), b = hbClean(req.body || {})
+  if (!(await pool.query('SELECT 1 FROM home_banners WHERE id=$1', [id])).rowCount) return res.status(404).json({ error: 'Banner not found' })
+  const cols = HB_COLS.filter((c) => b[c] !== undefined)
+  if (cols.length) {
+    const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
+    await pool.query(`UPDATE home_banners SET ${set} WHERE id=$${cols.length + 1}`, [...cols.map((c) => b[c]), id])
+  }
+  res.json({ ok: true })
+})
+app.delete('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
+  await pool.query('DELETE FROM home_banners WHERE id=$1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
+app.post('/api/admin/zones', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
   const status = ['planned', 'live', 'paused'].includes(b.status) ? b.status : 'planned'
@@ -859,7 +1170,7 @@ app.post('/api/admin/zones', adminAuth, requireRole('admin'), async (req, res) =
   await syncZonePricing(rows[0].id, b.config || {})
   res.status(201).json(zoneOut(rows[0]))
 })
-app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/zones/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Zone not found' })
   const z = cur.rows[0], b = req.body || {}
@@ -873,7 +1184,7 @@ app.patch('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, r
   await syncZonePricing(Number(req.params.id), b.config !== undefined ? b.config : (z.config || {}))
   res.json(zoneOut((await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])).rows[0]))
 })
-app.delete('/api/admin/zones/:id', adminAuth, requireRole('admin'), async (req, res) => {
+app.delete('/api/admin/zones/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   await pool.query('DELETE FROM zones WHERE id=$1', [req.params.id])
   res.json({ ok: true })
 })
@@ -925,7 +1236,7 @@ app.get('/api/admin/campaigns', adminAuth, async (_q, res) => {
   const uBy = Object.fromEntries(usage.rows.map((u) => [u.campaign_id, u.n]))
   res.json(rows.map((m) => ({ ...m, zoneIds: zBy[m.campaign_id] || [], rule: rBy[m.campaign_id] || null, coupon: cBy[m.campaign_id] || null, usedCount: uBy[m.campaign_id] || 0 })))
 })
-app.post('/api/admin/campaigns', adminAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/admin/campaigns', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
   const b = req.body || {}
   if (!b.campaign_name || !String(b.campaign_name).trim()) return res.status(400).json({ error: 'Campaign name is required' })
   if (!['zone', 'customer', 'coupon'].includes(b.campaign_type)) return res.status(400).json({ error: 'Invalid campaign type' })
@@ -936,8 +1247,9 @@ app.post('/api/admin/campaigns', adminAuth, requireRole('manager'), async (req, 
   await syncCampaignChildren(id, b)
   res.status(201).json({ ok: true, campaign_id: id })
 })
-app.patch('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async (req, res) => {
-  const id = Number(req.params.id), b = req.body || {}
+app.patch('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
+  const id = intId(req, res); if (id === null) return
+  const b = req.body || {}
   const cur = (await pool.query('SELECT 1 FROM campaign_master WHERE campaign_id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Campaign not found' })
   const cols = CM_COLS.filter((c) => b[c] !== undefined)
@@ -948,8 +1260,8 @@ app.patch('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async (
   await syncCampaignChildren(id, b)
   res.json({ ok: true })
 })
-app.delete('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async (req, res) => {
-  const id = Number(req.params.id)
+app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
+  const id = intId(req, res); if (id === null) return
   await pool.query('DELETE FROM campaign_zone WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM campaign_customer_rule WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM coupon WHERE campaign_id=$1', [id])
@@ -957,7 +1269,7 @@ app.delete('/api/admin/campaigns/:id', adminAuth, requireRole('manager'), async 
   res.json({ ok: true })
 })
 app.get('/api/admin/campaigns/:id/usage', adminAuth, async (req, res) => {
-  const id = Number(req.params.id)
+  const id = intId(req, res); if (id === null) return
   const [total, recent] = await Promise.all([
     pool.query('SELECT COUNT(*)::int n, COUNT(DISTINCT customer_id)::int customers FROM customer_campaign_usage WHERE campaign_id=$1', [id]),
     pool.query('SELECT customer_id, booking_id, created FROM customer_campaign_usage WHERE campaign_id=$1 ORDER BY created DESC LIMIT 50', [id]),
@@ -1003,6 +1315,13 @@ async function analyseStore(lat, lng, radiusKm, excludeId = null) {
   return { nearby, coveredBy, overlaps }
 }
 
+/** One store's location, for dispatch's per-worker job radius (measured from the worker's store). */
+app.get('/api/internal/stores/:id', internalOnly, async (req, res) => {
+  const { rows } = await pool.query('SELECT id, name, zone_id, lat, lng, radius_km, status FROM stores WHERE id=$1', [Number(req.params.id)])
+  if (!rows.length) return res.status(404).json({ error: 'Store not found' })
+  res.json(rows[0])
+})
+
 app.get('/api/admin/stores', adminAuth, async (req, res) => {
   const zone = req.query.zone_id ? Number(req.query.zone_id) : null
   const { rows } = zone != null
@@ -1011,20 +1330,23 @@ app.get('/api/admin/stores', adminAuth, async (req, res) => {
   res.json(rows)
 })
 // Coverage/overlap preview for a candidate centre — the wizard calls this before creating.
+// Overriding a store-coverage overlap is a privileged action — super, or any role granted the
+// explicit zones.stores_override permission.
+const canOverrideStore = (req) => req.admin?.role === 'super' || (req.admin?.permissions || []).includes('zones.stores_override')
 app.get('/api/admin/stores/check', adminAuth, async (req, res) => {
   const lat = Number(req.query.lat), lng = Number(req.query.lng), radiusKm = Number(req.query.radiusKm) || 0
   if (!isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'lat/lng required' })
   const a = await analyseStore(lat, lng, radiusKm, req.query.exclude_id)
-  res.json({ ...a, covered: a.coveredBy.length > 0, overlapping: a.overlaps.length > 0, canOverride: req.admin?.role === 'super' })
+  res.json({ ...a, covered: a.coveredBy.length > 0, overlapping: a.overlaps.length > 0, canOverride: canOverrideStore(req) })
 })
-app.post('/api/admin/stores', adminAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/admin/stores', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Store name is required' })
   const lat = Number(b.lat), lng = Number(b.lng), radiusKm = Number(b.radius_km) || 3
   if (!isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'A valid location (lat/lng) is required' })
   const a = await analyseStore(lat, lng, radiusKm)
   const blocked = a.coveredBy.length > 0 || a.overlaps.length > 0
-  const isSuper = req.admin?.role === 'super'
+  const isSuper = canOverrideStore(req)
   if (blocked && !(isSuper && b.override)) {
     return res.status(409).json({
       error: a.coveredBy.length ? 'This location is already covered by an existing store.' : 'This store overlaps an existing store.',
@@ -1038,7 +1360,7 @@ app.post('/api/admin/stores', adminAuth, requireRole('manager'), async (req, res
       String(b.pincode || '').trim(), lat, lng, radiusKm, ['active', 'paused', 'planned'].includes(b.status) ? b.status : 'active'])
   res.status(201).json({ ...rows[0], overridden: blocked })
 })
-app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/admin/stores/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   const cur = (await pool.query('SELECT * FROM stores WHERE id=$1', [Number(req.params.id)])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Store not found' })
@@ -1048,8 +1370,8 @@ app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req
   if (b.lat !== undefined || b.lng !== undefined || b.radius_km !== undefined) {
     const a = await analyseStore(lat, lng, radiusKm, cur.id)
     const blocked = a.coveredBy.length > 0 || a.overlaps.length > 0
-    if (blocked && !(req.admin?.role === 'super' && b.override))
-      return res.status(409).json({ error: 'This location overlaps an existing store.', coveredBy: a.coveredBy, overlaps: a.overlaps, canOverride: req.admin?.role === 'super' })
+    if (blocked && !(canOverrideStore(req) && b.override))
+      return res.status(409).json({ error: 'This location overlaps an existing store.', coveredBy: a.coveredBy, overlaps: a.overlaps, canOverride: canOverrideStore(req) })
   }
   const { rows } = await pool.query(
     `UPDATE stores SET name=$1,manager=$2,address=$3,pincode=$4,lat=$5,lng=$6,radius_km=$7,status=$8,zone_id=$9 WHERE id=$10 RETURNING *`,
@@ -1057,13 +1379,13 @@ app.patch('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req
       lat, lng, radiusKm, b.status ?? cur.status, b.zone_id ?? cur.zone_id, cur.id])
   res.json(rows[0])
 })
-app.delete('/api/admin/stores/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.delete('/api/admin/stores/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   await pool.query('DELETE FROM stores WHERE id=$1', [Number(req.params.id)])
   res.json({ ok: true })
 })
 
 // Customer-facing single-field update kept from the monolith (price/availability toggle).
-app.patch('/api/services/:id', adminAuth, requireRole('manager'), async (req, res) => {
+app.patch('/api/services/:id', adminAuth, requirePerm('services.edit'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Service not found' })
   const s = cur.rows[0]
@@ -1082,7 +1404,7 @@ const ENTITY = {
   inventory: { cols: ['zone_id', 'name', 'vendor', 'stock', 'reorder', 'unit'], zoned: true },
   zone_pricing: { cols: ['zone_id', 'service_id', 'price', 'discount', 'active'], zoned: true },
 }
-function entityRoutes(path, table) {
+function entityRoutes(path, table, perm = 'zones.edit') {
   const def = ENTITY[table]
   app.get(`/api/admin/${path}`, adminAuth, async (req, res) => {
     const zone = req.query.zone_id ? Number(req.query.zone_id) : null
@@ -1091,7 +1413,7 @@ function entityRoutes(path, table) {
       : await pool.query(`SELECT * FROM ${table} ORDER BY id`)
     res.json(rows)
   })
-  app.post(`/api/admin/${path}`, adminAuth, requireRole('manager'), async (req, res) => {
+  app.post(`/api/admin/${path}`, adminAuth, requirePerm(perm), async (req, res) => {
     const b = req.body || {}
     const cols = def.cols.filter((c) => b[c] !== undefined)
     if (!cols.length) return res.status(400).json({ error: 'No fields provided' })
@@ -1100,17 +1422,19 @@ function entityRoutes(path, table) {
     const { rows } = await pool.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) RETURNING *`, vals)
     res.status(201).json(rows[0])
   })
-  app.patch(`/api/admin/${path}/:id`, adminAuth, requireRole('manager'), async (req, res) => {
+  app.patch(`/api/admin/${path}/:id`, adminAuth, requirePerm(perm), async (req, res) => {
+    const id = intId(req, res); if (id === null) return
     const b = req.body || {}
     const cols = def.cols.filter((c) => b[c] !== undefined)
     if (!cols.length) return res.json({ ok: true })
     const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
-    const { rows } = await pool.query(`UPDATE ${table} SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => b[c]), Number(req.params.id)])
+    const { rows } = await pool.query(`UPDATE ${table} SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => b[c]), id])
     if (!rows.length) return res.status(404).json({ error: 'Not found' })
     res.json(rows[0])
   })
-  app.delete(`/api/admin/${path}/:id`, adminAuth, requireRole('manager'), async (req, res) => {
-    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [Number(req.params.id)])
+  app.delete(`/api/admin/${path}/:id`, adminAuth, requirePerm(perm), async (req, res) => {
+    const id = intId(req, res); if (id === null) return
+    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [id])
     res.json({ ok: true })
   })
 }
@@ -1118,7 +1442,80 @@ entityRoutes('cities', 'cities')
 entityRoutes('clusters', 'clusters')
 entityRoutes('apartments', 'apartments')
 entityRoutes('inventory', 'inventory')
-entityRoutes('zone-pricing', 'zone_pricing')
+entityRoutes('zone-pricing', 'zone_pricing', 'pricing.edit')
+
+/* ───────── Membership plans (Module 10) — admin config authority + public catalog ─────────
+   Admin edits reuse the pricing permission. Body uses snake_case column names (like campaigns);
+   the three JSONB columns are stringified before write. Customer app + auth read the public list. */
+const MP_COLS = ['plan_key', 'name', 'tagline', 'popular', 'price', 'features', 'discount_pct',
+  'max_discount_per_order', 'discounted_orders_per_month', 'platform_fee_waiver', 'cashback_pct',
+  'cashback_max', 'free_cancellations', 'priority_booking', 'min_order_value', 'eligible_services',
+  'eligible_zones', 'customer_segment', 'starts_at', 'ends_at', 'status', 'sort']
+const MP_JSON = new Set(['features', 'eligible_services', 'eligible_zones'])
+const mpVal = (c, v) => (MP_JSON.has(c) ? JSON.stringify(v ?? []) : v)
+const mpParse = (v, d) => { if (v == null) return d; if (typeof v === 'object') return v; try { return JSON.parse(v) } catch { return d } }
+function membershipPlanOut(r) {
+  return {
+    id: r.id, key: r.plan_key, name: r.name, tagline: r.tagline, popular: r.popular, price: r.price,
+    features: mpParse(r.features, []), discountPct: r.discount_pct, maxDiscountPerOrder: r.max_discount_per_order,
+    discountedOrdersPerMonth: r.discounted_orders_per_month, platformFeeWaiver: r.platform_fee_waiver,
+    cashbackPct: r.cashback_pct, cashbackMax: r.cashback_max, freeCancellations: r.free_cancellations,
+    priorityBooking: r.priority_booking, minOrderValue: r.min_order_value,
+    eligibleServices: mpParse(r.eligible_services, []), eligibleZones: mpParse(r.eligible_zones, []),
+    customerSegment: r.customer_segment, startsAt: r.starts_at, endsAt: r.ends_at, status: r.status, sort: r.sort,
+  }
+}
+
+app.get('/api/admin/membership-plans', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT * FROM membership_plans ORDER BY sort, id')
+  res.json(rows.map(membershipPlanOut))
+})
+app.post('/api/admin/membership-plans', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  if (!b.plan_key || !String(b.plan_key).trim()) return res.status(400).json({ error: 'plan_key is required' })
+  if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'name is required' })
+  const cols = MP_COLS.filter((c) => b[c] !== undefined)
+  const ph = cols.map((_, i) => `$${i + 1}`).join(',')
+  try {
+    const { rows } = await pool.query(`INSERT INTO membership_plans (${cols.join(',')}) VALUES (${ph}) RETURNING *`, cols.map((c) => mpVal(c, b[c])))
+    res.status(201).json(membershipPlanOut(rows[0]))
+  } catch (e) { res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'A plan with that key already exists' : 'Could not create plan' }) }
+})
+app.patch('/api/admin/membership-plans/:id', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const id = intId(req, res); if (id === null) return
+  const b = req.body || {}
+  const cols = MP_COLS.filter((c) => b[c] !== undefined)
+  if (!cols.length) return res.json({ ok: true })
+  const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
+  const { rows } = await pool.query(`UPDATE membership_plans SET ${set} WHERE id=$${cols.length + 1} RETURNING *`, [...cols.map((c) => mpVal(c, b[c])), id])
+  if (!rows.length) return res.status(404).json({ error: 'Not found' })
+  res.json(membershipPlanOut(rows[0]))
+})
+app.delete('/api/admin/membership-plans/:id', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const id = intId(req, res); if (id === null) return
+  await pool.query('DELETE FROM membership_plans WHERE id=$1', [id])
+  res.json({ ok: true })
+})
+// Public catalog: published plans only — the customer app renders these and auth prices from them.
+app.get('/api/membership-plans', async (_q, res) => {
+  const { rows } = await pool.query("SELECT * FROM membership_plans WHERE status='published' ORDER BY sort, id")
+  res.json(rows.map(membershipPlanOut))
+})
+
+/* Discount stacking policy + margin guard (Phase 3) — global pricing rules. */
+app.get('/api/admin/pricing-rules', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query('SELECT stacking, max_discount_pct, min_service_amount FROM pricing_rules WHERE id=1')
+  res.json(rows[0] || { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 })
+})
+app.put('/api/admin/pricing-rules', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const b = req.body || {}
+  const stacking = b.stacking === 'exclusive' ? 'exclusive' : 'stack'
+  const maxPct = Math.max(0, Math.min(100, Math.round(Number(b.max_discount_pct) || 0)))
+  const minSvc = Math.max(0, Math.round(Number(b.min_service_amount) || 0))
+  await pool.query('UPDATE pricing_rules SET stacking=$1, max_discount_pct=$2, min_service_amount=$3, updated=now() WHERE id=1', [stacking, maxPct, minSvc])
+  invalidatePricingRules()
+  res.json({ stacking, max_discount_pct: maxPct, min_service_amount: minSvc })
+})
 
 /* Real per-zone operations metrics, aggregated from live DB (apartments, inventory, workers,
  * bookings) — powers the dashboards with real numbers instead of derived estimates. */
@@ -1185,5 +1582,5 @@ app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
 subscribeEvents(REDIS_URL, 'catalog', (type) => { if (type === 'settings.updated') invalidateSettings() })
 
 init()
-  .then(() => app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)))
+  .then(() => { ensurePublicBucket().catch(() => {}); startWeatherPoller(pool, 20); app.listen(PORT, () => console.log(`[catalog] service on http://localhost:${PORT}`)) })
   .catch((e) => { console.error('[catalog] failed to start:', e.message); process.exit(1) });

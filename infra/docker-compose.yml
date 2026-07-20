@@ -20,6 +20,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # Object storage for KYC documents (Aadhaar/PAN/police verification). S3-compatible, so
+  # production swaps to real AWS S3 by pointing S3_ENDPOINT/keys elsewhere — no code change.
+  # Deliberately NOT a public bucket: documents are read through short-lived signed URLs the
+  # worker service issues after checking who is asking. :9001 is the MinIO admin console.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-homehelp}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-change-me-minio}
+    # 9010/9011 rather than MinIO's default 9000/9001, which commonly clash with another local
+    # MinIO. Bound to 127.0.0.1: KYC storage must not be reachable from the LAN.
+    ports: ["127.0.0.1:${S3_PORT:-9010}:9000", "127.0.0.1:${S3_CONSOLE_PORT:-9011}:9001"]
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # ============================ databases (one per service) ============================
   catalog-db:
     image: postgres:16-alpine
@@ -92,7 +112,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@auth-db:5432/auth
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       CATALOG_URL: http://catalog:4001
+      ADMIN_URL: http://admin:4010
       DEV_OTP: ${DEV_OTP}
     ports: ["4002:4002"]
     depends_on:
@@ -106,9 +128,19 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@catalog-db:5432/catalog
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
+      AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
       WORKER_URL: http://worker:4004
+      # object storage for Home-banner background images (public media bucket, like worker avatars)
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9010}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-homehelp}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-minio}
+      S3_BUCKET: ${S3_BUCKET:-homehelp-kyc}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-homehelp-media}
     ports: ["4001:4001"]
     depends_on:
       catalog-db: { condition: service_healthy }
@@ -121,6 +153,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@booking-db:5432/booking
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       CATALOG_URL: http://catalog:4001
       AUTH_URL: http://auth:4002
       WORKER_URL: http://worker:4004
@@ -140,6 +173,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@dispatch-db:5432/dispatch
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       WORKER_URL: http://worker:4004
       BOOKING_URL: http://booking:4006
       CATALOG_URL: http://catalog:4001
@@ -157,6 +191,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@payment-db:5432/payment
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
@@ -175,6 +210,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@wallet-db:5432/wallet
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
       WORKER_URL: http://worker:4004
       PAYMENT_URL: http://payment:4008
@@ -192,14 +228,28 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@worker-db:5432/worker
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
       WALLET_URL: http://wallet:4009
+      CATALOG_URL: http://catalog:4001
+      NOTIFICATION_URL: http://notification:4003
       WORKER_DEV_OTP: ${WORKER_DEV_OTP}
+      # KYC document storage. Point these at real S3 in production; the code is S3-compatible.
+      # S3_ENDPOINT is where this service writes; S3_PUBLIC_ENDPOINT is what signed URLs must say,
+      # because a browser opens them and cannot resolve the "minio" hostname.
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9010}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-homehelp}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-minio}
+      S3_BUCKET: ${S3_BUCKET:-homehelp-kyc}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-homehelp-media}
     ports: ["4004:4004"]
     depends_on:
       worker-db: { condition: service_healthy }
+      minio: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   notification:
@@ -209,9 +259,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@notification-db:5432/notification
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       ADMIN_URL: http://admin:4010
       AUTH_URL: http://auth:4002
       BOOKING_URL: http://booking:4006
+      WORKER_URL: http://worker:4004
     ports: ["4003:4003"]
     depends_on:
       notification-db: { condition: service_healthy }
@@ -224,6 +276,13 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@admin-db:5432/admin
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+
+      MSG91_KEY: ${MSG91_KEY:-}
+
+      MSG91_OTP_TEMPLATE_ID: ${MSG91_OTP_TEMPLATE_ID:-}
+
+      MSG91_SENDER_ID: ${MSG91_SENDER_ID:-}
       AUTH_URL: http://auth:4002
       CATALOG_URL: http://catalog:4001
       BOOKING_URL: http://booking:4006
@@ -276,6 +335,7 @@ services:
       - redis
 
 volumes:
+  minio-data:
   catalog-pgdata:
   auth-pgdata:
   notification-pgdata:

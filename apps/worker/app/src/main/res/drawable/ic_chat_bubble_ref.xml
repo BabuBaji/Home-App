@@ -1,0 +1,32 @@
+<!--
+  Round outlined speech bubble with a bottom-left tail and two message lines — the chat
+  glyph from the reference design. Material ships no circular bubble-with-lines icon
+  (Outlined.Message is a rounded rectangle), so this is drawn by hand.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Bubble outline: a circle whose lower-left sweeps out into a tail. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#111827"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,3.2 C16.86,3.2 20.8,6.85 20.8,11.35 C20.8,15.85 16.86,19.5 12,19.5 C10.62,19.5 9.31,19.21 8.15,18.69 L3.9,20.4 L5.05,16.62 C3.86,15.19 3.2,13.35 3.2,11.35 C3.2,6.85 7.14,3.2 12,3.2 Z" />
+    <!-- Two message lines: the upper one full width, the lower one short. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#111827"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M8.6,10.2 L15.4,10.2" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#111827"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M8.6,13.4 L12.8,13.4" />
+</vector>

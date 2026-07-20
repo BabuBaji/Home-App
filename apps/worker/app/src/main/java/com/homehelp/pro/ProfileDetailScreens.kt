@@ -4,11 +4,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,15 +36,29 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CardGiftcard
+import androidx.compose.material.icons.filled.CurrencyRupee
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
@@ -61,14 +80,25 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +108,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.homehelp.pro.network.SkillClaim
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared scaffolding & small building blocks for the profile detail screens.
@@ -85,7 +116,7 @@ import androidx.navigation.NavHostController
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
+internal fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(title, onBack = { nav.popBackStack() })
         Column(
@@ -235,7 +266,7 @@ private fun BankPickerField(selected: String, onSelect: (BankOption) -> Unit) {
 
 /** Tinted rounded icon chip used as the leading element of list/toggle/nav rows. */
 @Composable
-private fun IconChip(icon: ImageVector, tint: Color, bg: Color, size: Int = 38) {
+internal fun IconChip(icon: ImageVector, tint: Color, bg: Color, size: Int = 38) {
     Box(
         Modifier.size(size.dp).clip(RoundedCornerShape(Radius.field)).background(bg),
         contentAlignment = Alignment.Center,
@@ -296,42 +327,279 @@ private fun NavRow(
     }
 }
 
+/** A labelled pick-one row. Used where the value is a small fixed set (gender, blood group…) — a
+ *  free-text field there just produces data nobody can group by. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChoiceRow(label: String, options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column {
+        SectionLabel(label)
+        Spacer(Modifier.height(Space.xs))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            options.forEach { opt ->
+                val on = selected.equals(opt, ignoreCase = true)
+                Text(
+                    opt, fontSize = 13.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (on) Purple else TextGray,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Radius.field))
+                        .background(if (on) PurpleLight else FieldFill)
+                        .clickable { onSelect(if (on) "" else opt) }
+                        .padding(horizontal = Space.m, vertical = Space.s),
+                )
+            }
+        }
+    }
+}
+
+private val GENDERS = listOf("Male", "Female", "Other")
+private val BLOOD_GROUPS = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-")
+private val MARITAL = listOf("Single", "Married", "Other")
+private val QUALIFICATIONS = listOf("Below 10th", "10th", "12th", "Diploma", "Graduate", "Post Graduate")
+
 @Composable
 fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    DetailScaffold("Personal Information", nav) {
-        // Identity hero — avatar, name, rating and earned tier.
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString(""), size = 60)
-                Spacer(Modifier.width(Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text(vm.workerName, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
-                    Spacer(Modifier.height(Space.xs))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (vm.jobsCompleted > 0) {
-                            RatingStars(vm.workerRating)
-                            Spacer(Modifier.width(Space.s))
+    var sameAsCurrent by remember { mutableStateOf(false) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) vm.uploadPhoto(ctx, uri)
+    }
+    LaunchedEffect(vm.profileError) { vm.profileError?.let { toast(ctx, it); vm.clearProfileError() } }
+    val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        // Clean white top bar — back + title + hairline.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Space.xs))
+            Text("Personal Information", color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+        }
+        HairlineDivider()
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),
+        ) {
+            // Photo hero — centered avatar with camera badge.
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        Modifier.size(84.dp).clip(CircleShape).background(Primary50).border(2.dp, Purple, CircleShape).clickable { photoPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (vm.avatarUrl.isNotBlank()) {
+                            SubcomposeAsyncImage(
+                                model = vm.avatarUrl, contentDescription = "Profile photo", contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp) },
+                                error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp) },
+                            )
+                        } else {
+                            Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                         }
-                        Text("${vm.jobsCompleted} jobs", fontSize = 12.sp, color = TextGray)
                     }
-                    Spacer(Modifier.height(Space.s))
-                    TierBadge(vm.tier)
+                    Box(
+                        Modifier.size(28.dp).clip(CircleShape).background(Purple).border(2.dp, Color.White, CircleShape).clickable { photoPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.PhotoCamera, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(14.dp)) }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(vm.workerName.ifBlank { "Your name" }, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Tap the photo to update it", color = TextMuted, fontSize = 11.5.sp)
+            }
+
+            PiSection("Contact Details")
+            PiField("Full Name", vm.workerName) { vm.workerName = it }
+            // Mobile is the login identity — shown read-only; changing it would lock the account out.
+            PiField("Mobile Number", vm.workerPhone, enabled = false) { }
+            Text("Your mobile is your login — contact admin to change it.", fontSize = 11.sp, color = TextMuted, modifier = Modifier.padding(bottom = 8.dp))
+            PiField("Email", vm.workerEmail, KeyboardType.Email) { vm.workerEmail = it }
+            PiField("City", vm.workerCity) { vm.workerCity = it }
+            PiField("Date of Birth (YYYY-MM-DD)", vm.dob) { vm.dob = it }
+            ChoiceRow("Gender", GENDERS, vm.gender) { vm.gender = it }
+            Spacer(Modifier.height(Space.m))
+            ChoiceRow("Blood Group", BLOOD_GROUPS, vm.bloodGroup) { vm.bloodGroup = it }
+            Spacer(Modifier.height(Space.m))
+            ChoiceRow("Marital Status", MARITAL, vm.maritalStatus) { vm.maritalStatus = it }
+
+            PiSection("Family & Emergency")
+            PiField("Father's Name", vm.fatherName) { vm.fatherName = it }
+            PiField("Mother's Name", vm.motherName) { vm.motherName = it }
+            PiField("Emergency Contact Name", vm.emergencyName) { vm.emergencyName = it }
+            PiField("Emergency Contact Number", vm.emergencyPhone, KeyboardType.Phone) { vm.emergencyPhone = it.filter(Char::isDigit).take(10) }
+
+            PiSection("Address")
+            PiField("Current Address", vm.currentAddress) { vm.currentAddress = it; if (sameAsCurrent) vm.permanentAddress = it }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = sameAsCurrent,
+                    onCheckedChange = { sameAsCurrent = it; if (it) vm.permanentAddress = vm.currentAddress },
+                    colors = CheckboxDefaults.colors(checkedColor = Purple),
+                )
+                Text("Permanent address is the same", fontSize = 13.sp, color = TextDark)
+            }
+            if (!sameAsCurrent) { Spacer(Modifier.height(Space.s)); PiField("Permanent Address", vm.permanentAddress) { vm.permanentAddress = it } }
+
+            PiSection("Experience")
+            ChoiceRow("Highest Qualification", QUALIFICATIONS, vm.qualification) { vm.qualification = it }
+            Spacer(Modifier.height(Space.m))
+            PiField("Years of Experience", vm.experienceYears, KeyboardType.Number) { vm.experienceYears = it.filter(Char::isDigit).take(2) }
+            PiField("Previous Company", vm.previousCompany) { vm.previousCompany = it }
+            PiField("Languages Known", vm.languages) { vm.languages = it }
+            Text("e.g. Hindi, Telugu, English", fontSize = 11.sp, color = TextMuted)
+        }
+
+        // Sticky save bar so the action is always reachable without scrolling to the end.
+        androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
+            Box(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
+                PrimaryButton("Save Changes", enabled = !vm.savingProfile, loading = vm.savingProfile) {
+                    vm.saveProfile { toast(ctx, "Profile updated") }
                 }
             }
         }
-        // Editable contact details.
-        Card {
-            SectionLabel("Contact Details")
-            Spacer(Modifier.height(Space.m))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Field("Full Name", vm.workerName) { vm.workerName = it }
-                Field("Mobile Number", vm.workerPhone) { vm.workerPhone = it }
-                Field("Email", vm.workerEmail) { vm.workerEmail = it }
-                Field("City", vm.workerCity) { vm.workerCity = it }
+    }
+}
+
+/** Section header for the white Personal Information form. */
+@Composable
+private fun PiSection(text: String) {
+    Text(text, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 10.dp))
+}
+
+/** White outlined field (light border, purple focus) for the professional form look. */
+@Composable
+private fun PiField(label: String, value: String, keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        enabled = enabled,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+        shape = RoundedCornerShape(Radius.field),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = Color.White, unfocusedContainerColor = Color.White, disabledContainerColor = FieldFill,
+            focusedBorderColor = Purple, unfocusedBorderColor = Divider, disabledBorderColor = Divider,
+            focusedLabelColor = Purple, unfocusedLabelColor = TextMuted, disabledLabelColor = TextMuted,
+            disabledTextColor = TextGray, cursorColor = Purple,
+        ),
+    )
+}
+
+/**
+ * Phase 6 — the worker picks the services they can do, at what level, with how much experience.
+ *
+ * A claim is NOT a capability: only an admin approval puts a service into the set dispatch matches
+ * on. The screen says so plainly, because "I ticked Deep Cleaning and got no deep-cleaning jobs"
+ * is otherwise an invisible rule.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SkillsScreen(vm: AppViewModel, nav: NavHostController) {
+    val ctx = LocalContext.current
+    var certFor by remember { mutableStateOf<String?>(null) }
+    val certPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val svc = certFor
+        if (uri != null && svc != null) vm.uploadSkillCertificate(ctx, svc, uri)
+        certFor = null
+    }
+    LaunchedEffect(Unit) { vm.loadSkills() }
+    LaunchedEffect(vm.skillsError) { vm.skillsError?.let { toast(ctx, it); vm.clearSkillsError() } }
+
+    // Local edits; only sent on Save.
+    val claims = remember { mutableStateMapOf<String, SkillClaim>() }
+    LaunchedEffect(vm.skills.size) {
+        claims.clear()
+        vm.skills.forEach { (svc, s) -> claims[svc] = SkillClaim(s.level, s.years) }
+    }
+
+    DetailScaffold("Skills & Services", nav) {
+        Card(padding = Dp16.S) {
+            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                IconChip(Icons.Filled.Info, Purple, PurpleLight)
+                Spacer(Modifier.width(Space.m))
+                Text(
+                    "Pick the services you can do and your level. An admin reviews each one — you'll only be sent jobs for skills they approve.",
+                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                )
             }
         }
-        PrimaryButton("Save Changes") { vm.saveProfile(); toast(ctx, "Profile updated") }
+
+        vm.serviceCatalogue.forEach { svc ->
+            val claim = claims[svc]
+            val saved = vm.skills[svc]
+            val picked = claim != null
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = picked, onCheckedChange = { on ->
+                        if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
+                        else claims.remove(svc)
+                    })
+                    Text(svc, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    // The status of the CLAIM — what the admin decided, not what the worker typed.
+                    when (saved?.status) {
+                        "Approved" -> StatusPill("Approved", GreenLight, GreenSuccess)
+                        "Rejected" -> StatusPill("Rejected", RedLight, RedCancel)
+                        "Pending" -> StatusPill("In review", GoldLight, Amber)
+                        else -> {}
+                    }
+                }
+                if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
+                    Spacer(Modifier.height(Space.xs))
+                    Text("Not approved: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
+                }
+                if (picked) {
+                    Spacer(Modifier.height(Space.s))
+                    HairlineDivider()
+                    Spacer(Modifier.height(Space.s))
+                    Text("Your level", fontSize = 12.sp, color = TextGray)
+                    Spacer(Modifier.height(Space.xs))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        vm.skillLevels.forEach { lvl ->
+                            val on = claim?.level == lvl
+                            Text(
+                                lvl, fontSize = 12.5.sp,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (on) Purple else TextGray,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(Radius.field))
+                                    .background(if (on) PurpleLight else FieldFill)
+                                    .clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }
+                                    .padding(horizontal = Space.m, vertical = Space.s),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Space.m))
+                    Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
+                        claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
+                    }
+                    Spacer(Modifier.height(Space.s))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
+                            .clickable { certFor = svc; certPicker.launch("*/*") }.padding(Space.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.CheckCircle, null, tint = if (saved?.certificate != null) GreenSuccess else TextMuted, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(Space.s))
+                        Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 13.sp, color = TextDark)
+                    }
+                    if (saved?.status == "Approved") {
+                        Spacer(Modifier.height(Space.xs))
+                        Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                    }
+                }
+            }
+        }
+
+        PrimaryButton("Save Skills", enabled = !vm.savingSkills, loading = vm.savingSkills) {
+            vm.saveSkills(claims.toMap()) { toast(ctx, "Skills sent for review") }
+        }
     }
 }
 
@@ -357,30 +625,50 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         val docName = pendingDoc
         if (uri != null && docName != null) {
-            val fileName = pickedFileName(ctx, uri)
-            vm.uploadDocument(docName, fileName)
-            toast(ctx, "$docName uploaded: $fileName")
+            // Hand the Uri over so the BYTES get uploaded. Previously only the display name was
+            // taken and the Uri discarded, so nothing was ever actually sent — and it toasted
+            // "uploaded" before the request had even been made.
+            vm.uploadDocument(ctx, docName, pickedFileName(ctx, uri), uri)
         } else if (docName != null) {
             toast(ctx, "Upload cancelled")
         }
         pendingDoc = null
     }
+    // Report the real outcome (wrong file type, too large, storage unreachable).
+    LaunchedEffect(vm.uploadError) { vm.uploadError?.let { toast(ctx, it); vm.clearUploadError() } }
+    // The server owns the document set — fetch it rather than trusting the seeded placeholder.
+    LaunchedEffect(Unit) { vm.loadDocumentTypes() }
 
     DetailScaffold("Documents", nav) {
+        val required = vm.documents.filter { vm.documentRequired[it.name] != false }
+        val done = required.count { it.status == "Verified" }
         Card(padding = Dp16.S) {
             Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
                 IconChip(Icons.Filled.Info, Purple, PurpleLight)
                 Spacer(Modifier.width(Space.m))
-                Text(
-                    "Upload a clear photo or PDF scan for each document. Files are reviewed within 24–48 hours.",
-                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
-                )
+                Column {
+                    Text(
+                        // Only claim a review window we can actually keep: an admin approves these
+                        // by hand, so promise the mechanism, not a deadline nobody owns.
+                        "Upload a clear photo or PDF scan of each document. An admin checks each one and you'll be told if any needs re-doing.",
+                        fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                    )
+                    if (required.isNotEmpty()) {
+                        Spacer(Modifier.height(Space.s))
+                        Text(
+                            "$done of ${required.size} required documents verified",
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (done == required.size) GreenSuccess else TextDark,
+                        )
+                    }
+                }
             }
         }
         // One tap-through row per document — status colour tells verified / pending / missing
         // at a glance, and tapping the row opens the picker (upload / replace) as before.
         vm.documents.forEach { doc ->
             val hasFile = doc.fileName.isNotBlank()
+            val isRequired = vm.documentRequired[doc.name] != false
             val icon: ImageVector
             val tint: Color
             val bg: Color
@@ -390,32 +678,41 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
                     icon = Icons.Filled.CheckCircle; tint = GreenSuccess; bg = GreenLight
                     subtitle = doc.fileName.ifBlank { "Verified" }
                 }
-                doc.status == "Under Review" -> {
-                    icon = Icons.Filled.Schedule; tint = Purple; bg = PurpleLight
-                    subtitle = "Under review • ${doc.fileName.ifBlank { "submitted" }}"
+                // An admin sent it back. Without this branch a rejection rendered as amber
+                // "pending" and the worker had no idea anything was wrong.
+                doc.status == "Rejected" -> {
+                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
+                    subtitle = doc.rejectReason.ifBlank { "Rejected — please upload a new copy" }
                 }
                 hasFile -> {
                     icon = Icons.Filled.Schedule; tint = Amber; bg = GoldLight
-                    subtitle = doc.fileName
+                    subtitle = "Waiting for review • ${doc.fileName}"
                 }
                 else -> {
-                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
-                    subtitle = "Not uploaded yet — tap to add"
+                    icon = if (isRequired) Icons.Filled.Close else Icons.Filled.Add
+                    tint = if (isRequired) RedCancel else TextGray
+                    bg = if (isRequired) RedLight else FieldFill
+                    subtitle = vm.documentHints[doc.name]?.takeIf { it.isNotBlank() } ?: "Tap to add"
                 }
             }
-            StatusListRow(
-                icon = icon,
-                iconTint = tint,
-                iconBg = bg,
-                title = doc.name,
-                subtitle = subtitle,
-                subtitleColor = tint,
-                value = if (doc.status == "Verified") "Replace" else "Upload",
-                valueColor = tint,
-            ) {
-                pendingDoc = doc.name
-                // Accept images and PDFs; system picker honours the mime hint.
-                picker.launch("*/*")
+            Column {
+                StatusListRow(
+                    icon = icon,
+                    iconTint = tint,
+                    iconBg = bg,
+                    title = doc.name + if (isRequired) "" else "  (optional)",
+                    subtitle = subtitle,
+                    subtitleColor = tint,
+                    value = if (hasFile || doc.status == "Verified") "Replace" else "Upload",
+                    valueColor = if (doc.status == "Verified") GreenSuccess else Purple,
+                ) {
+                    pendingDoc = doc.name
+                    // Accept images and PDFs; system picker honours the mime hint.
+                    picker.launch("*/*")
+                }
+                if (vm.uploadingDoc == doc.name) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = Space.m), color = Purple)
+                }
             }
         }
     }
@@ -613,7 +910,29 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
 fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    LaunchedEffect(Unit) { vm.loadAvailability() }
+    LaunchedEffect(vm.availabilityError) { vm.availabilityError?.let { toast(ctx, it); vm.clearAvailabilityError() } }
     DetailScaffold("Availability", nav) {
+        // What the admin decided. Without this the worker assumes what they picked is what they got.
+        Card(padding = Dp16.S) {
+            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                val (tint, bg) = when (vm.availabilityStatus) {
+                    "Approved" -> GreenSuccess to GreenLight
+                    "Modified" -> Amber to GoldLight
+                    else -> Purple to PurpleLight
+                }
+                IconChip(Icons.Filled.Info, tint, bg)
+                Spacer(Modifier.width(Space.m))
+                Text(
+                    when (vm.availabilityStatus) {
+                        "Approved" -> "Your admin approved these preferences."
+                        "Modified" -> "Your admin changed this: ${vm.availabilityReason}"
+                        else -> "These are your preferences — an admin confirms them. Only the hours limit applies straight away."
+                    },
+                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+                )
+            }
+        }
         Card {
             SectionLabel("Working Days")
             Text("Tap the days you want to work.", fontSize = 12.sp, color = TextGray)
@@ -658,11 +977,28 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             HairlineDivider()
             LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
         }
+
+        // The one preference that binds: past this, no more jobs are offered until the worker
+        // raises it themselves. Everything else on this screen guides the admin's assignment.
+        Card {
+            SectionLabel("Maximum Working Hours")
+            Text(
+                "The most you want to work in a week. Once you hit it you won't be offered more jobs until you raise it. Leave blank for no limit.",
+                fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.m))
+            Field("Hours per week", vm.maxWeeklyHours, KeyboardType.Number) {
+                vm.maxWeeklyHours = it.filter(Char::isDigit).take(2)
+            }
+            Spacer(Modifier.height(Space.s))
+            LabeledRow("Worked so far this week", "${vm.hoursThisWeek} h")
+        }
+
         PrimaryButton("Save Availability") {
-            vm.saveAvailability()
-            val active = vm.availableDays.count { it.value }
-            val shift = if (vm.shiftStart.isNotBlank()) " • ${vm.shiftStart}–${vm.shiftEnd}" else ""
-            toast(ctx, "Saved • $active days/week$shift")
+            vm.saveAvailability {
+                val active = vm.availableDays.count { it.value }
+                toast(ctx, "Sent for approval • $active days/week")
+            }
         }
     }
 }
@@ -887,7 +1223,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             SectionLabel("Your Shift Plan")
             Text(
-                "Pick one shift. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 10)} min of the start time — later check-ins are penalised.",
+                "Ask for a shift — an admin confirms it. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
                 fontSize = 12.sp, color = TextGray,
             )
             Spacer(Modifier.height(Space.m))
@@ -896,10 +1232,28 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     vm.shifts.forEach { s ->
+                        // Only the ASSIGNED shift shows as selected. A request in flight is marked
+                        // as such — the earnings guarantee follows the assignment, and showing a
+                        // pending request as chosen would have workers counting on one they lack.
                         ShiftOption(s, vm.selectedShiftId == s.id) {
-                            vm.selectShift(s.id) { toast(ctx, "Shift set: ${s.name}") }
+                            vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} — awaiting approval") }
                         }
                     }
+                }
+                val requested = vm.requestedShiftId
+                if (requested != null && requested != vm.selectedShiftId) {
+                    Spacer(Modifier.height(Space.s))
+                    val name = vm.shifts.firstOrNull { it.id == requested }?.name ?: "that shift"
+                    Text(
+                        "You've asked for $name — waiting for an admin to confirm it. " +
+                            (if (vm.selectedShiftId == null) "You're not on a shift yet." else "Until then your current shift stands."),
+                        fontSize = 12.sp, color = Amber, lineHeight = 17.sp,
+                    )
+                }
+                if (vm.shiftStatus == "Modified" && vm.selectedShiftId != null) {
+                    Spacer(Modifier.height(Space.s))
+                    val name = vm.shifts.firstOrNull { it.id == vm.selectedShiftId }?.name ?: "a different shift"
+                    Text("An admin put you on $name.", fontSize = 12.sp, color = TextGray)
                 }
             }
         }
@@ -1143,37 +1497,190 @@ fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+// Light-blue accent used for shift / policy notifications (no theme token for it).
+private val NotifBlue = Color(0xFF3B82F6)
+private val NotifBlueBg = Color(0xFFE8F0FE)
+
+/** One notification row, exactly as the 4_Notifications reference draws it. */
+private data class NotifItem(
+    val icon: ImageVector,
+    val tint: Color,
+    val chipBg: Color,
+    val title: String,
+    val line1: String,
+    val line2: String = "",
+    val link: String = "",
+    val time: String,
+    val category: String,
+    val accent: Color? = null,     // non-null → unread (colored left bar + dot)
+    val highlight: Boolean = false, // faint tinted card background (focused item)
+)
+
+private val NOTIFS_TODAY = listOf(
+    NotifItem(Icons.Filled.CalendarMonth, Purple, PurpleLight, "New Job Offer", "Kitchen Cleaning at Madhapur", "₹220 • 2.6 km away", time = "2 min ago", category = "Jobs", accent = Purple, highlight = true),
+    NotifItem(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Payment Credited", "₹220 added to your wallet", "Order #SNB12745", time = "15 min ago", category = "Wallet", accent = GreenSuccess),
+    NotifItem(Icons.Filled.CardGiftcard, Amber, GoldLight, "Incentive Unlocked! 🎉", "You earned ₹200 incentive", "Keep it up!", time = "35 min ago", category = "Wallet", accent = Amber),
+)
+
+private val NOTIFS_EARLIER = listOf(
+    NotifItem(Icons.Filled.Campaign, NotifBlue, NotifBlueBg, "Shift Update", "Your shift on 26 May has been updated", "New timing: 10:00 AM – 6:00 PM", time = "2 hours ago", category = "HR"),
+    NotifItem(Icons.Filled.School, Purple, PurpleLight, "Training Session", "Hygiene & Safety training", "Tomorrow at 10:00 AM", time = "3 hours ago", category = "Training"),
+    NotifItem(Icons.Filled.Warning, RedCancel, RedLight, "Attendance Marked", "Checked in at 09:02 AM", "26 May 2024", time = "4 hours ago", category = "HR"),
+    NotifItem(Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Weekly Target Update", "You are 60% towards this week's target", "₹2,000 more to go!", time = "5 hours ago", category = "HR"),
+    NotifItem(Icons.Filled.Description, NotifBlue, NotifBlueBg, "New Policy Update", "Please check the updated cancellation policy", link = "View Details", time = "1 day ago", category = "System"),
+    NotifItem(Icons.Filled.WorkspacePremium, Purple, PurpleLight, "Congrats! You are a Top Performer 🏆", "You are in Top 20% workers in your zone", "Great going!", time = "1 day ago", category = "HR"),
+)
+
 @Composable
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
-    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshNotifications(); vm.markNotificationsRead() }
-    DetailScaffold("Notifications", nav) {
-        if (vm.notifications.isNotEmpty()) {
-            Card {
-                SectionLabel("Recent")
-                Spacer(Modifier.height(Space.s))
-                vm.notifications.take(25).forEachIndexed { i, n ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-                        IconChip(Icons.Filled.Notifications, Purple, PurpleLight)
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(n.text, fontSize = 13.sp, color = TextDark)
-                            if (n.date.isNotBlank()) Text(n.date, fontSize = 11.sp, color = TextGray)
-                        }
+    val ctx = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.markNotificationsRead() }
+    var tab by remember { mutableStateOf("All") }
+    val tabs = listOf("All", "Jobs", "Wallet", "HR", "Training", "System")
+    val today = NOTIFS_TODAY.filter { tab == "All" || it.category == tab }
+    val earlier = NOTIFS_EARLIER.filter { tab == "All" || it.category == tab }
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        // Clean white top bar — title + search + overflow, as the reference draws it (no back arrow;
+        // system back returns from this pushed screen).
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Notifications", color = TextDark, fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.Search, contentDescription = "Search", tint = TextDark, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(Space.l))
+            Icon(Icons.Filled.MoreVert, contentDescription = "More", tint = TextDark, modifier = Modifier.size(22.dp).clip(CircleShape).clickable { nav.popBackStack() })
+        }
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(bottom = Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            // Category filter pills — horizontally scrollable (six tabs don't fit a fixed track).
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                tabs.forEach { t ->
+                    val on = t == tab
+                    Box(
+                        Modifier.clip(RoundedCornerShape(Radius.pill))
+                            .background(if (on) Purple else FieldFill)
+                            .clickable { tab = t }
+                            .padding(horizontal = 15.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            t, color = if (on) Color.White else TextGray, fontSize = 12.5.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        )
                     }
-                    if (i < vm.notifications.take(25).lastIndex) HairlineDivider()
+                }
+            }
+
+            if (today.isEmpty() && earlier.isEmpty()) {
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 44.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("🔔", fontSize = 40.sp)
+                    Spacer(Modifier.height(Space.m))
+                    Text("You're all caught up", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Nothing here under this filter.", color = TextGray, fontSize = 13.sp)
+                }
+            } else {
+                if (today.isNotEmpty()) {
+                    Text("Today", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
+                    today.forEach { NotifCard(it) }
+                }
+                if (earlier.isNotEmpty()) {
+                    Text("Earlier", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = Space.xs))
+                    earlier.forEach { NotifCard(it) }
+                }
+            }
+
+            // "Stay Updated" promo — opens the OS notification settings for this app.
+            Spacer(Modifier.height(2.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF5A48E6), Color(0xFF7C5CFF))))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🔔", fontSize = 28.sp)
+                Spacer(Modifier.width(Space.s))
+                Column(Modifier.weight(1f)) {
+                    Text("Stay Updated!", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Enable push notifications to never miss important updates and job offers.",
+                        color = Color.White.copy(alpha = 0.92f), fontSize = 11.5.sp, lineHeight = 15.sp,
+                    )
+                }
+                Spacer(Modifier.width(Space.s))
+                Box(
+                    Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White)
+                        .clickable { openAppNotificationSettings(ctx) }.padding(horizontal = 14.dp, vertical = 8.dp),
+                ) { Text("Enable Now", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotifCard(n: NotifItem) {
+    val unread = n.accent != null
+    Surface(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = if (n.highlight) Primary50 else Color.White,
+        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, if (unread) n.accent!!.copy(alpha = 0.45f) else Divider),
+    ) {
+        Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+            // Colored left accent bar marks an unread item.
+            if (unread) Box(Modifier.width(3.dp).fillMaxHeight().background(n.accent!!))
+            Row(Modifier.weight(1f).padding(horizontal = 11.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconChip(n.icon, n.tint, n.chipBg, size = 40)
+                Spacer(Modifier.width(Space.s))
+                Column(Modifier.weight(1f)) {
+                    Text(n.title, color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text(n.line1, color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                    if (n.line2.isNotBlank()) Text(n.line2, color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                    if (n.link.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(n.link, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.width(Space.s))
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(n.time, color = TextMuted, fontSize = 10.5.sp, maxLines = 1)
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (unread) {
+                            Box(Modifier.size(6.dp).clip(CircleShape).background(Purple))
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
-        Card {
-            SectionLabel("Notification Settings")
-            Spacer(Modifier.height(Space.xs))
-            ToggleRow(Icons.Filled.WorkOutline, Purple, PurpleLight, "New job alerts", checked = vm.notifNewJobs) { vm.notifNewJobs = it; vm.saveNotifications() }
-            HairlineDivider()
-            ToggleRow(Icons.Filled.Payments, GreenSuccess, GreenLight, "Payment updates", checked = vm.notifPayments) { vm.notifPayments = it; vm.saveNotifications() }
-            HairlineDivider()
-            ToggleRow(Icons.Filled.ThumbUp, Gold, GoldLight, "Ratings & feedback", checked = vm.notifRatings) { vm.notifRatings = it; vm.saveNotifications() }
-            HairlineDivider()
-            ToggleRow(Icons.Filled.Campaign, Coral, CoralLight, "Promotions & offers", checked = vm.notifPromotions) { vm.notifPromotions = it; vm.saveNotifications() }
+    }
+}
+
+/** Opens this app's OS notification settings so the worker can grant/toggle push. */
+private fun openAppNotificationSettings(ctx: Context) {
+    runCatching {
+        ctx.startActivity(
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName),
+        )
+    }.onFailure {
+        runCatching {
+            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
         }
     }
 }
@@ -1371,6 +1878,8 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             NavRow(Icons.Filled.Notifications, Purple, PurpleLight, "Notifications") { nav.navigate(Routes.P_NOTIFICATIONS) }
             HairlineDivider()
+            NavRow(Icons.Filled.Campaign, Purple, PurpleLight, "Communication Preferences", "How we can reach you") { nav.navigate(Routes.P_COMM) }
+            HairlineDivider()
             NavRow(Icons.Filled.PrivacyTip, Purple, PurpleLight, "Privacy Policy") {
                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://homehelp.pro/privacy"))) }
                     .onFailure { toast(ctx, "No browser app found") }
@@ -1395,6 +1904,38 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.width(Space.s))
             Text("Logout", color = RedCancel, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+/** Per-channel communication opt-in. Backed by the admin service (proxied through the worker service),
+ *  so toggling here is what the admin panel and broadcast targeting read. Each switch saves instantly. */
+@Composable
+fun CommPreferencesScreen(vm: AppViewModel, nav: NavHostController) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadComm() }
+    DetailScaffold("Communication", nav) {
+        Card {
+            SectionLabel("Communication Preferences")
+            Spacer(Modifier.height(Space.s))
+            Text(
+                "Choose how HomeHelp can reach you. Turning a channel off stops those messages.",
+                color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.xs))
+            ToggleRow(Icons.Filled.Chat, Purple, PurpleLight, "WhatsApp", "Updates & alerts on WhatsApp", vm.commWhatsapp) { vm.commWhatsapp = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.Sms, Purple, PurpleLight, "SMS", "Text messages", vm.commSms) { vm.commSms = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.Email, Purple, PurpleLight, "Email", "Email updates", vm.commEmail) { vm.commEmail = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.NotificationsActive, Purple, PurpleLight, "Push Notifications", "In-app push alerts", vm.commPush) { vm.commPush = it; vm.saveComm() }
+            HairlineDivider()
+            ToggleRow(Icons.Filled.LocalOffer, Purple, PurpleLight, "Promotional Offers", "Bonuses, campaigns & offers", vm.commPromo) { vm.commPromo = it; vm.saveComm() }
+        }
+        Text(
+            "Important account, job and payment messages are always sent, regardless of these settings.",
+            color = TextMuted, fontSize = 11.5.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(horizontal = Space.xs),
+        )
     }
 }
 

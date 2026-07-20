@@ -39,12 +39,16 @@ function pickTarget(url) {
   const u = (url || '').split('?')[0]
   const p = (s) => u === s || u.startsWith(s + '/') || u.startsWith(s)
 
+  // ----- membership plan CATALOG (config) lives in catalog, NOT the auth membership-instance API.
+  // Checked first: '/api/membership-plans' would otherwise prefix-match the '/api/membership' rule.
+  if (p('/api/admin/membership-plans') || p('/api/membership-plans') || p('/api/admin/pricing-rules')) return U.catalog
+
   // ----- admin panel (BFF + per-domain admin routes) -----
-  if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/campaigns') || p('/api/admin/ops-overview') || p('/api/admin/stores')) return U.catalog
+  if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/campaigns') || p('/api/admin/ops-overview') || p('/api/admin/stores') || p('/api/admin/surge') || p('/api/admin/banners')) return U.catalog
   if (p('/api/admin/activity')) return U.notification
   if (p('/api/admin/notifications')) return U.notification
   if (/^\/api\/admin\/workers\/[^/]+\/wallet/.test(u)) return U.wallet
-  if (p('/api/admin/workers') || p('/api/admin/shifts') || p('/api/admin/shift-defs') || p('/api/admin/attendance') || p('/api/admin/sites')) return U.worker
+  if (p('/api/admin/workers') || p('/api/admin/shifts') || p('/api/admin/shift-defs') || p('/api/admin/attendance') || p('/api/admin/sites') || p('/api/admin/training') || p('/api/admin/equipment') || p('/api/admin/salary-plans') || p('/api/admin/incentive-plans') || p('/api/admin/payroll') || p('/api/admin/incentive-rules')) return U.worker
   if (p('/api/admin/bookings')) return U.booking
   if (p('/api/admin/finance') || p('/api/admin/payments') || p('/api/admin/refunds')) return U.payment
   if (p('/api/admin/tickets') || p('/api/admin/complaints')) return U.notification
@@ -56,13 +60,17 @@ function pickTarget(url) {
   if (p('/api/worker')) return U.worker
 
   // ----- customer identity / profile / wallet -----
-  if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')) return U.auth
+  // /api/payment-methods must be listed here (before the /api/payment rule) so it reaches auth,
+  // which owns saved payment methods, rather than the payment service.
+  if (p('/api/auth') || p('/api/me') || p('/api/addresses') || p('/api/wallet')
+    || p('/api/family') || p('/api/payment-methods') || p('/api/profile')
+    || p('/api/reminders') || p('/api/plans') || p('/api/membership')) return U.auth
 
   // ----- catalogue / pricing / address search -----
-  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info')) return U.catalog
+  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info') || p('/api/surge') || p('/api/home-banners') || p('/api/banner-media')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
-  if (p('/api/bookings') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
+  if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
 
   // ----- support tickets -----
   if (p('/api/tickets')) return U.notification

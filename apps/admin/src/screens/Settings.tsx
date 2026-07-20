@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { fetchSettings, updateSettings } from '../api'
 import { Card, Field, Loading, ErrorState, useToast } from '../components/UI'
-import { useStore, can } from '../store'
+import { useStore, has } from '../store'
 
 // Left vertical nav. Only "general" maps to live fields; others are placeholders.
 const NAV = [
@@ -30,7 +30,9 @@ const KEYS = [
   { k: 'payout_mode', label: 'Payout Mode', hint: 'IMPS / NEFT / UPI (default IMPS)', secret: false },
   { k: 'payout_webhook_secret', label: 'Payout Webhook Secret', hint: 'Verifies RazorpayX payout & fund-account-validation webhooks', secret: true },
   { k: 'google_maps_key', label: 'Google Maps API Key', hint: 'Geocoding & live tracking maps', secret: true },
-  { k: 'msg91_key', label: 'MSG91 / SMS Key', hint: 'OTP & transactional SMS', secret: true },
+  { k: 'msg91_key', label: 'MSG91 / SMS Key', hint: 'Sends login OTPs. While this is empty, codes are returned in the API response instead (dev only).', secret: true },
+  { k: 'msg91_otp_template_id', label: 'MSG91 OTP Template ID', hint: 'Required once the key is set — India needs a DLT-registered template or MSG91 rejects the send.', secret: false },
+  { k: 'msg91_sender_id', label: 'MSG91 Sender ID', hint: '6-character DLT-approved sender, e.g. HHELP', secret: false },
   { k: 'firebase_server_key', label: 'Firebase Server Key', hint: 'Push notifications (FCM)', secret: true },
   { k: 'smtp_host', label: 'SMTP Host', hint: 'e.g. smtp.gmail.com', secret: false },
   { k: 'smtp_user', label: 'SMTP Username', hint: 'Email sender address', secret: false },
@@ -44,7 +46,7 @@ export default function SettingsScreen() {
   const [err, setErr] = useState('')
   const [nav, setNav] = useState<string>('general')
   const [busy, setBusy] = useState(false)
-  const editable = can(admin?.role, 'admin')
+  const editable = has(admin, 'settings.edit')
 
   const load = () => { setErr(''); fetchSettings().then(setS).catch((e) => setErr(e.message)) }
   useEffect(load, [])
@@ -184,6 +186,21 @@ export default function SettingsScreen() {
         <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
           The minimum is enforced on every withdrawal request. Frequency sets the payout date estimated for
           workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
+        </p>
+
+        {/* Settlement rates — drive the per-booking Payment & Settlement breakdown. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Settlement Rates</h4>
+        <div className="form-grid">
+          <Field label="Payment gateway fee (%)"><input disabled={!editable} type="number" step="0.01" min={0} value={s.pg_fee_percent || ''} onChange={(e) => set('pg_fee_percent', e.target.value)} placeholder="2.36" /></Field>
+          <Field label="GST on gateway fee (%)"><input disabled={!editable} type="number" step="0.01" min={0} value={s.pg_fee_gst_percent || ''} onChange={(e) => set('pg_fee_gst_percent', e.target.value)} placeholder="18" /></Field>
+          <Field label="Worker incentive (% of service)"><input disabled={!editable} type="number" step="0.1" min={0} value={s.worker_incentive_percent || ''} onChange={(e) => set('worker_incentive_percent', e.target.value)} placeholder="3" /></Field>
+          <Field label="Operational cost (% of order)"><input disabled={!editable} type="number" step="0.1" min={0} value={s.operational_cost_percent || ''} onChange={(e) => set('operational_cost_percent', e.target.value)} placeholder="2" /></Field>
+          <Field label="Marketing & platform cost (% of order)"><input disabled={!editable} type="number" step="0.1" min={0} value={s.marketing_cost_percent || ''} onChange={(e) => set('marketing_cost_percent', e.target.value)} placeholder="1" /></Field>
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          These drive each booking's Payment &amp; Settlement breakdown. The gateway fee + its GST are the real
+          charges a card/UPI payment incurs (0 on wallet); incentive/operational/marketing are the org's
+          allocated per-booking costs. Set any to 0 to remove that line.
         </p>
 
         {/* Session & Security */}

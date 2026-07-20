@@ -30,6 +30,8 @@ export default function Summary() {
   // Pre-discount item total → total savings (auto campaigns + coupon), shown as one green line.
   const listTotal = quote.items.reduce((s, i) => s + (i.listPrice ?? i.price), 0)
   const savings = quote.savings ?? Math.max(0, listTotal - quote.total)
+  const memberDiscount = quote.memberDiscount || 0        // membership benefit, shown as its own line
+  const totalSaved = savings + memberDiscount
 
   return (
     <div className="screen">
@@ -77,7 +79,9 @@ export default function Summary() {
           <div className="label">Bill Details</div>
           <div className="kv"><span className="k">Item total</span><span className="v">₹{listTotal}</span></div>
           {savings > 0 && <div className="kv"><span className="k" style={{ color: 'var(--green)' }}>Discount{quote.coupon ? ` (incl. ${quote.coupon})` : ''}</span><span className="v" style={{ color: 'var(--green)' }}>-₹{savings}</span></div>}
+          {memberDiscount > 0 && <div className="kv"><span className="k" style={{ color: 'var(--primary)' }}>👑 {quote.memberPlan || 'Membership'} benefit</span><span className="v" style={{ color: 'var(--primary)' }}>-₹{memberDiscount}</span></div>}
           {(quote.peakSurcharge || 0) > 0 && <div className="kv"><span className="k">Peak-hour surcharge{quote.peakPct ? ` (+${quote.peakPct}%)` : ''}</span><span className="v">+₹{quote.peakSurcharge}</span></div>}
+          {(quote.surgeAmount || 0) > 0 && <div className="kv"><span className="k">{quote.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'}{quote.surgePct ? ` (+${quote.surgePct}%)` : ''}</span><span className="v">+₹{quote.surgeAmount}</span></div>}
           {(quote.fee || 0) > 0 && <div className="kv"><span className="k">Convenience fee</span><span className="v">+₹{quote.fee}</span></div>}
           {(quote.tax || 0) > 0 && <div className="kv"><span className="k">{quote.gstIncluded ? `Incl. GST${quote.gstPct ? ` (${quote.gstPct}%)` : ''}` : `GST${quote.gstPct ? ` (${quote.gstPct}%)` : ''}`}</span><span className="v">{quote.gstIncluded ? '' : '+'}₹{quote.tax}</span></div>}
           <div className="divider" />
@@ -86,7 +90,7 @@ export default function Summary() {
       </div>
 
       <FooterCTA>
-        <div className="sumbar"><div className="grow"><div className="cnt">₹{quote.total}</div>{savings > 0 && <div className="sub" style={{ color: 'var(--green)' }}>Saved ₹{savings}</div>}</div>
+        <div className="sumbar"><div className="grow"><div className="cnt">₹{quote.total}</div>{totalSaved > 0 && <div className="sub" style={{ color: 'var(--green)' }}>Saved ₹{totalSaved}</div>}</div>
           <button className="btn" onClick={() => nav('/payment')}>Proceed to Pay →</button></div>
       </FooterCTA>
     </div>

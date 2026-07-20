@@ -1,53 +1,40 @@
-# Home-App
+# HomeHelp Pro — Worker App
 
-Welcome to Home-App! This is a comprehensive home automation and management application.
+Android app for house-help / cleaning professionals, built from the mock screens and the
+`HOMEHELP_PRO_PLAN.md` / `HOMEHELP_PRO_ROADMAP_AND_WORKFLOWS.md` documents.
 
-## Features
+Native **Kotlin + Jetpack Compose**. All 12 screens and the full job-lifecycle workflow are
+implemented with an in-memory state machine and mock data (no backend required to run).
 
-- User-friendly interface for managing home devices
-- Real-time monitoring and control
-- Easy setup and configuration
+## Screens / Workflow
 
-## Getting Started
+Login → Home (Go Online) → New Job Request (18s countdown) → Job Details → On The Way →
+Start Service (OTP `4721`) → In Progress (live timer) → Job Completed (rating) → settle to
+Earnings/Wallet. Plus Bookings, Earnings, Wallet, and Profile tabs.
 
-### Prerequisites
+State machine: `NONE → REQUESTED → ACCEPTED → ON_THE_WAY → ARRIVED → IN_PROGRESS → COMPLETED → (settle)`
+(see `app/src/main/java/com/homehelp/pro/AppViewModel.kt`).
 
-Before you begin, ensure you have the following installed:
-- Git
-- Your required runtime/dependencies
+## Build
 
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/BabuBaji/Home-App.git
-   cd Home-App
-   ```
-
-2. Install dependencies:
-   ```bash
-   # Add your installation commands here
-   ```
-
-3. Configure the application:
-   ```bash
-   # Add your configuration steps here
-   ```
-
-## Usage
+Prerequisites: JDK 17+ and the Android SDK (API 34, build-tools 34).
 
 ```bash
-# Add usage examples here
+./gradlew assembleDebug
 ```
 
-## Contributing
+Output: `app/build/outputs/apk/debug/app-debug.apk`
 
-Contributions are welcome! Please feel free to submit pull requests or open issues to improve the project.
+## Install
 
-## License
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
 
-This project is open source and available under the MIT License.
+Or copy the APK to a phone and open it (enable "Install unknown apps").
 
-## Contact
+## Demo notes
 
-For questions or support, please reach out to the project maintainer.
+- Login: any 10-digit number, then any 4-digit OTP.
+- On Home, toggle **Go Online**, then tap **Simulate New Job Request** to start the flow.
+- Service start OTP is **4721**.

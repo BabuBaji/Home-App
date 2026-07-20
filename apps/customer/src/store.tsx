@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CartItem, User } from './types'
-import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours } from './api'
+import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours, setUnauthorizedHandler } from './api'
 import { checkServiceable } from './geo'
 import type { ZoneHours } from './components/Calendar'
 
@@ -69,6 +69,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback((t: string, u: User) => { setToken(t); saveUser(u); setUserState(u) }, [])
   const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]) }, [])
   const setUser = useCallback((u: User) => { saveUser(u); setUserState(u) }, [])
+
+  // Any request that comes back 401 with a token present (stale/invalid session) signs the user out
+  // here → the app's route guards send them to /login instead of failing silently at checkout.
+  useEffect(() => { setUnauthorizedHandler(() => signOut()); return () => setUnauthorizedHandler(null) }, [signOut])
 
   const addToCart = (i: CartItem) => setCart((p) => [...p.filter((x) => x.id !== i.id), i])
   const removeFromCart = (id: string) => setCart((p) => p.filter((x) => x.id !== id))

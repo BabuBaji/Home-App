@@ -112,7 +112,7 @@ export function Empty({ msg }: { msg: string }) {
 }
 
 /* ---------- cards & stats ---------- */
-export function Card({ title, right, children, className = '' }: { title?: string; right?: ReactNode; children: ReactNode; className?: string }) {
+export function Card({ title, right, children, className = '' }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={'card ' + className}>
       {(title || right) && <div className="card-head"><h3>{title}</h3><div>{right}</div></div>}
