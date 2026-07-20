@@ -56,7 +56,6 @@ export default function ServiceDetails() {
     <div className="screen m2">
       <div className="content no-pad">
         <div className="sd2-hero">
-          {s.image && <div className="sd2-hero-bg" style={{ backgroundImage: `url(${s.image})` }} aria-hidden="true" />}
           <ServiceHeroImg service={s} />
           <button className="sd2-iconbtn back" onClick={goBack} aria-label="Back"><ArrowLeft size={20} /></button>
           <button className="sd2-iconbtn share" onClick={share} aria-label="Share"><Share2 size={18} /></button>
