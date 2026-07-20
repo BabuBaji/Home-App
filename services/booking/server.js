@@ -177,6 +177,14 @@ const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 
 
 // ── zone working-hours enforcement ──
 const _minOf = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null }
+// Working hours are configured in IST, but the containers run with TZ unset (UTC), so a bare
+// new Date() here is 5.5h behind the business day. Shift explicitly rather than relying on the
+// host zone — same approach as admin's istDay(). If TZ is ever pinned to Asia/Kolkata this still
+// holds, because we derive from the UTC epoch, not from the local zone.
+const IST_MS = 5.5 * 3600000
+const istNow = () => new Date(Date.now() + IST_MS)
+const istMinutes = () => { const d = istNow(); return d.getUTCHours() * 60 + d.getUTCMinutes() }
+const istDateStr = () => istNow().toISOString().slice(0, 10)
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']   // JS getDay() 0=Sun … 6=Sat
 // Resolve a date's effective open window from a zone's working-hours config.
 // A special-hours entry for that exact date overrides the weekday schedule.
@@ -356,15 +364,31 @@ app.post('/api/bookings', auth, async (req, res) => {
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
   // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
-  // before any wallet debit). Uses the chosen date for scheduled bookings, else today for instant.
+  // before any wallet debit).
+  // For INSTANT the time is "right now", so derive it from the SERVER clock — body.at is the
+  // device's clock and a skewed or crafted one would otherwise book a 3 AM job no worker can take.
+  // For SCHEDULE the customer genuinely chose a future slot, so body.date/at is the real intent.
+  const isInstant = (body.type || 'instant') !== 'schedule'
   if (body.pincode) {
     const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(String(body.pincode).trim())}`, null)
     if (hours && !hours.is247) {
-      const dateStr = body.date || nowIso().slice(0, 10)
+      const dateStr = isInstant ? istDateStr() : (body.date || istDateStr())
       const win = dayWindow(hours, dateStr)
-      if (win.closed) return res.status(422).json({ error: 'This area is closed on the selected day. Please pick another date.' })
-      const tMin = _minOf(body.at)   // 24h "HH:MM" — scheduled slot or the instant-now time
-      if (tMin != null && !withinWindow(win, tMin)) return res.status(422).json({ error: 'That time is outside working hours for this area. Please choose a slot within working hours.' })
+      if (win.closed) {
+        return res.status(422).json({
+          error: isInstant
+            ? 'Instant booking is closed right now. Please schedule this for later.'
+            : 'This area is closed on the selected day. Please pick another date.',
+        })
+      }
+      const tMin = isInstant ? istMinutes() : _minOf(body.at)
+      if (tMin != null && !withinWindow(win, tMin)) {
+        return res.status(422).json({
+          error: isInstant
+            ? 'Instant booking is closed right now. Please schedule this for later.'
+            : 'That time is outside working hours for this area. Please choose a slot within working hours.',
+        })
+      }
     }
   }
 

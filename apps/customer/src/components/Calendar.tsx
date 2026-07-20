@@ -85,33 +85,46 @@ const _ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStar
  * - a closed day → [] (caller shows a "closed" message)
  * The daily break window is removed from the returned hours.
  */
+/** A date's open window in MINUTES from midnight. null → no window configured (unrestricted). */
+export interface DayWindow { closed: boolean; openMin: number; closeMin: number; brStart: number | null; brEnd: number | null }
+export function zoneWindow(zh: ZoneHours | null, date: Date): DayWindow | null {
+  if (!zh || zh.is247 || !zh.days) return null   // 24×7 / unconfigured → caller treats as unrestricted
+  const sp = (zh.specialHours || []).find((s) => s.date && s.date === _ymd(date))
+  if (sp) return { closed: false, openMin: _minOf(sp.open) ?? 0, closeMin: _minOf(sp.close) ?? 1440, brStart: null, brEnd: null }
+  const day = zh.days[_DOW[date.getDay()]]
+  if (!day || day.closed) return { closed: true, openMin: 0, closeMin: 0, brStart: null, brEnd: null }
+  return { closed: false, openMin: _minOf(day.open) ?? 0, closeMin: _minOf(day.close) ?? 1440, brStart: _minOf(day.brStart), brEnd: _minOf(day.brEnd) }
+}
+/** Is a minute-of-day inside the window and off-break? Mirrors booking/server.js withinWindow(). */
+function _within(win: DayWindow, m: number): boolean {
+  if (win.closed) return false
+  if (m < win.openMin || m >= win.closeMin) return false
+  if (win.brStart != null && win.brEnd != null && m >= win.brStart && m < win.brEnd) return false
+  return true
+}
+
 export function allowedHours(zh: ZoneHours | null, date: Date): number[] {
   if (zh && zh.is247) return Array.from({ length: 24 }, (_, i) => i)
   if (!zh || !zh.days) return SLOT_HOURS   // no zone / no hours configured → default grid
-  const sp = (zh.specialHours || []).find((s) => s.date && s.date === _ymd(date))
-  let openMin: number, closeMin: number, brS: number | null = null, brE: number | null = null
-  if (sp) { openMin = _minOf(sp.open) ?? 0; closeMin = _minOf(sp.close) ?? 1440 }
-  else {
-    const day = zh.days ? zh.days[_DOW[date.getDay()]] : null
-    if (!day || day.closed) return []
-    openMin = _minOf(day.open) ?? 0; closeMin = _minOf(day.close) ?? 1440
-    brS = _minOf(day.brStart); brE = _minOf(day.brEnd)
-  }
+  const win = zoneWindow(zh, date)
+  if (!win || win.closed) return []
   const out: number[] = []
-  for (let h = 0; h < 24; h++) {
-    const m = h * 60
-    if (m < openMin || m >= closeMin) continue
-    if (brS != null && brE != null && m >= brS && m < brE) continue
-    out.push(h)
-  }
+  for (let h = 0; h < 24; h++) if (_within(win, h * 60)) out.push(h)
   return out
 }
 
-/** Is the zone open at THIS moment? (instant bookings need this.) True when unconfigured / 24×7. */
+/**
+ * Is the zone open at THIS moment? (instant bookings need this.) True when unconfigured / 24×7.
+ * Compares MINUTES, not whole hours: an hour-granular check reads a 14:02 close as "open until
+ * 14:59", because the 14:00 slot still starts before the cutoff. That let instant look bookable
+ * past close, and the customer only hit the wall at payment when the server (which is
+ * minute-accurate) rejected it. Keep this in step with booking/server.js withinWindow().
+ */
 export function isZoneOpenNow(zh: ZoneHours | null): boolean {
-  if (!zh || zh.is247 || !zh.days) return true
   const now = new Date()
-  return allowedHours(zh, now).includes(now.getHours())
+  const win = zoneWindow(zh, now)
+  if (!win) return true                     // unconfigured / 24×7 → unrestricted
+  return _within(win, now.getHours() * 60 + now.getMinutes())
 }
 
 /** Today's "6:00 AM – 9:00 PM" label for messaging (empty if closed today / unconfigured). */
