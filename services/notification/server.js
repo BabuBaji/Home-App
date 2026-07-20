@@ -185,6 +185,17 @@ app.get('/api/admin/tickets/booking/:bookingId', adminAuth, async (req, res) => 
   }
   res.json({ tickets: rows, counts })
 })
+// Unresolved counts for the admin bell badge. This service owns both tables, so it counts them
+// here rather than shipping every row to the admin service just to length() it.
+// "Unresolved" = anything not resolved/closed, matching how the Support tab buckets statuses.
+app.get('/api/internal/alert-counts', internalOnly, async (_q, res) => {
+  const openish = "lower(coalesce(status,'')) NOT IN ('resolved','closed')"
+  const [t, c] = await Promise.all([
+    pool.query(`SELECT count(*)::int n FROM tickets WHERE ${openish}`),
+    pool.query(`SELECT count(*)::int n FROM complaints WHERE ${openish}`),
+  ])
+  res.json({ tickets: t.rows[0].n, complaints: c.rows[0].n })
+})
 // A customer's tickets (for the admin customer-profile Support tab).
 app.get('/api/internal/customers/:id/tickets', internalOnly, async (req, res) => {
   const rows = (await pool.query('SELECT * FROM tickets WHERE user_id=$1 ORDER BY id DESC', [Number(req.params.id)])).rows

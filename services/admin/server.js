@@ -1058,10 +1058,18 @@ app.get('/api/admin/insights', admin, async (req, res) => {
   })
 })
 
+// Bell-badge counts for the admin header: unresolved tickets + complaints + workers awaiting
+// verification. Returns an OBJECT with a `count` total — this used to return a bare array, so the
+// header's `alerts.count` was always undefined and the badge could never show a number at all.
 app.get('/api/admin/alerts', admin, async (_q, res) => {
-  const workers = await tryGet(U.worker, '/internal/workers', { workers: [] })
-  const pending = (workers.workers || []).filter((w) => w.status === 'pending')
-  res.json([...pending.map((w) => ({ type: 'worker_pending', message: `${w.name} awaiting verification`, id: w.id }))])
+  const [workersRes, support] = await Promise.all([
+    tryGet(U.worker, '/internal/workers', { workers: [] }),
+    tryGet(U.notification, '/api/internal/alert-counts', { tickets: 0, complaints: 0 }),
+  ])
+  const workers = (workersRes.workers || []).filter((w) => w.status === 'pending').length
+  const tickets = Number(support.tickets) || 0
+  const complaints = Number(support.complaints) || 0
+  res.json({ count: tickets + complaints + workers, tickets, complaints, workers })
 })
 
 /* ---------- customers (proxied to the auth service) ---------- */
