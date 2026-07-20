@@ -2,7 +2,11 @@ package com.homehelp.pro
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -607,49 +612,131 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadPayslip() }
     val p = vm.payslip
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Payslip", onBack = { nav.popBackStack() })
+        // White header: back · title · download.
+        Row(
+            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+            }
+            Text("Payslip", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            Box(
+                Modifier.size(38.dp).clip(CircleShape).clickable(enabled = p != null) {
+                    p?.let {
+                        val path = savePayslip(ctx, it.workerName, it.month, buildPayslipText(it))
+                        toast(ctx, if (path != null) "Saved to $path" else "Could not save payslip")
+                    }
+                },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Download, contentDescription = "Download", tint = Purple, modifier = Modifier.size(20.dp)) }
+        }
+
         Column(Modifier.verticalScroll(rememberScrollState()).padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             if (p == null) {
                 Text("Loading payslip…", color = TextGray, modifier = Modifier.padding(Space.xxl))
             } else {
-                // Worker + pay-period header.
-                Card {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text(p.workerName, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextDark)
-                            Text("ID: ${p.workerId}", color = TextGray, fontSize = 12.sp)
-                        }
-                        StatusPill(p.month, Primary50, Purple)
+                // Worker + pay period.
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(PurpleLight), contentAlignment = Alignment.Center) {
+                        Text(p.workerName.take(1).ifBlank { "W" }.uppercase(), color = Purple, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(p.workerName.ifBlank { "Worker" }, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
+                        Text("ID: ${p.workerId}", color = TextGray, fontSize = 12.5.sp)
+                    }
+                    Box(Modifier.clip(RoundedCornerShape(20.dp)).background(Primary50).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Text(p.month, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                // Net pay headline (green banner) connected to the full breakdown.
-                ElevatedGroup {
-                    MoneyBanner("Net Pay", p.netPay)
-                    Column(Modifier.background(CardBg).padding(Space.l)) {
-                        SectionTitle("Earnings")
-                        Spacer(Modifier.height(Space.xs))
-                        BreakdownRow("Total Jobs", "${p.totalJobs}")
-                        BreakdownRow("Gross Earnings", rupee(p.grossEarnings), GreenSuccess)
-                        BreakdownRow("Bonuses & Incentives", rupee(p.bonuses), GreenSuccess)
-                        BreakdownRow("Deductions", "- ${rupee(p.deductions)}", RedCancel)
-                        Spacer(Modifier.height(Space.m))
-                        // Muted inset for the settlement sub-details.
-                        Column(
-                            Modifier.background(FieldFill, RoundedCornerShape(Radius.field)).padding(Space.m),
-                            verticalArrangement = Arrangement.spacedBy(Space.s),
-                        ) {
-                            InsetRow("Withdrawn", rupee(p.withdrawals))
-                            InsetRow("Pending Balance", rupee(p.pending))
-                            InsetRow("Bank", p.bankDetails)
+
+                // Net-pay highlight (soft purple, take-home this month).
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(Color(0xFF6D4AFF), Color(0xFF4B2FD6)))).padding(20.dp),
+                ) {
+                    Text("NET PAY", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(rupee(p.netPay), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text("Take-home for ${p.month}", color = Color.White.copy(alpha = 0.85f), fontSize = 12.5.sp)
+                }
+
+                // Earnings card.
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
+                ) {
+                    Text("Earnings", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    PaySlipRow("Total Jobs", "${p.totalJobs}")
+                    HairlineDivider()
+                    if (p.breakup.isNotEmpty()) {
+                        p.breakup.forEach { PaySlipRow(it.category, "+ ${rupee(it.amount)}", GreenSuccess); HairlineDivider() }
+                    } else {
+                        PaySlipRow("Gross Earnings", "+ ${rupee(p.grossEarnings)}", GreenSuccess)
+                        HairlineDivider()
+                    }
+                    PaySlipRow("Bonuses & Incentives", "+ ${rupee(p.bonuses)}", GreenSuccess)
+                }
+
+                // Deductions card.
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
+                ) {
+                    Text("Deductions", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    if (p.deductionBreakup.isNotEmpty()) {
+                        p.deductionBreakup.forEachIndexed { i, it ->
+                            PaySlipRow(it.category, "- ${rupee(it.amount)}", RedCancel)
+                            if (i < p.deductionBreakup.lastIndex) HairlineDivider()
                         }
+                    } else {
+                        PaySlipRow("Total Deductions", "- ${rupee(p.deductions)}", RedCancel)
                     }
                 }
+
+                // Net pay summary strip.
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GreenLight).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Net Payable", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(rupee(p.netPay), color = GreenSuccess, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Settlement details.
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
+                ) {
+                    Text("Settlement", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    PaySlipRow("Withdrawn", rupee(p.withdrawals))
+                    HairlineDivider()
+                    PaySlipRow("Pending Balance", rupee(p.pending))
+                    HairlineDivider()
+                    PaySlipRow("Bank", p.bankDetails.ifBlank { "—" })
+                }
+
                 PrimaryButton("Download Payslip") {
                     val path = savePayslip(ctx, p.workerName, p.month, buildPayslipText(p))
                     toast(ctx, if (path != null) "Saved to $path" else "Could not save payslip")
                 }
+                Spacer(Modifier.height(Space.s))
             }
         }
+    }
+}
+
+/** Label-value row for the payslip cards (value right-aligned, optional colour). */
+@Composable
+private fun PaySlipRow(label: String, value: String, valueColor: Color = TextDark) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(Space.m))
+        Text(value, color = valueColor, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
     }
 }
 
