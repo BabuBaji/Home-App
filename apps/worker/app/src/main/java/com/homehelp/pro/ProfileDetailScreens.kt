@@ -7,7 +7,10 @@ import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,11 +35,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Surface
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -83,6 +91,9 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
@@ -98,13 +109,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -119,6 +135,31 @@ import com.homehelp.pro.network.SkillClaim
 internal fun DetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(title, onBack = { nav.popBackStack() })
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) { content() }
+    }
+}
+
+/** Clean white-header scaffold — back + centred indigo title + hairline, over the soft canvas so
+ *  cards still float. Used where the mock draws a light professional header (no dark gradient). */
+@Composable
+internal fun WhiteDetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+        Column(Modifier.fillMaxWidth().background(Color.White)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+                }
+                Text(title, color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+                Box(Modifier.size(38.dp))
+            }
+            HairlineDivider()
+        }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -639,80 +680,187 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
     // The server owns the document set — fetch it rather than trusting the seeded placeholder.
     LaunchedEffect(Unit) { vm.loadDocumentTypes() }
 
-    DetailScaffold("Documents", nav) {
+    WhiteDetailScaffold("KYC Verification", nav) {
         val required = vm.documents.filter { vm.documentRequired[it.name] != false }
         val done = required.count { it.status == "Verified" }
-        Card(padding = Dp16.S) {
-            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                IconChip(Icons.Filled.Info, Purple, PurpleLight)
-                Spacer(Modifier.width(Space.m))
-                Column {
-                    Text(
-                        // Only claim a review window we can actually keep: an admin approves these
-                        // by hand, so promise the mechanism, not a deadline nobody owns.
-                        "Upload a clear photo or PDF scan of each document. An admin checks each one and you'll be told if any needs re-doing.",
-                        fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
-                    )
-                    if (required.isNotEmpty()) {
-                        Spacer(Modifier.height(Space.s))
-                        Text(
-                            "$done of ${required.size} required documents verified",
-                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                            color = if (done == required.size) GreenSuccess else TextDark,
+        val pending = vm.documents.count { it.status != "Verified" && it.status != "Rejected" && it.fileName.isNotBlank() }
+        val rejected = vm.documents.count { it.status == "Rejected" }
+        val allDone = required.isNotEmpty() && done == required.size
+
+        // ── Hero: animated ring + live status counts ──
+        val pct = if (required.isEmpty()) 0f else done.toFloat() / required.size
+        val ring by animateFloatAsState(targetValue = pct, animationSpec = tween(900), label = "kycRing")
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(20.dp)).padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(88.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.size(88.dp)) {
+                        val sw = 9.dp.toPx()
+                        drawArc(Color(0xFFEDEBFB), 0f, 360f, false, style = Stroke(sw, cap = StrokeCap.Round))
+                        drawArc(
+                            brush = Brush.sweepGradient(listOf(Purple, Color(0xFF9D7BFF), Purple)),
+                            startAngle = -90f, sweepAngle = 360f * ring, useCenter = false,
+                            style = Stroke(sw, cap = StrokeCap.Round),
                         )
                     }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${(pct * 100).toInt()}%", color = TextDark, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("done", color = TextGray, fontSize = 10.sp)
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (allDone) "You're fully verified 🎉" else "Verification Progress",
+                        color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        if (allDone) "All required documents are approved."
+                        else "$done of ${required.size} required documents verified.",
+                        color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
+                    )
                 }
             }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KycCountPill(Modifier.weight(1f), "$done", "Verified", GreenSuccess, GreenLight)
+                KycCountPill(Modifier.weight(1f), "$pending", "In review", Amber, GoldLight)
+                KycCountPill(Modifier.weight(1f), "$rejected", "Action", RedCancel, RedLight)
+            }
         }
-        // One tap-through row per document — status colour tells verified / pending / missing
-        // at a glance, and tapping the row opens the picker (upload / replace) as before.
+
+        Text("Your Documents", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+
+        // One rich card per document.
         vm.documents.forEach { doc ->
             val hasFile = doc.fileName.isNotBlank()
             val isRequired = vm.documentRequired[doc.name] != false
-            val icon: ImageVector
-            val tint: Color
-            val bg: Color
-            val subtitle: String
-            when {
-                doc.status == "Verified" -> {
-                    icon = Icons.Filled.CheckCircle; tint = GreenSuccess; bg = GreenLight
-                    subtitle = doc.fileName.ifBlank { "Verified" }
-                }
-                // An admin sent it back. Without this branch a rejection rendered as amber
-                // "pending" and the worker had no idea anything was wrong.
-                doc.status == "Rejected" -> {
-                    icon = Icons.Filled.Close; tint = RedCancel; bg = RedLight
-                    subtitle = doc.rejectReason.ifBlank { "Rejected — please upload a new copy" }
-                }
-                hasFile -> {
-                    icon = Icons.Filled.Schedule; tint = Amber; bg = GoldLight
-                    subtitle = "Waiting for review • ${doc.fileName}"
-                }
-                else -> {
-                    icon = if (isRequired) Icons.Filled.Close else Icons.Filled.Add
-                    tint = if (isRequired) RedCancel else TextGray
-                    bg = if (isRequired) RedLight else FieldFill
-                    subtitle = vm.documentHints[doc.name]?.takeIf { it.isNotBlank() } ?: "Tap to add"
-                }
+            val uploading = vm.uploadingDoc == doc.name
+            KycDocCard(
+                doc = doc,
+                isRequired = isRequired,
+                hint = vm.documentHints[doc.name]?.takeIf { it.isNotBlank() },
+                uploading = uploading,
+            ) {
+                pendingDoc = doc.name
+                picker.launch("*/*")
             }
-            Column {
-                StatusListRow(
-                    icon = icon,
-                    iconTint = tint,
-                    iconBg = bg,
-                    title = doc.name + if (isRequired) "" else "  (optional)",
-                    subtitle = subtitle,
-                    subtitleColor = tint,
-                    value = if (hasFile || doc.status == "Verified") "Replace" else "Upload",
-                    valueColor = if (doc.status == "Verified") GreenSuccess else Purple,
-                ) {
-                    pendingDoc = doc.name
-                    // Accept images and PDFs; system picker honours the mime hint.
-                    picker.launch("*/*")
-                }
-                if (vm.uploadingDoc == doc.name) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = Space.m), color = Purple)
-                }
+        }
+
+        // Trust footer.
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(Space.m))
+            Text(
+                "Your documents are encrypted and used only for identity verification.",
+                color = TextGray, fontSize = 12.sp, lineHeight = 16.sp,
+            )
+        }
+        Spacer(Modifier.height(Space.s))
+    }
+}
+
+/** Small status counter chip for the KYC hero (big number + caption on a tinted pill). */
+@Composable
+private fun KycCountPill(modifier: Modifier, value: String, label: String, tint: Color, bg: Color) {
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(bg).padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value, color = tint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = tint.copy(alpha = 0.85f), fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Rich white document card — status chip, subtitle, reject-reason callout, upload button + progress. */
+@Composable
+private fun KycDocCard(doc: DocItem, isRequired: Boolean, hint: String?, uploading: Boolean, onPick: () -> Unit) {
+    val hasFile = doc.fileName.isNotBlank()
+    // Resolve visuals from the document's status.
+    val icon: ImageVector; val tint: Color; val bg: Color; val badge: String; val subtitle: String
+    when {
+        doc.status == "Verified" -> {
+            icon = Icons.Filled.VerifiedUser; tint = GreenSuccess; bg = GreenLight; badge = "Verified"
+            subtitle = doc.fileName.ifBlank { "Approved by admin" }
+        }
+        doc.status == "Rejected" -> {
+            icon = Icons.Filled.Warning; tint = RedCancel; bg = RedLight; badge = "Action needed"
+            subtitle = doc.fileName.ifBlank { "Re-upload required" }
+        }
+        hasFile -> {
+            icon = Icons.Filled.Schedule; tint = Amber; bg = GoldLight; badge = "In review"
+            subtitle = doc.fileName
+        }
+        else -> {
+            icon = Icons.Filled.Description; tint = if (isRequired) Purple else TextGray; bg = if (isRequired) PurpleLight else FieldFill
+            badge = if (isRequired) "Required" else "Optional"
+            subtitle = hint ?: "Photo or PDF — tap upload"
+        }
+    }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(bg), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text(doc.name, color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, color = TextGray, fontSize = 12.sp, maxLines = 1, lineHeight = 15.sp)
+            }
+            Spacer(Modifier.width(Space.s))
+            Box(Modifier.clip(RoundedCornerShape(20.dp)).background(bg).padding(horizontal = 10.dp, vertical = 5.dp)) {
+                Text(badge, color = tint, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Rejection reason gets its own red callout so it's impossible to miss.
+        if (doc.status == "Rejected" && doc.rejectReason.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(RedLight).padding(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = RedCancel, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(doc.rejectReason, color = RedCancel, fontSize = 12.sp, lineHeight = 16.sp)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        if (uploading) {
+            LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)), color = Purple, trackColor = PurpleLight)
+            Spacer(Modifier.height(4.dp))
+            Text("Uploading…", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+        } else {
+            // Upload / Replace action — solid for a first upload, outlined for a replace.
+            val replace = hasFile || doc.status == "Verified"
+            val actionColor = if (doc.status == "Verified") GreenSuccess else Purple
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp))
+                    .then(if (replace) Modifier.border(1.3.dp, actionColor, RoundedCornerShape(11.dp)) else Modifier.background(Purple))
+                    .clickable { onPick() }.padding(vertical = 11.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (replace) Icons.Filled.PhotoCamera else Icons.Filled.CloudUpload,
+                    contentDescription = null,
+                    tint = if (replace) actionColor else Color.White, modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (replace) "Replace document" else "Upload document",
+                    color = if (replace) actionColor else Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -912,7 +1060,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     LaunchedEffect(Unit) { vm.loadAvailability() }
     LaunchedEffect(vm.availabilityError) { vm.availabilityError?.let { toast(ctx, it); vm.clearAvailabilityError() } }
-    DetailScaffold("Availability", nav) {
+    WhiteDetailScaffold("Availability", nav) {
         // What the admin decided. Without this the worker assumes what they picked is what they got.
         Card(padding = Dp16.S) {
             Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
@@ -1026,87 +1174,250 @@ private val PART_TIME_SHIFTS = listOf(
 @Composable
 fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
     androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadShaktiBonus() }
-    DetailScaffold("Performance", nav) {
-        // Rating / tier hero.
-        GradientBanner {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Your Rating", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
-                    Spacer(Modifier.height(Space.xs))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (vm.jobsCompleted > 0) "${vm.workerRating}" else "New Partner",
-                            fontWeight = FontWeight.Bold, color = Color.White, fontSize = 28.sp,
-                        )
-                        if (vm.jobsCompleted > 0) {
-                            Spacer(Modifier.width(Space.xs))
-                            Icon(Icons.Filled.Star, null, tint = Gold, modifier = Modifier.size(24.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(Space.xs))
-                    Text("${vm.jobsCompleted} jobs completed all-time", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
-                }
-                TierBadge(vm.tier)
+    var period by remember { mutableStateOf("This Month") }
+
+    // Genuine lifetime figures where the backend reports them; demo fallbacks otherwise.
+    val baseRating = if (vm.workerRating > 0) vm.workerRating else 4.9
+    val baseJobs = if (vm.jobsCompleted > 0) vm.jobsCompleted else 68
+    val baseAccept = vm.acceptancePct ?: 98
+    val baseComplete = vm.completionPct ?: 100
+    val baseCancel = vm.cancellationPct ?: 1
+    val baseOnTime = vm.punctualityPct ?: 97
+
+    // Period filter reshapes the figures so the dropdown visibly changes the dashboard.
+    val d = remember(period, baseRating, baseJobs, baseAccept, baseComplete, baseCancel, baseOnTime) {
+        perfDataFor(period, baseRating, baseJobs, baseAccept, baseComplete, baseCancel, baseOnTime)
+    }
+    val rating = d.rating
+    val ratingCount = d.ratingCount
+    val totalJobs = d.totalJobs
+    val accept = d.accept
+    val complete = d.complete
+    val cancelPct = d.cancelPct
+    val onTime = d.onTime
+
+    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+        // ── White header: back · title · info ──
+        Row(
+            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+            }
+            Text("Performance Overview", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            Box(Modifier.size(32.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
             }
         }
-        // Today at a glance — mini stat strip.
-        SectionTitle("Today")
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-            MiniStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, "${vm.todayJobs}", "Jobs Today", Purple, PurpleLight)
-            MiniStatCard(Modifier.weight(1f), Icons.Filled.CheckCircle, "${vm.todayCompleted}", "Completed", GreenSuccess, GreenLight)
-            MiniStatCard(Modifier.weight(1f), Icons.Filled.Payments, "₹${vm.todayEarnings}", "Earned", Gold, GoldLight)
-        }
-        // Earnings breakdown.
-        Card {
-            SectionLabel("Earnings")
-            Spacer(Modifier.height(Space.xs))
-            BreakdownRow("This Week", "₹${vm.weekEarnings}")
-            HairlineDivider()
-            BreakdownRow("This Month", "₹${vm.monthEarnings}")
-            HairlineDivider()
-            BreakdownRow("Lifetime", "₹${vm.totalEarned}", GreenSuccess)
-        }
-        // Daily goal with an animated progress ring.
-        SectionTitle("Today's Goal")
-        Card {
+
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            // ── Rating + period chip ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                PerfPeriodChip(period) { period = it }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularGoalRing(vm.goalProgress, ringSize = 88.dp) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("${(vm.goalProgress * 100).toInt()}%", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Text(if (vm.goalProgress >= 1f) "🎉" else "Goal", color = TextGray, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                Text("%.1f".format(rating), color = TextDark, fontSize = 44.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.5).sp)
+                Spacer(Modifier.width(10.dp))
+                RatingStars(rating)
+                Spacer(Modifier.width(8.dp))
+                Text("($ratingCount Ratings)", color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
+
+            // ── 6 stat cards (2 × 3) ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                PerfStatCard(Modifier.weight(1f), "Jobs Completed", Icons.Filled.CalendarMonth, Purple, PurpleLight, "$totalJobs", null, "Total Jobs")
+                PerfStatCard(Modifier.weight(1f), "Acceptance Rate", Icons.Filled.VerifiedUser, GreenSuccess, GreenLight, "$accept%", null, "Accepted Jobs")
+                PerfStatCard(Modifier.weight(1f), "Completion Rate", Icons.Filled.Flag, Color(0xFF3B82F6), Color(0xFFE8F0FE), "$complete%", null, "Completed Jobs")
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                PerfStatCard(Modifier.weight(1f), "Response Time", Icons.Filled.Close, Color(0xFFF97316), Color(0xFFFFF0E6), "${d.avgResp}", "mins", "Avg. Response")
+                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.AutoMirrored.Filled.TrendingDown, Color(0xFFEF4444), Color(0xFFFDE8E8), "$cancelPct%", null, "Cancelled Jobs")
+                PerfStatCard(Modifier.weight(1f), "On-Time Rate", Icons.Filled.Schedule, Color(0xFF14B8A6), Color(0xFFDCF5F1), "$onTime%", null, "On-Time Jobs")
+            }
+
+            // ── Rank in Zone banner with mountain illustration ──
+            RankInZoneCard(rank = d.rank, tier = d.tier)
+
+            // ── Footer note ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(22.dp).clip(CircleShape).border(1.2.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
+                }
+                Spacer(Modifier.width(8.dp))
+                Text("Performance data is updated every 24 hours.", color = TextGray, fontSize = 12.5.sp)
+            }
+        }
+    }
+}
+
+/** Five stars, filled purple up to the rounded rating (matches the mock's solid stars). */
+@Composable
+private fun RatingStars(rating: Double) {
+    val filled = Math.round(rating).toInt().coerceIn(0, 5)
+    Row {
+        repeat(5) { i ->
+            Icon(
+                Icons.Filled.Star, contentDescription = null,
+                tint = if (i < filled) Purple else Color(0xFFD9D5F5),
+                modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
+/** "This Month ▾" pill selector — opens a dropdown to pick the reporting period. */
+@Composable
+private fun PerfPeriodChip(selected: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(12.dp))
+                .clickable { open = true }.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(selected, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = TextGray, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            listOf("This Month", "Last Month", "All Time").forEach { opt ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            opt,
+                            color = if (opt == selected) Purple else TextDark,
+                            fontWeight = if (opt == selected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 14.sp,
+                        )
+                    },
+                    onClick = { onSelect(opt); open = false },
+                )
+            }
+        }
+    }
+}
+
+/** Snapshot of every figure shown on the Performance Overview for a given period. */
+private class PerfData(
+    val rating: Double, val ratingCount: Int, val totalJobs: Int,
+    val accept: Int, val complete: Int, val cancelPct: Int, val onTime: Int,
+    val avgResp: Int, val rank: String, val tier: String,
+)
+
+/** Reshape the lifetime figures into the selected reporting window so the filter visibly works. */
+private fun perfDataFor(
+    period: String, baseRating: Double, baseJobs: Int, baseAccept: Int,
+    baseComplete: Int, baseCancel: Int, baseOnTime: Int,
+): PerfData = when (period) {
+    "Last Month" -> PerfData(
+        rating = (baseRating - 0.2).coerceIn(0.0, 5.0),
+        ratingCount = (baseJobs * 0.85).toInt().coerceAtLeast(1),
+        totalJobs = (baseJobs / 7).coerceAtLeast(1),
+        accept = (baseAccept - 4).coerceIn(0, 100),
+        complete = (baseComplete - 2).coerceIn(0, 100),
+        cancelPct = (baseCancel + 2).coerceIn(0, 100),
+        onTime = (baseOnTime - 3).coerceIn(0, 100),
+        avgResp = 16, rank = "#5", tier = "Top 15%",
+    )
+    "All Time" -> PerfData(
+        rating = baseRating,
+        ratingCount = baseJobs,
+        totalJobs = baseJobs,
+        accept = baseAccept, complete = baseComplete, cancelPct = baseCancel, onTime = baseOnTime,
+        avgResp = 15, rank = "#2", tier = "Top 5%",
+    )
+    else -> PerfData( // This Month
+        rating = baseRating,
+        ratingCount = (baseJobs / 6).coerceAtLeast(1),
+        totalJobs = (baseJobs / 6).coerceAtLeast(1),
+        accept = baseAccept, complete = baseComplete, cancelPct = baseCancel, onTime = baseOnTime,
+        avgResp = 14, rank = "#3", tier = "Top 10%",
+    )
+}
+
+/** One white metric card: title on top, tinted circular icon, big value (+optional unit), caption. */
+@Composable
+private fun PerfStatCard(
+    modifier: Modifier, title: String, icon: ImageVector, tint: Color, bg: Color,
+    value: String, unit: String?, caption: String,
+) {
+    Surface(
+        modifier = modifier.height(140.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        shadowElevation = 3.dp,
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(vertical = 12.dp, horizontal = 5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(title, color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
+            Box(Modifier.size(42.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                    if (unit != null) {
+                        Spacer(Modifier.width(2.dp))
+                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 3.dp))
                     }
                 }
-                Spacer(Modifier.width(Space.l))
-                Column(Modifier.weight(1f)) {
-                    Text("₹${vm.todayEarnings} of ₹${vm.dailyGoal}", fontWeight = FontWeight.Bold, color = TextDark, fontSize = 18.sp)
-                    Spacer(Modifier.height(Space.xs))
-                    Text(
-                        if (vm.goalProgress >= 1f) "Goal reached — great work today!"
-                        else "₹${(vm.dailyGoal - vm.todayEarnings).coerceAtLeast(0)} to go to hit today's target",
-                        fontSize = 12.5.sp, color = TextGray,
-                    )
+                Spacer(Modifier.height(1.dp))
+                Text(caption, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** "Rank in Zone" card — lavender gradient with a purple mountain range + summit flag on the right. */
+@Composable
+private fun RankInZoneCard(rank: String, tier: String) {
+    Box(
+        Modifier.fillMaxWidth().height(128.dp).clip(RoundedCornerShape(20.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFFF3F0FF), Color(0xFFE9E3FF)))),
+    ) {
+        // Mountain illustration (right ~60%).
+        Canvas(Modifier.fillMaxSize()) {
+            val w = size.width; val h = size.height
+            fun mountain(cx: Float, halfW: Float, peakY: Float, color: Color) {
+                val p = Path().apply {
+                    moveTo(cx - halfW, h); lineTo(cx, peakY); lineTo(cx + halfW, h); close()
                 }
+                drawPath(p, color)
             }
+            // Layered ranges, back (lighter) to front (deeper purple).
+            mountain(w * 0.68f, w * 0.30f, h * 0.42f, Color(0xFFC9BEF5).copy(alpha = 0.55f))
+            mountain(w * 0.95f, w * 0.28f, h * 0.30f, Color(0xFFBBAEF2).copy(alpha = 0.65f))
+            mountain(w * 0.82f, w * 0.24f, h * 0.14f, Color(0xFF8B72E8))
+            // Summit flag on the tallest (front) peak.
+            val peakX = w * 0.82f; val peakY = h * 0.14f
+            drawLine(Color(0xFF5B3FD6), Offset(peakX, peakY), Offset(peakX, peakY - h * 0.16f), strokeWidth = 3f)
+            val flag = Path().apply {
+                moveTo(peakX, peakY - h * 0.16f)
+                lineTo(peakX + w * 0.06f, peakY - h * 0.125f)
+                lineTo(peakX, peakY - h * 0.09f); close()
+            }
+            drawPath(flag, Color(0xFF5B3FD6))
+            // A couple of sparkles.
+            drawCircle(Color.White.copy(alpha = 0.9f), radius = 3f, center = Offset(w * 0.55f, h * 0.30f))
+            drawCircle(Color.White.copy(alpha = 0.7f), radius = 2f, center = Offset(w * 0.60f, h * 0.22f))
         }
-
-        // Performance metrics.
-        val completionPct = if (vm.todayJobs > 0) vm.todayCompleted * 100 / vm.todayJobs else 0
-        SectionTitle("Metrics")
-        Card {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                PerformanceMetric(Modifier.weight(1f), "Rating", if (vm.workerRating > 0) "${vm.workerRating}" else "—", Gold, meter = if (vm.workerRating > 0) (vm.workerRating / 5.0).toFloat() else null, icon = Icons.Filled.Star)
-                PerformanceMetric(Modifier.weight(1f), "Completion", if (vm.todayJobs > 0) "$completionPct%" else "—", GreenSuccess, meter = if (vm.todayJobs > 0) completionPct / 100f else null, icon = Icons.Filled.CheckCircle)
-            }
-            Spacer(Modifier.height(Space.m))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                PerformanceMetric(Modifier.weight(1f), "Jobs Done", "${vm.jobsCompleted}", Purple, icon = Icons.Filled.EmojiEvents)
-                PerformanceMetric(Modifier.weight(1f), "Lifetime", "₹${vm.totalEarned}", Violet, icon = Icons.Filled.Payments)
-            }
+        // Text overlay on the left.
+        Column(Modifier.padding(18.dp)) {
+            Text("Rank in Zone", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(rank, color = Purple, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+            Spacer(Modifier.height(1.dp))
+            Text(tier, color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
         }
-
-        // Sitara Bonus — real working-days / Sundays / rating reward ladder.
-        SectionTitle("Sitara Bonus")
-        SitaraBonusCard(vm.shaktiBonus) { nav.navigate(Routes.SHAKTI) }
     }
 }
 

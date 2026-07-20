@@ -33,7 +33,10 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CardGiftcard
+import androidx.compose.material.icons.filled.DonutLarge
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -144,6 +147,9 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                 }
             }
+
+            // Analytics & insights — prominent gradient carousel (unmissable, one tap away).
+            EarningsInsightsCarousel(nav)
 
             // Payout summary.
             SectionTitle("Payout")
@@ -794,17 +800,20 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 ProfileStat(Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "Customer Rating", "${vm.workerRating}", "Out of 5")
             }
 
+            // ── Earnings insights — same prominent carousel as the Earnings tab.
+            EarningsInsightsCarousel(nav)
+
             // ── Menu list
             Card(padding = Dp16.XS) {
                 ProfileMenuRow(Icons.Filled.Person, "Personal Information", "View and update your personal details") { nav.navigate(Routes.P_PERSONAL) }
                 HairlineDivider()
                 ProfileMenuRow(Icons.Filled.VerifiedUser, "KYC Verification", "Aadhaar, PAN, Bank & other documents", verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
                 HairlineDivider()
-                ProfileMenuRow(Icons.Filled.AccountBalance, "Bank Account", "Manage your bank account details") { nav.navigate(Routes.P_BANK) }
+                ProfileMenuRow(Icons.Filled.AccountBalance, "Bank Account", "Manage your bank account details") { nav.navigate(Routes.BANK_ACCOUNTS) }
                 HairlineDivider()
                 ProfileMenuRow(Icons.Filled.AccountBalanceWallet, "Wallet & Earnings", "View earnings, incentives & withdrawals") { nav.navigate(Routes.WALLET) }
                 HairlineDivider()
-                ProfileMenuRow(Icons.Filled.CalendarMonth, "My Shifts", "View your shifts and availability") { nav.navigate(Routes.P_AVAILABILITY) }
+                ProfileMenuRow(Icons.Filled.CalendarMonth, "My Shifts", "View your shifts and availability") { nav.navigate(Routes.MY_SHIFTS) }
                 HairlineDivider()
                 ProfileMenuRow(Icons.Filled.WorkspacePremium, "Performance", "View your performance and stats") { nav.navigate(Routes.PERFORMANCE) }
                 HairlineDivider()
@@ -926,6 +935,58 @@ private fun MenuItem(icon: ImageVector, label: String, divider: Boolean = true, 
             Spacer(Modifier.width(Space.m))
             Text(tr(label), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/**
+ * Prominent "Earnings Insights" carousel — four gradient cards that scroll horizontally.
+ * Reused on both the Earnings tab and the Profile tab so the analytics screens are always
+ * one tap away and unmissable. Each card is a soft two-tone gradient with a glassy icon chip.
+ */
+@Composable
+fun EarningsInsightsCarousel(nav: NavHostController, modifier: Modifier = Modifier) {
+    data class Insight(
+        val icon: ImageVector, val title: String, val sub: String,
+        val c1: Color, val c2: Color, val route: String,
+    )
+    val items = listOf(
+        Insight(Icons.Filled.DonutLarge, "Earnings\nBreakdown", "Where your money comes from", Color(0xFF7C5CFC), Color(0xFF9D7BFF), Routes.EARNINGS_BREAKDOWN),
+        Insight(Icons.Filled.BarChart, "Earnings\nAnalytics", "Daily · weekly · monthly", Color(0xFF10B981), Color(0xFF34D399), Routes.EARNINGS_ANALYTICS),
+        Insight(Icons.Filled.EmojiEvents, "Incentive\nProgress", "Track your bonus goal", Color(0xFFF59E0B), Color(0xFFFBBF24), Routes.INCENTIVE_PROGRESS),
+        Insight(Icons.AutoMirrored.Filled.TrendingUp, "Monthly\nTrend", "Your growth over time", Color(0xFF3B82F6), Color(0xFF60A5FA), Routes.MONTHLY_TREND),
+    )
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("Earnings Insights")
+            Spacer(Modifier.weight(1f))
+            Text("Swipe →", color = TextMuted, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(Space.s))
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            items.forEach { it ->
+                Column(
+                    Modifier
+                        .width(156.dp)
+                        .height(150.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Brush.linearGradient(listOf(it.c1, it.c2)))
+                        .clickable { nav.navigate(it.route) }
+                        .padding(14.dp),
+                ) {
+                    Box(
+                        Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.22f)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(it.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp)) }
+                    Spacer(Modifier.weight(1f))
+                    Text(it.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 19.sp)
+                    Spacer(Modifier.height(3.dp))
+                    Text(it.sub, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, lineHeight = 14.sp, maxLines = 2)
+                }
+            }
         }
     }
 }

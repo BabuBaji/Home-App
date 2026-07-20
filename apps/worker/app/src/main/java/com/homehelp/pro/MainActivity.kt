@@ -91,7 +91,15 @@ object Routes {
     const val WITHDRAW = "wallet_withdraw"
     const val SALARY_ADVANCE = "wallet_advance"
     const val WALLET_HISTORY = "wallet_history"
+    const val TRANSACTIONS = "transactions"
+    const val TRANSACTION_DETAIL = "transaction_detail"
     const val EARNINGS_BREAKUP = "wallet_breakup"
+    const val EARNINGS_BREAKDOWN = "earnings_breakdown"
+    const val EARNINGS_ANALYTICS = "earnings_analytics"
+    const val INCENTIVE_PROGRESS = "incentive_progress"
+    const val INCENTIVE_HISTORY = "incentive_history"
+    const val MONTHLY_TREND = "monthly_trend"
+    const val MY_SHIFTS = "my_shifts"
     const val DEDUCTIONS = "wallet_deductions"
     const val PAYSLIP = "wallet_payslip"
     const val WITHDRAW_RECEIPT = "wallet_receipt"
@@ -285,7 +293,15 @@ fun AppRoot() {
             composable(Routes.WALLET_HELP) { WalletHelpScreen(vm, nav) }
             composable(Routes.SALARY_ADVANCE) { SalaryAdvanceScreen(vm, nav) }
             composable(Routes.WALLET_HISTORY) { WalletHistoryScreen(vm, nav) }
+            composable(Routes.TRANSACTIONS) { TransactionsScreen(vm, nav) }
+            composable(Routes.TRANSACTION_DETAIL) { TransactionDetailScreen(vm, nav) }
             composable(Routes.EARNINGS_BREAKUP) { EarningsBreakupScreen(vm, nav) }
+            composable(Routes.EARNINGS_BREAKDOWN) { EarningsBreakdownScreen(vm, nav) }
+            composable(Routes.EARNINGS_ANALYTICS) { EarningsAnalyticsScreen(vm, nav) }
+            composable(Routes.INCENTIVE_PROGRESS) { IncentiveProgressScreen(vm, nav) }
+            composable(Routes.INCENTIVE_HISTORY) { IncentiveHistoryScreen(vm, nav) }
+            composable(Routes.MONTHLY_TREND) { MonthlyTrendScreen(vm, nav) }
+            composable(Routes.MY_SHIFTS) { MyShiftsScreen(vm, nav) }
             composable(Routes.DEDUCTIONS) { DeductionsScreen(vm, nav) }
             composable(Routes.PAYSLIP) { PayslipScreen(vm, nav) }
             composable(
