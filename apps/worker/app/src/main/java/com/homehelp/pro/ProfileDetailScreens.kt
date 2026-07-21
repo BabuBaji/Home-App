@@ -1479,7 +1479,7 @@ fun LeaveScreen(vm: AppViewModel, nav: NavHostController) {
     var to by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    DetailScaffold("Leave", nav) {
+    WhiteDetailScaffold("Request Time Off", nav) {
         Card {
             SectionLabel("Request Leave")
             Spacer(Modifier.height(Space.m))
