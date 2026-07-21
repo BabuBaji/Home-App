@@ -44,6 +44,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
@@ -1197,34 +1200,46 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
     val onTime = d.onTime
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // ── White header: back · title · info ──
+        // ── White header: menu box · title · info ──
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 10.dp),
+            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+            Box(
+                Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, Divider, RoundedCornerShape(12.dp))
+                    .clickable { nav.popBackStack() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(20.dp))
             }
-            Text("Performance Overview", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(32.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Performance Overview", color = TextDark, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.size(34.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
             }
         }
 
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.m),
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            // ── Rating + period chip ──
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                PerfPeriodChip(period) { period = it }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("%.1f".format(rating), color = TextDark, fontSize = 44.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.5).sp)
-                Spacer(Modifier.width(10.dp))
-                RatingStars(rating)
-                Spacer(Modifier.width(8.dp))
-                Text("($ratingCount Ratings)", color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            // ── Hero rating card: big rating on the left, period chip on the right ──
+            Surface(
+                Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color.White,
+                shadowElevation = 3.dp, border = BorderStroke(1.dp, Divider),
+            ) {
+                Row(Modifier.padding(horizontal = 22.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("%.1f".format(rating), color = Purple, fontSize = 48.sp, fontWeight = FontWeight.Bold, letterSpacing = (-2).sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Overall Rating", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(2.dp))
+                        Text("($ratingCount Ratings)", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                    Box(Modifier.width(1.dp).height(62.dp).background(Divider))
+                    Spacer(Modifier.width(16.dp))
+                    PerfPeriodChip(period) { period = it }
+                }
             }
 
             // ── 6 stat cards (2 × 3) ──
@@ -1234,16 +1249,20 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
                 PerfStatCard(Modifier.weight(1f), "Completion Rate", Icons.Filled.Flag, Color(0xFF3B82F6), Color(0xFFE8F0FE), "$complete%", null, "Completed Jobs")
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                PerfStatCard(Modifier.weight(1f), "Response Time", Icons.Filled.Close, Color(0xFFF97316), Color(0xFFFFF0E6), "${d.avgResp}", "mins", "Avg. Response")
-                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.AutoMirrored.Filled.TrendingDown, Color(0xFFEF4444), Color(0xFFFDE8E8), "$cancelPct%", null, "Cancelled Jobs")
+                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.Filled.Close, Color(0xFFF97316), Color(0xFFFFF0E6), "${d.avgResp}", "mins", "Avg. Cancellation Time")
+                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.AutoMirrored.Filled.TrendingDown, Color(0xFFEC4899), Color(0xFFFCE7F3), "$cancelPct%", null, "Cancelled Jobs")
                 PerfStatCard(Modifier.weight(1f), "On-Time Rate", Icons.Filled.Schedule, Color(0xFF14B8A6), Color(0xFFDCF5F1), "$onTime%", null, "On-Time Jobs")
             }
 
-            // ── Rank in Zone banner with mountain illustration ──
+            // ── Rank in Zone banner ──
             RankInZoneCard(rank = d.rank, tier = d.tier)
 
-            // ── Footer note ──
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            // ── Footer note pill ──
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF3F0FF))
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(Modifier.size(22.dp).clip(CircleShape).border(1.2.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
                 }
@@ -1341,82 +1360,74 @@ private fun perfDataFor(
     )
 }
 
-/** One white metric card: title on top, tinted circular icon, big value (+optional unit), caption. */
+/** One white metric card: tinted square icon on top, title, big coloured value (+optional unit),
+ *  caption, and a colour-matched underline bar along the bottom edge. */
 @Composable
 private fun PerfStatCard(
     modifier: Modifier, title: String, icon: ImageVector, tint: Color, bg: Color,
     value: String, unit: String?, caption: String,
 ) {
     Surface(
-        modifier = modifier.height(140.dp),
+        modifier = modifier.height(158.dp),
         shape = RoundedCornerShape(18.dp),
         color = Color.White,
         shadowElevation = 3.dp,
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(vertical = 12.dp, horizontal = 5.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(title, color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
-            Box(Modifier.size(42.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp, start = 5.dp, end = 5.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(bg), contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.height(9.dp))
+                Text(title, color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
+                Spacer(Modifier.height(7.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                    Text(value, color = tint, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
                     if (unit != null) {
                         Spacer(Modifier.width(2.dp))
-                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 3.dp))
+                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 4.dp))
                     }
                 }
-                Spacer(Modifier.height(1.dp))
-                Text(caption, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1)
+                Spacer(Modifier.height(2.dp))
+                Text(caption, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp, maxLines = 2)
             }
+            // Colour-matched accent underline near the bottom edge.
+            Box(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 12.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(tint))
         }
     }
 }
 
-/** "Rank in Zone" card — lavender gradient with a purple mountain range + summit flag on the right. */
+/** "Rank in Zone" card — white surface with a purple chart badge on the left, the rank/tier in the
+ *  middle, and a large pale-lavender growth-chart medallion on the right. */
 @Composable
 private fun RankInZoneCard(rank: String, tier: String) {
-    Box(
-        Modifier.fillMaxWidth().height(128.dp).clip(RoundedCornerShape(20.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFFF3F0FF), Color(0xFFE9E3FF)))),
+    Surface(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color.White,
+        shadowElevation = 3.dp, border = BorderStroke(1.dp, Divider),
     ) {
-        // Mountain illustration (right ~60%).
-        Canvas(Modifier.fillMaxSize()) {
-            val w = size.width; val h = size.height
-            fun mountain(cx: Float, halfW: Float, peakY: Float, color: Color) {
-                val p = Path().apply {
-                    moveTo(cx - halfW, h); lineTo(cx, peakY); lineTo(cx + halfW, h); close()
-                }
-                drawPath(p, color)
+        Row(
+            Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Left: solid purple circle with a white line-chart glyph.
+            Box(Modifier.size(56.dp).clip(CircleShape).background(Purple), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ShowChart, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
             }
-            // Layered ranges, back (lighter) to front (deeper purple).
-            mountain(w * 0.68f, w * 0.30f, h * 0.42f, Color(0xFFC9BEF5).copy(alpha = 0.55f))
-            mountain(w * 0.95f, w * 0.28f, h * 0.30f, Color(0xFFBBAEF2).copy(alpha = 0.65f))
-            mountain(w * 0.82f, w * 0.24f, h * 0.14f, Color(0xFF8B72E8))
-            // Summit flag on the tallest (front) peak.
-            val peakX = w * 0.82f; val peakY = h * 0.14f
-            drawLine(Color(0xFF5B3FD6), Offset(peakX, peakY), Offset(peakX, peakY - h * 0.16f), strokeWidth = 3f)
-            val flag = Path().apply {
-                moveTo(peakX, peakY - h * 0.16f)
-                lineTo(peakX + w * 0.06f, peakY - h * 0.125f)
-                lineTo(peakX, peakY - h * 0.09f); close()
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Rank in Zone", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(rank, color = Purple, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                Spacer(Modifier.height(1.dp))
+                Text(tier, color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             }
-            drawPath(flag, Color(0xFF5B3FD6))
-            // A couple of sparkles.
-            drawCircle(Color.White.copy(alpha = 0.9f), radius = 3f, center = Offset(w * 0.55f, h * 0.30f))
-            drawCircle(Color.White.copy(alpha = 0.7f), radius = 2f, center = Offset(w * 0.60f, h * 0.22f))
-        }
-        // Text overlay on the left.
-        Column(Modifier.padding(18.dp)) {
-            Text("Rank in Zone", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(rank, color = Purple, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-            Spacer(Modifier.height(1.dp))
-            Text(tier, color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            // Right: large pale-lavender medallion with a purple bar-chart glyph.
+            Box(Modifier.size(72.dp).clip(CircleShape).background(Color(0xFFEDE8FB)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.BarChart, contentDescription = null, tint = Purple, modifier = Modifier.size(38.dp))
+            }
         }
     }
 }
