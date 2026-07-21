@@ -1368,31 +1368,33 @@ private fun PerfStatCard(
     value: String, unit: String?, caption: String,
 ) {
     Surface(
-        modifier = modifier.height(158.dp),
+        modifier = modifier.height(168.dp),
         shape = RoundedCornerShape(18.dp),
         color = Color.White,
         shadowElevation = 3.dp,
     ) {
         Column(Modifier.fillMaxSize()) {
             Column(
-                Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp, start = 5.dp, end = 5.dp),
+                Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp, start = 4.dp, end = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(bg), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(bg), contentAlignment = Alignment.Center) {
                     Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
                 }
-                Spacer(Modifier.height(9.dp))
-                Text(title, color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(8.dp))
+                // Reserve two lines for the title so every card's value/caption line up across the row.
+                Text(title, color = TextDark, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 13.sp, minLines = 2, maxLines = 2)
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(value, color = tint, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                    // Never wrap the headline figure — a narrow card must still show "100%" on one line.
+                    Text(value, color = tint, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, maxLines = 1, softWrap = false)
                     if (unit != null) {
                         Spacer(Modifier.width(2.dp))
-                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 4.dp))
+                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false, modifier = Modifier.padding(bottom = 3.dp))
                     }
                 }
                 Spacer(Modifier.height(2.dp))
-                Text(caption, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp, maxLines = 2)
+                Text(caption, color = TextGray, fontSize = 9.5.sp, textAlign = TextAlign.Center, lineHeight = 12.sp, maxLines = 2)
             }
             // Colour-matched accent underline near the bottom edge.
             Box(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 12.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(tint))
