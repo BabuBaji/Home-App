@@ -1116,7 +1116,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     rowItems.forEach { s ->
                         val selected = vm.shiftStart == s.start && vm.shiftEnd == s.end
-                        ShiftChip(s.label, "${s.start} – ${s.end}", selected, Modifier.weight(1f)) {
+                        ShiftChip(s.label, "${fmt12h(s.start)} – ${fmt12h(s.end)}", selected, Modifier.weight(1f)) {
                             vm.shiftStart = s.start; vm.shiftEnd = s.end
                         }
                     }
@@ -1126,7 +1126,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             }
             val shiftSet = vm.shiftStart.isNotBlank() && vm.shiftEnd.isNotBlank()
             HairlineDivider()
-            LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
+            LabeledRow("Selected", if (shiftSet) "$shiftType • ${fmt12h(vm.shiftStart)} – ${fmt12h(vm.shiftEnd)}" else "Not set")
         }
 
         // The one preference that binds: past this, no more jobs are offered until the worker
@@ -1158,20 +1158,31 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
 private data class ShiftPreset(val label: String, val start: String, val end: String)
 
 // Full-time shifts (longer windows) vs part-time 4-hour slots. The worker first picks a
-// type, then a slot within it.
+// type, then a slot within it. Times are stored as 24-hour HH:MM — the format the backend
+// validates and stores — and only formatted to 12-hour for display via [fmt12h].
 private val FULL_TIME_SHIFTS = listOf(
-    ShiftPreset("Morning", "06:00 AM", "02:00 PM"),
-    ShiftPreset("Day", "08:00 AM", "08:00 PM"),
-    ShiftPreset("Evening", "02:00 PM", "10:00 PM"),
-    ShiftPreset("Full Day", "05:00 AM", "10:00 PM"),
+    ShiftPreset("Morning", "06:00", "14:00"),
+    ShiftPreset("Day", "08:00", "20:00"),
+    ShiftPreset("Evening", "14:00", "22:00"),
+    ShiftPreset("Full Day", "05:00", "22:00"),
 )
 
 private val PART_TIME_SHIFTS = listOf(
-    ShiftPreset("Early", "06:00 AM", "10:00 AM"),
-    ShiftPreset("Midday", "10:00 AM", "02:00 PM"),
-    ShiftPreset("Afternoon", "02:00 PM", "06:00 PM"),
-    ShiftPreset("Evening", "06:00 PM", "10:00 PM"),
+    ShiftPreset("Early", "06:00", "10:00"),
+    ShiftPreset("Midday", "10:00", "14:00"),
+    ShiftPreset("Afternoon", "14:00", "18:00"),
+    ShiftPreset("Evening", "18:00", "22:00"),
 )
+
+/** Format a 24-hour "HH:MM" as a friendly 12-hour "6:00 AM"; passes anything unexpected through. */
+private fun fmt12h(hhmm: String): String {
+    val m = Regex("^(\\d{1,2}):(\\d{2})").find(hhmm.trim()) ?: return hhmm
+    val h = m.groupValues[1].toIntOrNull() ?: return hhmm
+    val min = m.groupValues[2]
+    val ap = if (h < 12) "AM" else "PM"
+    val h12 = ((h + 11) % 12) + 1
+    return "$h12:$min $ap"
+}
 
 // Performance & Incentives — all figures are real (from the worker's own activity/earnings).
 @Composable
