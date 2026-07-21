@@ -696,64 +696,62 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
         }
 
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = 6.dp, bottom = Space.s),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.s, bottom = Space.l),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // ── Identity card
-            Surface(shape = RoundedCornerShape(Radius.card), color = Primary50, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(11.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box {
-                            Box(
-                                Modifier.size(52.dp).clip(CircleShape).background(Color.White).border(2.dp, Purple, CircleShape),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (vm.avatarUrl.isNotBlank()) {
-                                    // Show the photo when it loads; fall back to initials while loading or if the URL can't be reached.
-                                    SubcomposeAsyncImage(
-                                        model = vm.avatarUrl,
-                                        contentDescription = "Profile photo",
-                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                        contentScale = ContentScale.Crop,
-                                        loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-                                        error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-                                    )
-                                } else {
-                                    Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                }
-                            }
-                            Box(
-                                Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(Purple)
-                                    .border(2.dp, Primary50, CircleShape).clickable { nav.navigate(Routes.P_PERSONAL) },
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(10.dp)) }
-                        }
-                        Spacer(Modifier.width(Space.s))
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(vm.workerName.ifBlank { "HomeHelp Partner" }, color = TextDark, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                                if (kycVerified) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp)) }
-                            }
-                            Spacer(Modifier.height(3.dp))
-                            if (vm.workerPhone.isNotBlank()) { ProfileIconLine(Icons.Filled.Phone, vm.workerPhone); Spacer(Modifier.height(1.dp)) }
-                            if (vm.workerCity.isNotBlank()) { ProfileIconLine(Icons.Filled.LocationOn, vm.workerCity); Spacer(Modifier.height(1.dp)) }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(13.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("${vm.workerRating}", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                                if (vm.jobsCompleted > 0) { Spacer(Modifier.width(4.dp)); Text("(${vm.jobsCompleted} Ratings)", color = TextGray, fontSize = 11.5.sp) }
-                            }
-                        }
-                        Spacer(Modifier.width(Space.s))
+            // ── Identity card — clean white surface, larger avatar, rating + contact, Edit pill
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box {
                         Box(
-                            Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White).border(1.dp, Purple, RoundedCornerShape(Radius.pill))
-                                .clickable { nav.navigate(Routes.P_PERSONAL) }.padding(horizontal = 9.dp, vertical = 6.dp),
+                            Modifier.size(60.dp).clip(CircleShape).background(PurpleLight).border(2.dp, Purple, CircleShape),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text("Edit", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            if (vm.avatarUrl.isNotBlank()) {
+                                // Show the photo when it loads; fall back to initials while loading or if the URL can't be reached.
+                                SubcomposeAsyncImage(
+                                    model = vm.avatarUrl,
+                                    contentDescription = "Profile photo",
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                    loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
+                                    error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
+                                )
+                            } else {
+                                Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                             }
+                        }
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(Purple)
+                                .border(2.dp, CardBg, CircleShape).clickable { nav.navigate(Routes.P_PERSONAL) },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(11.dp)) }
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(vm.workerName.ifBlank { "HomeHelp Partner" }, color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                            if (kycVerified) { Spacer(Modifier.width(5.dp)); Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp)) }
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("${vm.workerRating}", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            if (vm.jobsCompleted > 0) { Spacer(Modifier.width(5.dp)); Text("·  ${vm.jobsCompleted} jobs done", color = TextGray, fontSize = 12.sp) }
+                        }
+                        if (vm.workerPhone.isNotBlank()) { Spacer(Modifier.height(3.dp)); ProfileIconLine(Icons.Filled.Phone, vm.workerPhone) }
+                        if (vm.workerCity.isNotBlank()) { Spacer(Modifier.height(2.dp)); ProfileIconLine(Icons.Filled.LocationOn, vm.workerCity) }
+                    }
+                    Spacer(Modifier.width(Space.s))
+                    Box(
+                        Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight)
+                            .clickable { nav.navigate(Routes.P_PERSONAL) }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -857,36 +855,41 @@ private fun ProfileIconLine(icon: ImageVector, text: String) {
 private fun ProfileStat(modifier: Modifier, icon: ImageVector, tint: Color, tintBg: Color, label: String, value: String, caption: String) {
     Card(modifier = modifier, padding = Dp16.XS) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Box(Modifier.size(26.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(tintBg), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(17.dp))
             }
-            Spacer(Modifier.height(3.dp))
-            Text(label, color = TextGray, fontSize = 9.5.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 11.sp)
-            Spacer(Modifier.height(1.dp))
-            Text(value, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(caption, color = TextMuted, fontSize = 9.sp)
+            Spacer(Modifier.height(7.dp))
+            Text(value, color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            // Reserve two lines so every card's label block is the same height across the strip.
+            Text(label, color = TextGray, fontSize = 9.5.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 11.sp, minLines = 2, maxLines = 2)
+            Text(caption, color = TextMuted, fontSize = 8.5.sp, textAlign = TextAlign.Center, maxLines = 1)
         }
     }
 }
 
-/** Menu row: plain leading icon + title (with optional Verified pill) + subtitle + chevron. */
+/** Menu row: tinted icon chip + title (with optional Verified pill) + subtitle + chevron. Tall
+ *  enough (~56dp) to be an easy tap target for a worker on the move. */
 @Composable
 private fun ProfileMenuRow(icon: ImageVector, title: String, subtitle: String, verified: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 5.dp),
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 6.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(Space.s))
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
+        }
+        Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                 if (verified) {
                     Spacer(Modifier.width(Space.s))
                     StatusPill("Verified", GreenLight, GreenSuccess)
                 }
             }
-            Text(subtitle, color = TextGray, fontSize = 11.5.sp)
+            Spacer(Modifier.height(1.dp))
+            Text(subtitle, color = TextGray, fontSize = 11.5.sp, lineHeight = 14.sp)
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
     }
@@ -940,21 +943,22 @@ private fun MenuItem(icon: ImageVector, label: String, divider: Boolean = true, 
 }
 
 /**
- * Prominent "Earnings Insights" carousel — four gradient cards that scroll horizontally.
- * Reused on both the Earnings tab and the Profile tab so the analytics screens are always
- * one tap away and unmissable. Each card is a soft two-tone gradient with a glassy icon chip.
+ * "Earnings Insights" carousel — four clean white cards that scroll horizontally. Reused on both
+ * the Earnings tab and the Profile tab so the analytics screens are always one tap away. Each card
+ * is a white Material surface with a soft coloured icon chip and a chevron affordance, so the strip
+ * reads as native Android rather than a row of web marketing banners.
  */
 @Composable
 fun EarningsInsightsCarousel(nav: NavHostController, modifier: Modifier = Modifier) {
     data class Insight(
         val icon: ImageVector, val title: String, val sub: String,
-        val c1: Color, val c2: Color, val route: String,
+        val accent: Color, val route: String,
     )
     val items = listOf(
-        Insight(Icons.Filled.DonutLarge, "Earnings\nBreakdown", "Where your money comes from", Color(0xFF7C5CFC), Color(0xFF9D7BFF), Routes.EARNINGS_BREAKDOWN),
-        Insight(Icons.Filled.BarChart, "Earnings\nAnalytics", "Daily · weekly · monthly", Color(0xFF10B981), Color(0xFF34D399), Routes.EARNINGS_ANALYTICS),
-        Insight(Icons.Filled.EmojiEvents, "Incentive\nProgress", "Track your bonus goal", Color(0xFFF59E0B), Color(0xFFFBBF24), Routes.INCENTIVE_PROGRESS),
-        Insight(Icons.AutoMirrored.Filled.TrendingUp, "Monthly\nTrend", "Your growth over time", Color(0xFF3B82F6), Color(0xFF60A5FA), Routes.MONTHLY_TREND),
+        Insight(Icons.Filled.DonutLarge, "Earnings Breakdown", "Where your money comes from", Color(0xFF7C5CFC), Routes.EARNINGS_BREAKDOWN),
+        Insight(Icons.Filled.BarChart, "Earnings Analytics", "Daily · weekly · monthly", Color(0xFF10B981), Routes.EARNINGS_ANALYTICS),
+        Insight(Icons.Filled.EmojiEvents, "Incentive Progress", "Track your bonus goal", Color(0xFFF59E0B), Routes.INCENTIVE_PROGRESS),
+        Insight(Icons.AutoMirrored.Filled.TrendingUp, "Monthly Trend", "Your growth over time", Color(0xFF3B82F6), Routes.MONTHLY_TREND),
     )
     Column(modifier) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -970,21 +974,26 @@ fun EarningsInsightsCarousel(nav: NavHostController, modifier: Modifier = Modifi
             items.forEach { it ->
                 Column(
                     Modifier
-                        .width(156.dp)
-                        .height(150.dp)
+                        .width(166.dp)
+                        .height(156.dp)
+                        .shadow(2.dp, RoundedCornerShape(18.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0F101828))
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Brush.linearGradient(listOf(it.c1, it.c2)))
+                        .background(Color.White)
+                        .border(1.dp, Divider, RoundedCornerShape(18.dp))
                         .clickable { nav.navigate(it.route) }
-                        .padding(14.dp),
+                        .padding(15.dp),
                 ) {
-                    Box(
-                        Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.22f)),
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(it.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp)) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                        Box(
+                            Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(it.accent.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(it.icon, contentDescription = null, tint = it.accent, modifier = Modifier.size(23.dp)) }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+                    }
                     Spacer(Modifier.weight(1f))
-                    Text(it.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 19.sp)
-                    Spacer(Modifier.height(3.dp))
-                    Text(it.sub, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, lineHeight = 14.sp, maxLines = 2)
+                    Text(it.title, color = TextDark, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, lineHeight = 19.sp, maxLines = 2)
+                    Spacer(Modifier.height(4.dp))
+                    Text(it.sub, color = TextGray, fontSize = 11.5.sp, lineHeight = 14.sp, maxLines = 2)
                 }
             }
         }
