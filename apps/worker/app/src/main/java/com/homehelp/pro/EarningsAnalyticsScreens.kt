@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +25,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Description
@@ -45,14 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -78,12 +73,12 @@ private fun AnalyticsBar(title: String, onBack: () -> Unit, onInfo: () -> Unit =
             Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+            Box(Modifier.size(38.dp).clip(CircleShape).border(1.dp, Divider, CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(20.dp))
             }
-            Text(title, color = Purple, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.3.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(30.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape).clickable { onInfo() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
+            Text(title, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            Box(Modifier.size(32.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape).clickable { onInfo() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
             }
         }
     }
@@ -130,9 +125,12 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
         )
     }
     val sum = slices.sumOf { it.amount }.coerceAtLeast(1)
-    val sweep by animateFloatAsState(targetValue = 1f, animationSpec = tween(900, easing = LinearOutSlowInEasing), label = "donut")
+    // Insights derived from the total so the "Last Month" toggle reshapes them too.
+    val avgPerDay = (total / 26).coerceAtLeast(1)
+    val highestDay = avgPerDay * 144 / 100
+    val highestDayName = if (period == "Last Month") "Saturday" else "Friday"
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+    Column(Modifier.fillMaxSize().background(Color.White)) {
         AnalyticsBar("Earnings Breakdown", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
@@ -140,52 +138,69 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             Row { PeriodChip(period, leading = true) { period = if (period == "This Month") "Last Month" else "This Month" } }
 
+            // ── Total earnings + category breakdown ──
             Card {
-                Box(Modifier.fillMaxWidth().height(240.dp), contentAlignment = Alignment.Center) {
-                    Canvas(Modifier.size(240.dp)) {
-                        val stroke = 42.dp.toPx()
-                        val inset = stroke / 2
-                        val arcSize = Size(size.width - stroke, size.height - stroke)
-                        val topLeft = Offset(inset, inset)
-                        var start = -90f
-                        slices.forEach { s ->
-                            val full = 360f * s.amount / sum
-                            drawArc(
-                                color = s.color, startAngle = start, sweepAngle = full * sweep, useCenter = false,
-                                topLeft = topLeft, size = arcSize,
-                                style = Stroke(width = stroke, cap = StrokeCap.Butt),
-                            )
-                            // Thin white gap between slices.
-                            drawArc(color = Color.White, startAngle = start, sweepAngle = 1.4f, useCenter = false, topLeft = topLeft, size = arcSize, style = Stroke(width = stroke))
-                            start += full
-                        }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Total Earnings", color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("₹${fmt(total)}", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
                     }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("₹${fmt(total)}", color = TextDark, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-                        Text("Total Earnings", color = TextGray, fontSize = 14.sp)
+                    Box(Modifier.size(58.dp).clip(CircleShape).background(Primary50), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.AccountBalanceWallet, contentDescription = null, tint = Purple, modifier = Modifier.size(26.dp))
                     }
                 }
-                Spacer(Modifier.height(Space.s))
+                Spacer(Modifier.height(14.dp))
+                HairlineDivider()
+                Spacer(Modifier.height(4.dp))
                 slices.forEachIndexed { i, s ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(11.dp).clip(CircleShape).background(s.color))
+                    Row(Modifier.fillMaxWidth().padding(vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(s.color))
                         Spacer(Modifier.width(Space.m))
                         Text(s.label, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        Text("${"%.1f".format(s.amount * 100.0 / sum)}%", color = TextGray, fontSize = 14.sp, modifier = Modifier.width(72.dp), textAlign = TextAlign.End)
-                        Text("₹${fmt(s.amount)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(88.dp), textAlign = TextAlign.End)
+                        Text("${"%.1f".format(s.amount * 100.0 / sum)}%", color = TextGray, fontSize = 13.5.sp, modifier = Modifier.width(52.dp), textAlign = TextAlign.End)
+                        Text("₹${fmt(s.amount)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(80.dp), textAlign = TextAlign.End)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
                     }
                     if (i < slices.lastIndex) HairlineDivider()
                 }
+                Spacer(Modifier.height(12.dp))
+                // Before-tax note nested inside the card.
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column {
+                        Text("All earnings are before taxes", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Last updated: ${nowStampAnalytics()}", color = TextGray, fontSize = 12.sp)
+                    }
+                }
             }
 
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(38.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.BarChart, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
+            // ── Insights ──
+            Card {
+                Text("Insights", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(Space.s))
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(GreenLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.AutoMirrored.Filled.ShowChart, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(21.dp))
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Text("Highest Day", color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text(highestDayName, color = GreenSuccess, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(Space.l))
+                    Text("₹${fmt(highestDay)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
-                Spacer(Modifier.width(Space.m))
-                Column {
-                    Text("All earnings are before taxes", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Last updated: ${nowStampAnalytics()}", color = TextGray, fontSize = 12.sp)
+                HairlineDivider()
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(21.dp))
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Text("Average per Day", color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("₹${fmt(avgPerDay)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -207,8 +222,8 @@ fun EarningsAnalyticsScreen(vm: AppViewModel, nav: NavHostController) {
     val highestIdx = series.bars.indexOf(maxVal)
     val avg = series.bars.sum() / series.bars.size
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        AnalyticsBar("EARNINGS ANALYTICS", onBack = { nav.popBackStack() })
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        AnalyticsBar("Earnings Analytics", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -224,77 +239,43 @@ fun EarningsAnalyticsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
+            // Total + a simple, readable per-period list (no chart).
             Card {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(series.periodLabel, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = TextGray, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.height(10.dp))
-                Text("₹${fmt(series.total)}", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
+                Text(series.periodLabel, color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(4.dp))
+                Text("₹${fmt(series.total)}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
                 Text("Total Earnings", color = TextGray, fontSize = 13.sp)
-                Spacer(Modifier.height(Space.l))
-                BarChart(bars = series.bars, labels = series.labels)
+                Spacer(Modifier.height(Space.m))
+                HairlineDivider()
+                Spacer(Modifier.height(4.dp))
+                series.names.forEachIndexed { i, name ->
+                    SimpleBarRow(name, series.bars[i], series.bars[i].toFloat() / maxVal, highlight = i == highestIdx)
+                }
             }
 
+            // Insights.
             Card {
                 Text("Insights", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(Space.m))
+                Spacer(Modifier.height(Space.s))
                 InsightRow(Icons.AutoMirrored.Filled.TrendingUp, GreenSuccess, GreenLight, "Highest ${series.unitWord}", series.names.getOrElse(highestIdx) { "—" }, "₹${fmt(maxVal)}", valueTint = GreenSuccess)
                 HairlineDivider()
                 InsightRow(Icons.Filled.CalendarMonth, Purple, PurpleLight, "Average per ${series.unitWord}", "", "₹${fmt(avg)}")
-            }
-
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) { Text("💡", fontSize = 18.sp) }
-                Spacer(Modifier.width(Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text("Keep it up!", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("You're doing great. Consistent earnings lead to bigger rewards.", color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
-                }
-                Text("📈", fontSize = 30.sp)
             }
         }
     }
 }
 
+/** A simple labelled amount row with a slim proportional bar — light, worker-friendly, no axes. */
 @Composable
-private fun BarChart(bars: List<Int>, labels: List<String>) {
-    val grown by animateFloatAsState(targetValue = 1f, animationSpec = tween(800, easing = LinearOutSlowInEasing), label = "bars")
-    val top = niceTop(bars.max())
-    // Y-axis ticks scale with the data (top → 0 in four steps).
-    val yTicks = listOf(top, top * 3 / 4, top / 2, top / 4, 0)
-    Row(Modifier.fillMaxWidth().height(220.dp)) {
-        // Y axis labels.
-        Column(Modifier.width(34.dp).fillMaxSize().padding(bottom = 22.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-            yTicks.forEach { Text(kFmt(it), color = TextMuted, fontSize = 9.sp) }
+private fun SimpleBarRow(name: String, value: Int, fraction: Float, highlight: Boolean = false) {
+    val safe = if (fraction.isNaN()) 0f else fraction
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(name, color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.width(74.dp))
+        Box(Modifier.weight(1f).height(7.dp).clip(RoundedCornerShape(Radius.pill)).background(FieldFill)) {
+            Box(Modifier.fillMaxWidth(safe.coerceIn(0.04f, 1f)).height(7.dp).clip(RoundedCornerShape(Radius.pill)).background(if (highlight) Purple else IncentiveLilac))
         }
-        Spacer(Modifier.width(6.dp))
-        Box(Modifier.weight(1f).fillMaxSize()) {
-            // Dashed gridlines.
-            Canvas(Modifier.fillMaxSize().padding(bottom = 22.dp)) {
-                val rows = 4
-                for (i in 0..rows) {
-                    val y = size.height * i / rows
-                    drawLine(Color(0xFFEDEDF3), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
-                }
-            }
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
-                bars.forEachIndexed { i, v ->
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                        Text(kFmt(v), color = TextDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(4.dp))
-                        Box(
-                            Modifier.width(18.dp)
-                                .height((190.dp * (v.toFloat() / top) * grown).coerceAtLeast(2.dp))
-                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                .background(Brush.verticalGradient(listOf(Purple, IncentiveLilac))),
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(labels[i], color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-        }
+        Spacer(Modifier.width(Space.s))
+        Text("₹${fmt(value)}", color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.width(72.dp))
     }
 }
 
@@ -322,35 +303,27 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val pct = earned * 100 / goal
     val anim by animateFloatAsState(targetValue = earned.toFloat() / goal, animationSpec = tween(900, easing = LinearOutSlowInEasing), label = "prog")
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+    Column(Modifier.fillMaxSize().background(Color.White)) {
         AnalyticsBar("Incentive Progress", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            // Celebration banner.
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card))
-                    .background(Brush.horizontalGradient(listOf(Color(0xFF4A34C7), Color(0xFF6D4BE0)))).padding(Space.l),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.EmojiEvents, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
-                }
-                Spacer(Modifier.width(Space.m))
-                Column {
-                    Text("You are doing great!", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("Keep it up and earn more 😊", color = Color.White.copy(alpha = 0.92f), fontSize = 13.sp)
-                }
-            }
-
+            // Goal + progress — clean white card.
             Card {
-                Text("Monthly Incentive Goal", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text("₹${fmt(goal)}", color = TextDark, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Monthly Incentive Goal", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("₹${fmt(goal)}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                    }
+                    Box(Modifier.size(52.dp).clip(CircleShape).background(GoldLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.EmojiEvents, contentDescription = null, tint = Amber, modifier = Modifier.size(26.dp))
+                    }
+                }
                 Spacer(Modifier.height(Space.m))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(Radius.pill)).background(Color(0xFFEDEBF9))) {
+                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(Radius.pill)).background(FieldFill)) {
                         Box(Modifier.fillMaxWidth(anim).height(10.dp).clip(RoundedCornerShape(Radius.pill)).background(Brush.horizontalGradient(listOf(Purple, IncentiveLilac))))
                     }
                     Spacer(Modifier.width(Space.m))
@@ -358,8 +331,8 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Row {
-                    Text("₹${fmt(earned)}", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text(" / ₹${fmt(goal)}", color = TextGray, fontSize = 14.sp)
+                    Text("₹${fmt(earned)} earned", color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    Text("  of ₹${fmt(goal)}", color = TextGray, fontSize = 13.5.sp)
                 }
                 Spacer(Modifier.height(Space.m))
                 HairlineDivider()
@@ -373,7 +346,7 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).clickable { nav.navigate(Routes.INCENTIVE_HISTORY) }.padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(38.dp).clip(CircleShape).background(PurpleLight), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.Description, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
                 }
                 Spacer(Modifier.width(Space.m))
@@ -492,16 +465,19 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
     val avg = total / trend.size
     val highIdx = trend.indexOf(trend.max())
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+    val maxT = trend.max().coerceAtLeast(1)
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
         AnalyticsBar("Monthly Earnings Trend", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
+            // Headline + simple month-by-month list (no chart).
             Card {
                 Row(verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f)) {
-                        Text("₹${fmt(headline)}", color = TextDark, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                        Text("₹${fmt(headline)}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
                         Text(headlineLabel, color = TextGray, fontSize = 14.sp)
                     }
                     PeriodChip(year) { year = if (year == "This Year") "Last Year" else "This Year" }
@@ -513,10 +489,17 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
                     Text("12% ", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Text("vs last month", color = TextGray, fontSize = 13.sp)
                 }
-                Spacer(Modifier.height(Space.l))
-                LineChart(values = trend, labels = months)
-                Spacer(Modifier.height(Space.l))
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).padding(vertical = 14.dp)) {
+                Spacer(Modifier.height(Space.m))
+                HairlineDivider()
+                Spacer(Modifier.height(4.dp))
+                months.forEachIndexed { i, m ->
+                    SimpleBarRow(m, trend[i], trend[i].toFloat() / maxT, highlight = i == highIdx)
+                }
+            }
+
+            // Summary stats.
+            Card {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TrendStat(Modifier.weight(1f), Icons.AutoMirrored.Filled.TrendingUp, GreenLight, GreenSuccess, "Highest Month", months[highIdx], "₹${fmt(trend.max())}", nameTint = GreenSuccess)
                     Box(Modifier.width(1.dp).height(56.dp).background(Divider))
                     TrendStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, PurpleLight, Purple, "Average / Month", "", "₹${fmt(avg)}")
@@ -524,6 +507,7 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
                     TrendStat(Modifier.weight(1f), Icons.Filled.BarChart, Color(0xFFE8F0FE), Color(0xFF3B82F6), "Total Earnings", "", "₹${fmt(total)}")
                 }
             }
+
             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(28.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
@@ -534,56 +518,6 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
                     Text("Last updated: ${nowStampAnalytics()}", color = TextMuted, fontSize = 11.sp)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun LineChart(values: List<Int>, labels: List<String>) {
-    val progress by animateFloatAsState(targetValue = 1f, animationSpec = tween(1000, easing = LinearOutSlowInEasing), label = "line")
-    val top = niceTop(values.max())
-    val yTicks = listOf(top, top * 3 / 4, top / 2, top / 4, 0)
-    Column {
-        Row(Modifier.fillMaxWidth().height(200.dp)) {
-            Column(Modifier.width(30.dp).fillMaxHeightSafe(), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-                yTicks.forEach { Text(kFmt(it), color = TextMuted, fontSize = 9.sp) }
-            }
-            Spacer(Modifier.width(6.dp))
-            Canvas(Modifier.weight(1f).height(200.dp)) {
-                val w = size.width; val h = size.height
-                // Gridlines.
-                for (i in 0..4) {
-                    val y = h * i / 4
-                    drawLine(Color(0xFFEDEDF3), Offset(0f, y), Offset(w, y), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
-                }
-                val n = values.size
-                val pts = values.mapIndexed { i, v ->
-                    val x = w * i / (n - 1)
-                    val y = h - (v.toFloat() / top) * h
-                    Offset(x, y * 1f + (1 - progress) * (h - y))
-                }
-                // Area fill.
-                val area = Path().apply {
-                    moveTo(pts.first().x, h)
-                    pts.forEach { lineTo(it.x, it.y) }
-                    lineTo(pts.last().x, h); close()
-                }
-                drawPath(area, Brush.verticalGradient(listOf(Purple.copy(alpha = 0.22f), Color.Transparent)))
-                // Line.
-                val line = Path().apply { moveTo(pts.first().x, pts.first().y); for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y) }
-                drawPath(line, Purple, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
-                // Dots.
-                pts.forEachIndexed { i, p ->
-                    drawCircle(Color.White, radius = 5.dp.toPx(), center = p)
-                    drawCircle(Purple, radius = 5.dp.toPx(), center = p, style = Stroke(width = 2.dp.toPx()))
-                }
-                // Highlight last point.
-                drawCircle(Purple, radius = 6.dp.toPx(), center = pts.last())
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth().padding(start = 34.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            labels.forEach { Text(it, color = TextGray, fontSize = 9.5.sp) }
         }
     }
 }
@@ -636,14 +570,6 @@ private fun analyticsSeries(tab: String, week: Int, month: Int): AnalyticsSeries
     }
 }
 
-/** Round a max value up to a clean axis top (…800, 1K, 2K, 5K, 10K…) so gridlines read nicely. */
-private fun niceTop(v: Int): Int {
-    if (v <= 0) return 100
-    val pow = Math.pow(10.0, Math.floor(Math.log10(v.toDouble()))).toInt().coerceAtLeast(1)
-    for (s in intArrayOf(1, 2, 5, 10)) if (v <= s * pow) return s * pow
-    return 10 * pow
-}
-
 /** Short ("Jul") or long ("July") month labels for the trailing 6 months, ending at the current month. */
 private fun last6Months(long: Boolean): List<String> {
     val cal = java.util.Calendar.getInstance()
@@ -655,9 +581,6 @@ private fun last6Months(long: Boolean): List<String> {
 }
 
 private fun fmt(v: Int): String = java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(v)
-private fun kFmt(v: Int): String = if (v >= 1000) "%.1fK".format(v / 1000.0) else "$v"
 private fun dayName(i: Int): String = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday").getOrElse(i) { "—" }
 private fun nowStampAnalytics(): String =
     java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date())
-
-private fun Modifier.fillMaxHeightSafe(): Modifier = this.then(Modifier.height(178.dp))
