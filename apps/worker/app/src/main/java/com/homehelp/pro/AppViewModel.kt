@@ -1668,9 +1668,37 @@ class AppViewModel : ViewModel() {
     fun checkOut(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             try { attendance = api.checkOut(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            checkNextDayPrompt()   // finishing the shift is what triggers the "coming tomorrow?" ask
             onDone()
         }
     }
+
+    // ---- next-day availability ("Are you coming in tomorrow?") ----
+    var nextDayPrompt by mutableStateOf(false)
+        private set
+    var nextDayDate by mutableStateOf("")
+        private set
+    /** Ask the backend whether the prompt is due (shift finished + not yet answered for tomorrow). */
+    fun checkNextDayPrompt() {
+        if (!isLoggedIn) return
+        viewModelScope.launch {
+            try {
+                val s = api.getNextDay()
+                nextDayDate = s.forDate
+                nextDayPrompt = s.prompt
+                backendConnected = true
+            } catch (_: Exception) {}
+        }
+    }
+    /** Store the worker's answer for tomorrow and close the prompt. */
+    fun submitNextDay(coming: Boolean, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { api.postNextDay(com.homehelp.pro.network.NextDayBody(coming)); backendConnected = true } catch (_: Exception) {}
+            nextDayPrompt = false
+            onDone()
+        }
+    }
+    fun dismissNextDayPrompt() { nextDayPrompt = false }
 
     // ---- availability state (Available | Busy | Break | Offline | Leave) ----
     var availabilityState by mutableStateOf("Offline")

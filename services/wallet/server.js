@@ -817,6 +817,7 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
     // reaching into its database (e.g. the worker service on a KYC document approve/reject).
     await notify(data.workerId, data.title, data.body || '')
   } else if (type === 'shift.late') await applyShiftLatePenalty(data)
+  else if (type === 'zone.penalty') await applyOutOfZonePenalty(data)
   else if (type === 'shift.settle') await settleMinGuarantee(data)
   else if (type === 'geofence.breach') await notifyGeofenceBreach(data)
 })
@@ -838,6 +839,20 @@ async function applyShiftLatePenalty({ workerId, amount, shiftName, lateMinutes 
   await adjustBalance(workerId, { balance: -amt })
   await notify(workerId, 'Late check-in penalty', `−₹${amt}: you checked in ${lateMinutes || 0} min after your ${shiftName || ''} shift start`)
   publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Shift late penalty ₹${amt} (${lateMinutes || 0} min late)`, meta: { amount: amt } })
+}
+
+// Three jobs in a row completed outside the worker's preferred zone → deduct an out-of-zone penalty.
+async function applyOutOfZonePenalty({ workerId, amount, count, ref }) {
+  const amt = Math.max(0, parseInt(amount, 10) || 0)
+  if (!workerId || !amt) return
+  const n = parseInt(count, 10) || 3
+  await pool.query(
+    "INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1,'Out-of-Zone Penalty',$2,$3)",
+    [workerId, `${n} consecutive jobs completed outside preferred zone${ref ? ` (last: ${ref})` : ''}`, amt])
+  await adjustBalance(workerId, { balance: -amt })
+  await notify(workerId, 'Out-of-zone penalty',
+    `−₹${amt}: ${n} jobs in a row completed outside your preferred zone. Please take jobs within your zone to avoid deductions.`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Out-of-zone penalty ₹${amt} (${n} consecutive out-of-zone jobs)`, meta: { amount: amt } })
 }
 
 // Shift checkout → guarantee a minimum day's pay: top up if job earnings fell short (idempotent/day).

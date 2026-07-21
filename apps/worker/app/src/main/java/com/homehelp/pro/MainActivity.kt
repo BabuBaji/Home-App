@@ -217,6 +217,7 @@ fun AppRoot() {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 vm.refresh()
+                vm.checkNextDayPrompt()   // surface "coming tomorrow?" if the shift is done
                 val (batt, net) = readDeviceState(hbCtx)
                 val loc = lastKnownLoc(hbCtx)
                 vm.sendHeartbeat(batt, net, loc?.first, loc?.second)
@@ -363,6 +364,26 @@ fun AppRoot() {
             },
             title = { Text("⚠  Left your assigned area", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
             text = { Text(msg) },
+        )
+    }
+
+    // After a shift is done, ask whether the worker is coming in tomorrow; the answer is stored
+    // for admin's next-day roster. Shown app-wide (never over the login screen).
+    if (vm.nextDayPrompt && route != Routes.LOGIN) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.dismissNextDayPrompt() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.submitNextDay(true) }) {
+                    Text("Yes, I'll be there", color = Purple, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.submitNextDay(false) }) {
+                    Text("Not tomorrow", color = androidx.compose.ui.graphics.Color.Gray)
+                }
+            },
+            title = { Text("Coming in tomorrow?", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text("Great work finishing today's shift! 🎉  Please let us know if you'll be coming in for your shift tomorrow so we can plan the roster.") },
         )
     }
     }

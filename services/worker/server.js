@@ -100,6 +100,9 @@ async function init() {
     `CREATE INDEX IF NOT EXISTS ux_bank_worker ON worker_bank_accounts (worker_id)`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS designation TEXT`,   // Zone Manager / Team Leader / Worker — drives zone Assign-Team role lookups
+    // Running count of jobs completed OUTSIDE the worker's preferred zone, in a row. Reset to 0 on
+    // any in-zone completion; at 3 consecutive it triggers an out-of-zone penalty then resets.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS out_of_zone_streak INTEGER NOT NULL DEFAULT 0`,
     // Shifts (WFM roster): a worker is "on shift" in a zone during weekly time windows.
     // weekday 0=Sun..6=Sat; start_min/end_min = minutes from midnight (IST).
     `CREATE TABLE IF NOT EXISTS shifts (
@@ -126,6 +129,15 @@ async function init() {
       in_lat REAL, in_lng REAL, out_lat REAL, out_lng REAL,
       UNIQUE(worker_id, day)
     )`,
+    // Next-day availability: after finishing a shift the worker answers "coming in tomorrow?".
+    // One row per worker per target date; admin reads these to plan the next day's roster.
+    `CREATE TABLE IF NOT EXISTS next_day_avail (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, for_date DATE NOT NULL,
+      coming BOOLEAN NOT NULL, note TEXT DEFAULT '',
+      responded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(worker_id, for_date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_next_day_date ON next_day_avail(for_date)`,
     // Shift PLANS (min-guarantee model): the named shifts a worker signs up for. A worker picks
     // one; attendance/check-in is judged against its start_min (+ grace_min); late → penalty; and
     // the day is topped up to min_g_* if job earnings fall short. Admin-editable.
@@ -1608,6 +1620,71 @@ app.post('/api/worker/attendance/checkout', auth, async (req, res) => {
   res.json(await attendanceToday(req.worker.id))
 })
 
+/* ---------- next-day availability ("Are you coming in tomorrow?") ---------- */
+// After a worker finishes their selected shift — an explicit checkout, or the shift plan's end time
+// has passed for today — the app asks whether they're coming in tomorrow. The answer is stored per
+// target date and surfaced to admin so the next day's roster can be planned.
+const nextDayTargetStr = () => istDateStr(Date.now() + 24 * 3600 * 1000)
+
+async function shiftFinishedToday(workerId) {
+  const day = istDateStr(Date.now())
+  const a = (await pool.query('SELECT check_out FROM attendance WHERE worker_id=$1 AND day=$2', [workerId, day])).rows[0]
+  if (a?.check_out) return true                        // explicit checkout = shift done
+  const sd = await getShiftDef((await getWorker(workerId))?.shift_def_id)
+  if (sd) { const { minutes } = istNow(); if (minutes >= sd.end_min) return true }  // shift end passed
+  return false
+}
+
+// Worker: has the "coming tomorrow?" prompt become due, and what was the last answer?
+app.get('/api/worker/shift/next-day', auth, async (req, res) => {
+  const forDate = nextDayTargetStr()
+  const existing = (await pool.query('SELECT coming, note FROM next_day_avail WHERE worker_id=$1 AND for_date=$2', [req.worker.id, forDate])).rows[0]
+  const finished = await shiftFinishedToday(req.worker.id)
+  res.json({
+    forDate,
+    prompt: finished && !existing,          // ask only once the shift is done and not yet answered
+    responded: !!existing,
+    coming: existing ? existing.coming : null,
+    note: existing?.note || '',
+  })
+})
+
+// Worker: record the answer (defaults to tomorrow's date). Idempotent per target date.
+app.post('/api/worker/shift/next-day', auth, async (req, res) => {
+  const coming = req.body?.coming === true || req.body?.coming === 'true'
+  const note = String(req.body?.note || '').slice(0, 300)
+  const forDate = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : nextDayTargetStr()
+  await pool.query(
+    `INSERT INTO next_day_avail (worker_id, for_date, coming, note) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (worker_id, for_date) DO UPDATE SET coming=$3, note=$4, responded_at=now()`,
+    [req.worker.id, forDate, coming, note])
+  const w = await getWorker(req.worker.id)
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'shift.next_day',
+    entityType: 'worker', entityId: req.worker.id,
+    detail: coming ? `Confirmed coming in on ${forDate}` : `Not coming in on ${forDate}${note ? ' — ' + note : ''}`,
+  })
+  res.json({ ok: true, forDate, coming, note })
+})
+
+// Admin: the next-day roster — who's confirmed / out for a given day (defaults to tomorrow).
+app.get('/api/admin/next-day-availability', adminAuth, async (req, res) => {
+  const forDate = /^\d{4}-\d{2}-\d{2}$/.test(req.query?.date || '') ? req.query.date : nextDayTargetStr()
+  const { rows } = await pool.query(
+    `SELECT n.worker_id, n.coming, n.note, n.responded_at, w.name, w.phone
+       FROM next_day_avail n JOIN workers w ON w.id = n.worker_id
+      WHERE n.for_date = $1 ORDER BY n.coming DESC, w.name`, [forDate])
+  res.json({
+    date: forDate,
+    coming: rows.filter((r) => r.coming).length,
+    notComing: rows.filter((r) => !r.coming).length,
+    responses: rows.map((r) => ({
+      workerId: r.worker_id, name: r.name, phone: r.phone,
+      coming: r.coming, note: r.note || '', respondedAt: r.responded_at,
+    })),
+  })
+})
+
 /* ---------- geofence (assigned-apartment radius) ---------- */
 // The app reports the worker's live location; we return whether they're inside their assigned
 // apartment's radius. Edge-triggered: the FIRST time they leave, fire an alert (notification +
@@ -2872,6 +2949,44 @@ async function evaluateJobRules(booking) {
     if (!ins.rowCount) continue // this version already paid this worker for this booking
     // The money: wallet credit, idempotent on its own ref.
     publishEvent(REDIS_URL, 'incentive.credit', { workerId: w.id, amount, ref: `rule-${v.id}-${ref}`, label })
+  }
+}
+
+/* ---------- out-of-preferred-zone penalty ---------- */
+// A worker with a preferred zone who keeps taking jobs OUTSIDE it is drifting off their patch. If
+// three jobs IN A ROW are completed out of zone, deduct a penalty and reset the streak. Any in-zone
+// completion resets the streak to 0. "Out of zone" = the booking's zone differs from the worker's
+// preferred zone (zone areas are pincode-defined); if a booking isn't zone-stamped we fall back to a
+// straight-line radius from the worker's last known location.
+const ZONE_PENALTY = 100        // ₹ deducted after ZONE_STREAK_LIMIT consecutive out-of-zone jobs
+const ZONE_STREAK_LIMIT = 3
+const ZONE_RADIUS_KM = 15       // fallback radius used only when the booking has no zone stamp
+
+async function evaluateZoneRule(booking) {
+  if (!booking?.worker_id) return
+  const w = await getWorker(booking.worker_id)
+  if (!w || w.status !== 'active' || w.zone_id == null) return   // rule only applies to a zoned worker
+
+  // Decide whether THIS completed job was outside the worker's preferred zone (null = can't tell).
+  let out = null
+  if (booking.zone_id != null) {
+    out = Number(booking.zone_id) !== Number(w.zone_id)
+  } else if (w.last_lat != null && w.last_lng != null && booking.cust_lat != null && booking.cust_lng != null) {
+    out = distanceM(w.last_lat, w.last_lng, booking.cust_lat, booking.cust_lng) / 1000 > ZONE_RADIUS_KM
+  }
+  if (out === null) return   // no zone stamp and no coords — leave the streak untouched
+
+  const streak = out ? (w.out_of_zone_streak || 0) + 1 : 0
+  await pool.query('UPDATE workers SET out_of_zone_streak=$1 WHERE id=$2', [streak, w.id])
+  const bref = booking.ref || `#${booking.id}`
+
+  if (out) {
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Zone Monitor', action: 'zone.out', entityType: 'worker', entityId: w.id, detail: `Job ${bref} completed outside preferred zone (${streak}/${ZONE_STREAK_LIMIT})` })
+  }
+  if (streak >= ZONE_STREAK_LIMIT) {
+    await pool.query('UPDATE workers SET out_of_zone_streak=0 WHERE id=$1', [w.id])   // reset after charging
+    publishEvent(REDIS_URL, 'zone.penalty', { workerId: w.id, amount: ZONE_PENALTY, count: streak, ref: bref })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Zone Monitor', action: 'zone.penalty', entityType: 'worker', entityId: w.id, detail: `Out-of-zone penalty ₹${ZONE_PENALTY} — ${ZONE_STREAK_LIMIT} consecutive jobs outside preferred zone` })
   }
 }
 
@@ -5009,7 +5124,11 @@ subscribeEvents(REDIS_URL, 'worker', async (type, data) => {
   if (type === 'bank.verify.failed') return applyBankVerification(data.workerId, false, data)
   // Compensation Rule Engine — job_completed trigger. Runs alongside the wallet's own settlement
   // (its own consumer group), evaluates every active job rule, and credits eligible payouts.
-  if (type === 'booking.completed' && data.booking) return evaluateJobRules(data.booking).catch((e) => console.error('[worker] job-rule eval failed:', e.message))
+  if (type === 'booking.completed' && data.booking) {
+    evaluateJobRules(data.booking).catch((e) => console.error('[worker] job-rule eval failed:', e.message))
+    evaluateZoneRule(data.booking).catch((e) => console.error('[worker] zone-rule eval failed:', e.message))
+    return
+  }
 })
 
 
