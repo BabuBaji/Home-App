@@ -80,6 +80,27 @@ import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Kitchen
+import androidx.compose.material.icons.filled.LocalLaundryService
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Handyman
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Bathtub
+import androidx.compose.material.icons.filled.Iron
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Weekend
+import androidx.compose.material.icons.filled.Window
+import androidx.compose.material.icons.filled.Plumbing
+import androidx.compose.material.icons.filled.ElectricalServices
+import androidx.compose.material.icons.filled.FormatPaint
+import androidx.compose.material.icons.filled.Carpenter
+import androidx.compose.material.icons.filled.PestControl
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.LocalCarWash
+import androidx.compose.material.icons.filled.Grass
+import androidx.compose.material.icons.filled.ChildCare
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.WorkOutline
@@ -329,10 +350,11 @@ private fun ToggleRow(
     subtitle: String? = null,
     checked: Boolean,
     trackColor: Color = Purple,
+    chipSize: Int = 38,
     onChange: (Boolean) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-        IconChip(icon, tint, bg)
+        IconChip(icon, tint, bg, chipSize)
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
             Text(label, color = TextDark, fontWeight = FontWeight.Medium, fontSize = 14.sp)
@@ -1799,36 +1821,88 @@ private fun ShiftChip(title: String, subtitle: String, selected: Boolean, modifi
 @Composable
 fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    DetailScaffold("Preferences", nav) {
+    WhiteDetailScaffold("Preferences", nav) {
+        val services = vm.jobPreferences.keys.toList()
+        val enabled = vm.jobPreferences.count { it.value }
+        val allOn = services.isNotEmpty() && enabled == services.size
+
+        Text(
+            "Choose the jobs you'd like to be offered. We'll only send you the services you switch on.",
+            color = TextGray, fontSize = 13.sp, lineHeight = 18.sp,
+        )
+
+        // Master "all job types" toggle + live count.
         Card {
-            SectionLabel("Job types you want to receive")
-            Spacer(Modifier.height(Space.s))
-            val services = vm.jobPreferences.keys.toList()
-            services.forEachIndexed { i, service ->
-                val on = vm.jobPreferences[service] ?: false
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { vm.jobPreferences[service] = !on }
-                        .padding(vertical = Space.s),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconChip(Icons.Filled.WorkOutline, if (on) Purple else TextMuted, if (on) PurpleLight else FieldFill)
-                    Spacer(Modifier.width(Space.m))
-                    Text(service, color = TextDark, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    Checkbox(
-                        checked = on,
-                        onCheckedChange = { vm.jobPreferences[service] = it },
-                        colors = CheckboxDefaults.colors(checkedColor = Purple),
-                    )
+            ToggleRow(
+                Icons.Filled.Tune, Purple, PurpleLight,
+                "All Job Types", "$enabled of ${services.size} enabled",
+                checked = allOn, chipSize = 44,
+            ) { on -> services.forEach { vm.jobPreferences[it] = on } }
+        }
+
+        if (services.isEmpty()) {
+            Card { EmptyState("🧰", "No job types yet", "Your job preferences will appear here once your services are set.") }
+        } else {
+            Card {
+                SectionLabel("Job types you want to receive")
+                Spacer(Modifier.height(Space.s))
+                services.forEachIndexed { i, service ->
+                    val on = vm.jobPreferences[service] ?: false
+                    val (icon, tint) = prefStyle(service)
+                    ToggleRow(
+                        icon, tint, tint.copy(alpha = 0.14f),
+                        service, if (on) "Receiving these jobs" else "Turned off",
+                        checked = on, chipSize = 44,
+                    ) { vm.jobPreferences[service] = it }
+                    if (i < services.lastIndex) HairlineDivider()
                 }
-                if (i < services.lastIndex) HairlineDivider()
             }
         }
+
         PrimaryButton("Save Preferences") {
             vm.savePreferences()
             val n = vm.jobPreferences.count { it.value }
             toast(ctx, "Preferences saved • $n job types enabled")
         }
+    }
+}
+
+/** Pick a distinct, relevant icon AND a professional accent colour for a job/service name. Order
+ *  matters — specific keywords match before broad ones ("utensil wash" → dishes not laundry;
+ *  "car wash" → car not laundry). The chip background is derived as a soft tint of this colour. */
+private fun prefStyle(service: String): Pair<ImageVector, Color> {
+    val s = service.lowercase()
+    return when {
+        // Kitchen & dishes
+        "utensil" in s || "dish" in s || "cutlery" in s || "cook" in s -> Icons.Filled.Restaurant to Color(0xFFF97316) // orange
+        "kitchen" in s -> Icons.Filled.Kitchen to Color(0xFFEF4444) // red
+        // Bathroom
+        "bathroom" in s || "toilet" in s || "shower" in s || "washroom" in s -> Icons.Filled.Bathtub to Color(0xFF0EA5E9) // sky
+        // Carpet / car (before the generic "wash" laundry rule)
+        "carpet" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
+        "car wash" in s || "vehicle" in s -> Icons.Filled.LocalCarWash to Color(0xFF06B6D4) // cyan
+        // Clothes / laundry
+        "iron" in s -> Icons.Filled.Iron to Color(0xFF8B5CF6) // violet
+        "laundry" in s || "cloth" in s || "wash" in s || "dry clean" in s -> Icons.Filled.LocalLaundryService to Color(0xFF6366F1) // indigo
+        // Floor & surface cleaning
+        "mop" in s || "sweep" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
+        "dust" in s -> Icons.Filled.AutoAwesome to Color(0xFFF59E0B) // amber
+        "sofa" in s || "upholst" in s -> Icons.Filled.Weekend to Color(0xFF8B5CF6) // violet
+        "window" in s || "glass" in s -> Icons.Filled.Window to Color(0xFF06B6D4) // cyan
+        // Trades
+        "plumb" in s -> Icons.Filled.Plumbing to Color(0xFF3B82F6) // blue
+        "electric" in s || "wiring" in s -> Icons.Filled.ElectricalServices to Color(0xFFF59E0B) // amber
+        "paint" in s -> Icons.Filled.FormatPaint to Color(0xFFEC4899) // pink
+        "carpen" in s || "furniture" in s -> Icons.Filled.Carpenter to Color(0xFFB45309) // brown
+        "pest" in s -> Icons.Filled.PestControl to Color(0xFF16A34A) // green
+        "air cond" in s || "a/c" in s || "hvac" in s -> Icons.Filled.AcUnit to Color(0xFF06B6D4) // cyan
+        "garden" in s || "lawn" in s || "plant" in s -> Icons.Filled.Grass to Color(0xFF22C55E) // green
+        "baby" in s || "child" in s || "elder" in s || "nanny" in s || "care" in s -> Icons.Filled.ChildCare to Color(0xFFEC4899) // pink
+        "repair" in s || "fix" in s || "handy" in s -> Icons.Filled.Handyman to Color(0xFF64748B) // slate
+        // Whole-home / generic cleaning
+        "home" in s || "house" in s || "full" in s -> Icons.Filled.Home to Purple
+        "clean" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
+        else -> Icons.Filled.WorkOutline to Purple
     }
 }
 
@@ -1851,29 +1925,48 @@ private data class NotifItem(
     val highlight: Boolean = false, // faint tinted card background (focused item)
 )
 
-private val NOTIFS_TODAY = listOf(
-    NotifItem(Icons.Filled.CalendarMonth, Purple, PurpleLight, "New Job Offer", "Kitchen Cleaning at Madhapur", "₹220 • 2.6 km away", time = "2 min ago", category = "Jobs", accent = Purple, highlight = true),
-    NotifItem(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Payment Credited", "₹220 added to your wallet", "Order #SNB12745", time = "15 min ago", category = "Wallet", accent = GreenSuccess),
-    NotifItem(Icons.Filled.CardGiftcard, Amber, GoldLight, "Incentive Unlocked! 🎉", "You earned ₹200 incentive", "Keep it up!", time = "35 min ago", category = "Wallet", accent = Amber),
-)
+/** Style bucket for a notification — derives icon/colour/category from the message so wallet, job,
+ *  shift and training notices are visually distinct (mirrors the mock's colour coding). */
+private class NotifStyle(val icon: ImageVector, val tint: Color, val bg: Color, val category: String)
 
-private val NOTIFS_EARLIER = listOf(
-    NotifItem(Icons.Filled.Campaign, NotifBlue, NotifBlueBg, "Shift Update", "Your shift on 26 May has been updated", "New timing: 10:00 AM – 6:00 PM", time = "2 hours ago", category = "HR"),
-    NotifItem(Icons.Filled.School, Purple, PurpleLight, "Training Session", "Hygiene & Safety training", "Tomorrow at 10:00 AM", time = "3 hours ago", category = "Training"),
-    NotifItem(Icons.Filled.Warning, RedCancel, RedLight, "Attendance Marked", "Checked in at 09:02 AM", "26 May 2024", time = "4 hours ago", category = "HR"),
-    NotifItem(Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Weekly Target Update", "You are 60% towards this week's target", "₹2,000 more to go!", time = "5 hours ago", category = "HR"),
-    NotifItem(Icons.Filled.Description, NotifBlue, NotifBlueBg, "New Policy Update", "Please check the updated cancellation policy", link = "View Details", time = "1 day ago", category = "System"),
-    NotifItem(Icons.Filled.WorkspacePremium, Purple, PurpleLight, "Congrats! You are a Top Performer 🏆", "You are in Top 20% workers in your zone", "Great going!", time = "1 day ago", category = "HR"),
-)
+private fun notifStyle(lower: String): NotifStyle = when {
+    "penalt" in lower || "deduct" in lower || "zone" in lower || "geofence" in lower -> NotifStyle(Icons.Filled.Warning, RedCancel, RedLight, "Wallet")
+    "credit" in lower || "payment" in lower || "paid" in lower || "withdraw" in lower || "guarantee" in lower || "settle" in lower -> NotifStyle(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Wallet")
+    "incentive" in lower || "bonus" in lower || "reward" in lower -> NotifStyle(Icons.Filled.CardGiftcard, Amber, GoldLight, "Wallet")
+    "job" in lower || "offer" in lower || "booking" in lower -> NotifStyle(Icons.Filled.CalendarMonth, Purple, PurpleLight, "Jobs")
+    "shift" in lower || "attendance" in lower || "roster" in lower || "tomorrow" in lower || "leave" in lower -> NotifStyle(Icons.Filled.Campaign, NotifBlue, NotifBlueBg, "HR")
+    "training" in lower || "quiz" in lower || "certif" in lower -> NotifStyle(Icons.Filled.School, Purple, PurpleLight, "Training")
+    else -> NotifStyle(Icons.Filled.Notifications, Purple, PurpleLight, "System")
+}
+
+/** Turn a backend notification (title — body text) into the card model used by [NotifCard]. */
+private fun toNotifItem(n: com.homehelp.pro.network.NotificationItem): NotifItem {
+    val dash = n.text.indexOf(" — ")
+    val title = (if (dash > 0) n.text.substring(0, dash) else n.text).trim()
+    val body = (if (dash > 0) n.text.substring(dash + 3) else "").trim()
+    val st = notifStyle(n.text.lowercase())
+    return NotifItem(
+        icon = st.icon, tint = st.tint, chipBg = st.bg,
+        title = title, line1 = body,
+        time = n.time.ifBlank { n.date }, category = st.category,
+        accent = if (!n.read) st.tint else null,
+    )
+}
 
 @Composable
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    androidx.compose.runtime.LaunchedEffect(Unit) { vm.markNotificationsRead() }
+    // Load the real backend notifications on open; mark them read on leave so the bell badge clears
+    // only after the worker has actually seen them (unread items keep their coloured accent here).
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshNotifications() }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.markNotificationsRead() } }
     var tab by remember { mutableStateOf("All") }
     val tabs = listOf("All", "Jobs", "Wallet", "HR", "Training", "System")
-    val today = NOTIFS_TODAY.filter { tab == "All" || it.category == tab }
-    val earlier = NOTIFS_EARLIER.filter { tab == "All" || it.category == tab }
+    val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()) }
+    val rows = vm.notifications.map { it to toNotifItem(it) }
+        .filter { (_, ni) -> tab == "All" || ni.category == tab }
+    val today = rows.filter { (n, _) -> n.date == todayStr }.map { it.second }
+    val earlier = rows.filter { (n, _) -> n.date != todayStr }.map { it.second }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         // Clean white top bar — title + search + overflow, as the reference draws it (no back arrow;
