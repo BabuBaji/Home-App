@@ -101,6 +101,11 @@ import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.LocalCarWash
 import androidx.compose.material.icons.filled.Grass
 import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Bed
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Sanitizer
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.WorkOutline
@@ -585,81 +590,102 @@ fun SkillsScreen(vm: AppViewModel, nav: NavHostController) {
         vm.skills.forEach { (svc, s) -> claims[svc] = SkillClaim(s.level, s.years) }
     }
 
-    DetailScaffold("Skills & Services", nav) {
-        Card(padding = Dp16.S) {
-            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                IconChip(Icons.Filled.Info, Purple, PurpleLight)
+    val approved = vm.skills.values.count { it.status == "Approved" }
+    val inReview = vm.skills.values.count { it.status == "Pending" }
+
+    WhiteDetailScaffold("Skills & Services", nav) {
+        // ── Summary hero: icon + intro + Approved / In-review / Selected counts ──
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(20.dp)).padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(46.dp).clip(RoundedCornerShape(13.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.WorkspacePremium, contentDescription = null, tint = Purple, modifier = Modifier.size(24.dp))
+                }
                 Spacer(Modifier.width(Space.m))
-                Text(
-                    "Pick the services you can do and your level. An admin reviews each one — you'll only be sent jobs for skills they approve.",
-                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
-                )
+                Column(Modifier.weight(1f)) {
+                    Text("Your Skills", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text("Add the services you can do and your level — an admin reviews each one, and you're only sent jobs for approved skills.", color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KycCountPill(Modifier.weight(1f), "$approved", "Approved", GreenSuccess, GreenLight)
+                KycCountPill(Modifier.weight(1f), "$inReview", "In review", Amber, GoldLight)
+                KycCountPill(Modifier.weight(1f), "${claims.size}", "Selected", Purple, PurpleLight)
             }
         }
 
-        vm.serviceCatalogue.forEach { svc ->
-            val claim = claims[svc]
-            val saved = vm.skills[svc]
-            val picked = claim != null
-            Card {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = picked, onCheckedChange = { on ->
-                        if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
-                        else claims.remove(svc)
-                    })
-                    Text(svc, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-                    // The status of the CLAIM — what the admin decided, not what the worker typed.
-                    when (saved?.status) {
-                        "Approved" -> StatusPill("Approved", GreenLight, GreenSuccess)
-                        "Rejected" -> StatusPill("Rejected", RedLight, RedCancel)
-                        "Pending" -> StatusPill("In review", GoldLight, Amber)
-                        else -> {}
-                    }
-                }
-                if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
-                    Spacer(Modifier.height(Space.xs))
-                    Text("Not approved: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
-                }
-                if (picked) {
-                    Spacer(Modifier.height(Space.s))
-                    HairlineDivider()
-                    Spacer(Modifier.height(Space.s))
-                    Text("Your level", fontSize = 12.sp, color = TextGray)
-                    Spacer(Modifier.height(Space.xs))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        vm.skillLevels.forEach { lvl ->
-                            val on = claim?.level == lvl
-                            Text(
-                                lvl, fontSize = 12.5.sp,
-                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (on) Purple else TextGray,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(Radius.field))
-                                    .background(if (on) PurpleLight else FieldFill)
-                                    .clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }
-                                    .padding(horizontal = Space.m, vertical = Space.s),
-                            )
+        Text("Select your services", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+
+        // One grouped card with hairline-separated compact rows — far less scrolling than a card
+        // per service. A row expands inline to its level / experience / certificate controls.
+        Card(padding = Dp16.XS) {
+            vm.serviceCatalogue.forEachIndexed { i, svc ->
+                val claim = claims[svc]
+                val saved = vm.skills[svc]
+                val picked = claim != null
+                val (icon, tint) = prefStyle(svc)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconChip(icon, tint, tint.copy(alpha = 0.14f), 36)
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(svc, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        when (saved?.status) {
+                            "Approved" -> Text("Approved by admin", color = GreenSuccess, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            "Rejected" -> Text("Not approved — resubmit", color = RedCancel, fontSize = 11.sp, maxLines = 1)
+                            "Pending" -> Text("In review", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            else -> {}
                         }
                     }
-                    Spacer(Modifier.height(Space.m))
-                    Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
-                        claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
-                    }
-                    Spacer(Modifier.height(Space.s))
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
-                            .clickable { certFor = svc; certPicker.launch("*/*") }.padding(Space.m),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.CheckCircle, null, tint = if (saved?.certificate != null) GreenSuccess else TextMuted, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(Space.s))
-                        Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 13.sp, color = TextDark)
-                    }
-                    if (saved?.status == "Approved") {
-                        Spacer(Modifier.height(Space.xs))
-                        Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                    Spacer(Modifier.width(Space.s))
+                    Switch(
+                        checked = picked,
+                        onCheckedChange = { on ->
+                            if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
+                            else claims.remove(svc)
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Purple),
+                    )
+                }
+                if (picked) {
+                    Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 2.dp, bottom = 10.dp)) {
+                        if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
+                            Text("Reason: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
+                            Spacer(Modifier.height(Space.s))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            vm.skillLevels.forEach { lvl ->
+                                val on = claim?.level == lvl
+                                Box(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(Radius.button)).background(if (on) Purple else FieldFill).clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }.padding(vertical = 9.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text(lvl, color = if (on) Color.White else TextDark, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, maxLines = 1) }
+                            }
+                        }
+                        Spacer(Modifier.height(Space.s))
+                        Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
+                            claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
+                        }
+                        Spacer(Modifier.height(Space.s))
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
+                                .clickable { certFor = svc; certPicker.launch("*/*") }.padding(horizontal = Space.m, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(if (saved?.certificate != null) Icons.Filled.CheckCircle else Icons.Filled.CloudUpload, null, tint = if (saved?.certificate != null) GreenSuccess else Purple, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(Space.s))
+                            Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 12.5.sp, color = TextDark, modifier = Modifier.weight(1f), maxLines = 1)
+                            if (saved?.certificate == null) Text("Upload", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (saved?.status == "Approved") {
+                            Spacer(Modifier.height(Space.xs))
+                            Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                        }
                     }
                 }
+                if (i < vm.serviceCatalogue.lastIndex) HairlineDivider()
             }
         }
 
@@ -1899,6 +1925,13 @@ private fun prefStyle(service: String): Pair<ImageVector, Color> {
         "garden" in s || "lawn" in s || "plant" in s -> Icons.Filled.Grass to Color(0xFF22C55E) // green
         "baby" in s || "child" in s || "elder" in s || "nanny" in s || "care" in s -> Icons.Filled.ChildCare to Color(0xFFEC4899) // pink
         "repair" in s || "fix" in s || "handy" in s -> Icons.Filled.Handyman to Color(0xFF64748B) // slate
+        // Appliances, rooms & specialty services (checked before the broad home/clean fallbacks)
+        "fan" in s -> Icons.Filled.Air to Color(0xFF06B6D4) // cyan
+        "refriger" in s || "fridge" in s -> Icons.Filled.Kitchen to Color(0xFFEF4444) // red
+        "bed" in s || "mattress" in s -> Icons.Filled.Bed to Color(0xFF8B5CF6) // violet
+        "garbage" in s || "trash" in s || "waste" in s || "disposal" in s -> Icons.Filled.Delete to Color(0xFF64748B) // slate
+        "saniti" in s || "disinfect" in s || "sanitation" in s -> Icons.Filled.Sanitizer to Color(0xFF16A34A) // green
+        "organiz" in s || "organis" in s -> Icons.Filled.Inventory2 to Color(0xFF3B82F6) // blue
         // Whole-home / generic cleaning
         "home" in s || "house" in s || "full" in s -> Icons.Filled.Home to Purple
         "clean" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
