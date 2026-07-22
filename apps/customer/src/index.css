@@ -2975,6 +2975,15 @@ body { line-height: 1.45; }
 .sheet-row:active { background: var(--primary-50); }
 
 /* ---- invoice screen (64) ---- */
+/* Invoice view — the full professional document rendered in an iframe + a download/share footer */
+.inv-screen { display: flex; flex-direction: column; min-height: 0; }
+.inv-view { flex: 1 1 auto; min-height: 0; overflow: hidden; background: #eceaf2; }
+.inv-frame { width: 100%; height: 100%; border: 0; display: block; }
+.inv-foot { flex-shrink: 0; display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fff; }
+.inv-btn { flex: 1; padding: 13px; border-radius: 13px; background: var(--primary, #6d4ee6); color: #fff; font-size: 14.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.inv-btn:disabled { opacity: .55; }
+.inv-btn.ghost { background: #fff; color: var(--primary, #6d4ee6); border: 1.6px solid #ddd8fb; }
+
 .inv-sheet { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-sm); }
 .inv-brand { display: flex; align-items: center; gap: 10px; }
 .inv-logo { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--primary-50); font-size: 19px; }
