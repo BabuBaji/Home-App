@@ -813,7 +813,7 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerRow(Icons.Filled.WorkspacePremium, "Skills & Services", Color(0xFF7C3AED)) { go(Routes.P_SKILLS) }
             DrawerRow(Icons.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
             DrawerRow(Icons.Filled.Inventory2, "My Equipment", Color(0xFF0891B2)) { go(Routes.P_EQUIPMENT) }
-            DrawerRow(Icons.Filled.AccountBalance, "Bank Details", Color(0xFF14B8A6)) { go(Routes.P_BANK) }
+            DrawerRow(Icons.Filled.AccountBalance, "Bank Accounts", Color(0xFF14B8A6)) { go(Routes.BANK_ACCOUNTS) }
             DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
             DrawerRow(Icons.Filled.Notifications, "Notifications", PurpleMid) { go(Routes.P_NOTIFICATIONS) }
 

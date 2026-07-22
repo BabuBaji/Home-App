@@ -2112,7 +2112,7 @@ fun HelpSupportScreen(vm: AppViewModel, nav: NavHostController) {
                 "How do I receive jobs?" to "Go online from the Home screen. When a nearby job matches your services and shift, it's offered to you — tap Accept, then navigate to the customer.",
                 "When do I get paid?" to "Earnings for a completed job are credited to your wallet right away. Withdraw to your bank anytime from the Wallet tab.",
                 "How is my rating calculated?" to "It's the average of the star ratings customers leave after each completed job. A higher rating gets you more job offers.",
-                "How do I withdraw my earnings?" to "Open the Wallet tab → Withdraw, enter the amount and confirm. Add and verify your bank details first under Profile → Bank Details.",
+                "How do I withdraw my earnings?" to "Open the Wallet tab → Withdraw, enter the amount and confirm. Add and verify your bank details first under Profile → Bank Account.",
             )
             val open = remember { mutableStateOf(-1) }
             faqs.forEachIndexed { i, (q, a) ->
