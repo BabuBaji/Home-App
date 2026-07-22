@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.WorkOutline
 import androidx.compose.material.icons.filled.WorkspacePremium
@@ -97,74 +98,124 @@ import androidx.navigation.NavHostController
 
 @Composable
 fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
-    // Pull the latest wallet snapshot so today/week/month totals are populated from the server.
+    // Pull the latest wallet snapshot so today/week/month totals + ledger are populated.
     LaunchedEffect(Unit) { vm.refreshWallet() }
-    val entries = vm.earnings
-    // Which working day the calendar has selected (0 = most recent). Resets when data loads.
-    var selectedIdx by remember(entries.size) { mutableStateOf(0) }
-    val sel = entries.getOrNull(selectedIdx)
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        BellHeader("Earnings") { nav.navigate(Routes.P_NOTIFICATIONS) }
+    val openDrawer = LocalDrawerOpen.current
+
+    // ── Monthly figures derived from the wallet ledger (this month vs last, jobs, avg, incentives) ──
+    val hist = vm.walletHistory
+    val cal = remember { java.util.Calendar.getInstance() }
+    val thisYM = remember { "%04d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1) }
+    val monthName = remember { java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault()).format(cal.time) }
+    val lastYM = remember {
+        val c = java.util.Calendar.getInstance(); c.add(java.util.Calendar.MONTH, -1)
+        "%04d-%02d".format(c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH) + 1)
+    }
+    val monthCredits = hist.filter { it.isCredit && it.date.startsWith(thisYM) }.sumOf { it.amount }
+    val monthTotal = if (monthCredits > 0) monthCredits else vm.monthEarnings
+    val lastMonthCredits = hist.filter { it.isCredit && it.date.startsWith(lastYM) }.sumOf { it.amount }
+    val monthJobs = hist.count { it.isCredit && it.type.equals("Job Earnings", true) && it.date.startsWith(thisYM) }
+    val earningDays = hist.filter { it.isCredit && it.date.startsWith(thisYM) }.map { it.date }.distinct().size
+    val avgPerDay = if (earningDays > 0) monthTotal / earningDays else 0
+    val incentivesMonth = hist.filter { it.isCredit && it.date.startsWith(thisYM) && (it.type.contains("incentive", true) || it.type.contains("bonus", true) || it.type.contains("reward", true)) }.sumOf { it.amount }
+    val pct = if (lastMonthCredits > 0) ((monthTotal - lastMonthCredits) * 100 / lastMonthCredits) else null
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        // ── White professional header: menu · title · bell(badge) ──
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = 10.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(24.dp).clip(CircleShape).clickable { openDrawer() })
+            Spacer(Modifier.width(Space.m))
+            Text("Monthly Earnings", color = TextDark, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, modifier = Modifier.weight(1f))
+            Box(Modifier.clip(CircleShape).clickable { nav.navigate(Routes.P_NOTIFICATIONS) }.padding(2.dp)) {
+                Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark, modifier = Modifier.size(23.dp))
+                if (vm.unreadNotifications > 0) {
+                    Box(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(15.dp).clip(CircleShape).background(RedCancel), contentAlignment = Alignment.Center) {
+                        Text("${vm.unreadNotifications.coerceAtMost(9)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        HairlineDivider()
+
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
-            // Working-days calendar strip — tap a date to see that day's income below.
-            if (entries.isNotEmpty()) {
-                Column {
-                    SectionTitle("Daily Earnings")
-                    Spacer(Modifier.height(Space.s))
-                    Row(
-                        Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    ) {
-                        entries.forEachIndexed { i, e ->
-                            DateChip(e.date, "₹${e.amount}", e.paid, selectedIdx == i) { selectedIdx = i }
+            // ── Monthly hero: total · vs-last-month · Jobs / Avg-Day / Incentives ──
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("This Month · $monthName", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("₹${inr(monthTotal)}", color = TextDark, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                        if (pct != null) {
+                            Spacer(Modifier.height(6.dp))
+                            val up = pct >= 0
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background((if (up) GreenSuccess else RedCancel).copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                                    Text("${if (up) "↑" else "↓"} ${kotlin.math.abs(pct)}%", color = if (up) GreenSuccess else RedCancel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Text("vs last month", color = TextGray, fontSize = 12.sp)
+                            }
                         }
                     }
+                    Box(Modifier.size(56.dp).clip(CircleShape).background(GreenLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.AccountBalanceWallet, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Spacer(Modifier.height(Space.m))
+                HairlineDivider()
+                Spacer(Modifier.height(Space.m))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, "$monthJobs", "Jobs")
+                    Box(Modifier.width(1.dp).height(38.dp).background(Divider))
+                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color(0xFF3B82F6), "₹${inr(avgPerDay)}", "Avg/Day")
+                    Box(Modifier.width(1.dp).height(38.dp).background(Divider))
+                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Amber, "₹${inr(incentivesMonth)}", "Incentives")
                 }
             }
 
-            // Hero: the selected day's income (green banner) + that day's breakdown.
-            ElevatedGroup {
-                MoneyBanner(sel?.date ?: "Today's Earnings", sel?.amount ?: vm.todayEarnings)
-                Column(Modifier.background(CardBg).padding(Space.l)) {
-                    if (sel != null) {
-                        BreakdownRow(
-                            "Payment status",
-                            if (sel.paid) "Paid" else "Pending",
-                            valueColor = if (sel.paid) GreenSuccess else Gold,
-                        )
-                    }
-                    BreakdownRow("This Week", "₹${vm.weekEarnings}")
-                    BreakdownRow("This Month", "₹${vm.monthEarnings}", valueColor = Purple)
-                    Spacer(Modifier.height(Space.s))
-                    // Inset sub-breakdown box (overall context).
-                    Column(Modifier.fillMaxWidth().background(FieldFill, RoundedCornerShape(Radius.field)).padding(Space.m)) {
-                        InsetRow("Jobs today", "${vm.todayJobs}")
-                        Spacer(Modifier.height(Space.s))
-                        InsetRow("Completed all-time", "${vm.jobsCompleted}")
-                    }
-                }
+            // ── Today / This Week ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, "₹${inr(vm.todayEarnings)}", "Today", GreenSuccess, GreenLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.CalendarMonth, "₹${inr(vm.weekEarnings)}", "This Week", Purple, PurpleLight)
             }
 
-            // Analytics & insights — prominent gradient carousel (unmissable, one tap away).
+            // ── Analytics & insights carousel ──
             EarningsInsightsCarousel(nav)
 
-            // Payout summary.
+            // ── Payout summary ──
             SectionTitle("Payout")
             Card {
-                LabeledRow("Available to withdraw", "₹${vm.walletBalance}", GreenSuccess)
-                LabeledRow("Pending clearance", "₹${vm.pendingAmount}", Gold)
+                LabeledRow("Available to withdraw", "₹${inr(vm.walletBalance)}", GreenSuccess)
+                LabeledRow("Pending clearance", "₹${inr(vm.pendingAmount)}", Gold)
                 LabeledRow("Next payout", vm.nextPayout)
             }
             PrimaryButton("Withdraw to Bank") { nav.navigate(Routes.WITHDRAW) }
 
-            // Recent Earnings — live calendar; tap a day to see that day's services + income.
+            // ── Recent Earnings — live calendar; tap a day to see that day's services + income ──
             SectionTitle("Recent Earnings")
             RecentEarningsCalendar(vm)
             Spacer(Modifier.height(Space.s))
         }
+    }
+}
+
+/** One stat column in the monthly-earnings hero strip. */
+@Composable
+private fun EarnStat(modifier: Modifier, icon: ImageVector, tint: Color, value: String, label: String) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(tint.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(1.dp))
+        Text(label, color = TextGray, fontSize = 11.sp)
     }
 }
 
