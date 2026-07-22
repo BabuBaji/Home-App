@@ -361,6 +361,10 @@ async function buildCtx(customerId) {
 // Customer catalogue: each service priced (60-min base) through the engine for this zone + customer.
 async function catalogueFor(zoneId, customerId) {
   const zmap = await zonePriceMap(zoneId)
+  // A zone that has ANY active zone_pricing rows is treated as explicitly configured: it OFFERS only
+  // those services, and everything else is surfaced to the customer as "coming soon" (available:false)
+  // rather than bookable. A zone with no pricing rows (or an unzoned pincode) offers everything, as before.
+  const zoneConfigured = zoneId != null && Object.keys(zmap).length > 0
   const [campaigns, ctx, { rows }] = await Promise.all([
     campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId),
     pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services ORDER BY sort, name'),
@@ -368,7 +372,8 @@ async function catalogueFor(zoneId, customerId) {
   return rows.map((s) => {
     const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: '60m', listPrice: zoneBase(s, zmap) }], campaigns, ctx, applyCoupons: false })
     const it = r.items[0]
-    return withImage({ ...s, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount })
+    const available = !!s.available && (!zoneConfigured || zmap[s.id] != null)
+    return withImage({ ...s, available, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount })
   })
 }
 
@@ -386,7 +391,11 @@ async function serviceDetail(id, zoneId, customerId) {
     return { ...d, listPrice: it.listPrice, price: it.price, original: it.discount > 0 ? d.price : d.original }
   })
   const off = durations.find((d) => d.id === '60m')?.zoneDiscount || 0
-  return withImage({ ...s, ...details, price: durations[0].price, listPrice: durations[0].listPrice, durations, zoneDiscount: durations[0].price < durations[0].listPrice ? Math.round((1 - durations[0].price / durations[0].listPrice) * 100) : off })
+  // Consistent with catalogueFor: in a configured zone the service is only offered (bookable) if it
+  // has an active zone_pricing row; otherwise the detail screen shows it as coming soon / not bookable.
+  const zoneConfigured = zoneId != null && Object.keys(zmap).length > 0
+  const available = !!s.available && (!zoneConfigured || zmap[s.id] != null)
+  return withImage({ ...s, ...details, available, price: durations[0].price, listPrice: durations[0].listPrice, durations, zoneDiscount: durations[0].price < durations[0].listPrice ? Math.round((1 - durations[0].price / durations[0].listPrice) * 100) : off })
 }
 
 // Authoritative cart pricing → the shape the customer/booking flow expects (items + bill breakdown).

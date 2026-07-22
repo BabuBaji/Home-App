@@ -2065,6 +2065,12 @@ body { line-height: 1.45; }
 .hd-pop-all { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; overflow: visible; margin: 0; }
 .hd-pop-all .hd-pop-card { flex: initial; width: auto; }
 .hd-pop-all .hd-pop-img { height: 108px; }
+/* "Coming Soon" services — not offered in this zone yet: dimmed image + badge, not bookable */
+.hd-pop-card.soon .hd-pop-img { position: relative; }
+.hd-pop-card.soon .hd-pop-img img { filter: grayscale(0.7); opacity: 0.55; }
+.hd-pop-card.soon .hd-pop-name { color: var(--sub, #7a8090); }
+.hd-pop-card.soon .hd-pop-price { color: var(--sub, #7a8090); font-weight: 500; }
+.hd-pop-soon { position: absolute; top: 8px; left: 8px; padding: 4px 9px; border-radius: 20px; background: rgba(30,20,60,0.78); color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: 0.2px; }
 
 /* continue booking card */
 .hd-cont { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line);
@@ -2685,6 +2691,46 @@ body { line-height: 1.45; }
 .jt-lp-bar { height: 8px; border-radius: 6px; background: #d6ecdc; overflow: hidden; }
 .jt-lp-bar span { display: block; height: 100%; background: #22c55e; border-radius: 6px; transition: width .5s; }
 .jt-lp-pct { text-align: right; font-size: 12px; font-weight: 700; color: #12945a; margin-top: 6px; }
+
+/* circular service timer (Live Progress) — ring fills over the booked duration */
+.jt-timer-card { background: #faf9ff; border: 1px solid var(--line); border-radius: 18px; padding: 18px 16px; margin-bottom: 18px; text-align: center; }
+.jt-timer-card.done { background: #f2f9f4; border-color: #cfeed5; }
+.jt-timer { position: relative; width: 224px; height: 224px; margin: 14px auto 6px; }
+.jt-timer-svg { width: 100%; height: 100%; display: block; }
+.jt-timer-track { fill: none; stroke: #eceafa; stroke-width: 15; }
+.jt-timer-fill { fill: none; stroke: var(--v); stroke-width: 15; stroke-linecap: round; transition: stroke-dashoffset 0.9s linear; }
+.jt-timer-card.done .jt-timer-fill { stroke: #22c55e; }
+.jt-timer-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.jt-timer-emoji { font-size: 26px; line-height: 1; }
+.jt-timer-time { font-size: 38px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+.jt-timer-lbl { font-size: 12.5px; color: var(--sub); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+.jt-timer-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding: 0 4px; font-size: 12.5px; color: var(--sub); }
+.jt-timer-meta b { color: var(--ink); font-weight: 700; }
+.jt-timer-pct { font-size: 15px; font-weight: 800; color: var(--v); }
+.jt-timer-card.done .jt-timer-pct { color: #12945a; }
+
+/* Live Progress — section headers, worker "working now", service + location cards */
+.jt-lp-sec-h { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 800; color: var(--ink); margin: 4px 2px 8px; }
+.jt-lp-worker { margin-bottom: 14px; }
+.jt-lp-w-status { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; font-weight: 700; color: #12945a; }
+.jt-lp-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); animation: jtPulse 1.4s infinite; }
+@keyframes jtPulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.5); } 70% { box-shadow: 0 0 0 7px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+.jt-lp-svc-card { padding: 8px 12px; margin-bottom: 14px; }
+.jt-lp-svc { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.jt-lp-svc + .jt-lp-svc { border-top: 1px solid #f4f3fb; }
+.jt-lp-svc-img { width: 46px; height: 46px; border-radius: 12px; overflow: hidden; flex-shrink: 0; background: linear-gradient(135deg, #efeafe, #e2dbf8); }
+.jt-lp-svc-img img { width: 100%; height: 100%; object-fit: cover; }
+.jt-lp-svc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.jt-lp-svc-main b { font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.jt-lp-svc-main small { font-size: 12px; color: var(--sub); }
+.jt-lp-svc-tag { flex-shrink: 0; padding: 4px 11px; border-radius: 20px; background: #eef7f1; color: #12945a; font-size: 11px; font-weight: 800; letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 5px; }
+.jt-lp-svc-tag:not(.done)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: jtPulse 1.4s infinite; }
+.jt-lp-svc-tag.done { background: #eaf7ef; }
+.jt-lp-loc-card { padding: 13px; margin-bottom: 8px; }
+.jt-lp-loc { display: flex; gap: 11px; }
+.jt-lp-loc-main { flex: 1; min-width: 0; }
+.jt-lp-loc-flat { font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1.4; }
+.jt-lp-loc-area { font-size: 12.5px; color: #3d4356; line-height: 1.45; word-break: break-word; }
 .jt-lp-tasks-h { font-size: 14px; font-weight: 700; color: var(--ink); margin: 0 0 10px; }
 .jt-lp-tasks { display: flex; flex-direction: column; gap: 4px; }
 .jt-lp-task { display: flex; align-items: center; gap: 11px; padding: 11px 0; border-bottom: 1px solid #f4f3fb; font-size: 14px; color: var(--sub); }
@@ -3051,6 +3097,23 @@ body { line-height: 1.45; }
 .am-m + .am-m { border-top: 1px solid var(--line); }
 .am-m.sel { background: var(--primary-50); }
 .am-m-ico { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: #f4f3fb; font-size: 16px; flex: 0 0 auto; }
+/* brand payment icons (PhonePe / GPay / Paytm / UPI / card / bank) */
+.am-m-ico.brand { width: 34px; height: 34px; background: transparent; border-radius: 10px; overflow: hidden; }
+.pay-svg { width: 100%; height: 100%; display: block; }
+.pay-tile { width: 100%; height: 100%; border-radius: 10px; display: grid; place-items: center; font-size: 16px; }
+.pay-tile.card { background: #eef0ff; color: #5b51e8; }
+.pay-tile.bank { background: #e7f5ef; color: #0d8a3e; }
+.pay-tile.wallet { background: #fdf1e6; color: #d97a2b; }
+.pay-tile.cash { background: #eaf7ef; color: #12945a; }
+.pay-tile.neutral { background: #f4f3fb; }
+/* checkout (Payment.tsx) icon slot in brand mode + the UPI apps cluster */
+.oicon.pay.brand { background: transparent; padding: 0; overflow: visible; }
+.oicon.pay.brand .pay-svg, .oicon.pay.brand .pay-tile { width: 40px; height: 40px; border-radius: 11px; }
+.oicon.pay.brand.cluster { display: inline-flex; align-items: center; justify-content: center; }
+.pay-cluster { display: inline-flex; align-items: center; }
+.pay-cluster-i { width: 27px; height: 27px; margin-left: -8px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 2px #fff; }
+.pay-cluster-i:first-child { margin-left: 0; }
+.pay-cluster-i .pay-svg { width: 100%; height: 100%; border-radius: 8px; }
 .am-m-main { flex: 1; min-width: 0; }
 .am-m-name { display: block; font-size: 13px; font-weight: 600; }
 .am-m-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }

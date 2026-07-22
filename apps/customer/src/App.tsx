@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams, Outlet } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
@@ -31,7 +31,6 @@ import AddressSelect from './screens/AddressSelect'
 import Schedule from './screens/Schedule'
 import Summary from './screens/Summary'
 import Payment from './screens/Payment'
-import Track from './screens/Track'
 import BookingTracking from './screens/BookingTracking'
 import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
@@ -201,7 +200,9 @@ export default function App() {
               <Route path="/summary" element={<Summary />} />
               <Route path="/payment" element={<Payment />} />
               <Route path="/tracking/:id" element={<BookingTracking />} />
-              <Route path="/track/:id" element={<Track />} />
+              {/* Old "Track Your Expert" screen is superseded by the redesigned /job/:id flow — send
+                  every track entry point (Continue Booking, notifications, post-cancel/reschedule) there. */}
+              <Route path="/track/:id" element={<TrackRedirect />} />
               <Route path="/reschedule/:id" element={<Reschedule />} />
               <Route path="/cancel/:id" element={<Cancel />} />
               {/* Module 6 — Live Job Tracking */}
@@ -339,6 +340,13 @@ function Guard({ authed }: { authed: boolean }) {
   const loc = useLocation()
   if (!authed) return <Navigate to="/login" replace state={{ from: loc }} />
   return <Outlet />
+}
+
+// The old "Track Your Expert" screen (Track.tsx) is replaced by the redesigned /job/:id flow.
+// Redirect the legacy /track/:id route so every entry point shows the new Booking Details UI.
+function TrackRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/job/${id}`} replace />
 }
 
 // Gate for the main app: an authenticated user must have picked a city (location)

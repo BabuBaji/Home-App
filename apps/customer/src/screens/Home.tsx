@@ -53,7 +53,9 @@ export default function Home() {
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
   const firstName = (user?.name || 'there').split(' ')[0]
-  const svcList = useMemo(() => services.filter((s) => s.available), [services])
+  // Show every service, but order the ones offered in this zone first; the rest are rendered as
+  // "Coming Soon" (not bookable) so the customer sees what will arrive rather than a blank gap.
+  const svcList = useMemo(() => [...services].sort((a, b) => Number(b.available) - Number(a.available)), [services])
   // Only a genuinely live booking counts as "Continue Booking": an active status that hasn't gone
   // stale (see isContinuable — a job whose slot is >1 day past is abandoned, not continuable). Once
   // it's completed/cancelled or stale it drops out; future-scheduled bookings still show.
@@ -197,13 +199,15 @@ export default function Home() {
           <div className="hd-sec-head"><h3>All Services</h3></div>
           <div className="hd-pop hd-pop-all">
             {svcList.map((s) => (
-              <button key={s.id} className="hd-pop-card" onClick={() => openService(s)}>
+              <button key={s.id} className={`hd-pop-card${s.available ? '' : ' soon'}`}
+                onClick={() => s.available ? openService(s) : toast(`${s.name} is coming soon to your area 🚧`)}>
                 <span className="hd-pop-img">
                   <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                  {!s.available && <span className="hd-pop-soon">Coming Soon</span>}
                 </span>
                 <span className="hd-pop-name">{s.name}</span>
-                <span className="hd-pop-price">From ₹{s.price}</span>
+                <span className="hd-pop-price">{s.available ? `From ₹${s.price}` : 'Not available yet'}</span>
               </button>
             ))}
             {svcList.length === 0 && <p className="muted" style={{ padding: 12 }}>Loading services…</p>}

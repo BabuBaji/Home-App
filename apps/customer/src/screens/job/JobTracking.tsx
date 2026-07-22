@@ -32,6 +32,9 @@ export default function JobTracking() {
   const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
   const verified = !!b.pro?.verified
   const live = isLive(b.status)
+  const started = b.status === 'in_progress'   // service running now
+  // Cancel is only valid BEFORE the service starts — once the worker begins, you can't cancel it.
+  const cancellable = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived'].includes(b.status)
   // Tapping Call opens the device dialer with the worker's real number; falls back to the in-app
   // call screen when no number is on file yet (not assigned).
   const call = () => { const ph = b.pro?.phone; if (ph) window.location.href = `tel:${ph}`; else nav(`/job/${b.id}/call`) }
@@ -69,10 +72,13 @@ export default function JobTracking() {
 
         {menu && (
           <div className="jt-menu" onClick={(e) => e.stopPropagation()}>
-            {live && b.type === 'schedule' && (
+            {cancellable && b.type === 'schedule' && (
               <button className="jt-mi" onClick={() => go(`/reschedule/${b.id}`)}><CalendarClock size={16} /> Reschedule Booking</button>
             )}
-            {live && (
+            {started && (
+              <button className="jt-mi" onClick={() => go(`/job/${b.id}/progress`)}><Bike size={16} /> View Live Progress</button>
+            )}
+            {cancellable && (
               <button className="jt-mi danger" onClick={() => go(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
             )}
             <button className="jt-mi" onClick={share}><Share2 size={16} /> Share Booking</button>
@@ -163,11 +169,21 @@ export default function JobTracking() {
         </div>
       </div>
 
+      {/* Footer depends on the stage: a running service can't be cancelled — show its live timer
+          instead. Before it starts, Chat + Cancel; once completed, the summary. */}
       <div className="jt-foot">
-        <button className="jt-btn ghost" onClick={chat}><MessageCircle size={16} /> Chat with Worker</button>
-        {live
-          ? <button className="jt-btn danger" onClick={() => nav(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
-          : <button className="jt-btn" onClick={call}><Phone size={16} /> Call Worker</button>}
+        {started ? (
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/progress`)}><Bike size={16} /> View Live Progress</button>
+        ) : b.status === 'completed' ? (
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}><Check size={16} /> View Summary</button>
+        ) : cancellable ? (
+          <>
+            <button className="jt-btn ghost" onClick={chat}><MessageCircle size={16} /> Chat with Worker</button>
+            <button className="jt-btn danger" onClick={() => nav(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
+          </>
+        ) : (
+          <button className="jt-btn" onClick={call}><Phone size={16} /> Call Worker</button>
+        )}
       </div>
 
       {menu && <div className="jt-menu-back" onClick={() => setMenu(false)} />}
