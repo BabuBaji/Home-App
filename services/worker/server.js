@@ -1221,6 +1221,10 @@ const DOC_TYPES = [
   { name: 'PF Account Proof', required: false, hint: 'Provident Fund account proof' },
   { name: 'Vaccination Certificate', required: false, hint: 'COVID / other vaccination proof' },
   { name: 'Resume / Bio Data', required: false, hint: 'Résumé or bio-data' },
+  { name: 'Voter ID', required: false, hint: 'EPIC card — front & back' },
+  { name: 'Ration Card', required: false, hint: 'Family ration card' },
+  { name: 'Educational Certificate', required: false, hint: 'Highest qualification certificate' },
+  { name: 'Reference Letter', required: false, hint: 'Character or previous-employment reference' },
 ]
 const DOC_NAMES = new Set(DOC_TYPES.map((d) => d.name))
 
