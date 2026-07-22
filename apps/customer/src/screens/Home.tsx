@@ -4,7 +4,7 @@ import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, 
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
-import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, type HomeBanner } from '../api'
+import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
 import type { Service, Booking, Address } from '../types'
 
 // Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
@@ -20,7 +20,6 @@ type Slide = HomeBanner & { greetingName?: string }
 
 // Module 2 · #7 — Home Dashboard. UI redesigned to the mock; all booking data/flow
 // (services, bookings, serviceable guard, service navigation) is preserved.
-const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 
 function greeting() {
   const h = new Date().getHours()
@@ -55,9 +54,10 @@ export default function Home() {
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
   const firstName = (user?.name || 'there').split(' ')[0]
   const svcList = useMemo(() => services.filter((s) => s.available), [services])
-  // Only an in-progress booking counts as "Continue Booking" — once it's completed or cancelled it
-  // drops out (no fall-back to the most recent booking regardless of status).
-  const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || null, [bookings])
+  // Only a genuinely live booking counts as "Continue Booking": an active status that hasn't gone
+  // stale (see isContinuable — a job whose slot is >1 day past is abandoned, not continuable). Once
+  // it's completed/cancelled or stale it drops out; future-scheduled bookings still show.
+  const cont = useMemo(() => bookings.find((b) => isContinuable(b)) || null, [bookings])
 
   // The greeting is always the first slide; live banners rotate in after it.
   const slides: Slide[] = useMemo(() => [

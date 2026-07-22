@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, CalendarClock } from 'lucide-react'
 import { BottomNav, Loading } from '../components/UI'
-import { fetchBookings } from '../api'
+import { fetchBookings, isContinuable, CONTINUABLE_STATUSES } from '../api'
 import type { Booking } from '../types'
 
 // Module 2 · #12 — Continue Booking. Lists the customer's resumable bookings (real data
 // via fetchBookings); "Continue" opens the existing track/detail flow. No backend change.
-const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 
 function when(b: Booking) {
   if (b.date && b.time) return `${b.date}, ${b.time}`
@@ -20,8 +19,8 @@ export default function ContinueBooking() {
 
   useEffect(() => { fetchBookings().then(setItems).catch(() => setItems([])) }, [])
 
-  const list = (items || []).filter((b) => b.status !== 'cancelled' && b.status !== 'completed')
-  const resume = (b: Booking) => nav(ACTIVE.includes(b.status) ? `/track/${b.id}` : `/booking/${b.id}`)
+  const list = (items || []).filter((b) => isContinuable(b))
+  const resume = (b: Booking) => nav(CONTINUABLE_STATUSES.includes(b.status) ? `/track/${b.id}` : `/booking/${b.id}`)
 
   return (
     <div className="screen has-nav m2">

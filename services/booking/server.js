@@ -334,7 +334,19 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
   let travel = {}
   const d = distanceKm(b.worker_lat, b.worker_lng, b.cust_lat, b.cust_lng)
   if (d != null) travel = { pos: { lat: b.worker_lat, lng: b.worker_lng }, dist: +d.toFixed(1), eta: Math.max(1, Math.round(d * 2.5)) }
-  res.json({ ...publicBooking(b), serviceAvailable, pro, ...travel })
+  // Full structured address so the tracking screen can show the COMPLETE address — flat/house +
+  // apartment/building + area — not just the geocoded area line the booking stores. Resolved
+  // read-only from the saved address stamped at checkout; free-typed/legacy bookings keep the text.
+  let addr = null
+  if (b.address_id) {
+    const addrs = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}/addresses`, [])
+    const a = (addrs || []).find((x) => Number(x.id) === Number(b.address_id))
+    if (a) addr = {
+      label: a.label || '', house: a.house || '', floor: a.floor || '', apartment: a.apartment || '',
+      street: a.street || '', landmark: a.landmark || '', line: a.line || '', city: a.city || '', pincode: a.pincode || '',
+    }
+  }
+  res.json({ ...publicBooking(b), serviceAvailable, pro, addr, ...travel })
 })
 
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
@@ -454,6 +466,21 @@ app.post('/api/bookings', auth, async (req, res) => {
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
       body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso(), addressId ?? null])
   let booking = rowTo(ins.rows[0])
+
+  // Record the payment in the customer's transaction ledger for NON-wallet methods too. Wallet
+  // payments already posted a real balance-moving debit above; UPI/card/PhonePe paid the gateway and
+  // cash is paid to the expert after the service, so this is a ledger-only passbook entry that does
+  // NOT move the wallet balance — it just makes every booking visible in Transactions (and in the
+  // admin customer ledger). Best-effort + idempotent on the booking ref: it never fails or
+  // double-posts the booking.
+  if (!isWallet) {
+    const methodLabel = isCash ? 'Cash' : payment === 'card' ? 'Card'
+      : payment === 'phonepe' ? 'PhonePe' : payment === 'upi' ? 'UPI' : (payment || 'Online')
+    internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, {
+      ledgerOnly: true, type: 'debit', kind: 'BOOKING_PAYMENT',
+      title: `Booking Payment · ${methodLabel}`, amount: priced.total, ref: booking.ref,
+    }).catch((e) => console.error('[booking] ledger record failed:', e?.message || e))
+  }
 
   // Assign an expert immediately: the customer's chosen worker, else the nearest ONLINE worker
   // offering the service (demo auto-assign). Additive — if none is found the booking stays

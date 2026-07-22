@@ -401,6 +401,24 @@ async function walletSpend(uid, amount, { title, ref, kind = 'BOOKING_PAYMENT' }
 async function addTransaction(uid, type, title, amount, ref, kind) {
   return walletMutate(uid, { balanceType: 'cash', type: type === 'debit' ? 'debit' : 'credit', kind: kind || (type === 'debit' ? 'DEBIT' : 'CREDIT'), title, amount, ref })
 }
+// Record a ledger row WITHOUT moving any balance — an informational passbook entry. A booking paid
+// by UPI/card/PhonePe/cash took the money through the gateway (or is pay-after-service), not the
+// wallet, but the customer still expects to see it in their transactions. `balance` is snapshotted
+// from the current cash wallet so the running-balance column stays truthful (the wallet didn't move).
+// Idempotent on (user_id, ref, kind) so a redelivered/retried booking event can't double-post.
+async function recordLedger(uid, { type, kind, title, amount, ref }) {
+  const u = await getUser(uid)
+  if (!u) throw new Error('User not found')
+  const amt = Math.max(0, Math.round(Number(amount) || 0))
+  const t = type === 'credit' ? 'credit' : 'debit'
+  if (ref) {
+    const dup = await pool.query('SELECT 1 FROM transactions WHERE user_id=$1 AND ref=$2 AND kind=$3 LIMIT 1', [uid, ref, kind ?? null])
+    if (dup.rowCount) return { balance: u.wallet || 0, duplicate: true }
+  }
+  await pool.query('INSERT INTO transactions (user_id,type,title,amount,balance,ref,kind,balance_type,created) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [uid, t, title || 'Transaction', amt, u.wallet || 0, ref ?? null, kind ?? null, 'cash', nowIso()])
+  return { balance: u.wallet || 0, recorded: true }
+}
 
 async function recordIdentity(user, provider) {
   await pool.query(
@@ -1112,7 +1130,7 @@ app.post('/api/internal/users/find-or-create-google', internalOnly, async (req, 
 })
 // Wallet debit/credit/refund driven by the booking service.
 app.post('/api/internal/users/:id/wallet', internalOnly, async (req, res) => {
-  const { type, title, amount, ref, kind, balance, admin } = req.body || {}
+  const { type, title, amount, ref, kind, balance, admin, ledgerOnly } = req.body || {}
   const uid = Number(req.params.id)
   const u = await getUser(uid)
   if (!u) return res.status(404).json({ error: 'User not found' })
@@ -1120,6 +1138,12 @@ app.post('/api/internal/users/:id/wallet', internalOnly, async (req, res) => {
   const status = u.wallet_status || 'active'
   const bt = balance === 'promo' || balance === 'points' ? balance : 'cash'
   try {
+    // Ledger-only entry: record the transaction WITHOUT moving any balance (e.g. a booking paid by
+    // UPI/card/cash — the money left via the gateway, but the passbook should still show it). Never
+    // blocked by wallet status and never fails on balance, since no balance is touched.
+    if (ledgerOnly) {
+      return res.json(await recordLedger(uid, { type, kind, title, amount: amt, ref }))
+    }
     if (type === 'debit') {
       // Customer spending is blocked on a frozen/blocked wallet; admin debits bypass.
       if (!admin && status !== 'active') return res.status(403).json({ error: `Wallet is ${status}` })

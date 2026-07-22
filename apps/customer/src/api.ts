@@ -28,6 +28,21 @@ export async function initApiBase(): Promise<void> {
   } catch { /* keep the baked fallback */ }
 }
 
+// A booking is worth surfacing as "Continue Booking" only while it's genuinely live. These are the
+// in-flight statuses; once completed/cancelled it drops out.
+export const CONTINUABLE_STATUSES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+
+// True only for a live booking that hasn't gone stale. An instant job completes within hours and a
+// scheduled job within its day, so an active-status booking whose slot (or, for instant, its creation
+// time) is more than a day in the past is an abandoned/never-closed record — not something to continue.
+// Future-scheduled bookings (slot ahead of now) always pass, so upcoming jobs still show.
+export function isContinuable(b: Booking, now: number = Date.now()): boolean {
+  if (!CONTINUABLE_STATUSES.includes(b.status)) return false
+  const ref = typeof b.scheduled_at === 'number' ? b.scheduled_at : Date.parse(b.created)
+  if (!Number.isFinite(ref)) return true            // no usable timestamp -> don't hide it
+  return now - ref <= 24 * 60 * 60 * 1000           // drop once >1 day past the slot/creation time
+}
+
 let token = localStorage.getItem('hh_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }
 export function clearToken() { token = ''; localStorage.removeItem('hh_token') }

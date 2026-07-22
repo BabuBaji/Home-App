@@ -1,65 +1,132 @@
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Share2, MoreVertical, Check, Phone, Star, ChevronRight, MessageCircle } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import {
+  ArrowLeft, Share2, MoreVertical, Check, Phone, Star, ChevronRight, MessageCircle,
+  MapPin, BadgeCheck, ShieldCheck, Headset, Bike, CalendarClock, XCircle, ShieldQuestion,
+} from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
+import { Share } from '@capacitor/share'
+import { Loading, useToast } from '../../components/UI'
+import { pushBackHandler } from '../../backStack'
 import { useJob, proName, proRating, serviceNames, fmtDateTime } from './useJob'
-import { WorkerAvatar, MiniTimeline } from './parts'
+import { WorkerAvatar } from './parts'
+import { isLive } from '../../orders'
+import type { Booking } from '../../types'
 
-// Module 6 · #42 — Worker Assigned. Everything is real booking data (ref, service, date, address,
-// assigned worker) polled from /api/bookings/:id. Hub for the rest of the live-job screens.
+// Module 6 · #42 — Booking Details / Worker Assigned. All real booking data (ref, service, date,
+// full address, assigned worker) polled from /api/bookings/:id. Hub for the live-job screens, with
+// working Share, an actions menu (Reschedule / Cancel / Policy / Help), Chat, Call and View on Map.
 export default function JobTracking() {
   const { id } = useParams()
   const nav = useNavigate()
+  const toast = useToast()
   const { b } = useJob(id)
+  const [menu, setMenu] = useState(false)
+
+  // Android hardware back closes the menu instead of leaving the screen.
+  useEffect(() => { if (menu) return pushBackHandler(() => setMenu(false)) }, [menu])
 
   if (!b) return <div className="screen jt"><Loading /></div>
 
-  const jobs = b.pro?.jobs ?? b.pro?.servicesDone
+  const jobs = b.pro?.jobs ?? b.pro?.servicesDone ?? 0
   const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
-  // Tapping Call opens the device dialer directly with the worker's real number. If no number is
-  // on file yet (not assigned), fall back to the in-app call screen.
+  const verified = !!b.pro?.verified
+  const live = isLive(b.status)
+  // Tapping Call opens the device dialer with the worker's real number; falls back to the in-app
+  // call screen when no number is on file yet (not assigned).
   const call = () => { const ph = b.pro?.phone; if (ph) window.location.href = `tel:${ph}`; else nav(`/job/${b.id}/call`) }
+  const chat = () => nav(`/job/${b.id}/chat`)
+  const go = (to: string) => { setMenu(false); nav(to) }
+
+  async function share() {
+    setMenu(false)
+    if (!b) return
+    const text = [
+      `HomeHelp booking ${b.ref}`,
+      serviceNames(b),
+      fmtDateTime(b),
+      fullAddress(b) ? `At: ${fullAddress(b)}` : '',
+    ].filter(Boolean).join('\n')
+    try {
+      if (Capacitor.isNativePlatform()) await Share.share({ title: `HomeHelp ${b.ref}`, text, dialogTitle: 'Share booking' })
+      else if (navigator.share) await navigator.share({ title: `HomeHelp ${b.ref}`, text })
+      else { await navigator.clipboard.writeText(text); toast('Booking details copied') }
+    } catch { /* user dismissed the sheet — not an error */ }
+  }
+
+  const arr = arrivalFor(b)
+  const addr = addressParts(b)
 
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav('/home')} aria-label="Back"><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
         <b>Booking Details</b>
         <div className="jt-top-r">
-          <button className="jt-ic" aria-label="Share"><Share2 size={19} /></button>
-          <button className="jt-ic" aria-label="More"><MoreVertical size={19} /></button>
+          <button className="jt-ic round" onClick={share} aria-label="Share booking"><Share2 size={18} /></button>
+          <button className="jt-ic round" onClick={() => setMenu(true)} aria-label="More options"><MoreVertical size={18} /></button>
         </div>
+
+        {menu && (
+          <div className="jt-menu" onClick={(e) => e.stopPropagation()}>
+            {live && b.type === 'schedule' && (
+              <button className="jt-mi" onClick={() => go(`/reschedule/${b.id}`)}><CalendarClock size={16} /> Reschedule Booking</button>
+            )}
+            {live && (
+              <button className="jt-mi danger" onClick={() => go(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
+            )}
+            <button className="jt-mi" onClick={share}><Share2 size={16} /> Share Booking</button>
+            <button className="jt-mi" onClick={() => go('/cancellation-policy')}><ShieldQuestion size={16} /> Cancellation Policy</button>
+            <button className="jt-mi" onClick={() => go('/support')}><Headset size={16} /> Get Help</button>
+          </div>
+        )}
       </div>
 
       <div className="content jt-scroll">
+        {/* hero */}
         <div className="jt-hero">
           <div className="jt-hero-ava">
-            <WorkerAvatar b={b} size={92} />
-            {assigned && <span className="jt-hero-check"><Check size={16} strokeWidth={3} /></span>}
+            <WorkerAvatar b={b} size={66} />
+            {assigned && <span className="jt-hero-check"><Check size={14} strokeWidth={3} /></span>}
           </div>
           <h2>{assigned ? 'Worker Assigned!' : 'Confirming your expert…'}</h2>
           <p>{assigned
-            ? `Your booking is confirmed. ${proName(b).split(' ')[0]} has been assigned to your service.`
+            ? `Great! ${proName(b).split(' ')[0]} has been assigned to your service.`
             : 'Your booking is confirmed. We are assigning the best expert near you — this usually takes a moment.'}</p>
+          <span className="jt-badge-confirm"><ShieldCheck size={15} /> Your booking is confirmed</span>
         </div>
 
+        {/* details + address */}
         <div className="jt-card jt-details">
           <Row label="Booking ID" value={b.ref} />
           <Row label="Service" value={serviceNames(b)} />
           <Row label="Date & Time" value={fmtDateTime(b)} />
-          <Row label="Address" value={b.address} />
+          <div className="jt-addr">
+            <span className="jt-addr-ic"><MapPin size={16} /></span>
+            <div className="jt-addr-main">
+              <div className="jt-addr-k">Address</div>
+              {addr.flat && <div className="jt-addr-primary">{addr.flat}</div>}
+              <div className="jt-addr-line">{addr.area || '—'}</div>
+              {addr.landmark && <div className="jt-addr-land">Near {addr.landmark}</div>}
+            </div>
+          </div>
+          <button className="jt-addr-map" onClick={() => nav(`/job/${b.id}/map`)}><MapPin size={16} /> View on Map</button>
         </div>
 
+        {/* worker — compact single row: avatar + info (→ profile) + small chat/call icons */}
         {assigned ? (
-          <button className="jt-card jt-worker" onClick={() => nav(`/job/${b.id}/worker`)}>
-            <WorkerAvatar b={b} size={50} />
-            <div className="jt-worker-main">
-              <div className="jt-worker-name">{proName(b)}</div>
-              <div className="jt-worker-sub"><Star size={13} className="jt-star" /> {proRating(b)}{jobs != null ? ` · ${jobs} jobs` : ''}</div>
-              {b.pro?.phone && <div className="jt-worker-phone"><Phone size={12} /> {b.pro.phone}</div>}
-              <div className="jt-worker-link">View profile</div>
-            </div>
-            <span className="jt-worker-call" onClick={(e) => { e.stopPropagation(); call() }} aria-label="Call worker"><Phone size={18} /></span>
-          </button>
+          <div className="jt-card jt-worker2">
+            <button className="jt-worker2-ava" onClick={() => nav(`/job/${b.id}/worker`)} aria-label="View worker profile">
+              <WorkerAvatar b={b} size={46} />
+              <span className="jt-online" />
+            </button>
+            <button className="jt-worker2-main" onClick={() => nav(`/job/${b.id}/worker`)}>
+              <div className="jt-worker2-name">{proName(b)}{verified && <BadgeCheck size={15} className="jt-vcheck" />}</div>
+              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {jobs} jobs{verified ? ' · Verified' : ''}</div>
+            </button>
+            <button className="jt-wmini ghost" onClick={chat} aria-label="Chat with worker"><MessageCircle size={17} /></button>
+            <button className="jt-wmini" onClick={call} aria-label="Call worker"><Phone size={17} /></button>
+          </div>
         ) : (
           <div className="jt-card jt-worker pending">
             <span className="jt-ava jt-ava-init" style={{ width: 50, height: 50, fontSize: 20 }}>…</span>
@@ -70,36 +137,103 @@ export default function JobTracking() {
           </div>
         )}
 
-        <StatusAction status={b.status} onGo={(p) => nav(`/job/${b.id}/${p}`)} />
+        {/* live status card */}
+        {arr && (
+          <button className="jt-arrival" onClick={() => nav(`/job/${b.id}/${arr.path}`)}>
+            <span className="jt-arrival-ic">{arr.icon}</span>
+            <span className="jt-arrival-main">
+              <span className="jt-arrival-t">{arr.title}</span>
+              <span className="jt-arrival-s">{arr.sub}</span>
+            </span>
+            <ChevronRight size={20} className="jt-arrival-chev" />
+          </button>
+        )}
 
-        <MiniTimeline status={b.status} />
+        {/* progress stepper */}
+        <StepTimeline status={b.status} />
+
+        {/* safety */}
+        <div className="jt-safety">
+          <div className="jt-safety-head"><ShieldCheck size={15} /> Your safety is our priority</div>
+          <div className="jt-safety-items">
+            <span><BadgeCheck size={13} /> Background Verified</span>
+            <span><Headset size={13} /> Support Available</span>
+            <span><ShieldCheck size={13} /> Quality Assured</span>
+          </div>
+        </div>
       </div>
 
       <div className="jt-foot">
-        <button className="jt-btn ghost" onClick={() => nav(`/job/${b.id}/chat`)}><MessageCircle size={17} /> Chat</button>
-        <button className="jt-btn" onClick={call}><Phone size={17} /> Call</button>
+        <button className="jt-btn ghost" onClick={chat}><MessageCircle size={16} /> Chat with Worker</button>
+        {live
+          ? <button className="jt-btn danger" onClick={() => nav(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
+          : <button className="jt-btn" onClick={call}><Phone size={16} /> Call Worker</button>}
       </div>
+
+      {menu && <div className="jt-menu-back" onClick={() => setMenu(false)} />}
     </div>
   )
 }
 
-// Contextual next-step button that routes to the matching Module-6 screen for the live status.
-function StatusAction({ status, onGo }: { status: string; onGo: (p: string) => void }) {
-  const map: Record<string, { label: string; path: string }> = {
-    worker_assigned: { label: 'Worker is on the way', path: 'otw' },
-    on_the_way: { label: 'Track on live map', path: 'map' },
-    arrived: { label: 'Share start OTP', path: 'otp' },
-    in_progress: { label: 'View live progress', path: 'progress' },
-    completed: { label: 'View service summary', path: 'completed' },
+/* ---------- address ---------- */
+// Split the booking address into a flat/building primary line and the area line, using the full
+// structured address when the booking service resolved one, else the plain stored text.
+function addressParts(b: Booking): { flat: string; area: string; landmark: string } {
+  const a = b.addr
+  if (a && (a.house || a.apartment || a.floor)) {
+    const flat = [a.house, a.apartment, a.floor && `Floor ${a.floor}`].filter(Boolean).join(', ')
+    const area = a.line || [a.street, a.city, a.pincode].filter(Boolean).join(', ') || b.address || ''
+    return { flat, area, landmark: a.landmark || '' }
   }
-  const a = map[status]
-  if (!a) return null
-  return <button className="jt-status-cta" onClick={() => onGo(a.path)}>{a.label}<ChevronRight size={18} /></button>
+  return { flat: '', area: (a?.line || b.address || ''), landmark: a?.landmark || '' }
+}
+// One-line full address for the share sheet.
+function fullAddress(b: Booking): string {
+  const p = addressParts(b)
+  return [p.flat, p.area, p.landmark && `Near ${p.landmark}`].filter(Boolean).join(', ')
 }
 
-function Row({ label, value, multiline }: { label: string; value?: string; multiline?: boolean }) {
+/* ---------- live status card ---------- */
+function arrivalFor(b: Booking): { icon: JSX.Element; title: string; sub: string; path: string } | null {
+  const eta = b.eta
+  const etaText = eta ? `Estimated arrival in ${eta}–${eta + 3} mins` : 'Estimated arrival in 12–15 mins'
+  switch (b.status) {
+    case 'worker_assigned': return { icon: <Bike size={20} />, title: 'Worker is getting ready', sub: 'Preparing to head to your location', path: 'otw' }
+    case 'on_the_way': return { icon: <Bike size={20} />, title: 'Worker is on the way', sub: etaText, path: 'map' }
+    case 'arrived': return { icon: <MapPin size={20} />, title: 'Worker has arrived', sub: 'Share your start OTP to begin', path: 'otp' }
+    case 'in_progress': return { icon: <Check size={20} />, title: 'Service in progress', sub: 'Your service is underway', path: 'progress' }
+    case 'completed': return { icon: <Check size={20} />, title: 'Service completed', sub: 'View your service summary', path: 'completed' }
+    default: return null
+  }
+}
+
+/* ---------- big numbered stepper (Booked → Completed) ---------- */
+const BIG_STEPS = ['Booked', 'Assigned', 'On the way', 'In Progress', 'Completed']
+const bigStepIdx = (status: string): number => (
+  { confirmed: 0, worker_assigned: 1, on_the_way: 2, arrived: 2, in_progress: 3, completed: 4 }[status] ?? 0
+)
+function StepTimeline({ status }: { status: string }) {
+  const cur = bigStepIdx(status)
+  const done = status === 'completed'
   return (
-    <div className={`jt-row ${multiline ? 'col' : ''}`}>
+    <div className="jt-steps">
+      {BIG_STEPS.map((s, i) => {
+        const isDone = done || i < cur
+        const isCur = !done && i === cur
+        return (
+          <div key={s} className={`jt-step ${isDone ? 'done' : ''} ${isCur ? 'cur' : ''}`}>
+            <span className="jt-step-dot">{isDone ? <Check size={14} strokeWidth={3} /> : i + 1}</span>
+            <span className="jt-step-lbl">{s}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Row({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="jt-row">
       <span className="jt-row-l">{label}</span>
       <span className="jt-row-v">{value || '—'}</span>
     </div>
