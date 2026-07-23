@@ -124,6 +124,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.homehelp.pro.network.NotificationItem
 import com.homehelp.pro.network.SkillClaim
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1176,13 +1177,14 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
     androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadShaktiBonus() }
     var period by remember { mutableStateOf("This Month") }
 
-    // Genuine lifetime figures where the backend reports them; demo fallbacks otherwise.
-    val baseRating = if (vm.workerRating > 0) vm.workerRating else 4.9
-    val baseJobs = if (vm.jobsCompleted > 0) vm.jobsCompleted else 68
-    val baseAccept = vm.acceptancePct ?: 98
-    val baseComplete = vm.completionPct ?: 100
-    val baseCancel = vm.cancellationPct ?: 1
-    val baseOnTime = vm.punctualityPct ?: 97
+    // The worker's own lifetime figures, or zero. A new worker has no record yet — inventing
+    // 4.9★ over 68 jobs tells them something about themselves that isn't true.
+    val baseRating = vm.workerRating
+    val baseJobs = vm.jobsCompleted
+    val baseAccept = vm.acceptancePct ?: 0
+    val baseComplete = vm.completionPct ?: 0
+    val baseCancel = vm.cancellationPct ?: 0
+    val baseOnTime = vm.punctualityPct ?: 0
 
     // Period filter reshapes the figures so the dropdown visibly changes the dashboard.
     val d = remember(period, baseRating, baseJobs, baseAccept, baseComplete, baseCancel, baseOnTime) {
@@ -1827,29 +1829,46 @@ private data class NotifItem(
     val highlight: Boolean = false, // faint tinted card background (focused item)
 )
 
-private val NOTIFS_TODAY = listOf(
-    NotifItem(Icons.Filled.CalendarMonth, Purple, PurpleLight, "New Job Offer", "Kitchen Cleaning at Madhapur", "₹220 • 2.6 km away", time = "2 min ago", category = "Jobs", accent = Purple, highlight = true),
-    NotifItem(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Payment Credited", "₹220 added to your wallet", "Order #SNB12745", time = "15 min ago", category = "Wallet", accent = GreenSuccess),
-    NotifItem(Icons.Filled.CardGiftcard, Amber, GoldLight, "Incentive Unlocked! 🎉", "You earned ₹200 incentive", "Keep it up!", time = "35 min ago", category = "Wallet", accent = Amber),
-)
-
-private val NOTIFS_EARLIER = listOf(
-    NotifItem(Icons.Filled.Campaign, NotifBlue, NotifBlueBg, "Shift Update", "Your shift on 26 May has been updated", "New timing: 10:00 AM – 6:00 PM", time = "2 hours ago", category = "HR"),
-    NotifItem(Icons.Filled.School, Purple, PurpleLight, "Training Session", "Hygiene & Safety training", "Tomorrow at 10:00 AM", time = "3 hours ago", category = "Training"),
-    NotifItem(Icons.Filled.Warning, RedCancel, RedLight, "Attendance Marked", "Checked in at 09:02 AM", "26 May 2024", time = "4 hours ago", category = "HR"),
-    NotifItem(Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Weekly Target Update", "You are 60% towards this week's target", "₹2,000 more to go!", time = "5 hours ago", category = "HR"),
-    NotifItem(Icons.Filled.Description, NotifBlue, NotifBlueBg, "New Policy Update", "Please check the updated cancellation policy", link = "View Details", time = "1 day ago", category = "System"),
-    NotifItem(Icons.Filled.WorkspacePremium, Purple, PurpleLight, "Congrats! You are a Top Performer 🏆", "You are in Top 20% workers in your zone", "Great going!", time = "1 day ago", category = "HR"),
-)
+/**
+ * Backend rows carry no category, so the icon/tint is derived from the notification's own words —
+ * purely how the row is drawn, never what it says. Anything unrecognised stays a neutral notice.
+ */
+private fun NotificationItem.toNotifItem(wasUnread: Boolean): NotifItem {
+    val t = text.lowercase()
+    val (icon, tint, chip) = when {
+        listOf("job", "booking", "order").any { it in t } -> Triple(Icons.Filled.CalendarMonth, Purple, PurpleLight)
+        listOf("credit", "paid", "payout", "wallet", "earn", "₹").any { it in t } ->
+            Triple(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight)
+        listOf("bonus", "incentive").any { it in t } -> Triple(Icons.Filled.CardGiftcard, Amber, GoldLight)
+        listOf("penalty", "late", "cancel").any { it in t } -> Triple(Icons.Filled.Warning, RedCancel, RedLight)
+        else -> Triple(Icons.Filled.Campaign, NotifBlue, NotifBlueBg)
+    }
+    // The wallet service sends "Title — body"; split it back so the card keeps its two-line shape.
+    val parts = text.split(" — ", limit = 2)
+    return NotifItem(
+        icon = icon, tint = tint, chipBg = chip,
+        title = parts.firstOrNull().orEmpty().ifBlank { "Notification" },
+        line1 = parts.getOrNull(1).orEmpty(),
+        time = time.ifBlank { date },
+        category = "All",
+        accent = if (wasUnread) tint else null,
+    )
+}
 
 @Composable
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    androidx.compose.runtime.LaunchedEffect(Unit) { vm.markNotificationsRead() }
-    var tab by remember { mutableStateOf("All") }
-    val tabs = listOf("All", "Jobs", "Wallet", "HR", "Training", "System")
-    val today = NOTIFS_TODAY.filter { tab == "All" || it.category == tab }
-    val earlier = NOTIFS_EARLIER.filter { tab == "All" || it.category == tab }
+    // Which rows were unread when this screen opened — marking them read below would otherwise
+    // erase the distinction before the list is even drawn.
+    val unreadIds = remember { vm.notifications.filter { !it.read }.map { it.id }.toSet() }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        vm.refreshNotifications()
+        vm.markNotificationsRead()
+    }
+    val todayDate = remember { java.time.LocalDate.now().toString() }
+    val rows = vm.notifications.map { it.toNotifItem(it.id in unreadIds) to it.date }
+    val today = rows.filter { it.second == todayDate }.map { it.first }
+    val earlier = rows.filter { it.second != todayDate }.map { it.first }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         // Clean white top bar — title + search + overflow, as the reference draws it (no back arrow;
@@ -1868,27 +1887,8 @@ fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(bottom = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            // Category filter pills — horizontally scrollable (six tabs don't fit a fixed track).
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                tabs.forEach { t ->
-                    val on = t == tab
-                    Box(
-                        Modifier.clip(RoundedCornerShape(Radius.pill))
-                            .background(if (on) Purple else FieldFill)
-                            .clickable { tab = t }
-                            .padding(horizontal = 15.dp, vertical = 7.dp),
-                    ) {
-                        Text(
-                            t, color = if (on) Color.White else TextGray, fontSize = 12.5.sp,
-                            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                        )
-                    }
-                }
-            }
-
+            // No category pills: the wallet feed carries no category, and tabs that can never
+            // match anything are worse than no tabs.
             if (today.isEmpty() && earlier.isEmpty()) {
                 Column(
                     Modifier.fillMaxWidth().padding(vertical = 44.dp),
@@ -1898,7 +1898,7 @@ fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.height(Space.m))
                     Text("You're all caught up", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Nothing here under this filter.", color = TextGray, fontSize = 13.sp)
+                    Text("You have no notifications yet.", color = TextGray, fontSize = 13.sp)
                 }
             } else {
                 if (today.isNotEmpty()) {

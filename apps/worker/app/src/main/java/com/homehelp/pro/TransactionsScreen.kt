@@ -103,7 +103,8 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
     var hideBalance by remember { mutableStateOf(false) }
     var page by remember { mutableIntStateOf(0) }
 
-    val all = if (vm.walletHistory.isNotEmpty()) vm.walletHistory.toList() else demoLedger()
+    // The real ledger or nothing — an invented history is money the worker never earned.
+    val all = vm.walletHistory.toList()
 
     // Filter → search → sort. Resetting the page whenever the result set changes keeps paging sane.
     val filtered = all
@@ -166,7 +167,7 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            if (hideBalance) "₹ ••••" else rupees(vm.walletBalance.takeIf { it > 0 } ?: 2100),
+                            if (hideBalance) "₹ ••••" else rupees(vm.walletBalance),
                             color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold,
                         )
                     }
@@ -472,18 +473,3 @@ private fun DetailRow(label: String, value: String, valueColor: Color = TextDark
     }
 }
 
-/** Fallback ledger mirroring the reference, used only until the backend reports real history. */
-private fun demoLedger(): List<LedgerEntry> = listOf(
-    LedgerEntry(1, "25 May 2026", "11:30 AM", "Service Earnings", "", 450, true, "Completed", "", "Home Cleaning - 2 Hours"),
-    LedgerEntry(2, "24 May 2026", "09:15 PM", "Incentive Earned", "", 300, true, "Completed", "", "Performance Bonus"),
-    LedgerEntry(3, "24 May 2026", "03:45 PM", "Service Earnings", "", 600, true, "Completed", "", "Kitchen Deep Cleaning"),
-    LedgerEntry(4, "23 May 2026", "", "Incentive Pending", "", 900, true, "Pending", "", "Monthly Target Incentive"),
-    LedgerEntry(5, "22 May 2026", "08:20 PM", "Payout to Bank", "", 2000, false, "Paid", "", "HDFC Bank **** 1234"),
-    LedgerEntry(6, "22 May 2026", "04:10 PM", "Adjustment", "", 100, false, "Completed", "", "Cancellation Penalty"),
-    LedgerEntry(7, "21 May 2026", "10:05 AM", "Service Earnings", "", 350, true, "Completed", "", "Bathroom Cleaning"),
-    LedgerEntry(8, "20 May 2026", "05:30 PM", "Service Earnings", "", 500, true, "Completed", "", "Home Cleaning - 3 Hours"),
-    LedgerEntry(9, "19 May 2026", "01:20 PM", "Incentive Earned", "", 250, true, "Completed", "", "Referral Bonus"),
-    LedgerEntry(10, "18 May 2026", "07:45 PM", "Payout to Bank", "", 1500, false, "Paid", "", "HDFC Bank **** 1234"),
-    LedgerEntry(11, "17 May 2026", "11:00 AM", "Service Earnings", "", 420, true, "Completed", "", "Sofa Cleaning"),
-    LedgerEntry(12, "16 May 2026", "02:30 PM", "Adjustment", "", 50, false, "Completed", "", "Late Arrival Fee"),
-)
