@@ -124,6 +124,29 @@ async function init() {
       created       TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated       TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Service extensions — extra paid time bought once the booked duration runs out. The original
+    // service price is NEVER rewritten: these two columns accumulate alongside `total` so the
+    // invoice can show the two lines separately and worker settlement keeps using the base total.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extension_minutes INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extension_total INTEGER NOT NULL DEFAULT 0`,
+    // One row per request, approved or not — declines are kept because "how often do we ask for
+    // more time, and why" is the signal that tells you your duration estimates are wrong.
+    `CREATE TABLE IF NOT EXISTS booking_extensions (
+      id SERIAL PRIMARY KEY,
+      booking_id INTEGER NOT NULL,
+      requested_by TEXT NOT NULL DEFAULT 'worker',  -- worker | customer
+      worker_id INTEGER,
+      minutes INTEGER NOT NULL,
+      price INTEGER NOT NULL DEFAULT 0,             -- what the customer pays (0 when absorbed)
+      payout INTEGER NOT NULL DEFAULT 0,            -- what the worker earns for it
+      reason_code TEXT NOT NULL DEFAULT '',
+      reason_text TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',       -- pending | approved | declined | cancelled
+      payment_method TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now(),
+      decided TIMESTAMPTZ
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_ext_booking ON booking_extensions(booking_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
@@ -164,6 +187,63 @@ async function cancelCfg() {
 }
 
 const emitBookingUpdate = async (id) => publishRealtime(REDIS_URL, `booking:${id}`, 'booking:update', await getBooking(id))
+
+/* ═══════════════ Service extensions ═══════════════
+ * Extra paid time, bought only with the customer's consent. The worker (or later the customer)
+ * raises a request once the booked time is running out; the customer approves and pays; only then
+ * does the job clock grow. Nothing here rewrites the original service price — see the two
+ * `extension_*` columns.
+ */
+
+// Why more time is needed, and — the part that matters — who pays for it. A worker who simply ran
+// over their own estimate cannot bill the customer for it, so `chargeable: false` extends the clock
+// at no charge and the cost sits with the business. This is the whole reason a reason code exists.
+const EXT_REASONS = {
+  customer_request: { label: 'Customer requested additional work', chargeable: true },
+  more_area: { label: 'More area/items than expected', chargeable: true },
+  service_condition: { label: 'Service condition requires more time', chargeable: true },
+  customer_added_task: { label: 'Customer added another task', chargeable: true },
+  scope_incomplete: { label: 'Original scope incomplete', chargeable: false },
+  other: { label: 'Other', chargeable: true },
+}
+
+const extDto = (r) => r && ({
+  id: r.id, bookingId: r.booking_id, requestedBy: r.requested_by, minutes: r.minutes,
+  price: r.price, payout: r.payout, reasonCode: r.reason_code,
+  reasonLabel: EXT_REASONS[r.reason_code]?.label || r.reason_code,
+  reasonText: r.reason_text, status: r.status, created: r.created, decided: r.decided,
+})
+
+const extensionsFor = async (bookingId) =>
+  (await pool.query('SELECT * FROM booking_extensions WHERE booking_id=$1 ORDER BY id', [bookingId])).rows.map(extDto)
+
+// The service whose rule governs this booking — the first booked item, same one the timer uses.
+const ruleForBooking = async (b) =>
+  tryGet(CATALOG_URL, `/api/internal/extension-rule/${encodeURIComponent((b.items || [])[0]?.id || '')}`, null)
+
+/**
+ * Validate a request against the service's rule and price it. Fails closed: no rule, disabled,
+ * unknown block, too many requests or over the time ceiling all mean "cannot extend".
+ */
+async function priceExtension(b, minutes, reasonCode) {
+  const rule = await ruleForBooking(b)
+  if (!rule || !rule.enabled) return { error: 'Extensions are not available for this service' }
+  const block = (rule.blocks || []).find((x) => x.mins === minutes)
+  if (!block) return { error: 'That extension length is not offered for this service' }
+  const rows = await extensionsFor(b.id)
+  if (rows.some((r) => r.status === 'pending')) return { error: 'An extension request is already awaiting a decision' }
+  const approved = rows.filter((r) => r.status === 'approved')
+  if (approved.length >= rule.maxRequests) return { error: `This booking has already been extended ${rule.maxRequests} time(s)` }
+  const usedMin = approved.reduce((s, r) => s + r.minutes, 0)
+  if (usedMin + minutes > rule.maxTotalMin) {
+    return { error: `Maximum ${rule.maxTotalMin} min of extra time per booking — ${rule.maxTotalMin - usedMin} min left` }
+  }
+  const reason = EXT_REASONS[reasonCode]
+  if (!reason) return { error: 'Pick a reason for the extra time' }
+  // Non-chargeable reasons still extend the clock, at no cost to the customer and no extra pay.
+  return reason.chargeable ? { price: block.price, payout: block.payout } : { price: 0, payout: 0 }
+}
+
 async function anyActiveWorker(serviceNames) {
   const r = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent((serviceNames || []).join(','))}`, null)
   return r ? !!r.available : true // default true if worker service is unavailable
@@ -238,6 +318,94 @@ async function slotAvailability(date, time, pincode, serviceNames) {
 const app = express()
 app.use(express.json({ limit: '6mb' }))
 app.get('/health', (_q, res) => res.json({ service: 'booking', ok: true }))
+
+// Worker-raised request, proxied by dispatch (which owns the worker's session).
+app.post('/api/internal/bookings/:id/extension', internalOnly, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (b.status !== 'in_progress') return res.status(409).json({ error: 'The service is not in progress' })
+  const minutes = Math.round(Number(req.body?.minutes) || 0)
+  const reasonCode = String(req.body?.reasonCode || '')
+  const priced = await priceExtension(b, minutes, reasonCode)
+  if (priced.error) return res.status(400).json({ error: priced.error })
+  const { rows } = await pool.query(
+    `INSERT INTO booking_extensions (booking_id, requested_by, worker_id, minutes, price, payout, reason_code, reason_text)
+     VALUES ($1,'worker',$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [b.id, b.worker_id || null, minutes, priced.price, priced.payout, reasonCode, String(req.body?.reasonText || '')])
+  const ext = extDto(rows[0])
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extension.requested', { booking: b, extension: ext })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: b.worker_id, actorName: b.pro_name, action: 'job.extension.request', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Requested +${minutes} min (₹${priced.price}) · ${EXT_REASONS[reasonCode].label}` })
+  res.json({ ok: true, extension: ext })
+})
+
+app.get('/api/internal/bookings/:id/extensions', internalOnly, async (req, res) =>
+  res.json(await extensionsFor(Number(req.params.id))))
+
+/* ---------- customer-facing ---------- */
+// What the approval sheet needs: the pending ask plus everything already granted.
+app.get('/api/bookings/:id/extensions', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const rows = await extensionsFor(b.id)
+  res.json({
+    pending: rows.find((r) => r.status === 'pending') || null,
+    extensions: rows,
+    extensionMinutes: b.extension_minutes || 0,
+    extensionTotal: b.extension_total || 0,
+  })
+})
+
+app.post('/api/bookings/:id/extensions/:extId/decline', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const { rows } = await pool.query(
+    `UPDATE booking_extensions SET status='declined', decided=now()
+     WHERE id=$1 AND booking_id=$2 AND status='pending' RETURNING *`, [Number(req.params.extId), b.id])
+  if (!rows.length) return res.status(409).json({ error: 'That request is no longer pending' })
+  const ext = extDto(rows[0])
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extension.declined', { booking: b, extension: ext })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: b.user_id, action: 'job.extension.decline', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Declined +${ext.minutes} min` })
+  res.json({ ok: true, extension: ext })
+})
+
+// Approve = pay, then grant. The charge happens FIRST: if the money doesn't move, the clock
+// doesn't either, so a worker can never be told to carry on against an unpaid extension.
+app.post('/api/bookings/:id/extensions/:extId/approve', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const row = (await pool.query('SELECT * FROM booking_extensions WHERE id=$1 AND booking_id=$2',
+    [Number(req.params.extId), b.id])).rows[0]
+  if (!row || row.status !== 'pending') return res.status(409).json({ error: 'That request is no longer pending' })
+
+  let method = ''
+  if (row.price > 0) {
+    // Wallet is the only settled rail for extensions today; a gateway charge mid-service needs the
+    // customer to complete a checkout, which the approval sheet can't yet drive. Fail loudly
+    // rather than granting time nobody paid for.
+    try {
+      await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`,
+        { type: 'debit', title: `Service extension +${row.minutes} min`, amount: row.price })
+      method = 'wallet'
+    } catch (e) {
+      return res.status(402).json({ error: e.message || 'Insufficient wallet balance', needsTopUp: true, amount: row.price })
+    }
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE booking_extensions SET status='approved', decided=now(), payment_method=$2 WHERE id=$1 RETURNING *`,
+    [row.id, method])
+  await pool.query(
+    'UPDATE bookings SET extension_minutes = extension_minutes + $2, extension_total = extension_total + $3 WHERE id=$1',
+    [b.id, row.minutes, row.price])
+  const ext = extDto(rows[0])
+  const after = await getBooking(b.id)
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extension.approved', { booking: after, extension: ext })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: b.user_id, action: 'job.extension.approve', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Approved +${ext.minutes} min · ₹${ext.price}`, meta: { amount: ext.price } })
+  res.json({ ok: true, extension: ext, extensionMinutes: after.extension_minutes, extensionTotal: after.extension_total })
+})
 
 // App-scoped AI support chat. Returns { reply } on success, or { reply: null, fallback: true }
 // so the app uses its built-in offline assistant (also the default when no AI_API_KEY is set).
@@ -686,7 +854,9 @@ app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
-  res.json({ ...b, customer: u?.user?.name || 'Customer' })
+  // Extensions ride along with the booking: an admin looking at what was charged needs to see the
+  // extra time too, not just the base service.
+  res.json({ ...b, customer: u?.user?.name || 'Customer', extensions: await extensionsFor(b.id) })
 })
 // Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
 // actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp

@@ -24,12 +24,11 @@ const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
 
-// On-time-start rule: after accepting a job, the worker must START the service (enter the
-// customer OTP) within START_WINDOW_MIN. On time → ON_TIME_INCENTIVE credited; otherwise
-// LATE_PENALTY is deducted. Both land in the worker's wallet history.
-const START_WINDOW_MIN = Number(process.env.START_WINDOW_MIN || 15)
-const ON_TIME_INCENTIVE = Number(process.env.ONTIME_INCENTIVE || 15)
-const LATE_PENALTY = Number(process.env.LATE_START_PENALTY || 15)
+// Job-start bonus: the worker is credited the moment they START the service (enter the customer
+// OTP). Unconditional — it does not depend on how the job reached them or how long they took to
+// start, so it can never be silently skipped. Lands in the wallet immediately.
+// The amount is the admin's to set (Settings → "Job start bonus"); 0 turns it off.
+const START_BONUS_DEFAULT = Number(process.env.ONTIME_INCENTIVE || 15)
 
 process.on('unhandledRejection', (e) => console.error('[wallet] unhandledRejection:', e?.message || e))
 
@@ -44,8 +43,8 @@ async function init() {
     `CREATE TABLE IF NOT EXISTS worker_advances (id SERIAL PRIMARY KEY, worker_id INTEGER, amount INTEGER, outstanding INTEGER, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_payslips (id SERIAL PRIMARY KEY, worker_id INTEGER, month TEXT, gross INTEGER, deductions INTEGER, net INTEGER, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_notifications (id SERIAL PRIMARY KEY, worker_id INTEGER, title TEXT, body TEXT, read BOOLEAN DEFAULT false, created TIMESTAMPTZ DEFAULT now())`,
-    // Tracks the 15-min "start service by OTP" window per accepted job. resolved: NULL (pending),
-    // 'incentive' (started on time), 'penalty' (started late / never started), 'skipped' (cancelled).
+    // Retired: the job-start bonus is now unconditional, so nothing reads or writes this. Kept so
+    // the historical rows explaining old 'On-time start' credits and late-start penalties survive.
     `CREATE TABLE IF NOT EXISTS worker_start_deadlines (booking_id INTEGER PRIMARY KEY, worker_id INTEGER, ref TEXT, accepted_at TIMESTAMPTZ DEFAULT now(), deadline TIMESTAMPTZ, resolved TEXT)`,
     // Plain unique (NULLs are distinct in Postgres, so bonus/penalty rows with no ref_id are fine),
     // so `INSERT ... ON CONFLICT (worker_id, ref_id)` can use it as the arbiter for idempotent settlement.
@@ -80,6 +79,9 @@ async function init() {
 }
 
 const commission = () => getSettingInt(ADMIN_URL, 'commission_percent', 20)
+// Admin-controlled job-start bonus. Read per credit so a change in Settings applies to the very
+// next job started — no redeploy, no restart.
+const startBonus = () => getSettingInt(ADMIN_URL, 'job_start_bonus', START_BONUS_DEFAULT)
 
 /* Phase 10: a worker may have their own commission, which overrides the platform-wide one.
  * The worker service owns the worker, so we ASK rather than keep a copy that drifts.
@@ -182,6 +184,21 @@ async function settleBooking(b) {
       await notify(b.worker_id, 'Incentive credited', `+₹${perJobIncentive} for ${ref}`)
     }
   }
+  // Extra time the customer approved and paid for. Paid as its own ledger line rather than folded
+  // into the share: the base job price is never rewritten by an extension, so the share can't carry
+  // it. Idempotent per extension row.
+  const exts = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extensions`, [])
+  for (const e of (Array.isArray(exts) ? exts : [])) {
+    if (e.status !== 'approved' || !(e.payout > 0)) continue
+    const extIns = await pool.query(
+      `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Extension',$2,$3,$4,'available')
+       ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+      [b.worker_id, `Extra time +${e.minutes} min · ${ref}`, e.payout, `ext-${e.id}`])
+    if (extIns.rowCount) {
+      await adjustBalance(b.worker_id, { balance: e.payout, earnings: e.payout })
+      await notify(b.worker_id, 'Extra time credited', `+₹${e.payout} for ${e.minutes} extra min on ${ref}`)
+    }
+  }
   await internalPost((process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''), `/api/internal/bookings/${b.id}/settled`, {}).catch(() => {})
   if (share > 0) {
     await notify(b.worker_id, 'Earnings credited', `₹${share} for ${b.ref || b.id}`)
@@ -189,65 +206,23 @@ async function settleBooking(b) {
   }
 }
 
-/* ---------- on-time-start incentive / late-start penalty ---------- */
-// Start (or reset) the 15-min start window when a job is accepted / auto-assigned.
-async function openStartWindow({ bookingId, workerId, ref }) {
+/* ---------- job-start bonus ---------- */
+// Credited on job.start (customer OTP verified), whatever route the job arrived by. Idempotent on
+// ref_id, so a retried event or a resumed job can't pay twice. Kept on the `ontime-` ref prefix:
+// the rows already in the ledger were paid under the old on-time rule and must not double-credit.
+async function creditStartBonus({ bookingId, workerId, ref }) {
   if (!bookingId || !workerId) return
-  await pool.query(
-    `INSERT INTO worker_start_deadlines (booking_id, worker_id, ref, accepted_at, deadline, resolved)
-     VALUES ($1, $2, $3, now(), now() + make_interval(mins => $4), NULL)
-     ON CONFLICT (booking_id) DO UPDATE SET worker_id = EXCLUDED.worker_id, ref = EXCLUDED.ref,
-       accepted_at = now(), deadline = EXCLUDED.deadline, resolved = NULL`,
-    [bookingId, workerId, ref || `#${bookingId}`, START_WINDOW_MIN])
-}
-
-// Credit the on-time-start bonus (idempotent on ref_id → shows as a credit in wallet history).
-async function creditOnTimeIncentive(row) {
+  const amount = await startBonus()
+  if (amount <= 0) return // admin set it to 0 → bonus switched off
+  const label = ref || `#${bookingId}`
   const ins = await pool.query(
     `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
      VALUES ($1, 'Incentive', $2, $3, $4, 'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [row.worker_id, `On-time start · ${row.ref}`, ON_TIME_INCENTIVE, `ontime-${row.booking_id}`])
+    [workerId, `Job start bonus · ${label}`, amount, `ontime-${bookingId}`])
   if (!ins.rowCount) return
-  await adjustBalance(row.worker_id, { balance: ON_TIME_INCENTIVE, earnings: ON_TIME_INCENTIVE })
-  await notify(row.worker_id, 'On-time bonus', `+₹${ON_TIME_INCENTIVE} for starting ${row.ref} within ${START_WINDOW_MIN} min`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.incentive', entityType: 'worker', entityId: row.worker_id, detail: `On-time start bonus ₹${ON_TIME_INCENTIVE} for ${row.ref}`, meta: { amount: ON_TIME_INCENTIVE } })
-}
-
-// Deduct the late-start penalty (shows as a debit in wallet history + the Deductions screen).
-async function applyLatePenalty(row) {
-  await pool.query(
-    `INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1, 'Late Start Penalty', $2, $3)`,
-    [row.worker_id, `Late start · ${row.ref} (not started within ${START_WINDOW_MIN} min)`, LATE_PENALTY])
-  await adjustBalance(row.worker_id, { balance: -LATE_PENALTY })
-  await notify(row.worker_id, 'Late-start penalty', `−₹${LATE_PENALTY}: service for ${row.ref} not started within ${START_WINDOW_MIN} min`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: row.worker_id, detail: `Late-start penalty ₹${LATE_PENALTY} for ${row.ref}`, meta: { amount: LATE_PENALTY } })
-}
-
-// Worker started the service (OTP verified). Atomically claim the row so the sweep can't also fire.
-async function resolveOnStart({ bookingId }) {
-  if (!bookingId) return
-  const row = (await pool.query(
-    `UPDATE worker_start_deadlines SET resolved = CASE WHEN now() <= deadline THEN 'incentive' ELSE 'penalty' END
-     WHERE booking_id = $1 AND resolved IS NULL RETURNING *`, [bookingId])).rows[0]
-  if (!row) return // no window, or already resolved by the sweep
-  if (row.resolved === 'incentive') await creditOnTimeIncentive(row)
-  else await applyLatePenalty(row)
-}
-
-// Periodic sweep: penalize jobs accepted >15 min ago that were never started — but only if the
-// booking is still assigned-and-not-started (skip cancelled / released / completed jobs).
-const NOT_STARTED = ['worker_assigned', 'on_the_way', 'arrived']
-async function sweepLateStarts() {
-  const { rows } = await pool.query("SELECT * FROM worker_start_deadlines WHERE resolved IS NULL AND deadline < now()")
-  for (const row of rows) {
-    const b = await tryGet(BOOKING_URL, `/api/internal/bookings/${row.booking_id}`, null)
-    const stillWaiting = NOT_STARTED.includes(b?.status)
-    // Claim the row atomically (guards against a concurrent job.start resolving it).
-    const claimed = (await pool.query(
-      "UPDATE worker_start_deadlines SET resolved = $2 WHERE booking_id = $1 AND resolved IS NULL RETURNING *",
-      [row.booking_id, stillWaiting ? 'penalty' : 'skipped'])).rows[0]
-    if (claimed && stillWaiting) await applyLatePenalty(claimed)
-  }
+  await adjustBalance(workerId, { balance: amount, earnings: amount })
+  await notify(workerId, 'Job start bonus', `+₹${amount} for starting ${label}`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.incentive', entityType: 'worker', entityId: workerId, detail: `Job start bonus ₹${amount} for ${label}`, meta: { amount } })
 }
 
 // ISO date/time parts for a ledger row (UTC — good enough for the demo history list).
@@ -797,9 +772,7 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'payroll.credit') return creditPayroll(data)
   if (type === 'incentive.credit') return creditEngineIncentive(data)
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
-  else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
-  else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })
-  else if (type === 'job.start') await resolveOnStart({ bookingId: data.bookingId })
+  else if (type === 'job.start') await creditStartBonus({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.cancelled' && data.booking?.worker_id && data.quote?.workerComp > 0) {
     const b = data.booking, comp = data.quote.workerComp
     const cSvc = serviceOf(b)
@@ -861,7 +834,5 @@ async function settleMinGuarantee({ workerId, minG, day }) {
 init()
   .then(() => {
     app.listen(PORT, () => console.log(`[wallet] service on http://localhost:${PORT}`))
-    // Sweep for jobs never started within the window (applies the late-start penalty).
-    setInterval(() => sweepLateStarts().catch((e) => console.error('[wallet] late-start sweep:', e.message)), 30000)
   })
   .catch((e) => { console.error('[wallet] failed to start:', e.message); process.exit(1) });

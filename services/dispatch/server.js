@@ -175,6 +175,17 @@ function bookingDurationMinutes(b) {
   return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
 }
 
+// Reason menu the worker picks from. `chargeable:false` means the customer is not billed for the
+// extra time — kept in sync with EXT_REASONS in the booking service, which is the authority.
+const EXT_REASON_LIST = [
+  { code: 'customer_request', label: 'Customer requested additional work', chargeable: true },
+  { code: 'more_area', label: 'More area/items than expected', chargeable: true },
+  { code: 'service_condition', label: 'Service condition requires more time', chargeable: true },
+  { code: 'customer_added_task', label: 'Customer added another task', chargeable: true },
+  { code: 'scope_incomplete', label: 'Original scope incomplete', chargeable: false },
+  { code: 'other', label: 'Other', chargeable: true },
+]
+
 async function jobFromBooking(b) {
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   const c = u?.user || {}
@@ -187,6 +198,9 @@ async function jobFromBooking(b) {
     distanceKm: +(1 + (b.id % 30) / 10).toFixed(1), earnings: await workerShare(b.total), otp: b.service_otp,
     lat: b.cust_lat ?? (17.4448 + (b.id % 10) * 0.002), lng: b.cust_lng ?? (78.3498 + (b.id % 10) * 0.002),
     startedAt: b.started_at || null, completedAt: b.completed_at || null,
+    // Extra approved time rides alongside the booked duration — the app adds the two for the live
+    // countdown, so the base figure keeps meaning "what was booked".
+    extensionMinutes: b.extension_minutes || 0,
   }
 }
 
@@ -444,6 +458,48 @@ app.post('/api/worker/jobs/signature', auth, async (req, res) => {
   }))
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.signed', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Customer signed off${rating ? ` · rated ${rating}★` : ''}` })
   res.json({ ok: true, ...out })
+})
+
+/* ---------- service extensions (worker side) ---------- */
+// The menu the worker is offered, plus what's already been used — booking owns the accounting, so
+// this is a straight proxy rather than a second copy of the rules.
+app.get('/api/worker/jobs/extension-options', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const serviceId = (b.items || [])[0]?.id || ''
+  const rule = await tryGet(CATALOG_URL, `/api/internal/extension-rule/${encodeURIComponent(serviceId)}`, null)
+  const rows = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extensions`, [])
+  const approved = (Array.isArray(rows) ? rows : []).filter((r) => r.status === 'approved')
+  const usedMin = approved.reduce((s, r) => s + r.minutes, 0)
+  const remaining = Math.max(0, (rule?.maxTotalMin || 0) - usedMin)
+  res.json({
+    enabled: !!rule?.enabled && remaining > 0 && approved.length < (rule?.maxRequests || 0),
+    blocks: (rule?.blocks || []).filter((x) => x.mins <= remaining),
+    reasons: EXT_REASON_LIST,
+    pending: (Array.isArray(rows) ? rows : []).find((r) => r.status === 'pending') || null,
+    usedMinutes: usedMin, remainingMinutes: remaining,
+    requestsLeft: Math.max(0, (rule?.maxRequests || 0) - approved.length),
+  })
+})
+
+app.post('/api/worker/jobs/extension', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  try {
+    const out = await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/extension`, {
+      minutes: Number(req.body?.minutes) || 0,
+      reasonCode: String(req.body?.reasonCode || ''),
+      reasonText: String(req.body?.reasonText || ''),
+    })
+    res.json(out)
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message || 'Could not request more time' })
+  }
+})
+
+// Poll target while the worker waits on the customer — cheap, and the app already polls job state.
+app.get('/api/worker/jobs/extensions', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const rows = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extensions`, [])
+  res.json({ ok: true, extensions: Array.isArray(rows) ? rows : [], extensionMinutes: b.extension_minutes || 0 })
 })
 
 app.post('/api/worker/jobs/extras', auth, async (req, res) => {

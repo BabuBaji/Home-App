@@ -316,6 +316,27 @@ export const fetchServiceWorkers = (service: string, lat?: number, lng?: number)
     `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
+
+/* service extensions — extra paid time the expert asks for and the customer grants */
+export interface BookingExtension {
+  id: number; bookingId: number; requestedBy: 'worker' | 'customer'
+  minutes: number; price: number; payout: number
+  reasonCode: string; reasonLabel: string; reasonText: string
+  status: 'pending' | 'approved' | 'declined' | 'cancelled'
+  created: string; decided: string | null
+}
+export interface ExtensionState {
+  pending: BookingExtension | null
+  extensions: BookingExtension[]
+  extensionMinutes: number
+  extensionTotal: number
+}
+export const fetchExtensions = (id: number) => req<ExtensionState>(`/api/bookings/${id}/extensions`)
+export const approveExtension = (id: number, extId: number) =>
+  req<{ ok: boolean; extension: BookingExtension; extensionMinutes: number; extensionTotal: number }>(
+    `/api/bookings/${id}/extensions/${extId}/approve`, { method: 'POST' })
+export const declineExtension = (id: number, extId: number) =>
+  req<{ ok: boolean; extension: BookingExtension }>(`/api/bookings/${id}/extensions/${extId}/decline`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })
 export const completeBooking = (id: number) => req<Booking>(`/api/bookings/${id}/complete`, { method: 'POST' })
 export const rescheduleBookingApi = (id: number, date: string, time: string) => req<Booking>(`/api/bookings/${id}/reschedule`, { method: 'POST', body: JSON.stringify({ date, time }) })

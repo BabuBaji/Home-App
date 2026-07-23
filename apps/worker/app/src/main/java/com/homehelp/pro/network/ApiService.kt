@@ -234,6 +234,15 @@ interface ApiService {
     @POST("api/worker/jobs/signature")
     suspend fun saveSignature(@Body body: SignatureBody): JobStateResponse
 
+    @GET("api/worker/jobs/extension-options")
+    suspend fun extensionOptions(): ExtensionOptions
+
+    @POST("api/worker/jobs/extension")
+    suspend fun requestExtension(@Body body: ExtensionRequestBody): ExtensionRequestResult
+
+    @GET("api/worker/jobs/extensions")
+    suspend fun jobExtensions(): ExtensionsResponse
+
     @POST("api/worker/jobs/extras")
     suspend fun addExtra(@Body body: ExtraBody): JobStateResponse
 

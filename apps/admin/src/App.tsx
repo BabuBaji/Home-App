@@ -17,6 +17,7 @@ import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import AdminBookingDetail from './screens/AdminBookingDetail'
 import Services from './screens/Services'
+import ExtensionRules from './screens/ExtensionRules'
 import Campaigns from './screens/Campaigns'
 import MembershipPlans from './screens/MembershipPlans'
 import ServiceAreas from './screens/ServiceAreas'
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="/bookings/:id" element={<Page perm="bookings.view"><AdminBookingDetail /></Page>} />
           <Route path="/cancellations" element={<Page perm="cancellations.view"><Bookings /></Page>} />
           <Route path="/services" element={<Page perm="services.view"><Services /></Page>} />
+          <Route path="/extension-rules" element={<Page perm="services.view"><ExtensionRules /></Page>} />
           <Route path="/campaigns" element={<Page perm="campaigns.view"><Campaigns /></Page>} />
           <Route path="/membership" element={<Page perm="pricing.view"><MembershipPlans /></Page>} />
           <Route path="/home-banners" element={<Page perm="campaigns.view"><HomeBanners /></Page>} />

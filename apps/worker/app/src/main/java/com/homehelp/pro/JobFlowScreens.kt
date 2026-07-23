@@ -1297,17 +1297,28 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     // Booked time is up once elapsed reaches the duration. Freeze the on-screen timer at the
     // booked length and raise a one-time "service time completed" popup (worker still ends
     // the service manually with the proof photo).
-    val targetSec = job.durationMinutes.coerceAtLeast(1) * 60
+    // Booked time plus whatever extra the customer has approved — the extension grows the clock,
+    // it never rewrites the booked figure.
+    val targetSec = (job.durationMinutes + vm.extensionMinutes).coerceAtLeast(1) * 60
     val timeUp = rawElapsed >= targetSec
     val elapsed = if (timeUp) targetSec else rawElapsed
     var timeUpDismissed by remember { mutableStateOf(false) }
+    var extSheet by remember { mutableStateOf(false) }
+    // A fresh grant of time re-arms the popup, so the worker is asked again when THAT time runs out.
+    LaunchedEffect(vm.extensionMinutes) { if (vm.extensionMinutes > 0) timeUpDismissed = false }
 
     // Ending the service hands off to step 7 (After Photos) → step 8 (Customer Sign) → complete.
     // The proof photo the customer sees is the first after-photo, attached server-side.
 
     LaunchedEffect(Unit) {
         vm.loadJobState()   // checklist / extras / pause state for this job
+        vm.refreshExtensions()
         while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
+    }
+    // While the customer is deciding, poll for their answer. Only while pending — an idle job
+    // shouldn't be talking to the server every few seconds.
+    LaunchedEffect(vm.pendingExtension?.id) {
+        while (vm.pendingExtension != null) { delay(5000); vm.refreshExtensions() }
     }
     var pauseDialog by remember { mutableStateOf(false) }
     if (pauseDialog) {
@@ -1381,6 +1392,26 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                             Spacer(Modifier.height(2.dp))
                             Text(elapsedHms, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
                             Text("Time Elapsed", color = TextGray, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+
+            // ── Extra time granted on this job: booked vs total, so the base figure keeps its meaning.
+            if (vm.extensionMinutes > 0) {
+                FlowCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⏱", fontSize = 17.sp)
+                        Spacer(Modifier.width(Space.s))
+                        Column(Modifier.weight(1f)) {
+                            Text("Service Extended", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Original ${job.durationMinutes} min + ${vm.extensionMinutes} min extra = ${job.durationMinutes + vm.extensionMinutes} min",
+                                color = TextGray, fontSize = 12.sp,
+                            )
+                        }
+                        if (vm.extensionEarnings > 0) {
+                            Text("+₹${vm.extensionEarnings}", color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1520,15 +1551,186 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         }
     }
 
-    // One-time "service time completed" popup when the booked duration elapses.
-    if (timeUp && !timeUpDismissed) {
+    // Booked time is up: ask whether the job is done, or whether more time is needed. The worker
+    // cannot simply carry on billing — extra time has to be asked for and granted by the customer.
+    if (timeUp && !timeUpDismissed && vm.pendingExtension == null) {
+        val booked = job.durationMinutes + vm.extensionMinutes
         AlertDialog(
             onDismissRequest = { timeUpDismissed = true },
-            confirmButton = { TextButton(onClick = { timeUpDismissed = true }) { Text("OK") } },
+            confirmButton = {
+                TextButton(onClick = { timeUpDismissed = true; nav.navigate(Routes.AFTER_PHOTOS) }) {
+                    Text("Yes, complete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { timeUpDismissed = true; extSheet = true; vm.loadExtensionOptions() }) {
+                    Text("Need more time")
+                }
+            },
             title = { Text("⏱  Service Time Completed", fontWeight = FontWeight.Bold) },
-            text = { Text("The booked ${job.durationMinutes} min for this service is over. Wrap up and tap “End Service” to capture the proof photo.", color = TextGray, fontSize = 14.sp) },
+            text = {
+                Text(
+                    "The $booked min booked for this service is over.\n\nIs the service complete? If you need longer, you can ask the customer to approve extra time.",
+                    color = TextGray, fontSize = 14.sp,
+                )
+            },
         )
     }
+
+    // Waiting on the customer — the clock is NOT extended yet, and we say so plainly.
+    val pendingExt = vm.pendingExtension
+    if (pendingExt != null) {
+        val p = pendingExt
+        if (extSheet) extSheet = false
+        AlertDialog(
+            onDismissRequest = { },
+            confirmButton = { TextButton(onClick = { vm.refreshExtensions() }) { Text("Refresh") } },
+            title = { Text("Extension approval pending", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Waiting for the customer to approve +${p.minutes} min" +
+                        (if (p.price > 0) " (₹${p.price})" else " (no charge)") +
+                        ".\n\nCarry on only once they approve — the extra time isn't active yet.",
+                    color = TextGray, fontSize = 14.sp,
+                )
+            },
+        )
+    }
+
+    // The customer answered.
+    val outcome = vm.lastExtensionOutcome
+    if (outcome != null) {
+        val o = outcome
+        AlertDialog(
+            onDismissRequest = { vm.clearExtensionOutcome() },
+            confirmButton = { TextButton(onClick = { vm.clearExtensionOutcome() }) { Text("OK") } },
+            title = { Text(if (o.status == "approved") "Extra time approved" else "Extension declined", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (o.status == "approved")
+                        "+${o.minutes} min added" + (if (o.payout > 0) " · you earn ₹${o.payout} extra" else "") + ". The timer has been updated."
+                    else
+                        "The customer declined the extra time. Finish what you can of the original scope, then complete the job and note anything left undone.",
+                    color = TextGray, fontSize = 14.sp,
+                )
+            },
+        )
+    }
+
+    if (extSheet) {
+        RequestExtensionSheet(vm, onDismiss = { extSheet = false })
+    }
+}
+
+/**
+ * Ask for more time: pick a block, say why, see exactly what the customer will be charged and what
+ * you earn, then send. Blocks arrive pre-filtered by the server's caps, so anything shown here is
+ * genuinely still allowed on this booking.
+ */
+@Composable
+private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val opts = vm.extensionOptions
+    var mins by remember { mutableIntStateOf(0) }
+    var reason by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    val block = opts?.blocks?.firstOrNull { it.mins == mins }
+    val chargeable = opts?.reasons?.firstOrNull { it.code == reason }?.chargeable ?: true
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text("Request more time", fontWeight = FontWeight.Bold) },
+        text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text(
+                "The customer decides — they'll see the extra cost and can approve or decline.",
+                color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.l))
+
+            when {
+                opts == null -> Text("Loading options…", color = TextMuted, fontSize = 13.sp)
+                !opts.enabled -> Text(
+                    if (opts.requestsLeft <= 0) "This booking has already used all its allowed extensions. Contact Operations if more time is genuinely needed."
+                    else "Extra time isn't available for this service.",
+                    color = TextGray, fontSize = 13.sp, lineHeight = 18.sp,
+                )
+                else -> {
+                    Text("Additional time required", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        opts.blocks.forEach { b ->
+                            val on = b.mins == mins
+                            Column(
+                                Modifier.clip(RoundedCornerShape(14.dp))
+                                    .background(if (on) Purple else FieldFill)
+                                    .clickable { mins = b.mins }
+                                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text("+${b.mins} min", color = if (on) Color.White else TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("₹${b.price}", color = if (on) Color.White.copy(alpha = 0.9f) else TextGray, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(Space.l))
+
+                    Text("Why is more time required?", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    opts.reasons.forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { reason = r.code }
+                                .padding(vertical = 9.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                Modifier.size(18.dp).clip(CircleShape)
+                                    .background(if (reason == r.code) Purple else FieldFill),
+                                contentAlignment = Alignment.Center,
+                            ) { if (reason == r.code) Box(Modifier.size(7.dp).clip(CircleShape).background(Color.White)) }
+                            Spacer(Modifier.width(Space.s))
+                            Text(r.label, color = TextDark, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            // Being straight with the worker: this reason means the customer isn't billed.
+                            if (!r.chargeable) Text("no charge", color = TextMuted, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (block != null && reason.isNotBlank()) {
+                        Spacer(Modifier.height(Space.m))
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(Space.m),
+                        ) {
+                            Text("+${block.mins} minutes", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                if (chargeable) "Customer charge: ₹${block.price}" else "Customer charge: ₹0 — absorbed, not billed",
+                                color = TextGray, fontSize = 12.5.sp,
+                            )
+                            Text(
+                                if (chargeable) "Your additional earning: ₹${block.payout}" else "Your additional earning: ₹0",
+                                color = TextGray, fontSize = 12.5.sp,
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(Space.l))
+                    PrimaryButton(
+                        if (sending) "Sending…" else "Send Request to Customer",
+                        enabled = !sending && block != null && reason.isNotBlank(),
+                    ) {
+                        sending = true
+                        vm.requestExtension(mins, reason) { err ->
+                            sending = false
+                            if (err == null) { toast(ctx, "Request sent — waiting for the customer"); onDismiss() }
+                            else toast(ctx, err)
+                        }
+                    }
+                }
+            }
+        }
+        },
+    )
 }
 
 /**

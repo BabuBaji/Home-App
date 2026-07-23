@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Phone, MessageCircle, Star, BadgeCheck, MapPin, Sparkles, CheckCircle2 } from 'lucide-react'
 import { Loading } from '../../components/UI'
+import { fetchExtensions, type ExtensionState } from '../../api'
 import { useJob, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
 
@@ -17,19 +18,47 @@ export default function LiveProgress() {
   const [, tick] = useState(0)
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(i) }, [])
 
+  // Extension state: a pending ask needs answering, and approved minutes lengthen the timer below.
+  const [ext, setExt] = useState<ExtensionState | null>(null)
+  useEffect(() => {
+    if (!b?.id || b.status !== 'in_progress') return
+    let stop = false
+    const load = () => fetchExtensions(b.id).then((d) => { if (!stop) setExt(d) }).catch(() => {})
+    load()
+    const iv = setInterval(load, 8000)
+    return () => { stop = true; clearInterval(iv) }
+  }, [b?.id, b?.status])
+
   if (!b) return <div className="screen jt"><Loading /></div>
 
   const done = b.status === 'completed'
-  const targetMin = DUR_MIN[b.items[0]?.durationId] ?? 60
+  // Approved extra time counts towards the countdown, so the ring doesn't sit at 100% for the
+  // whole extension. Booked and extra are kept apart for the caption — 60 min was booked, the
+  // rest was granted later.
+  const bookedMin = DUR_MIN[b.items[0]?.durationId] ?? 60
+  const extraMin = ext?.extensionMinutes ?? 0
+  const targetMin = bookedMin + extraMin
   const startedMs = b.started_at ? new Date(b.started_at).getTime() : Date.now()
   const targetSec = targetMin * 60
-  const elapsed = done ? targetSec : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
-  const remaining = done ? 0 : Math.max(0, targetSec - elapsed)
-  const frac = done ? 1 : Math.min(1, elapsed / targetSec)
+  const rawElapsed = Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+  // Freeze at the target once the time is up, exactly as the worker's timer does. Left running it
+  // would climb past the booked length ("Elapsed 95:20 / Booked 90 min") while remaining sat at 0.
+  const timeUp = !done && rawElapsed >= targetSec
+  // How far past the booked time the expert has gone — shown so the stopped clock is explained
+  // rather than just sitting there.
+  const overrunMin = timeUp ? Math.floor((rawElapsed - targetSec) / 60) : 0
+  const elapsed = done || timeUp ? targetSec : rawElapsed
+  const remaining = done ? 0 : Math.max(0, targetSec - rawElapsed)
+  const frac = done ? 1 : Math.min(1, rawElapsed / targetSec)
   const pct = done ? 100 : Math.min(99, Math.round(frac * 100))
   // circular timer geometry — ring fills as elapsed approaches the booked duration
   const R = 86, CIRC = 2 * Math.PI * R
-  const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+  // Past an hour mm:ss reads as "90:04", which looks like minutes-that-aren't. Roll over to h:mm:ss.
+  const mmss = (s: number) => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`
+  }
 
   const jobs = b.pro?.jobs ?? b.pro?.servicesDone ?? 0
   const verified = !!b.pro?.verified
@@ -49,9 +78,34 @@ export default function LiveProgress() {
       </div>
 
       <div className="content jt-scroll">
+        {/* The expert is waiting on an answer — put it above everything else. */}
+        {ext?.pending && (
+          <button
+            className="jt-card"
+            style={{ width: '100%', textAlign: 'left', borderColor: '#6D4AFF', background: '#F3F0FF', cursor: 'pointer' }}
+            onClick={() => nav(`/job/${b.id}/extend`)}
+          >
+            <b style={{ display: 'block' }}>{proName(b)} needs {ext.pending.minutes} more minutes</b>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              {ext.pending.price > 0 ? `Additional ₹${ext.pending.price} · tap to approve or decline` : 'No extra charge · tap to review'}
+            </span>
+          </button>
+        )}
+        {/* Already granted — explains why the countdown is longer than the booked time. */}
+        {!ext?.pending && !!ext?.extensionMinutes && (
+          <div className="jt-card" style={{ borderColor: '#6D4AFF' }}>
+            <b style={{ display: 'block' }}>Service Extended</b>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              +{ext.extensionMinutes} min added{ext.extensionTotal > 0 ? ` · ₹${ext.extensionTotal} paid` : ''}
+            </span>
+          </div>
+        )}
+
         {/* circular timer */}
         <div className={`jt-timer-card ${done ? 'done' : ''}`}>
-          <span className={`jt-lp-badge ${done ? 'done' : ''}`}>{done ? 'Completed' : 'In Progress'}</span>
+          <span className={`jt-lp-badge ${done ? 'done' : ''}`}>
+            {done ? 'Completed' : timeUp ? 'Scheduled Time Completed' : 'In Progress'}
+          </span>
           <div className="jt-timer">
             <svg viewBox="0 0 200 200" className="jt-timer-svg" aria-hidden="true">
               <circle cx="100" cy="100" r={R} className="jt-timer-track" />
@@ -59,15 +113,19 @@ export default function LiveProgress() {
                 strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - frac)} transform="rotate(-90 100 100)" />
             </svg>
             <div className="jt-timer-center">
-              <div className="jt-timer-emoji">{done ? '✅' : '🧹'}</div>
-              <div className="jt-timer-time">{done ? 'Done' : mmss(remaining)}</div>
-              <div className="jt-timer-lbl">{done ? '100% complete' : 'remaining'}</div>
+              <div className="jt-timer-emoji">{done ? '✅' : timeUp ? '⏱' : '🧹'}</div>
+              {/* A frozen 00:00 under "remaining" reads as a broken clock. Say what actually
+                  happened: the booked time is over and the expert is wrapping up. */}
+              <div className="jt-timer-time">{done ? 'Done' : timeUp ? 'Time up' : mmss(remaining)}</div>
+              <div className="jt-timer-lbl">
+                {done ? '100% complete' : timeUp ? `booked time over${overrunMin > 0 ? ` · +${overrunMin} min` : ''}` : 'remaining'}
+              </div>
             </div>
           </div>
           <div className="jt-timer-meta">
             <span>Elapsed <b>{mmss(elapsed)}</b></span>
             <span className="jt-timer-pct">{pct}%</span>
-            <span>Booked <b>{targetMin} min</b></span>
+            <span>Booked <b>{bookedMin} min</b>{extraMin > 0 && <> +<b>{extraMin}</b></>}</span>
           </div>
         </div>
 

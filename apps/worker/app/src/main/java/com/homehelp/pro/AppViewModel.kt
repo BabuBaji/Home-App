@@ -11,6 +11,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.mutableLongStateOf
 import com.homehelp.pro.network.ChecklistBody
 import com.homehelp.pro.network.ChecklistTask
+import com.homehelp.pro.network.ExtensionDto
+import com.homehelp.pro.network.ExtensionOptions
+import com.homehelp.pro.network.ExtensionRequestBody
 import com.homehelp.pro.network.ExtraBody
 import com.homehelp.pro.network.ExtraRemoveBody
 import com.homehelp.pro.network.JobExtra
@@ -887,6 +890,59 @@ class AppViewModel : ViewModel() {
         private set
     var extrasTotal by mutableIntStateOf(0)
         private set
+
+    // ─── Service extensions ───────────────────────────────────────────────────────────────
+    // Extra time is the CUSTOMER's to grant: the worker only ever raises a request. Nothing here
+    // lengthens the clock on its own — `extensionMinutes` grows only once the server says approved.
+    var extensionOptions by mutableStateOf<ExtensionOptions?>(null)
+        private set
+    var pendingExtension by mutableStateOf<ExtensionDto?>(null)
+        private set
+    var lastExtensionOutcome by mutableStateOf<ExtensionDto?>(null)   // approved/declined, to tell the worker
+        private set
+    var extensionMinutes by mutableIntStateOf(0)
+        private set
+    var extensionEarnings by mutableIntStateOf(0)
+        private set
+
+    /** Load the menu of blocks/reasons still allowed for this job. */
+    fun loadExtensionOptions() = sync {
+        val o = api.extensionOptions()
+        extensionOptions = o
+        pendingExtension = o.pending
+    }
+
+    /** Ask the customer for more time. Returns null on success, else a message to show. */
+    fun requestExtension(minutes: Int, reasonCode: String, reasonText: String = "", onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val r = api.requestExtension(ExtensionRequestBody(minutes, reasonCode, reasonText))
+                backendConnected = true
+                if (r.ok) { pendingExtension = r.extension; onResult(null) } else onResult(r.error ?: "Could not request more time")
+            } catch (e: Exception) {
+                backendConnected = false
+                onResult(e.message ?: "Could not reach the server")
+            }
+        }
+    }
+
+    /**
+     * Poll while a request is outstanding. Approved time is additive, so the countdown and the
+     * earnings line both come straight from the server's tally rather than being accumulated here.
+     */
+    fun refreshExtensions() = sync {
+        val r = api.jobExtensions()
+        extensionMinutes = r.extensionMinutes
+        extensionEarnings = r.extensions.filter { it.status == "approved" }.sumOf { it.payout }
+        val prev = pendingExtension
+        pendingExtension = r.extensions.firstOrNull { it.status == "pending" }
+        // A request that is no longer pending has been decided — surface that once.
+        if (prev != null && pendingExtension == null) {
+            lastExtensionOutcome = r.extensions.firstOrNull { it.id == prev.id }
+        }
+    }
+
+    fun clearExtensionOutcome() { lastExtensionOutcome = null }
     var jobPaused by mutableStateOf(false)
         private set
     /** Total time the service has been paused, including a pause still in flight. */
@@ -1016,6 +1072,8 @@ class AppViewModel : ViewModel() {
         beforeNotes = ""; afterNotes = ""; signature = null; customerSigned = false
         customerRating = 0; customerNotes = ""
         extras = emptyList(); extrasTotal = 0; jobPaused = false; pausedMs = 0L
+        extensionOptions = null; pendingExtension = null; lastExtensionOutcome = null
+        extensionMinutes = 0; extensionEarnings = 0
         messages.clear(); beforePhoto = null
     }
 
