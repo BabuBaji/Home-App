@@ -2634,7 +2634,13 @@ body { line-height: 1.45; }
 .jt-chat-empty { text-align: center; font-size: 13px; color: var(--sub); background: #fff; border: 1px dashed #d9d5f0; border-radius: 14px; padding: 18px; margin: auto 12px; }
 .jt-bubble { max-width: 78%; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.4; position: relative; }
 .jt-bubble.me { align-self: flex-end; background: var(--v); color: #fff; border-bottom-right-radius: 4px; }
+/* Incoming (the worker's own replies) — only .me was ever styled, because until the customer half
+   of the chat existed there was nothing to receive. */
+.jt-bubble.them { align-self: flex-start; background: #fff; color: var(--ink); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.jt-bubble.them .jt-bubble-t { text-align: left; opacity: .55; }
+.jt-bubble.pending { opacity: .55; }
 .jt-bubble-t { display: block; font-size: 9.5px; opacity: .8; margin-top: 4px; text-align: right; }
+.jt-chat-err { text-align: center; font-size: 12px; color: #b4232a; background: #fdecec; border-radius: 10px; padding: 8px 12px; margin: 0 12px; }
 .jt-chat-input { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fff; align-items: center; }
 .jt-chat-input input { flex: 1; border: 1px solid var(--line); border-radius: 22px; padding: 12px 16px; font-size: 14px; background: #f7f6fc; }
 .jt-send { width: 44px; height: 44px; border-radius: 50%; background: var(--v); color: #fff; display: grid; place-items: center; flex-shrink: 0; }

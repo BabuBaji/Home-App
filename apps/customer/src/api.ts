@@ -217,6 +217,16 @@ export const walletTopup = (paymentId: string, amount: number) =>
 export const applyReferral = (code: string) =>
   req<{ ok: boolean; referrer: string; reward: number }>('/api/referral/apply', { method: 'POST', body: JSON.stringify({ code }) })
 
+/* job chat — the same job_messages rows the worker app reads/writes, so a message sent here
+ * shows up on the worker's job screen. `sender` is 'customer' or 'worker'. */
+export interface JobMessage { id: number; sender: 'customer' | 'worker' | string; body: string; created: string }
+export const fetchJobMessages = (bookingId: number) =>
+  req<{ ok: boolean; messages: JobMessage[] }>(`/api/bookings/${bookingId}/messages`).then((r) => r.messages || [])
+export const sendJobMessage = (bookingId: number, text: string) =>
+  req<{ ok: boolean; message: JobMessage }>(`/api/bookings/${bookingId}/messages`, {
+    method: 'POST', body: JSON.stringify({ text }),
+  }).then((r) => r.message)
+
 /* support */
 export const fetchTickets = () => req<Ticket[]>('/api/tickets')
 export const createTicket = (category: string, message: string, extra?: { subcategory?: string; subject?: string }) =>

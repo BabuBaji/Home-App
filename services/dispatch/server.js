@@ -13,6 +13,7 @@ import {
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: it carries the jsonwebtoken dep.
 import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
 
 assertJwtSecret('dispatch') // refuse to boot without a signing secret rather than trust forgeable tokens
 
@@ -291,6 +292,11 @@ async function auth(req, res, next) {
   next()
 }
 
+// Customer auth, for the customer half of the job chat below. The messages live in THIS service's
+// database, so the customer's routes belong here next to the worker's rather than being proxied
+// through the booking service.
+const customerAuth = makeCustomerAuth(AUTH_URL)
+
 /* Phase 11: the worker's own stated weekly hours cap.
  * Enforced here rather than in the app, because the app isn't the only thing that can call this.
  * It's the ONE availability preference that gates: jobs are pull-based, so refusing a worker who
@@ -555,6 +561,42 @@ app.post('/api/worker/jobs/messages', auth, async (req, res) => {
   const q = await pool.query('INSERT INTO job_messages (booking_id, sender, body) VALUES ($1, $2, $3) RETURNING id, sender, body, created', [b.id, 'worker', body])
   // Surfaces to the customer side via the same realtime bus the status changes use.
   publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: req.worker.id, sender: 'worker', body })
+  res.json({ ok: true, message: q.rows[0] })
+})
+
+/* ---------- job chat: customer half ----------
+ * The worker half above has existed for a while; the customer app had no API to talk to and kept
+ * its messages in localStorage, so nothing the customer typed ever reached the worker. These two
+ * routes close that loop by writing the SAME job_messages rows with sender='customer' — the worker
+ * app already renders anything that isn't sender='worker' as an incoming bubble, so it needs no
+ * change. The booking service stays the authority on who owns a booking; we ask it every time
+ * rather than trusting the caller's id.
+ */
+const MSG_MAX = 1000
+async function ownedBookingOr404(req, res) {
+  const id = Number(req.params.id)
+  if (!Number.isFinite(id)) { res.status(404).json({ error: 'Not found' }); return null }
+  const b = await tryGet(BOOKING_URL, `/api/internal/bookings/${id}`, null)
+  // Same 404 for "no such booking" and "not yours" — never confirm another customer's booking exists.
+  if (!b || b.user_id !== req.user.id) { res.status(404).json({ error: 'Not found' }); return null }
+  return b
+}
+
+app.get('/api/bookings/:id/messages', customerAuth, async (req, res) => {
+  const b = await ownedBookingOr404(req, res); if (!b) return
+  const q = await pool.query('SELECT id, sender, body, created FROM job_messages WHERE booking_id=$1 ORDER BY id', [b.id])
+  res.json({ ok: true, messages: q.rows })
+})
+
+app.post('/api/bookings/:id/messages', customerAuth, async (req, res) => {
+  const b = await ownedBookingOr404(req, res); if (!b) return
+  // Readable after the job ends, but writable only while it's live — a message sent to a finished
+  // job would land in an app the worker has already closed.
+  if (!ACTIVE.includes(b.status)) return res.status(409).json({ ok: false, error: 'This job is no longer active' })
+  const body = String(req.body?.text || '').trim().slice(0, MSG_MAX)
+  if (!body) return res.status(400).json({ ok: false, error: 'text is required' })
+  const q = await pool.query('INSERT INTO job_messages (booking_id, sender, body) VALUES ($1, $2, $3) RETURNING id, sender, body, created', [b.id, 'customer', body])
+  publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: b.worker_id || null, sender: 'customer', body })
   res.json({ ok: true, message: q.rows[0] })
 })
 
