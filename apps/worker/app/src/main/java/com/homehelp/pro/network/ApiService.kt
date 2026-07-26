@@ -154,6 +154,10 @@ interface ApiService {
     @GET("api/worker/jobs/available")
     suspend fun jobsAvailable(): Map<String, Any>
 
+    /** The job assigned to this worker right now (bookingId null when none). See /jobs/current. */
+    @GET("api/worker/jobs/current")
+    suspend fun currentJob(): CurrentJobResponse
+
     @POST("api/worker/jobs/request")
     suspend fun requestJob(): RequestJobResponse
 

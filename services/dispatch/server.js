@@ -312,6 +312,26 @@ app.get('/api/worker/jobs/available', auth, async (req, res) => {
   res.json({ available: n > 0, count: n })
 })
 
+/* Identity of the job currently on this worker, or bookingId:null when they have none.
+ * /available answers "what could I pull?" and reads the UNASSIGNED pool — so with auto-assign on
+ * (the default) it is permanently 0, because the booking service assigns a worker inside the create
+ * request and the booking never sits in that pool. The background alert service had nothing to react
+ * to and a newly assigned job produced no notification at all. This is the missing "what is mine?"
+ * signal: cheap enough to poll, and carries the booking id so the app can tell a NEW assignment from
+ * the one it has already announced. Deliberately not /state, which returns working state with no
+ * booking identity in it. */
+app.get('/api/worker/jobs/current', auth, async (req, res) => {
+  const b = await activeBooking(req.worker.id)
+  if (!b) return res.json({ ok: true, bookingId: null })
+  res.json({
+    ok: true,
+    bookingId: b.id,
+    ref: b.ref || '',
+    status: b.status || '',
+    service: (b.items || []).map((i) => i.name).filter(Boolean).join(', '),
+  })
+})
+
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
   const wl = req.worker.workLimit
   if (wl?.capped) return res.json({ job: null, jobStatus: 'NONE', capped: true, error: cappedMsg(wl) })

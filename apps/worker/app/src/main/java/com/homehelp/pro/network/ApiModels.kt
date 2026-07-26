@@ -537,6 +537,15 @@ data class SignatureBody(val signature: String, val rating: Int, val notes: Stri
 data class ExtraBody(val name: String, val price: Int)
 data class ExtraRemoveBody(val id: Long)
 data class PauseBody(val reason: String? = null)
+/** Reply of GET api/worker/jobs/current — which booking is on this worker, if any. */
+data class CurrentJobResponse(
+    val ok: Boolean = true,
+    val bookingId: Int? = null,
+    val ref: String = "",
+    val status: String = "",
+    val service: String = "",
+)
+
 data class MessageBody(val text: String)
 
 data class JobMessage(

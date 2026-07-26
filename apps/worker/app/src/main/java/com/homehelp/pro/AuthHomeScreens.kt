@@ -316,16 +316,16 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     // Ask for notification permission (Android 13+) so background job alerts can show.
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    // Start/stop the background "online" alert service as the worker toggles online.
+    /* Only the PERMISSION prompt lives here — it needs an Activity-scoped launcher, and Home is
+     * where a worker first goes online. Starting/stopping the service itself moved to AppRoot, which
+     * outlives navigation; doing it here too meant it never ran when the worker went online from any
+     * other screen. Asked for on every online transition seen while Home is up; once granted or
+     * permanently denied the launcher is a no-op. */
     LaunchedEffect(vm.isOnline) {
-        if (vm.isOnline) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            JobAlertService.start(appCtx)
-        } else {
-            JobAlertService.stop(appCtx)
+        if (vm.isOnline &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 

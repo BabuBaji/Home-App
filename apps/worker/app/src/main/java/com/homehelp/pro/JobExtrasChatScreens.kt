@@ -33,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,13 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) {
         vm.loadMessages()
         while (true) { delay(4000); vm.loadMessages() }
+    }
+    // While this screen is up the background poller must not raise message alerts — the thread is
+    // already in front of the worker. Also clears any alert they tapped through to get here.
+    DisposableEffect(Unit) {
+        JobAlertService.chatVisible = true
+        JobAlertService.clearMessageAlert(ctx)
+        onDispose { JobAlertService.chatVisible = false }
     }
     // Keep the newest message in view as the thread grows.
     LaunchedEffect(vm.messages.size) {
