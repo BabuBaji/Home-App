@@ -2,13 +2,22 @@
 // booking service loads the tunables from the admin/config service and passes them in as `cfg`.
 const MON = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 }
 
+/* `bookings.date`/`time` are stored as bare wall-clock strings ("19 Jul 2026", "6:00 AM") with no
+ * offset, and they mean the CUSTOMER's local time. Building them with new Date(y, m, d, …) resolved
+ * them in the server's zone instead — which is UTC in the container, so every scheduled slot landed
+ * 5h30m late. That silently pushed the check-in OTP release (and the cancellation windows and
+ * no-show sweep, which share this function) past the worker's actual arrival.
+ * Fixed to the service's operating zone so the answer no longer depends on the host's TZ.
+ * IST is UTC+5:30 year-round with no DST, so a constant offset is exact. */
+const TZ_OFFSET_MIN = Number(process.env.SCHEDULE_TZ_OFFSET_MIN ?? 330) // +05:30 (Asia/Kolkata)
+
 export function scheduledStartMs(b) {
   if (!b || b.type !== 'schedule' || !b.date || !b.time) return null
   const dm = /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/.exec(String(b.date).trim())
   const tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(b.time).trim())
   if (!dm || !tm || !(dm[2] in MON)) return null
   let hr = Number(tm[1]) % 12; if (/pm/i.test(tm[3])) hr += 12
-  return new Date(Number(dm[3]), MON[dm[2]], Number(dm[1]), hr, Number(tm[2]), 0, 0).getTime()
+  return Date.UTC(Number(dm[3]), MON[dm[2]], Number(dm[1]), hr, Number(tm[2]), 0, 0) - TZ_OFFSET_MIN * 60_000
 }
 
 const pctOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0)

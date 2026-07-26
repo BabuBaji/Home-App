@@ -158,14 +158,26 @@ async function init() {
 const rowTo = (r) => (r ? { ...r, items: typeof r.items === 'string' ? JSON.parse(r.items) : r.items, settled: !!r.settled } : null)
 async function getBooking(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM bookings WHERE id=$1', [id]); return rowTo(rows[0]) }
 
-// Withhold the check-in OTP until 1h before a scheduled slot; expose scheduled_at.
+/* Is the check-in window open — i.e. may the customer see and use the start OTP?
+ * Open 1h before a scheduled slot (instant bookings are always open), and ALSO as soon as the
+ * worker marks themselves arrived: someone standing at the door outranks the clock, and a worker
+ * who turns up early must not leave the customer facing "Worker has arrived — share your start
+ * OTP" next to an empty box. Shared by publicBooking (what the customer is shown), /track and
+ * /verify-otp so the three can never disagree about whether the code is usable. */
+const OTP_ON_ARRIVAL_STATES = ['arrived', 'in_progress']
+const serviceWindowOpen = (b) => {
+  if (!b) return false
+  if (OTP_ON_ARRIVAL_STATES.includes(b.status)) return true
+  const s = scheduledStartMs(b)
+  return s == null ? true : Date.now() >= s - OTP_LEAD_MS
+}
+
+// Withhold the check-in OTP until that window opens; expose scheduled_at.
 function publicBooking(b) {
   if (!b) return b
-  const start = scheduledStartMs(b)
-  const open = start == null ? true : Date.now() >= start - OTP_LEAD_MS
-  return { ...b, scheduled_at: start, otp_released: open, service_otp: open ? b.service_otp : null }
+  const open = serviceWindowOpen(b)
+  return { ...b, scheduled_at: scheduledStartMs(b), otp_released: open, service_otp: open ? b.service_otp : null }
 }
-const serviceWindowOpen = (b) => { const s = scheduledStartMs(b); return s == null ? true : Date.now() >= s - OTP_LEAD_MS }
 
 function distanceKm(aLat, aLng, bLat, bLng) {
   if ([aLat, aLng, bLat, bLng].some((v) => v == null)) return null
