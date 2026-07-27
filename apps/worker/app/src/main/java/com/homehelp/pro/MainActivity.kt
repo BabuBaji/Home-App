@@ -209,6 +209,18 @@ fun AppRoot() {
             }
         }
     }
+    /* The online alert service follows the ONLINE STATE, not one screen.
+     * It used to be started only from HomeScreen's LaunchedEffect, so going online from anywhere
+     * else — the availability selector, the quick actions, the premium card — left it stopped, and
+     * navigating off Home disposed the effect that was supposed to manage it. A worker sitting on
+     * the live-job screen therefore got no background alerts at all: no new-job heads-up, and no
+     * customer-message ping. AppRoot hosts the NavHost, so this effect stays composed for the whole
+     * session and sees every transition of vm.isOnline. */
+    val alertCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    androidx.compose.runtime.LaunchedEffect(vm.isOnline) {
+        if (vm.isOnline) JobAlertService.start(alertCtx) else JobAlertService.stop(alertCtx)
+    }
+
     // Re-pull backend data every time the app comes to the foreground, so a completed job /
     // updated earnings appear immediately instead of only after a full relaunch.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current

@@ -159,6 +159,12 @@ export interface Booking {
     services?: string[]; skills?: string[]
     reviews?: { rating: number; review: string; customer: string; created: string }[]
   }
+  // Full structured address (flat/house + apartment + area), resolved by the booking service from the
+  // saved address this booking was placed to. Null for free-typed/legacy bookings — fall back to `address`.
+  addr?: {
+    label?: string; house?: string; floor?: string; apartment?: string
+    street?: string; landmark?: string; line?: string; city?: string; pincode?: string
+  } | null
 }
 
 export interface Transaction {

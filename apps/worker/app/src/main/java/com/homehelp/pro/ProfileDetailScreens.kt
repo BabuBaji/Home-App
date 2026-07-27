@@ -153,6 +153,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.homehelp.pro.network.NotificationItem
 import com.homehelp.pro.network.SkillClaim
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1238,13 +1239,14 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
     androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadShaktiBonus() }
     var period by remember { mutableStateOf("This Month") }
 
-    // Genuine lifetime figures where the backend reports them; demo fallbacks otherwise.
-    val baseRating = if (vm.workerRating > 0) vm.workerRating else 4.9
-    val baseJobs = if (vm.jobsCompleted > 0) vm.jobsCompleted else 68
-    val baseAccept = vm.acceptancePct ?: 98
-    val baseComplete = vm.completionPct ?: 100
-    val baseCancel = vm.cancellationPct ?: 1
-    val baseOnTime = vm.punctualityPct ?: 97
+    // The worker's own lifetime figures, or zero. A new worker has no record yet — inventing
+    // 4.9★ over 68 jobs tells them something about themselves that isn't true.
+    val baseRating = vm.workerRating
+    val baseJobs = vm.jobsCompleted
+    val baseAccept = vm.acceptancePct ?: 0
+    val baseComplete = vm.completionPct ?: 0
+    val baseCancel = vm.cancellationPct ?: 0
+    val baseOnTime = vm.punctualityPct ?: 0
 
     // Period filter reshapes the figures so the dropdown visibly changes the dashboard.
     val d = remember(period, baseRating, baseJobs, baseAccept, baseComplete, baseCancel, baseOnTime) {
@@ -1959,7 +1961,8 @@ private data class NotifItem(
 )
 
 /** Style bucket for a notification — derives icon/colour/category from the message so wallet, job,
- *  shift and training notices are visually distinct (mirrors the mock's colour coding). */
+ *  shift and training notices are visually distinct (mirrors the mock's colour coding). Backend rows
+ *  carry no category of their own, so this is purely how a row is drawn, never what it says. */
 private class NotifStyle(val icon: ImageVector, val tint: Color, val bg: Color, val category: String)
 
 private fun notifStyle(lower: String): NotifStyle = when {
@@ -1973,7 +1976,7 @@ private fun notifStyle(lower: String): NotifStyle = when {
 }
 
 /** Turn a backend notification (title — body text) into the card model used by [NotifCard]. */
-private fun toNotifItem(n: com.homehelp.pro.network.NotificationItem): NotifItem {
+private fun toNotifItem(n: NotificationItem): NotifItem {
     val dash = n.text.indexOf(" — ")
     val title = (if (dash > 0) n.text.substring(0, dash) else n.text).trim()
     val body = (if (dash > 0) n.text.substring(dash + 3) else "").trim()
@@ -1993,11 +1996,8 @@ fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
     // only after the worker has actually seen them (unread items keep their coloured accent here).
     androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshNotifications() }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.markNotificationsRead() } }
-    var tab by remember { mutableStateOf("All") }
-    val tabs = listOf("All", "Jobs", "Wallet", "HR", "Training", "System")
     val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()) }
     val rows = vm.notifications.map { it to toNotifItem(it) }
-        .filter { (_, ni) -> tab == "All" || ni.category == tab }
     val today = rows.filter { (n, _) -> n.date == todayStr }.map { it.second }
     val earlier = rows.filter { (n, _) -> n.date != todayStr }.map { it.second }
 
@@ -2018,27 +2018,8 @@ fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(bottom = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            // Category filter pills — horizontally scrollable (six tabs don't fit a fixed track).
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                tabs.forEach { t ->
-                    val on = t == tab
-                    Box(
-                        Modifier.clip(RoundedCornerShape(Radius.pill))
-                            .background(if (on) Purple else FieldFill)
-                            .clickable { tab = t }
-                            .padding(horizontal = 15.dp, vertical = 7.dp),
-                    ) {
-                        Text(
-                            t, color = if (on) Color.White else TextGray, fontSize = 12.5.sp,
-                            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                        )
-                    }
-                }
-            }
-
+            // No category pills: the wallet feed carries no category, and tabs that can never
+            // match anything are worse than no tabs.
             if (today.isEmpty() && earlier.isEmpty()) {
                 Column(
                     Modifier.fillMaxWidth().padding(vertical = 44.dp),
@@ -2048,7 +2029,7 @@ fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.height(Space.m))
                     Text("You're all caught up", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Nothing here under this filter.", color = TextGray, fontSize = 13.sp)
+                    Text("You have no notifications yet.", color = TextGray, fontSize = 13.sp)
                 }
             } else {
                 if (today.isNotEmpty()) {

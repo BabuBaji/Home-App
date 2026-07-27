@@ -502,6 +502,44 @@ data class JobStateResponse(
     val extrasTotal: Int = 0,
 )
 
+/* ---------- service extensions: extra paid time, granted only by the customer ---------- */
+
+/** One purchasable block of extra time. [price] is what the customer pays, [payout] what we earn. */
+data class ExtensionBlock(val mins: Int = 0, val price: Int = 0, val payout: Int = 0)
+
+/** A reason the worker can give. [chargeable] false = the customer is not billed for this time. */
+data class ExtensionReason(val code: String = "", val label: String = "", val chargeable: Boolean = true)
+
+data class ExtensionDto(
+    val id: Int = 0,
+    val minutes: Int = 0,
+    val price: Int = 0,
+    val payout: Int = 0,
+    val reasonCode: String = "",
+    val reasonLabel: String = "",
+    val status: String = "",        // pending | approved | declined | cancelled
+)
+
+/** What this job may still be extended by — already filtered server-side by the caps. */
+data class ExtensionOptions(
+    val enabled: Boolean = false,
+    val blocks: List<ExtensionBlock> = emptyList(),
+    val reasons: List<ExtensionReason> = emptyList(),
+    val pending: ExtensionDto? = null,
+    val usedMinutes: Int = 0,
+    val remainingMinutes: Int = 0,
+    val requestsLeft: Int = 0,
+)
+
+data class ExtensionsResponse(
+    val ok: Boolean = true,
+    val extensions: List<ExtensionDto> = emptyList(),
+    val extensionMinutes: Int = 0,
+)
+
+data class ExtensionRequestBody(val minutes: Int, val reasonCode: String, val reasonText: String = "")
+data class ExtensionRequestResult(val ok: Boolean = false, val error: String? = null, val extension: ExtensionDto? = null)
+
 data class ChecklistBody(val items: List<ChecklistTask>)
 data class PhotoBody(val phase: String, val slot: String, val photo: String)
 data class PhotoRemoveBody(val phase: String, val slot: String)
@@ -510,6 +548,15 @@ data class SignatureBody(val signature: String, val rating: Int, val notes: Stri
 data class ExtraBody(val name: String, val price: Int)
 data class ExtraRemoveBody(val id: Long)
 data class PauseBody(val reason: String? = null)
+/** Reply of GET api/worker/jobs/current — which booking is on this worker, if any. */
+data class CurrentJobResponse(
+    val ok: Boolean = true,
+    val bookingId: Int? = null,
+    val ref: String = "",
+    val status: String = "",
+    val service: String = "",
+)
+
 data class MessageBody(val text: String)
 
 data class JobMessage(

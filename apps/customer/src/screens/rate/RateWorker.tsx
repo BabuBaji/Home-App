@@ -15,7 +15,9 @@ export default function RateWorker() {
   const nav = useNavigate()
   const [sp] = useSearchParams()
   const { b } = useJob(id, false)
-  const [rating, setRating] = useState(Number(sp.get('stars')) || 5)
+  // No star is pre-selected — the customer decides by tapping. (A ?stars= hint from a prior screen
+  // is still honoured, but the default is 0 = unrated, so we never assume a 5-star review.)
+  const [rating, setRating] = useState(Number(sp.get('stars')) || 0)
   const [text, setText] = useState('')
   const [tags, setTags] = useState<string[]>([])
 
@@ -40,7 +42,7 @@ export default function RateWorker() {
 
         <div className="rt-q">How was your overall experience?</div>
         <div className="jt-stars big">{[1, 2, 3, 4, 5].map((n) => <span key={n} className={n <= rating ? 'on' : ''} onClick={() => setRating(n)}>★</span>)}</div>
-        <div className="rt-lbl">{LABELS[rating]}</div>
+        <div className="rt-lbl">{rating > 0 ? LABELS[rating] : 'Tap a star to rate'}</div>
 
         <div className="rt-field">
           <label>Share your feedback (Optional)</label>
@@ -54,7 +56,10 @@ export default function RateWorker() {
       </div>
 
       <div className="jt-foot">
-        <button className="jt-btn" onClick={() => nav(`/rate/${b.id}/photos`, { state: { rating, text, tags } })}>Continue</button>
+        <button className="jt-btn" disabled={rating === 0}
+          onClick={() => nav(`/rate/${b.id}/photos`, { state: { rating, text, tags } })}>
+          {rating === 0 ? 'Select a rating' : 'Continue'}
+        </button>
       </div>
     </div>
   )

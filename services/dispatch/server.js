@@ -13,6 +13,7 @@ import {
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: it carries the jsonwebtoken dep.
 import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
 
 assertJwtSecret('dispatch') // refuse to boot without a signing secret rather than trust forgeable tokens
 
@@ -175,6 +176,17 @@ function bookingDurationMinutes(b) {
   return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
 }
 
+// Reason menu the worker picks from. `chargeable:false` means the customer is not billed for the
+// extra time — kept in sync with EXT_REASONS in the booking service, which is the authority.
+const EXT_REASON_LIST = [
+  { code: 'customer_request', label: 'Customer requested additional work', chargeable: true },
+  { code: 'more_area', label: 'More area/items than expected', chargeable: true },
+  { code: 'service_condition', label: 'Service condition requires more time', chargeable: true },
+  { code: 'customer_added_task', label: 'Customer added another task', chargeable: true },
+  { code: 'scope_incomplete', label: 'Original scope incomplete', chargeable: false },
+  { code: 'other', label: 'Other', chargeable: true },
+]
+
 // The worker-facing job DTO. It deliberately carries NO `service_otp`: the check-in code is the
 // customer's proof of presence, so the worker device must never hold it — the customer reads it
 // out and /verify-otp below does the comparison server-side.
@@ -190,6 +202,9 @@ async function jobFromBooking(b) {
     distanceKm: +(1 + (b.id % 30) / 10).toFixed(1), earnings: await workerShare(b.total),
     lat: b.cust_lat ?? (17.4448 + (b.id % 10) * 0.002), lng: b.cust_lng ?? (78.3498 + (b.id % 10) * 0.002),
     startedAt: b.started_at || null, completedAt: b.completed_at || null,
+    // Extra approved time rides alongside the booked duration — the app adds the two for the live
+    // countdown, so the base figure keeps meaning "what was booked".
+    extensionMinutes: b.extension_minutes || 0,
   }
 }
 
@@ -280,6 +295,11 @@ async function auth(req, res, next) {
   next()
 }
 
+// Customer auth, for the customer half of the job chat below. The messages live in THIS service's
+// database, so the customer's routes belong here next to the worker's rather than being proxied
+// through the booking service.
+const customerAuth = makeCustomerAuth(AUTH_URL)
+
 /* Phase 11: the worker's own stated weekly hours cap.
  * Enforced here rather than in the app, because the app isn't the only thing that can call this.
  * It's the ONE availability preference that gates: jobs are pull-based, so refusing a worker who
@@ -293,6 +313,26 @@ app.get('/api/worker/jobs/available', auth, async (req, res) => {
   if (wl?.capped) return res.json({ available: false, count: 0, capped: true, reason: cappedMsg(wl) })
   const n = (await matchingBookings(req.worker)).length
   res.json({ available: n > 0, count: n })
+})
+
+/* Identity of the job currently on this worker, or bookingId:null when they have none.
+ * /available answers "what could I pull?" and reads the UNASSIGNED pool — so with auto-assign on
+ * (the default) it is permanently 0, because the booking service assigns a worker inside the create
+ * request and the booking never sits in that pool. The background alert service had nothing to react
+ * to and a newly assigned job produced no notification at all. This is the missing "what is mine?"
+ * signal: cheap enough to poll, and carries the booking id so the app can tell a NEW assignment from
+ * the one it has already announced. Deliberately not /state, which returns working state with no
+ * booking identity in it. */
+app.get('/api/worker/jobs/current', auth, async (req, res) => {
+  const b = await activeBooking(req.worker.id)
+  if (!b) return res.json({ ok: true, bookingId: null })
+  res.json({
+    ok: true,
+    bookingId: b.id,
+    ref: b.ref || '',
+    status: b.status || '',
+    service: (b.items || []).map((i) => i.name).filter(Boolean).join(', '),
+  })
 })
 
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
@@ -454,6 +494,48 @@ app.post('/api/worker/jobs/signature', auth, async (req, res) => {
   res.json({ ok: true, ...out })
 })
 
+/* ---------- service extensions (worker side) ---------- */
+// The menu the worker is offered, plus what's already been used — booking owns the accounting, so
+// this is a straight proxy rather than a second copy of the rules.
+app.get('/api/worker/jobs/extension-options', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const serviceId = (b.items || [])[0]?.id || ''
+  const rule = await tryGet(CATALOG_URL, `/api/internal/extension-rule/${encodeURIComponent(serviceId)}`, null)
+  const rows = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extensions`, [])
+  const approved = (Array.isArray(rows) ? rows : []).filter((r) => r.status === 'approved')
+  const usedMin = approved.reduce((s, r) => s + r.minutes, 0)
+  const remaining = Math.max(0, (rule?.maxTotalMin || 0) - usedMin)
+  res.json({
+    enabled: !!rule?.enabled && remaining > 0 && approved.length < (rule?.maxRequests || 0),
+    blocks: (rule?.blocks || []).filter((x) => x.mins <= remaining),
+    reasons: EXT_REASON_LIST,
+    pending: (Array.isArray(rows) ? rows : []).find((r) => r.status === 'pending') || null,
+    usedMinutes: usedMin, remainingMinutes: remaining,
+    requestsLeft: Math.max(0, (rule?.maxRequests || 0) - approved.length),
+  })
+})
+
+app.post('/api/worker/jobs/extension', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  try {
+    const out = await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/extension`, {
+      minutes: Number(req.body?.minutes) || 0,
+      reasonCode: String(req.body?.reasonCode || ''),
+      reasonText: String(req.body?.reasonText || ''),
+    })
+    res.json(out)
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message || 'Could not request more time' })
+  }
+})
+
+// Poll target while the worker waits on the customer — cheap, and the app already polls job state.
+app.get('/api/worker/jobs/extensions', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const rows = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extensions`, [])
+  res.json({ ok: true, extensions: Array.isArray(rows) ? rows : [], extensionMinutes: b.extension_minutes || 0 })
+})
+
 app.post('/api/worker/jobs/extras', auth, async (req, res) => {
   const b = await activeOr409(req, res); if (!b) return
   const s = await jobState(b)
@@ -507,6 +589,42 @@ app.post('/api/worker/jobs/messages', auth, async (req, res) => {
   const q = await pool.query('INSERT INTO job_messages (booking_id, sender, body) VALUES ($1, $2, $3) RETURNING id, sender, body, created', [b.id, 'worker', body])
   // Surfaces to the customer side via the same realtime bus the status changes use.
   publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: req.worker.id, sender: 'worker', body })
+  res.json({ ok: true, message: q.rows[0] })
+})
+
+/* ---------- job chat: customer half ----------
+ * The worker half above has existed for a while; the customer app had no API to talk to and kept
+ * its messages in localStorage, so nothing the customer typed ever reached the worker. These two
+ * routes close that loop by writing the SAME job_messages rows with sender='customer' — the worker
+ * app already renders anything that isn't sender='worker' as an incoming bubble, so it needs no
+ * change. The booking service stays the authority on who owns a booking; we ask it every time
+ * rather than trusting the caller's id.
+ */
+const MSG_MAX = 1000
+async function ownedBookingOr404(req, res) {
+  const id = Number(req.params.id)
+  if (!Number.isFinite(id)) { res.status(404).json({ error: 'Not found' }); return null }
+  const b = await tryGet(BOOKING_URL, `/api/internal/bookings/${id}`, null)
+  // Same 404 for "no such booking" and "not yours" — never confirm another customer's booking exists.
+  if (!b || b.user_id !== req.user.id) { res.status(404).json({ error: 'Not found' }); return null }
+  return b
+}
+
+app.get('/api/bookings/:id/messages', customerAuth, async (req, res) => {
+  const b = await ownedBookingOr404(req, res); if (!b) return
+  const q = await pool.query('SELECT id, sender, body, created FROM job_messages WHERE booking_id=$1 ORDER BY id', [b.id])
+  res.json({ ok: true, messages: q.rows })
+})
+
+app.post('/api/bookings/:id/messages', customerAuth, async (req, res) => {
+  const b = await ownedBookingOr404(req, res); if (!b) return
+  // Readable after the job ends, but writable only while it's live — a message sent to a finished
+  // job would land in an app the worker has already closed.
+  if (!ACTIVE.includes(b.status)) return res.status(409).json({ ok: false, error: 'This job is no longer active' })
+  const body = String(req.body?.text || '').trim().slice(0, MSG_MAX)
+  if (!body) return res.status(400).json({ ok: false, error: 'text is required' })
+  const q = await pool.query('INSERT INTO job_messages (booking_id, sender, body) VALUES ($1, $2, $3) RETURNING id, sender, body, created', [b.id, 'customer', body])
+  publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: b.worker_id || null, sender: 'customer', body })
   res.json({ ok: true, message: q.rows[0] })
 })
 

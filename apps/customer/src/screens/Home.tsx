@@ -4,7 +4,7 @@ import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, 
 import { BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
-import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, type HomeBanner } from '../api'
+import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
 import type { Service, Booking, Address } from '../types'
 
 // Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
@@ -20,7 +20,6 @@ type Slide = HomeBanner & { greetingName?: string }
 
 // Module 2 · #7 — Home Dashboard. UI redesigned to the mock; all booking data/flow
 // (services, bookings, serviceable guard, service navigation) is preserved.
-const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 
 function greeting() {
   const h = new Date().getHours()
@@ -54,10 +53,13 @@ export default function Home() {
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
   const firstName = (user?.name || 'there').split(' ')[0]
-  const svcList = useMemo(() => services.filter((s) => s.available), [services])
-  // Only an in-progress booking counts as "Continue Booking" — once it's completed or cancelled it
-  // drops out (no fall-back to the most recent booking regardless of status).
-  const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || null, [bookings])
+  // Show every service, but order the ones offered in this zone first; the rest are rendered as
+  // "Coming Soon" (not bookable) so the customer sees what will arrive rather than a blank gap.
+  const svcList = useMemo(() => [...services].sort((a, b) => Number(b.available) - Number(a.available)), [services])
+  // Only a genuinely live booking counts as "Continue Booking": an active status that hasn't gone
+  // stale (see isContinuable — a job whose slot is >1 day past is abandoned, not continuable). Once
+  // it's completed/cancelled or stale it drops out; future-scheduled bookings still show.
+  const cont = useMemo(() => bookings.find((b) => isContinuable(b)) || null, [bookings])
 
   // The greeting is always the first slide; live banners rotate in after it.
   const slides: Slide[] = useMemo(() => [
@@ -197,13 +199,15 @@ export default function Home() {
           <div className="hd-sec-head"><h3>All Services</h3></div>
           <div className="hd-pop hd-pop-all">
             {svcList.map((s) => (
-              <button key={s.id} className="hd-pop-card" onClick={() => openService(s)}>
+              <button key={s.id} className={`hd-pop-card${s.available ? '' : ' soon'}`}
+                onClick={() => s.available ? openService(s) : toast(`${s.name} is coming soon to your area 🚧`)}>
                 <span className="hd-pop-img">
                   <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                  {!s.available && <span className="hd-pop-soon">Coming Soon</span>}
                 </span>
                 <span className="hd-pop-name">{s.name}</span>
-                <span className="hd-pop-price">From ₹{s.price}</span>
+                <span className="hd-pop-price">{s.available ? `From ₹${s.price}` : 'Not available yet'}</span>
               </button>
             ))}
             {svcList.length === 0 && <p className="muted" style={{ padding: 12 }}>Loading services…</p>}

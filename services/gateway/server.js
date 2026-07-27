@@ -44,7 +44,7 @@ function pickTarget(url) {
   if (p('/api/admin/membership-plans') || p('/api/membership-plans') || p('/api/admin/pricing-rules')) return U.catalog
 
   // ----- admin panel (BFF + per-domain admin routes) -----
-  if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/campaigns') || p('/api/admin/ops-overview') || p('/api/admin/stores') || p('/api/admin/surge') || p('/api/admin/banners')) return U.catalog
+  if (p('/api/admin/services') || p('/api/admin/zones') || p('/api/admin/cities') || p('/api/admin/clusters') || p('/api/admin/apartments') || p('/api/admin/inventory') || p('/api/admin/zone-pricing') || p('/api/admin/extension-rules') || p('/api/admin/campaigns') || p('/api/admin/ops-overview') || p('/api/admin/stores') || p('/api/admin/surge') || p('/api/admin/banners')) return U.catalog
   if (p('/api/admin/activity')) return U.notification
   if (p('/api/admin/notifications')) return U.notification
   if (/^\/api\/admin\/workers\/[^/]+\/wallet/.test(u)) return U.wallet
@@ -70,6 +70,9 @@ function pickTarget(url) {
   if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info') || p('/api/surge') || p('/api/home-banners') || p('/api/banner-media')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
+  // The job chat is the one /api/bookings path the booking service does NOT own: the messages live
+  // in the dispatch DB alongside the worker half. Must be tested BEFORE the general rule below.
+  if (/^\/api\/bookings\/[^/]+\/messages\b/.test(u)) return U.dispatch
   if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
 
   // ----- support tickets -----

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams, Outlet } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings } from './api'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions } from './api'
 import { ensureNotifPermission, fireLocalNotification } from './notify'
 import { runTopBackHandler } from './backStack'
 
@@ -31,7 +31,6 @@ import AddressSelect from './screens/AddressSelect'
 import Schedule from './screens/Schedule'
 import Summary from './screens/Summary'
 import Payment from './screens/Payment'
-import Track from './screens/Track'
 import BookingTracking from './screens/BookingTracking'
 import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
@@ -102,6 +101,7 @@ import Chat from './screens/job/Chat'
 import CallWorker from './screens/job/CallWorker'
 import ShareOtp from './screens/job/ShareOtp'
 import ServiceStarted from './screens/job/ServiceStarted'
+import ExtendService from './screens/job/ExtendService'
 import LiveProgress from './screens/job/LiveProgress'
 import ServiceCompleted from './screens/job/ServiceCompleted'
 // Module 7 — Rating
@@ -165,6 +165,37 @@ export default function App() {
     return () => { stopped = true; clearInterval(iv) }
   }, [user?.id])
 
+  // The expert has asked for more time. This is time-critical — they're standing in the customer's
+  // home waiting on an answer — so it polls faster than the cancel watcher and alerts once per
+  // request. Approving is a payment, so we only ever notify: the decision stays on the screen.
+  useEffect(() => {
+    if (!user) return
+    const KEY = 'hh_ext_seen'
+    const seen = new Set<number>(JSON.parse(localStorage.getItem(KEY) || '[]'))
+    let stopped = false
+    const tick = async () => {
+      try {
+        const live = (await fetchBookings()).filter((b) => b.status === 'in_progress')
+        for (const b of live) {
+          const { pending } = await fetchExtensions(b.id)
+          if (!pending || seen.has(pending.id)) continue
+          seen.add(pending.id)
+          localStorage.setItem(KEY, JSON.stringify([...seen]))
+          const who = b.pro?.name || b.pro_name || 'Your expert'
+          fireLocalNotification(
+            `${who} needs ${pending.minutes} more minutes`,
+            pending.price > 0
+              ? `The current service may need more time — ₹${pending.price}. Tap to approve or decline.`
+              : 'The current service may need more time. Tap to review.',
+          )
+        }
+      } catch { /* offline — retry next tick */ }
+    }
+    tick()
+    const iv = setInterval(() => { if (!stopped) tick() }, 15000)
+    return () => { stopped = true; clearInterval(iv) }
+  }, [user?.id])
+
   const showSplash = !minTime || !booted
 
   return (
@@ -201,7 +232,9 @@ export default function App() {
               <Route path="/summary" element={<Summary />} />
               <Route path="/payment" element={<Payment />} />
               <Route path="/tracking/:id" element={<BookingTracking />} />
-              <Route path="/track/:id" element={<Track />} />
+              {/* Old "Track Your Expert" screen is superseded by the redesigned /job/:id flow — send
+                  every track entry point (Continue Booking, notifications, post-cancel/reschedule) there. */}
+              <Route path="/track/:id" element={<TrackRedirect />} />
               <Route path="/reschedule/:id" element={<Reschedule />} />
               <Route path="/cancel/:id" element={<Cancel />} />
               {/* Module 6 — Live Job Tracking */}
@@ -213,6 +246,7 @@ export default function App() {
               <Route path="/job/:id/call" element={<CallWorker />} />
               <Route path="/job/:id/otp" element={<ShareOtp />} />
               <Route path="/job/:id/started" element={<ServiceStarted />} />
+              <Route path="/job/:id/extend" element={<ExtendService />} />
               <Route path="/job/:id/progress" element={<LiveProgress />} />
               <Route path="/job/:id/completed" element={<ServiceCompleted />} />
               {/* Module 7 — Rating */}
@@ -339,6 +373,13 @@ function Guard({ authed }: { authed: boolean }) {
   const loc = useLocation()
   if (!authed) return <Navigate to="/login" replace state={{ from: loc }} />
   return <Outlet />
+}
+
+// The old "Track Your Expert" screen (Track.tsx) is replaced by the redesigned /job/:id flow.
+// Redirect the legacy /track/:id route so every entry point shows the new Booking Details UI.
+function TrackRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/job/${id}`} replace />
 }
 
 // Gate for the main app: an authenticated user must have picked a city (location)

@@ -1,100 +1,60 @@
-// 64 · Invoice — the customer-facing invoice summary.
-// "Download" exports the SAME tax-invoice document the booking screen has always produced
-// (invoiceDoc.ts), so nothing about the GST document changes — only how it is presented.
+// 64 · Invoice — shows the SAME professional GST tax-invoice document that Download/Share export
+// (invoiceDoc.ts): company + GSTIN, Bill-To, itemised services + SAC, CGST/SGST split, amount in
+// words, a PAID/CANCELLED stamp and an authorized-signatory signature. Rendered in an iframe so
+// what you view is exactly what you download.
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Download } from 'lucide-react'
-import { Loading } from '../components/UI'
+import { ArrowLeft, Download, Share2 } from 'lucide-react'
+import { Loading, useToast } from '../components/UI'
 import { fetchBooking, fetchInvoiceInfo, fetchMe, type InvoiceInfo } from '../api'
-import { invoiceNo, money } from '../invoiceDoc'
+import { invoiceHTML, downloadInvoice, shareInvoice } from '../invoiceDoc'
 import type { Booking, User } from '../types'
-
-// en-IN renders "05:16 pm"; the design shows "11:20 AM".
-const stamp = (s: string) =>
-  new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-    .replace(/\b(am|pm)\b/i, (m) => m.toUpperCase())
 
 export default function Invoice() {
   const { id } = useParams()
   const nav = useNavigate()
+  const toast = useToast()
   const [b, setB] = useState<Booking | null>(null)
   const [inv, setInv] = useState<InvoiceInfo | null>(null)
   const [me, setMe] = useState<User | null>(null)
   const [err, setErr] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => { fetchBooking(Number(id)).then(setB).catch(() => setErr(true)) }, [id])
   useEffect(() => { fetchInvoiceInfo().then(setInv).catch(() => {}) }, [])
   useEffect(() => { fetchMe().then((r) => setMe(r.user)).catch(() => {}) }, [])
 
-  const head = (right?: boolean) => (
+  const head = (
     <header className="appbar ord-appbar">
       <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
       <div className="titles"><h1>Invoice</h1></div>
-      {right && b
-        ? <button className="iconbtn" onClick={() => nav(`/receipt/${b.id}`)} aria-label="Download receipt"><Download size={18} /></button>
-        : <span className="iconbtn ghost" />}
+      <span className="iconbtn ghost" />
     </header>
   )
 
-  if (err) return <div className="screen">{head()}<div className="state"><div className="ico">⚠️</div><h3>Could not load invoice</h3></div></div>
-  if (!b) return <div className="screen">{head()}<Loading /></div>
+  if (err) return <div className="screen">{head}<div className="state"><div className="ico">⚠️</div><h3>Could not load invoice</h3></div></div>
+  if (!b) return <div className="screen">{head}<Loading /></div>
 
-  const paid = b.payment_status === 'paid'
-  const seller = inv?.name || 'HomeHelp Services'
+  const bill = { name: me?.name || undefined, phone: me?.phone || undefined }
+  const html = invoiceHTML(b, inv, bill)
+
+  const onDownload = async () => {
+    setBusy(true)
+    const saved = await downloadInvoice(b, inv, bill)
+    setBusy(false)
+    toast(saved ? `Invoice saved to ${saved}` : 'Could not save the invoice')
+  }
+  const onShare = async () => { if (!(await shareInvoice(b, inv, bill))) toast('Sharing is not available here') }
 
   return (
-    <div className="screen">
-      {head(true)}
-      <div className="content pad-cta">
-        <div className="inv-sheet">
-          <div className="inv-brand">
-            <span className="inv-logo">🏠</span>
-            <div>
-              <div className="inv-co">{seller}</div>
-              <div className="inv-tag">One expert who can do it all</div>
-            </div>
-          </div>
-
-          <div className="inv-no">
-            <div>Invoice #{invoiceNo(b, inv)}</div>
-            <div className="muted sm">{stamp(b.created)}</div>
-          </div>
-
-          <div className="inv-billed">
-            <div className="inv-k">Billed To</div>
-            <div className="inv-v">{me?.name || '—'}</div>
-            {b.address && <div className="inv-addr">{b.address}</div>}
-          </div>
-
-          <div className="inv-row"><span className="inv-k">Booking ID</span><span className="inv-v">{b.ref}</span></div>
-
-          <table className="inv-tbl">
-            <thead><tr><th>Item</th><th className="r">Amount (₹)</th></tr></thead>
-            <tbody>
-              {b.items.map((i, n) => (
-                <tr key={n}>
-                  <td>{i.name}{i.durationLabel ? ` (${i.durationLabel})` : ''}</td>
-                  <td className="r">{money(i.price)}</td>
-                </tr>
-              ))}
-              <tr><td>Platform Fee</td><td className="r">{money(b.fee)}</td></tr>
-              {b.tax > 0 && <tr><td>Taxes &amp; GST</td><td className="r">{money(b.tax)}</td></tr>}
-              {b.discount > 0 && (
-                <tr><td>Discount{b.coupon ? ` (${b.coupon})` : ''}</td><td className="r green">− {money(b.discount)}</td></tr>
-              )}
-            </tbody>
-          </table>
-
-          <div className="inv-total">
-            <div>
-              <div className="inv-total-k">Total Amount</div>
-              <div className="muted sm">{paid ? `Paid via ${(b.payment || '').toUpperCase()}` : `Payable · ${b.payment_status}`}</div>
-            </div>
-            <div className="inv-total-v">{money(b.total)}</div>
-          </div>
-
-          <div className="inv-thanks">Thank you for choosing our service!</div>
-        </div>
+    <div className="screen inv-screen">
+      {head}
+      <div className="inv-view">
+        <iframe title={`Invoice ${b.ref}`} srcDoc={html} className="inv-frame" />
+      </div>
+      <div className="inv-foot">
+        <button className="inv-btn ghost" onClick={onShare}><Share2 size={16} /> Share</button>
+        <button className="inv-btn" disabled={busy} onClick={onDownload}><Download size={16} /> {busy ? 'Saving…' : 'Download'}</button>
       </div>
     </div>
   )

@@ -107,7 +107,7 @@ private data class Slice(val label: String, val amount: Int, val color: Color)
 fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
     androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshWallet() }
     var period by remember { mutableStateOf("This Month") }
-    val monthE = (vm.monthEarnings.takeIf { it > 0 } ?: 32480)
+    val monthE = vm.monthEarnings
     // Last month settles a little lower — the toggle reloads the total + category mix.
     val total = if (period == "Last Month") (monthE * 86 / 100) else monthE
     // Category split shifts slightly between periods so the donut visibly changes.
@@ -213,8 +213,8 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
 fun EarningsAnalyticsScreen(vm: AppViewModel, nav: NavHostController) {
     androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshWallet() }
     var tab by remember { mutableStateOf("Daily") }
-    val week = (vm.weekEarnings.takeIf { it > 0 } ?: 8750)
-    val month = (vm.monthEarnings.takeIf { it > 0 } ?: 34200)
+    val week = vm.weekEarnings
+    val month = vm.monthEarnings
 
     // Each tab produces its own genuine series so the chart, totals and insights all change.
     val series = remember(tab, week, month) { analyticsSeries(tab, week, month) }

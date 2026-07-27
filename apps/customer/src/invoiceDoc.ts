@@ -67,7 +67,7 @@ export function invoiceNo(b: Booking, inv: InvoiceInfo | null): string {
   return `${prefix}/${fyY}-${String((fyY + 1) % 100).padStart(2, '0')}/${String(b.id).padStart(5, '0')}`
 }
 
-export function invoiceHTML(b: Booking, inv: InvoiceInfo | null): string {
+export function invoiceHTML(b: Booking, inv: InvoiceInfo | null, bill?: { name?: string; phone?: string } | null): string {
   const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c])
   const paid = b.payment_status === 'paid'
   const cancelled = b.status === 'cancelled'
@@ -112,6 +112,12 @@ td{padding:11px 0;font-size:13px;border-bottom:1px solid #f2f0f8}
 .stamp{position:absolute;right:20px;top:6px;width:116px;height:116px;border-radius:50%;border:3px double ${color};color:${color};display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transform:rotate(-15deg);opacity:.72}
 .stamp b{font-size:20px;font-weight:800;letter-spacing:1px}
 .stamp small{font-size:8px;letter-spacing:.5px;margin-top:3px;line-height:1.3;text-transform:uppercase}
+.sign-wrap{display:flex;justify-content:flex-end;padding:14px 0 6px}
+.sign{text-align:center;min-width:210px}
+.sign-mark{font-family:'Segoe Script','Brush Script MT','Snell Roundhand',cursive;font-size:32px;color:#4840c4;line-height:1.1;transform:rotate(-4deg)}
+.sign-rule{border-top:1.5px solid #cfcae6;margin:2px 0 5px}
+.sign-for{font-size:12px;font-weight:700;color:#1c1830}
+.sign-role{font-size:10px;color:#8a86a0;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
 .foot{text-align:center;padding:16px 24px 22px;color:#9a97ad;font-size:11px;line-height:1.6}
 .foot .hr{height:3px;background:linear-gradient(90deg,#6d5cf5,#4840c4);border-radius:3px;margin-bottom:12px}
 </style></head><body><div class="sheet">
@@ -119,6 +125,7 @@ td{padding:11px 0;font-size:13px;border-bottom:1px solid #f2f0f8}
 <div class="co">${esc(seller.name)} · GSTIN: ${esc(seller.gstin)}</div><div class="co">${esc(seller.address)}</div></div>
 <div class="it"><h1>TAX INVOICE</h1><div class="no">${esc(invNo)}</div><div class="no" style="opacity:.7">Ref ${esc(b.ref)}</div></div></div>
 <div class="meta">
+<div><div class="k">Billed To</div><div class="v">${esc(bill?.name || '—')}${bill?.phone ? `<br><span class="dim">${esc(bill.phone)}</span>` : ''}</div></div>
 <div><div class="k">Invoice Date</div><div class="v">${genAt}</div></div>
 <div><div class="k">Transaction ID</div><div class="v">${txn}</div></div>
 <div><div class="k">Booked On</div><div class="v">${dt(b.created)}</div></div>
@@ -144,12 +151,18 @@ ${b.discount ? `<div class="row"><span>Discount${b.coupon ? ` (${esc(b.coupon)})
 ${seller.gstInclusive ? `<div style="font-size:10px;color:#9a97ad;text-align:right;margin-top:4px">GST is included in the item price shown above.</div>` : ''}
 </div>
 <div style="clear:both;font-size:11.5px;color:#4a4660;padding:4px 0 8px;line-height:1.5"><b>Amount in words:</b> Rupees ${esc(inWords)} Only</div>
+<div class="sign-wrap"><div class="sign">
+<div class="sign-mark">${esc((seller.name || 'HomeHelp').split(/\s|\./)[0])}</div>
+<div class="sign-rule"></div>
+<div class="sign-for">For ${esc(seller.name)}</div>
+<div class="sign-role">Authorized Signatory</div>
+</div></div>
 </div>
 <div class="pay">Payment: <b>${esc((b.payment || '').toUpperCase())}</b>
 <span class="badge ${paid ? 'ok' : cancelled ? 'no' : 'pend'}">${esc(b.payment_status.toUpperCase())}</span>
 <span style="color:#8a86a0">Txn: ${txn}</span>
 ${cancelled && (b.refund ?? 0) > 0 ? `<span style="margin-left:auto;color:#1f9d57;font-weight:600">Refunded ${money(b.refund)} to wallet</span>` : ''}</div>
-<div class="foot"><div class="hr"></div>This is a computer-generated invoice and does not require a physical signature.<br>Generated on ${genAt} · Thank you for choosing HomeHelp!</div>
+<div class="foot"><div class="hr"></div>This invoice is digitally signed and stamped — no physical signature is required.<br>Generated on ${genAt} · Thank you for choosing HomeHelp!</div>
 </div></body></html>`
 }
 
@@ -160,8 +173,8 @@ const fileName = (b: Booking) => `Invoice-${b.ref.replace(/[#\s]/g, '')}.html`
  * phone (Documents, falling back to the app's Data dir if scoped storage refuses) and the browser
  * simply downloads it. Returns where it was saved, or null on failure.
  */
-export async function downloadInvoice(b: Booking, inv: InvoiceInfo | null): Promise<string | null> {
-  const html = invoiceHTML(b, inv)
+export async function downloadInvoice(b: Booking, inv: InvoiceInfo | null, bill?: { name?: string; phone?: string } | null): Promise<string | null> {
+  const html = invoiceHTML(b, inv, bill)
   const name = fileName(b)
   try {
     if (!Capacitor.isNativePlatform()) {
@@ -184,8 +197,8 @@ export async function downloadInvoice(b: Booking, inv: InvoiceInfo | null): Prom
 }
 
 /** SHARE — hand the invoice to the OS share sheet so it can go to any app/contact the user picks. */
-export async function shareInvoice(b: Booking, inv: InvoiceInfo | null): Promise<boolean> {
-  const html = invoiceHTML(b, inv)
+export async function shareInvoice(b: Booking, inv: InvoiceInfo | null, bill?: { name?: string; phone?: string } | null): Promise<boolean> {
+  const html = invoiceHTML(b, inv, bill)
   const name = fileName(b)
   try {
     if (Capacitor.isNativePlatform()) {

@@ -50,6 +50,8 @@ const DEFAULT_SETTINGS = {
   platform_fee: '20', tax_percent: '5',
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
+  // Flat ₹ credited to the worker's wallet when they start a service (customer OTP). 0 = off.
+  job_start_bonus: '15',
   // Settlement rates used to break down each booking's economics (Payment & Settlement tab).
   // pg_fee = payment-gateway charge (Razorpay ~2.36%) + 18% GST on it (0 on wallet); the incentive /
   // operational / marketing rates are the org's allocated per-booking costs — set to 0 to disable.

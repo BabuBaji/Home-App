@@ -28,6 +28,21 @@ export async function initApiBase(): Promise<void> {
   } catch { /* keep the baked fallback */ }
 }
 
+// A booking is worth surfacing as "Continue Booking" only while it's genuinely live. These are the
+// in-flight statuses; once completed/cancelled it drops out.
+export const CONTINUABLE_STATUSES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+
+// True only for a live booking that hasn't gone stale. An instant job completes within hours and a
+// scheduled job within its day, so an active-status booking whose slot (or, for instant, its creation
+// time) is more than a day in the past is an abandoned/never-closed record — not something to continue.
+// Future-scheduled bookings (slot ahead of now) always pass, so upcoming jobs still show.
+export function isContinuable(b: Booking, now: number = Date.now()): boolean {
+  if (!CONTINUABLE_STATUSES.includes(b.status)) return false
+  const ref = typeof b.scheduled_at === 'number' ? b.scheduled_at : Date.parse(b.created)
+  if (!Number.isFinite(ref)) return true            // no usable timestamp -> don't hide it
+  return now - ref <= 24 * 60 * 60 * 1000           // drop once >1 day past the slot/creation time
+}
+
 let token = localStorage.getItem('hh_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }
 export function clearToken() { token = ''; localStorage.removeItem('hh_token') }
@@ -202,6 +217,16 @@ export const walletTopup = (paymentId: string, amount: number) =>
 export const applyReferral = (code: string) =>
   req<{ ok: boolean; referrer: string; reward: number }>('/api/referral/apply', { method: 'POST', body: JSON.stringify({ code }) })
 
+/* job chat — the same job_messages rows the worker app reads/writes, so a message sent here
+ * shows up on the worker's job screen. `sender` is 'customer' or 'worker'. */
+export interface JobMessage { id: number; sender: 'customer' | 'worker' | string; body: string; created: string }
+export const fetchJobMessages = (bookingId: number) =>
+  req<{ ok: boolean; messages: JobMessage[] }>(`/api/bookings/${bookingId}/messages`).then((r) => r.messages || [])
+export const sendJobMessage = (bookingId: number, text: string) =>
+  req<{ ok: boolean; message: JobMessage }>(`/api/bookings/${bookingId}/messages`, {
+    method: 'POST', body: JSON.stringify({ text }),
+  }).then((r) => r.message)
+
 /* support */
 export const fetchTickets = () => req<Ticket[]>('/api/tickets')
 export const createTicket = (category: string, message: string, extra?: { subcategory?: string; subject?: string }) =>
@@ -301,6 +326,27 @@ export const fetchServiceWorkers = (service: string, lat?: number, lng?: number)
     `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
+
+/* service extensions — extra paid time the expert asks for and the customer grants */
+export interface BookingExtension {
+  id: number; bookingId: number; requestedBy: 'worker' | 'customer'
+  minutes: number; price: number; payout: number
+  reasonCode: string; reasonLabel: string; reasonText: string
+  status: 'pending' | 'approved' | 'declined' | 'cancelled'
+  created: string; decided: string | null
+}
+export interface ExtensionState {
+  pending: BookingExtension | null
+  extensions: BookingExtension[]
+  extensionMinutes: number
+  extensionTotal: number
+}
+export const fetchExtensions = (id: number) => req<ExtensionState>(`/api/bookings/${id}/extensions`)
+export const approveExtension = (id: number, extId: number) =>
+  req<{ ok: boolean; extension: BookingExtension; extensionMinutes: number; extensionTotal: number }>(
+    `/api/bookings/${id}/extensions/${extId}/approve`, { method: 'POST' })
+export const declineExtension = (id: number, extId: number) =>
+  req<{ ok: boolean; extension: BookingExtension }>(`/api/bookings/${id}/extensions/${extId}/decline`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })
 export const completeBooking = (id: number) => req<Booking>(`/api/bookings/${id}/complete`, { method: 'POST' })
 export const rescheduleBookingApi = (id: number, date: string, time: string) => req<Booking>(`/api/bookings/${id}/reschedule`, { method: 'POST', body: JSON.stringify({ date, time }) })

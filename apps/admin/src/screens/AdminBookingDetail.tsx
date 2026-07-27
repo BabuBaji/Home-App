@@ -268,6 +268,54 @@ export default function AdminBookingDetail() {
               ))}
             </div>
 
+            {/* Service extensions — extra time the worker asked for and the customer granted. Only
+                rendered when the booking actually has requests, so untouched bookings look unchanged. */}
+            {Array.isArray(b.extensions) && b.extensions.length > 0 && (
+              <Card
+                title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={16} /> Service Extensions</span>}
+                right={
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {b.extension_minutes || 0} min added · ₹{b.extension_total || 0} charged
+                  </span>
+                }
+              >
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Requested</th><th>By</th><th>Extra time</th>
+                        <th>Customer ₹</th><th>Worker ₹</th><th>Reason</th><th>Status</th><th>Decided</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {b.extensions.map((x: any) => (
+                        <tr key={x.id}>
+                          <td>{fmtDateTime(x.created)}</td>
+                          <td style={{ textTransform: 'capitalize' }}>{x.requestedBy}</td>
+                          <td><b>+{x.minutes} min</b></td>
+                          {/* A ₹0 charge is a deliberate outcome (worker overran their own estimate),
+                              not missing data — say so rather than showing a bare 0. */}
+                          <td>{x.price > 0 ? `₹${x.price}` : <span className="muted">not charged</span>}</td>
+                          <td>{x.payout > 0 ? `₹${x.payout}` : <span className="muted">—</span>}</td>
+                          <td style={{ fontSize: 12.5 }}>{x.reasonLabel}{x.reasonText ? ` — ${x.reasonText}` : ''}</td>
+                          <td>
+                            <Badge tone={x.status === 'approved' ? 'green' : x.status === 'declined' ? 'red' : 'amber'} dot={false}>
+                              {x.status}
+                            </Badge>
+                          </td>
+                          <td>{x.decided ? fmtDateTime(x.decided) : <span className="muted">—</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  Extensions are billed separately from the booking — the original service price is never rewritten.
+                  Worker payouts are credited when the job completes.
+                </div>
+              </Card>
+            )}
+
             {/* vertical timeline */}
             <Card title="Job Timeline">
               <div style={{ position: 'relative' }}>

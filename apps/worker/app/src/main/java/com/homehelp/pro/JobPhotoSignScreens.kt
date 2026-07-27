@@ -90,6 +90,12 @@ import java.io.ByteArrayOutputStream
 // rating survive the app being killed mid-job.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * How many of the service's photo slots the worker MUST fill before moving on. The rest stay on
+ * screen and are still worth taking — they just don't block the job when an angle isn't gettable.
+ */
+private const val MIN_PHOTOS = 1
+
 /** The nine steps of the job flow, as the mockups draw them. */
 private val FLOW_STEPS = listOf(
     "New Job\nOffer", "Navigate", "Arrived", "OTP\nVerification", "Before\nPhoto",
@@ -567,21 +573,23 @@ private fun PhotoStepScreen(
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(Space.l)) {
-                val allDone = vm.photoSlots.isNotEmpty() && vm.photosDone(phase) == vm.photoSlots.size
+                // One shot is the floor; the remaining slots are encouraged but optional, so a
+                // worker is never blocked from proceeding by an angle they can't get.
+                val canContinue = vm.photosDone(phase) >= MIN_PHOTOS
                 if (phase == "after") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                         OutlineButton("← BACK", modifier = Modifier.weight(1f)) { nav.popBackStack() }
                         Box(Modifier.weight(1.7f)) {
-                            PrimaryButton(ctaLabel, enabled = allDone) { vm.saveJobNotes(phase, notes); onContinue() }
+                            PrimaryButton(ctaLabel, enabled = canContinue) { vm.saveJobNotes(phase, notes); onContinue() }
                         }
                     }
                 } else {
-                    PrimaryButton(ctaLabel, enabled = allDone) { vm.saveJobNotes(phase, notes); onContinue() }
+                    PrimaryButton(ctaLabel, enabled = canContinue) { vm.saveJobNotes(phase, notes); onContinue() }
                 }
-                if (!allDone) {
+                if (!canContinue) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Capture all ${vm.photoSlots.size} required photos to continue.",
+                        "Capture at least 1 photo to continue.",
                         color = TextMuted, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                     )
                 }

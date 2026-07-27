@@ -204,7 +204,32 @@ async function init() {
     `ALTER TABLE home_banners ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS duration_min INTEGER`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS gst_pct INTEGER`,   // GST rate per service (SAC-based); default 18%
+    // Time & Extension Rules — per service, what extra time may be sold once the booked duration
+    // runs out, at what price, and how much of it the worker keeps. `blocks` is the ordered menu
+    // the apps offer: [{ mins, price, payout }]. A service with no row (or enabled=false) simply
+    // cannot be extended, which is why the request endpoint fails closed.
+    `CREATE TABLE IF NOT EXISTS service_extension_rules (
+      service_id TEXT PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      blocks JSONB NOT NULL DEFAULT '[]'::jsonb,
+      max_total_min INTEGER NOT NULL DEFAULT 60,   -- ceiling on total extra time per booking
+      max_requests INTEGER NOT NULL DEFAULT 2,     -- how many times a booking may be extended
+      min_remaining_min INTEGER NOT NULL DEFAULT 5, -- earliest a request may be raised (min left)
+      approval_required BOOLEAN NOT NULL DEFAULT true,
+      updated TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
   ])
+  // Seed one rule per service so extensions are configurable from day one. ON CONFLICT DO NOTHING:
+  // admin edits are authoritative and must survive a restart.
+  const DEFAULT_BLOCKS = JSON.stringify([
+    { mins: 15, price: 39, payout: 25 },
+    { mins: 30, price: 69, payout: 45 },
+    { mins: 45, price: 99, payout: 65 },
+    { mins: 60, price: 129, payout: 85 },
+  ])
+  await pool.query(
+    `INSERT INTO service_extension_rules (service_id, blocks) SELECT id, $1::jsonb FROM services
+     ON CONFLICT (service_id) DO NOTHING`, [DEFAULT_BLOCKS])
   // Seed inserts any missing services and keeps display order in sync, but does NOT overwrite
   // name/price/icon/category on conflict — those are admin-managed and must survive restarts.
   const up = `INSERT INTO services (id,name,icon,price,category,available,sort)
@@ -361,6 +386,10 @@ async function buildCtx(customerId) {
 // Customer catalogue: each service priced (60-min base) through the engine for this zone + customer.
 async function catalogueFor(zoneId, customerId) {
   const zmap = await zonePriceMap(zoneId)
+  // A zone that has ANY active zone_pricing rows is treated as explicitly configured: it OFFERS only
+  // those services, and everything else is surfaced to the customer as "coming soon" (available:false)
+  // rather than bookable. A zone with no pricing rows (or an unzoned pincode) offers everything, as before.
+  const zoneConfigured = zoneId != null && Object.keys(zmap).length > 0
   const [campaigns, ctx, { rows }] = await Promise.all([
     campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId),
     pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services ORDER BY sort, name'),
@@ -368,7 +397,8 @@ async function catalogueFor(zoneId, customerId) {
   return rows.map((s) => {
     const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: '60m', listPrice: zoneBase(s, zmap) }], campaigns, ctx, applyCoupons: false })
     const it = r.items[0]
-    return withImage({ ...s, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount })
+    const available = !!s.available && (!zoneConfigured || zmap[s.id] != null)
+    return withImage({ ...s, available, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount })
   })
 }
 
@@ -386,7 +416,11 @@ async function serviceDetail(id, zoneId, customerId) {
     return { ...d, listPrice: it.listPrice, price: it.price, original: it.discount > 0 ? d.price : d.original }
   })
   const off = durations.find((d) => d.id === '60m')?.zoneDiscount || 0
-  return withImage({ ...s, ...details, price: durations[0].price, listPrice: durations[0].listPrice, durations, zoneDiscount: durations[0].price < durations[0].listPrice ? Math.round((1 - durations[0].price / durations[0].listPrice) * 100) : off })
+  // Consistent with catalogueFor: in a configured zone the service is only offered (bookable) if it
+  // has an active zone_pricing row; otherwise the detail screen shows it as coming soon / not bookable.
+  const zoneConfigured = zoneId != null && Object.keys(zmap).length > 0
+  const available = !!s.available && (!zoneConfigured || zmap[s.id] != null)
+  return withImage({ ...s, ...details, available, price: durations[0].price, listPrice: durations[0].listPrice, durations, zoneDiscount: durations[0].price < durations[0].listPrice ? Math.round((1 - durations[0].price / durations[0].listPrice) * 100) : off })
 }
 
 // Authoritative cart pricing → the shape the customer/booking flow expects (items + bill breakdown).
@@ -953,11 +987,16 @@ function isPeakAt(peak, at) {
 async function syncZonePricing(zoneId, config) {
   const services = Array.isArray(config?.services) ? config.services : []
   const pricing = config?.pricing || {}, discounts = config?.discounts || {}
+  // Ignore ids that no longer exist in the catalogue: a zone whose rows all reference dead services
+  // would read as "configured with nothing" and take every service offline.
+  const known = new Set((await pool.query('SELECT id FROM services')).rows.map((r) => r.id))
   await pool.query('DELETE FROM zone_pricing WHERE zone_id=$1', [zoneId])
   for (const sid of services) {
+    if (!known.has(sid)) continue
     const price = Math.round(Number(pricing[sid]) || 0)
     const discount = Math.round(Number(discounts[sid]) || 0)
-    if (price <= 0 && discount <= 0) continue   // no override & no discount → service follows the live catalogue price
+    // Every selected service gets a row, even with no overrides: the row is what makes the service
+    // OFFERED in this zone (see catalogueFor). price 0 = follow the live catalogue price.
     await pool.query('INSERT INTO zone_pricing (zone_id, service_id, price, discount, active) VALUES ($1,$2,$3,$4,true)',
       [zoneId, sid, price, discount])
   }
@@ -1443,6 +1482,58 @@ entityRoutes('clusters', 'clusters')
 entityRoutes('apartments', 'apartments')
 entityRoutes('inventory', 'inventory')
 entityRoutes('zone-pricing', 'zone_pricing', 'pricing.edit')
+
+/* ---------- Time & Extension Rules (per service) ---------- */
+// Normalised rule: only whole-minute blocks with a real price survive, ordered shortest first, so
+// the apps can render the menu straight from this without re-validating.
+function extRuleDto(r, service) {
+  const blocks = (Array.isArray(r?.blocks) ? r.blocks : [])
+    .map((b) => ({ mins: Math.round(Number(b?.mins) || 0), price: Math.round(Number(b?.price) || 0), payout: Math.round(Number(b?.payout) || 0) }))
+    .filter((b) => b.mins > 0 && b.price >= 0)
+    .sort((a, b) => a.mins - b.mins)
+  return {
+    serviceId: r.service_id, serviceName: service?.name || r.service_id,
+    enabled: !!r.enabled, blocks,
+    maxTotalMin: r.max_total_min, maxRequests: r.max_requests,
+    minRemainingMin: r.min_remaining_min, approvalRequired: !!r.approval_required,
+  }
+}
+
+app.get('/api/admin/extension-rules', adminAuth, async (_q, res) => {
+  const { rows } = await pool.query(
+    `SELECT r.*, s.name FROM service_extension_rules r
+     LEFT JOIN services s ON s.id = r.service_id ORDER BY s.sort, r.service_id`)
+  res.json(rows.map((r) => extRuleDto(r, { name: r.name })))
+})
+
+app.patch('/api/admin/extension-rules/:serviceId', adminAuth, requirePerm('pricing.edit'), async (req, res) => {
+  const sid = String(req.params.serviceId)
+  const b = req.body || {}
+  const cur = (await pool.query('SELECT * FROM service_extension_rules WHERE service_id=$1', [sid])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'No such service' })
+  const blocks = b.blocks !== undefined ? JSON.stringify(b.blocks) : JSON.stringify(cur.blocks)
+  const { rows } = await pool.query(
+    `UPDATE service_extension_rules SET enabled=$2, blocks=$3::jsonb, max_total_min=$4, max_requests=$5,
+       min_remaining_min=$6, approval_required=$7, updated=now() WHERE service_id=$1 RETURNING *`,
+    [sid,
+      b.enabled !== undefined ? !!b.enabled : cur.enabled,
+      blocks,
+      b.maxTotalMin !== undefined ? Math.max(0, Number(b.maxTotalMin) || 0) : cur.max_total_min,
+      b.maxRequests !== undefined ? Math.max(0, Number(b.maxRequests) || 0) : cur.max_requests,
+      b.minRemainingMin !== undefined ? Math.max(0, Number(b.minRemainingMin) || 0) : cur.min_remaining_min,
+      b.approvalRequired !== undefined ? !!b.approvalRequired : cur.approval_required])
+  const s = (await pool.query('SELECT name FROM services WHERE id=$1', [sid])).rows[0]
+  res.json(extRuleDto(rows[0], s))
+})
+
+// Booking/dispatch ask for a service's rule when pricing or gating an extension request.
+app.get('/api/internal/extension-rule/:serviceId', internalOnly, async (req, res) => {
+  const sid = String(req.params.serviceId)
+  const r = (await pool.query('SELECT * FROM service_extension_rules WHERE service_id=$1', [sid])).rows[0]
+  if (!r) return res.json(null)
+  const s = (await pool.query('SELECT name FROM services WHERE id=$1', [sid])).rows[0]
+  res.json(extRuleDto(r, s))
+})
 
 /* ───────── Membership plans (Module 10) — admin config authority + public catalog ─────────
    Admin edits reuse the pricing permission. Body uses snake_case column names (like campaigns);
