@@ -334,6 +334,7 @@ export interface BookingExtension {
   reasonCode: string; reasonLabel: string; reasonText: string
   status: 'pending' | 'approved' | 'declined' | 'cancelled'
   created: string; decided: string | null
+  paymentMethod?: string // 'razorpay' | 'wallet' | '' — how the customer paid for this extension
 }
 export interface ExtensionState {
   pending: BookingExtension | null
@@ -342,9 +343,12 @@ export interface ExtensionState {
   extensionTotal: number
 }
 export const fetchExtensions = (id: number) => req<ExtensionState>(`/api/bookings/${id}/extensions`)
-export const approveExtension = (id: number, extId: number) =>
+// paymentId — a verified Razorpay payment id for the extension charge; the booking service settles
+// it through the payment gateway. Omit it (price 0, or the legacy wallet path) to charge the wallet.
+export const approveExtension = (id: number, extId: number, opts?: { paymentId?: string }) =>
   req<{ ok: boolean; extension: BookingExtension; extensionMinutes: number; extensionTotal: number }>(
-    `/api/bookings/${id}/extensions/${extId}/approve`, { method: 'POST' })
+    `/api/bookings/${id}/extensions/${extId}/approve`,
+    { method: 'POST', body: JSON.stringify({ paymentId: opts?.paymentId || undefined }) })
 export const declineExtension = (id: number, extId: number) =>
   req<{ ok: boolean; extension: BookingExtension }>(`/api/bookings/${id}/extensions/${extId}/decline`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })

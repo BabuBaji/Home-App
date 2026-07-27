@@ -338,6 +338,34 @@ app.post('/api/payment/wallet/topup', auth, async (req, res) => {
   res.json({ ok: true, balance })
 })
 
+// Settle a service extension paid via the gateway. Called INTERNALLY by the booking service from
+// its approve handler — the customer completed a Razorpay checkout mid-service and the booking must
+// only grant the extra time once the money is recorded here. Booking_id is deliberately NULL (the
+// payments table has a unique index on booking_id — the original booking already owns that row), so
+// the booking reference rides in order_id. Idempotent by payment_id so a retried approve or a
+// duplicate webhook can never double-charge. Status 'PAID' → counts as revenue in the admin panel.
+app.post('/api/internal/payment/extension', internalOnly, async (req, res) => {
+  const bookingId = Number(req.body?.bookingId) || null
+  const extId = Number(req.body?.extId) || null
+  const customerId = Number(req.body?.customerId) || null
+  const amount = Math.max(1, Math.round(Number(req.body?.amount) || 0))
+  const paymentId = String(req.body?.paymentId || '').trim()
+  if (!amount || !paymentId) return res.status(400).json({ error: 'Missing amount or paymentId' })
+  const r = await rzp()
+  // Live gateway → the payment must have passed server-side signature verification. Never trust a
+  // frontend "success" alone. In mock/demo mode there is no signature to check.
+  if (r.live && !verifiedPayments.has(paymentId)) return res.status(400).json({ error: 'Payment not verified' })
+  // Idempotency — one gateway payment settles exactly one extension.
+  const dup = await pool.query("SELECT id FROM payments WHERE payment_id=$1 AND mode='extension'", [paymentId])
+  if (dup.rowCount) return res.json({ ok: true, duplicate: true })
+  const orderRef = `EXT-BK${bookingId || '?'}${extId ? '-' + extId : ''}`
+  await pool.query(
+    "INSERT INTO payments (booking_id,customer_id,amount,mode,gateway,payment_id,order_id,status) VALUES (NULL,$1,$2,'extension',$3,$4,$5,'PAID')",
+    [customerId, amount, r.live ? 'razorpay' : 'mock', paymentId, orderRef])
+  verifiedPayments.delete(paymentId)
+  res.json({ ok: true })
+})
+
 app.post('/api/payment/charge', auth, async (req, res) => {
   const r = await rzp()
   if (r.live) return res.status(400).json({ error: 'Use the Razorpay checkout flow' })

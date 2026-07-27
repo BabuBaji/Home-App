@@ -50,3 +50,22 @@ export function fmtDateTime(b: Booking): string {
 }
 
 export const serviceNames = (b: Booking) => (b.items || []).map((i) => i.name).join(', ') || 'Home Service'
+
+// Booked length in minutes — durationId first (authoritative), then the free-text label. Mirrors the
+// server's rule. Shared by the live clock and the "ending soon" voice alert.
+const DUR: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+export function bookedMinutes(b: Booking): number {
+  const id = b.items?.[0]?.durationId
+  if (id && DUR[id]) return DUR[id]
+  const s = String(b.duration || '')
+  const n = parseInt(s, 10)
+  if (!n) return 60
+  return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
+}
+
+// Total service end time in ms (booked + approved extensions), or 0 if not started.
+export function serviceEndMs(b: Booking): number {
+  if (!b.started_at) return 0
+  const total = bookedMinutes(b) + (b.extension_minutes || 0)
+  return new Date(b.started_at).getTime() + total * 60000
+}

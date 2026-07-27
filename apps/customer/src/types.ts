@@ -135,6 +135,9 @@ export interface Booking {
   otp_released?: boolean         // false while a future scheduled booking is still waiting
   started_at?: string | null
   completed_at?: string | null   // when the worker ended the service (for actual duration)
+  extension_minutes?: number     // extra approved minutes; added to the booked duration for the live clock
+  extension_total?: number       // ₹ charged across all approved extensions (for history + invoice)
+  extensions?: import('./api').BookingExtension[] // full extension history on the booking detail
   work_photo?: string | null     // worker's proof-of-work photo captured at completion
   cust_lat?: number | null
   cust_lng?: number | null

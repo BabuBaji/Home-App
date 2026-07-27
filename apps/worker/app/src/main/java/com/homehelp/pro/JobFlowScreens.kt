@@ -385,7 +385,7 @@ private fun CustomerPhoto(url: String?, initials: String, size: Int) {
 
 /** Lavender customer+service strip with the real photo — shown on the Work-in-Progress screen. */
 @Composable
-private fun InProgressCustomerStrip(job: Job) {
+private fun InProgressCustomerStrip(job: Job, unread: Int, onChat: () -> Unit) {
     val ctx = LocalContext.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(12.dp),
@@ -399,6 +399,25 @@ private fun InProgressCustomerStrip(job: Job) {
                     Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 7.dp, vertical = 2.dp)) {
                         Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                // Chat with the customer — a tappable message button (with unread badge) beside the name.
+                Spacer(Modifier.width(Space.s))
+                Box {
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape).background(PurpleLight).clickable { onChat() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Chat, contentDescription = "Chat with customer", tint = Purple, modifier = Modifier.size(19.dp))
+                    }
+                    if (unread > 0) {
+                        Box(
+                            Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp)
+                                .size(18.dp).clip(CircleShape).background(Color(0xFFE5484D)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(if (unread > 9) "9+" else "$unread", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1315,6 +1334,10 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         vm.refreshExtensions()
         while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
     }
+    // Poll for new customer messages so the chat badge stays current without opening the thread.
+    LaunchedEffect(Unit) {
+        while (true) { vm.refreshUnreadMessages(); delay(6000) }
+    }
     // While the customer is deciding, poll for their answer. Only while pending — an idle job
     // shouldn't be talking to the server every few seconds.
     LaunchedEffect(vm.pendingExtension?.id) {
@@ -1417,8 +1440,8 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            // ── Customer (with photo).
-            InProgressCustomerStrip(job)
+            // ── Customer (with photo + chat button showing unread message count).
+            InProgressCustomerStrip(job, vm.unreadMessages) { nav.navigate(Routes.JOB_CHAT) }
 
             // ── Checklist.
             FlowCard {

@@ -26,6 +26,7 @@ const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
+const PAYMENT_URL = (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, '')
 
 // A single malformed request must never take the service down.
 process.on('unhandledRejection', (e) => console.error('[booking] unhandledRejection:', e?.message || e))
@@ -224,6 +225,8 @@ const extDto = (r) => r && ({
   price: r.price, payout: r.payout, reasonCode: r.reason_code,
   reasonLabel: EXT_REASONS[r.reason_code]?.label || r.reason_code,
   reasonText: r.reason_text, status: r.status, created: r.created, decided: r.decided,
+  // How the customer paid for this extension (razorpay | wallet | ''), for the history + invoice.
+  paymentMethod: r.payment_method || '',
 })
 
 const extensionsFor = async (bookingId) =>
@@ -393,15 +396,28 @@ app.post('/api/bookings/:id/extensions/:extId/approve', auth, async (req, res) =
 
   let method = ''
   if (row.price > 0) {
-    // Wallet is the only settled rail for extensions today; a gateway charge mid-service needs the
-    // customer to complete a checkout, which the approval sheet can't yet drive. Fail loudly
-    // rather than granting time nobody paid for.
-    try {
-      await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`,
-        { type: 'debit', title: `Service extension +${row.minutes} min`, amount: row.price })
-      method = 'wallet'
-    } catch (e) {
-      return res.status(402).json({ error: e.message || 'Insufficient wallet balance', needsTopUp: true, amount: row.price })
+    // Charge FIRST: if the money doesn't move, the clock doesn't either, so a worker is never told
+    // to carry on against an unpaid extension. Two settled rails:
+    //  - Razorpay (paymentId present): the customer completed a gateway checkout in the app; the
+    //    payment service verifies the signature and records the transaction. This is the default path.
+    //  - Wallet (no paymentId): unchanged legacy fallback — debits the customer wallet in auth.
+    const paymentId = String(req.body?.paymentId || '').trim()
+    if (paymentId) {
+      try {
+        await internalPost(PAYMENT_URL, '/api/internal/payment/extension',
+          { bookingId: b.id, extId: row.id, customerId: b.user_id, amount: row.price, paymentId })
+        method = 'razorpay'
+      } catch (e) {
+        return res.status(402).json({ error: e.message || 'Payment could not be confirmed', amount: row.price })
+      }
+    } else {
+      try {
+        await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`,
+          { type: 'debit', title: `Service extension +${row.minutes} min`, amount: row.price })
+        method = 'wallet'
+      } catch (e) {
+        return res.status(402).json({ error: e.message || 'Insufficient wallet balance', needsTopUp: true, amount: row.price })
+      }
     }
   }
 
@@ -526,7 +542,10 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
       street: a.street || '', landmark: a.landmark || '', line: a.line || '', city: a.city || '', pincode: a.pincode || '',
     }
   }
-  res.json({ ...publicBooking(b), serviceAvailable, pro, addr, ...travel })
+  // Include the full extension history (minutes/amount/method/status) so the booking detail and the
+  // invoice can itemise the paid extra time alongside the base service.
+  const extensions = await extensionsFor(b.id)
+  res.json({ ...publicBooking(b), serviceAvailable, pro, addr, extensions, ...travel })
 })
 
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.

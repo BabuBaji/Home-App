@@ -1036,6 +1036,11 @@ class AppViewModel : ViewModel() {
     val messages = mutableStateListOf<JobMessage>()
     var chatSending by mutableStateOf(false)
         private set
+    // Unread customer messages — the count shown on the chat badge on the live-job screen. A message
+    // is "unread" until the worker opens the chat (loadMessages marks everything read).
+    var unreadMessages by mutableStateOf(0)
+        private set
+    private var lastReadMsgId = 0
 
     fun loadMessages() {
         if (activeJob == null) return
@@ -1044,8 +1049,26 @@ class AppViewModel : ViewModel() {
                 withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
                 val r = api.jobMessages()
                 messages.clear(); messages.addAll(r.messages)
+                // Viewing the thread marks it read → clear the badge.
+                lastReadMsgId = r.messages.maxOfOrNull { it.id } ?: lastReadMsgId
+                unreadMessages = 0
                 backendConnected = true
             } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    /** Badge poll for the live-job screen: refresh the thread and count customer messages the worker
+     *  hasn't opened the chat to read yet. Does NOT mark them read. */
+    fun refreshUnreadMessages() {
+        if (activeJob == null) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.jobMessages()
+                messages.clear(); messages.addAll(r.messages)
+                unreadMessages = r.messages.count { !it.fromWorker && it.id > lastReadMsgId }
+                backendConnected = true
+            } catch (_: Exception) { /* keep last count */ }
         }
     }
 
