@@ -18,13 +18,21 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 8080;
 
 // ---- helpers ----
+// Worker-facing view of a job: the check-in OTP is stripped. It belongs to the customer, who
+// reads it out on arrival; /api/jobs/verify-otp compares it here against the stored copy.
+function publicJob(job) {
+  if (!job) return job;
+  const { otp, ...rest } = job; // eslint-disable-line no-unused-vars
+  return rest;
+}
+
 function bootstrap() {
   const s = db.get();
   return {
     worker: s.worker,
     wallet: s.wallet,
     jobStatus: s.jobStatus,
-    activeJob: s.activeJob,
+    activeJob: publicJob(s.activeJob),
     bookings: s.bookings,
     earnings: s.earnings,
     walletTxns: s.walletTxns,
@@ -126,7 +134,7 @@ app.post('/api/jobs/request', (req, res) => {
   s.activeJob = job;
   s.jobStatus = 'REQUESTED';
   db.save();
-  res.json({ job, jobStatus: s.jobStatus });
+  res.json({ job: publicJob(job), jobStatus: s.jobStatus });
 });
 
 function setStatus(res, status, requireActive = true) {
@@ -134,7 +142,7 @@ function setStatus(res, status, requireActive = true) {
   if (requireActive && !s.activeJob) return res.status(409).json({ ok: false, error: 'No active job' });
   s.jobStatus = status;
   db.save();
-  res.json({ ok: true, jobStatus: s.jobStatus, activeJob: s.activeJob });
+  res.json({ ok: true, jobStatus: s.jobStatus, activeJob: publicJob(s.activeJob) });
 }
 
 app.post('/api/jobs/accept', (req, res) => setStatus(res, 'ACCEPTED'));
@@ -154,12 +162,15 @@ app.post('/api/jobs/verify-otp', (req, res) => {
   const s = db.get();
   const job = s.activeJob;
   if (!job) return res.status(409).json({ ok: false, error: 'No active job' });
-  if (String(req.body.otp) === String(job.otp)) {
+  const given = String((req.body && req.body.otp) || '').trim();
+  const expected = String(job.otp || '').trim();
+  // A blank on either side must never pass — otherwise an empty field would start the job.
+  if (given && expected && given === expected) {
     s.jobStatus = 'IN_PROGRESS';
     db.save();
     return res.json({ ok: true, jobStatus: s.jobStatus });
   }
-  res.json({ ok: false, error: 'Incorrect OTP' });
+  res.json({ ok: false, error: 'Incorrect OTP. Try again.' });
 });
 
 // Finish & settle -> credit earnings + wallet, append history.

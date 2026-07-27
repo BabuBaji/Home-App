@@ -1030,7 +1030,10 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
     var otp by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
+    // Null = no error. The message comes from the server (wrong code) or from a failed request —
+    // the app can no longer tell the two apart on its own, since it never sees the real OTP.
+    var error by remember { mutableStateOf<String?>(null) }
+    var verifying by remember { mutableStateOf(false) }
     var showCancel by remember { mutableStateOf(false) }
     var resendSec by remember { mutableIntStateOf(28) }
     LaunchedEffect(job.id) { resendSec = 28; while (resendSec > 0) { delay(1000); resendSec-- } }
@@ -1057,7 +1060,16 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
         }
     }
 
-    fun verify() { if (vm.verifyOtpAndStart(otp)) nav.navigate(Routes.BEFORE_PHOTOS) else error = true }
+    fun verify() {
+        if (verifying) return
+        verifying = true
+        error = null
+        vm.verifyOtpAndStart(otp) { err ->
+            verifying = false
+            error = err
+            if (err == null) nav.navigate(Routes.BEFORE_PHOTOS)
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
@@ -1135,7 +1147,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 BasicTextField(
                     value = otp,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) { otp = it; error = false } },
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) { otp = it; error = null } },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     decorationBox = {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -1144,7 +1156,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                                 val active = i == otp.length
                                 Box(
                                     Modifier.size(62.dp).clip(RoundedCornerShape(14.dp)).background(Color.White)
-                                        .border(if (active || ch.isNotEmpty()) 2.dp else 1.5.dp, if (error) RedCancel else Purple.copy(alpha = if (active || ch.isNotEmpty()) 1f else 0.4f), RoundedCornerShape(14.dp)),
+                                        .border(if (active || ch.isNotEmpty()) 2.dp else 1.5.dp, if (error != null) RedCancel else Purple.copy(alpha = if (active || ch.isNotEmpty()) 1f else 0.4f), RoundedCornerShape(14.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) { Text(ch, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextDark) }
                             }
@@ -1152,8 +1164,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                     },
                 )
             }
-            if (error) Text("Incorrect OTP. Try again.", color = RedCancel, fontSize = 12.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-            Text("OTP sent to customer's registered mobile number", color = TextGray, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            error?.let { Text(it, color = RedCancel, fontSize = 12.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) }
+            Text("Ask the customer for the code sent to their registered mobile number", color = TextGray, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 if (resendSec > 0) {
                     Text("Resend OTP in ", color = TextGray, fontSize = 13.sp)
@@ -1163,7 +1175,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                         modifier = Modifier.clickable { resendSec = 28; toast(ctx, "OTP resent") })
                 }
             }
-            Text("Demo OTP: ${job.otp}", color = TextMuted, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            // No OTP hint is shown here by design — the worker must get the code from the
+            // customer verbally before it can be entered.
 
             // ── Didn't receive OTP?
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1203,16 +1216,19 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Column(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     OutlineButton("CANCEL JOB", modifier = Modifier.weight(1f)) { showCancel = true }
+                    val canVerify = otp.length == 4 && !verifying
                     Box(
                         Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(Radius.button))
-                            .background(if (otp.length == 4) Purple else Purple.copy(alpha = 0.4f))
-                            .clickable(enabled = otp.length == 4) { verify() },
+                            .background(if (canVerify) Purple else Purple.copy(alpha = 0.4f))
+                            .clickable(enabled = canVerify) { verify() },
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("VERIFY & CONTINUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(6.dp))
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Text(if (verifying) "VERIFYING…" else "VERIFY & CONTINUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            if (!verifying) {
+                                Spacer(Modifier.width(6.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }

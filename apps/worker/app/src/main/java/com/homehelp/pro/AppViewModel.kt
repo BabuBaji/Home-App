@@ -130,7 +130,10 @@ data class Job(
     val area: String,
     val distanceKm: Double,
     val earnings: Int,
-    val otp: String,
+    // NOTE: there is deliberately no `otp` field. The check-in code belongs to the customer and
+    // is never sent to the worker device — the worker must be told it verbally and the SERVER
+    // does the comparison (see verifyOtpAndStart). Gson ignores the key if an older backend
+    // still emits it.
     val lat: Double,
     val lng: Double,
     // Server timestamp (ISO-8601, UTC) when the service started. The live timer is
@@ -835,26 +838,35 @@ class AppViewModel : ViewModel() {
         sync { api.arrived() }
     }
 
-    /** OTP-gated start. Returns true if the OTP matches and service begins.
+    /** OTP-gated start. The code is checked by the SERVER — never on-device — because the worker
+     *  app is not told the customer's OTP; the only way through is for the customer to read it
+     *  out. That also means there is no offline path: a failed request leaves the job un-started
+     *  rather than optimistically starting it.
+     *
      *  We adopt the server's job snapshot from the response so the live timer anchors to
      *  the SERVER's started_at (the same value the customer app uses) — otherwise the two
-     *  timers drift by the request round-trip / local-clock difference. */
-    fun verifyOtpAndStart(input: String): Boolean {
-        val job = activeJob ?: return false
-        if (input != job.otp) return false
-        jobStatus = JobStatus.IN_PROGRESS
-        jobAcceptedAtMs = 0L                           // start window met — hide the countdown banner
-        serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
-        serviceEndMs = 0L
+     *  timers drift by the request round-trip / local-clock difference.
+     *
+     *  [onResult] receives null on success, or a message to show the worker. */
+    fun verifyOtpAndStart(input: String, onResult: (String?) -> Unit) {
+        if (activeJob == null) { onResult("No active job."); return }
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
-                val r = api.verifyOtp(OtpBody(input))
-                r.activeJob?.let { activeJob = it }    // now carries the server started_at
+                val r = api.verifyOtp(OtpBody(input.trim()))
                 backendConnected = true
-            } catch (e: Exception) { backendConnected = false }
+                if (!r.ok) { onResult(r.error ?: "Incorrect OTP. Try again."); return@launch }
+                jobStatus = JobStatus.IN_PROGRESS
+                jobAcceptedAtMs = 0L                          // start window met — hide the countdown banner
+                serviceStartMs = System.currentTimeMillis()  // fallback until the server started_at lands
+                serviceEndMs = 0L
+                r.activeJob?.let { activeJob = it }           // now carries the server started_at
+                onResult(null)
+            } catch (e: Exception) {
+                backendConnected = false
+                onResult("Couldn't reach the server. Check your connection and try again.")
+            }
         }
-        return true
     }
 
     // ─── In-service job state: checklist · before/after photos · extras · pause ───────────

@@ -956,7 +956,8 @@ async function bootstrap(wid) {
         durationMinutes: bookingDurationMinutes(active),
         address: addr, area: addr, distanceKm: 0,
         earnings: Math.round((active.total || 0) * 0.8),
-        otp: active.service_otp || '',
+        // No `otp` here on purpose — the check-in code stays server-side and is only ever
+        // compared by dispatch's /api/worker/jobs/verify-otp. The customer reads it out.
         lat: active.cust_lat || 0, lng: active.cust_lng || 0,
         startedAt: active.started_at, completedAt: active.completed_at,
       }

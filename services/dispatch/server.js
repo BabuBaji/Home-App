@@ -175,6 +175,9 @@ function bookingDurationMinutes(b) {
   return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
 }
 
+// The worker-facing job DTO. It deliberately carries NO `service_otp`: the check-in code is the
+// customer's proof of presence, so the worker device must never hold it — the customer reads it
+// out and /verify-otp below does the comparison server-side.
 async function jobFromBooking(b) {
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   const c = u?.user || {}
@@ -184,7 +187,7 @@ async function jobFromBooking(b) {
     customerType: b.type || 'Residential', note: b.note || '',
     services: (b.items || []).map((i) => i.name), dateTime: [b.date, b.time].filter(Boolean).join(', ') || new Date(b.created).toLocaleString(),
     durationHours: Math.max(1, parseInt(b.duration, 10) || 2), durationMinutes: bookingDurationMinutes(b), address: b.address, area: (b.address || '').split(',').slice(-2).join(',').trim() || b.address,
-    distanceKm: +(1 + (b.id % 30) / 10).toFixed(1), earnings: await workerShare(b.total), otp: b.service_otp,
+    distanceKm: +(1 + (b.id % 30) / 10).toFixed(1), earnings: await workerShare(b.total),
     lat: b.cust_lat ?? (17.4448 + (b.id % 10) * 0.002), lng: b.cust_lng ?? (78.3498 + (b.id % 10) * 0.002),
     startedAt: b.started_at || null, completedAt: b.completed_at || null,
   }
@@ -346,10 +349,15 @@ app.post('/api/worker/jobs/location', auth, async (req, res) => {
   res.json({ ok: true, dist: dist != null ? +dist.toFixed(1) : null, eta })
 })
 
+// The ONLY place the check-in code is compared. The worker app never receives it (see
+// jobFromBooking), so the worker has to be told it by the customer.
 app.post('/api/worker/jobs/verify-otp', auth, async (req, res) => {
   const b = await activeBooking(req.worker.id)
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
-  if (String(req.body?.otp) !== String(b.service_otp)) return res.json({ ok: false, error: 'Incorrect OTP' })
+  const given = String(req.body?.otp ?? '').trim()
+  const expected = String(b.service_otp ?? '').trim()
+  // A blank on either side must never pass — otherwise an empty field would start the job.
+  if (!given || !expected || given !== expected) return res.json({ ok: false, error: 'Incorrect OTP. Try again.' })
   await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'in_progress' })
   // Domain event: the wallet service uses this to decide the on-time-start incentive vs late penalty.
   publishEvent(REDIS_URL, 'job.start', { bookingId: b.id, workerId: req.worker.id, ref: b.ref })
