@@ -44,6 +44,8 @@ object DebugNav {
     var amount: Int = 0
     var phone: String? = null
     var otp: String? = null
+    /** `--ez debug_demo true` seeds Home with representative figures for design review. */
+    var demo: Boolean = false
     var consumed: Boolean = false
 }
 
@@ -56,6 +58,7 @@ class MainActivity : ComponentActivity() {
             DebugNav.amount = intent?.getIntExtra("debug_amount", 0) ?: 0
             DebugNav.phone = intent?.getStringExtra("debug_phone")
             DebugNav.otp = intent?.getStringExtra("debug_otp")
+            DebugNav.demo = intent?.getBooleanExtra("debug_demo", false) == true
             DebugNav.consumed = false
             // When driving the app headlessly via `am start` (touch injection blocked by the OS),
             // turn the screen on and keep it lit so automated screenshots aren't black frames.
@@ -201,9 +204,15 @@ fun AppRoot() {
                 if (DebugNav.amount > 0) WithdrawDraft.amount = DebugNav.amount
                 if (DebugNav.login && !vm.isLoggedIn) {
                     vm.debugLogin(DebugNav.phone ?: "9800000000", DebugNav.otp ?: "1234") { ok ->
-                        if (ok) nav.navigate(target)
+                        if (ok) {
+                            // Seed AFTER login: the bootstrap that login triggers would
+                            // otherwise land on top of the demo figures and zero them again.
+                            if (DebugNav.demo) vm.applyDemoFigures()
+                            nav.navigate(target)
+                        }
                     }
                 } else {
+                    if (DebugNav.demo) vm.applyDemoFigures()
                     nav.navigate(target)
                 }
             }

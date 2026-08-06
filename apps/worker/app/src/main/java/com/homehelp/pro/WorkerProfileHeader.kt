@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,27 +51,22 @@ fun WorkerProfileHeader(
     onProfileClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "$greeting, $firstName 👋",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextDark,
-                letterSpacing = (-0.3).sp,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text("Stay active, earn more!", fontSize = 13.sp, color = TextGray)
-            Spacer(Modifier.height(7.dp))
-            OnlineStatusPill(online = online, onClick = onToggleOnline)
-        }
-        Spacer(Modifier.width(Space.m))
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            VerifiedAvatar(onClick = onProfileClick)
-            Spacer(Modifier.height(5.dp))
-            // Always shown (as in the design). A worker with no ratings yet reads "—".
-            RatingChip(rating = rating)
-        }
+    // Greeting block only: the avatar moved into the top bar and the rating became a stat tile,
+    // both per the reference. Greeting and name stay on separate lines — as one string the
+    // block wrapped wherever the name ran long, pushing the emoji onto a line of its own.
+    Column(modifier.fillMaxWidth()) {
+        Text("$greeting,", fontSize = 14.sp, color = TextGray, maxLines = 1)
+        Spacer(Modifier.height(1.dp))
+        Text(
+            "$firstName 👋",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextDark,
+            letterSpacing = (-0.6).sp,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(11.dp))
+        OnlineStatusPill(online = online, onClick = onToggleOnline)
     }
 }
 
@@ -82,10 +78,10 @@ fun WorkerProfileHeader(
  */
 @Composable
 fun VerifiedAvatar(onClick: () -> Unit) {
-    Box(Modifier.size(56.dp)) {
+    Box(Modifier.size(60.dp)) {
         Box(
             Modifier
-                .size(52.dp)
+                .size(56.dp)
                 .align(Alignment.TopCenter)
                 .clip(RoundedCornerShape(Radius.pill))
                 .background(BrandGradient)

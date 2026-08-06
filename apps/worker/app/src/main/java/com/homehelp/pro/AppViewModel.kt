@@ -598,6 +598,10 @@ class AppViewModel : ViewModel() {
         // Re-hydrate the in-service working state (ticks/photos/extras/pause) for a job that was
         // already running when the app was killed — this is what makes it survive a restart.
         if (activeJob != null) loadJobState()
+        // Seeded demo figures must outlast this: the bootstrap kicked off by login lands
+        // asynchronously, after the deep-link handler has already seeded, and would otherwise
+        // zero the dashboard again. Re-applying here is idempotent and ordering-independent.
+        if (demoFigures) applyDemoFigures()
     }
 
     // ---- lifecycle transitions ----
@@ -715,6 +719,9 @@ class AppViewModel : ViewModel() {
      *  was completed/assigned server-side — shows up right away instead of after a full relaunch. */
     fun refresh() {
         if (!isLoggedIn) return
+        // Demo figures are seeded for design review and would be wiped by the ON_RESUME refresh
+        // the moment the app came back to the foreground. DEBUG-only — see [applyDemoFigures].
+        if (demoFigures) return
         sync { applyBootstrap(api.bootstrap()) }
     }
 
@@ -736,6 +743,39 @@ class AppViewModel : ViewModel() {
 
     /** Load the worker's persisted daily goal (called once the session is ready). */
     fun loadDailyGoal() { dailyGoal = Session.dailyGoal }
+
+    /** True while Home is showing seeded demo figures instead of live backend data. */
+    var demoFigures by mutableStateOf(false)
+        private set
+
+    /**
+     * DEBUG ONLY — fill Home's figures with representative numbers so the dashboard can be
+     * reviewed with realistic content instead of a column of zeros.
+     *
+     * Nothing in the shipped app calls this: the only caller is MainActivity's debug deep-link
+     * handler, which is itself inside `if (BuildConfig.DEBUG)`. Setting [demoFigures] also parks
+     * [refresh] so the seeded numbers survive the app coming back to the foreground; the flag is
+     * never persisted, so a normal relaunch is back on live data.
+     */
+    fun applyDemoFigures() {
+        demoFigures = true
+        todayEarnings = 1240
+        weekEarnings = 7850
+        monthEarnings = 28400
+        walletBalance = 3250
+        holdBalance = 480
+        dailyGoal = 1500
+        todayJobs = 6
+        todayCompleted = 4
+        todayCancelled = 1
+        workerRating = 4.8
+        acceptancePct = 96
+        completionPct = 98
+        punctualityPct = 94
+        cancellationPct = 2
+        // No fabricated schedule. The Next Job card and the timeline must only ever show real
+        // customer bookings, so demo mode seeds figures only and leaves the job feed alone.
+    }
 
     /** True when a real customer booking is waiting — drives the "New Job Request" notification. */
     var hasIncomingJob by mutableStateOf(false)
@@ -1142,6 +1182,10 @@ class AppViewModel : ViewModel() {
 
     // ---- wallet module ----
     private fun applyWalletSummary(s: WalletSummaryDto) {
+        // This is the one place every wallet refresh path funnels through to write Home's
+        // figures, so it is where the DEBUG demo seed has to be defended: the wallet poll that
+        // follows going online lands here and would otherwise reset the dashboard to zeros.
+        if (demoFigures) return
         walletBalance = s.available
         pendingAmount = s.pending
         holdBalance = s.hold

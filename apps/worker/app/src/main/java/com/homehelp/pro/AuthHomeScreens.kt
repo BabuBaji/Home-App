@@ -3,6 +3,7 @@ package com.homehelp.pro
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -10,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -95,6 +97,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -299,12 +302,30 @@ private fun TrustItem(emoji: String, label: String) {
     }
 }
 
+/**
+ * Best-effort last known position for a Home check-in / check-out, mirroring what the
+ * attendance screen captures. Returns nulls when permission is missing or no fix is cached —
+ * the attendance API accepts null coordinates, so check-in still succeeds without GPS.
+ */
+private fun homeLastLoc(ctx: Context): Pair<Double?, Double?> = try {
+    if (androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx, android.Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+        loc?.latitude to loc?.longitude
+    } else null to null
+} catch (_: Exception) { null to null }
+
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val openDrawer = LocalDrawerOpen.current
     val appCtx = LocalContext.current.applicationContext
 
     val sosCtx = LocalContext.current
+    val homeCtx = LocalContext.current
 
     // Pull the wallet ledger so the Home "Last 7 Days" chart + balance chip have live data.
     LaunchedEffect(Unit) { vm.refreshWallet() }
@@ -352,36 +373,38 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             .take(2).joinToString("").uppercase().ifBlank { "P" }
     }
 
-    // ─── Today's incentive, summed from the real wallet ledger. Null (renders "—") until
-    //     the ledger has actually loaded, so an unloaded ledger never reads as "₹0". ───
-    val todayIso = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) }
-    val todayIncentive: Int? = remember(vm.walletHistory.toList()) {
-        if (vm.walletHistory.isEmpty()) null
-        else vm.walletHistory
-            .filter { it.isCredit && it.date == todayIso && it.type.contains("Incentive", ignoreCase = true) }
-            .sumOf { it.amount }
-    }
-
-    // Bonus progress = working days achieved / days needed for the top (Gold) Sitara tier.
-    val bonusProgress: Float? = vm.shaktiBonus?.let { s ->
-        val goldDays = s.tiers.lastOrNull()?.days ?: 0
-        if (goldDays <= 0) null else (s.workingDays.toFloat() / goldDays).coerceIn(0f, 1f)
-    }
+    // Today's incentive was derived here for the progress card. That figure left Home when the
+    // card was cut to the two job counts, so the wallet-ledger scan it needed went with it.
 
     // Next scheduled job — the real `schedule` feed carries service/time/location.
-    val nextJob = vm.schedule.firstOrNull { it.status == "Upcoming" }
+    // Any live or upcoming job, not just "Upcoming". The backend reports a job the worker has
+    // already accepted as "In progress", so an exact-match on "Upcoming" hid the Next Job card
+    // for exactly the job the worker most needs to act on.
+    val nextJob = vm.schedule.firstOrNull {
+        it.status.equals("Upcoming", true) || it.status.equals("In progress", true) ||
+            it.status.equals("Accepted", true) || it.status.equals("Confirmed", true)
+    } ?: vm.schedule.firstOrNull()
     val nextJobWindow = remember(nextJob?.time, nextJob?.durationMins) { jobTimeWindow(nextJob?.time, nextJob?.durationMins) }
 
-    // Home is a fit-to-screen dashboard, not a scroller: every section stays visible at once,
-    // shrinking together on shorter phones (see FitToScreen).
-    FitToScreen(Modifier.fillMaxSize().background(ScreenBg)) {
-        // Design frame (390×844): the mock's "16px" gap is measured on its 864px-wide export —
-        // 2.22× the frame — so it is an 8dp gap there. This stack is ~1.37× the frame's height
-        // before FitToScreen shrinks it to the viewport, so 11dp here lands on the mock's 8dp
-        // once scaled. Measured, not guessed: see the design-vs-device numbers in the PR notes.
+    // Home scrolls, and deliberately so. Measured on a 1080×2408 @440dpi device: this layout's
+    // natural height is ~1500dp against ~820dp of usable screen, so the old FitToScreen wrapper
+    // was rendering the whole page at 0.545 scale — 108dp tiles came out 162px instead of 297px,
+    // and 19sp figures read as 10sp. No amount of trimming closes a 680dp gap; dropping the
+    // schedule, banner and ticker together still only reached ~0.76. Scrolling is what lets the
+    // type and cards render at the size they are designed at.
+    Column(
+        Modifier.fillMaxSize().background(ScreenBg).verticalScroll(rememberScrollState()),
+    ) {
+        // Screen padding 20dp and 12dp between sections (the design system's 20dp section gap,
         Column(
-            Modifier.padding(horizontal = Space.l).padding(top = 8.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            // Bottom padding clears the floating bottom nav, which is drawn over this content
+            // rather than below it — without it the last card sits behind the nav pill.
+            // The floating bottom nav is drawn over this content, not below it. Measured on the
+            // device it occupies ~83dp plus the ~46dp system gesture bar, so the last card needs
+            // ~130dp of clearance before it stops sitting behind the nav pill — plus a margin so
+            // it does not sit flush against it.
+            Modifier.padding(horizontal = Space.xl).padding(top = 10.dp, bottom = 190.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             // ─── Top bar: drawer · notifications · support (per the 1_home design) ───
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -418,16 +441,37 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                         }
                     }
                 }
+                // SOS lives here now that the Quick Actions grid is gone. It is a lone-worker
+                // safety control, so it keeps a one-tap home: the only other idle-time route to
+                // it is Support → SOS, and pushing an emergency action to two taps to tidy the
+                // layout is not a trade worth making.
                 Box(
                     Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .clickable { nav.navigate(Routes.P_HELP) },
+                        .background(RedLight)
+                        .clickable { vm.sendSos(null, null) { msg -> toast(sosCtx, msg) } },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        painterResource(R.drawable.ic_chat_bubble_ref),
-                        contentDescription = "Support",
-                        tint = TextDark,
-                        modifier = Modifier.size(24.dp),
+                    Text("SOS", color = RedCancel, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(6.dp))
+                // Avatar sits in the top bar, as the reference draws it, with a presence dot on
+                // its corner. Plain photo rather than VerifiedAvatar: that one already carries a
+                // KYC badge at bottom-end, and the two badges landed on top of each other.
+                Box(Modifier.size(42.dp)) {
+                    Image(
+                        painterResource(R.drawable.dummy_avatar),
+                        contentDescription = "Profile",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(40.dp)
+                            .clip(RoundedCornerShape(Radius.pill))
+                            .border(2.dp, Purple.copy(alpha = 0.35f), RoundedCornerShape(Radius.pill))
+                            .clickable { nav.navigateApp(Routes.PROFILE) },
+                    )
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).size(12.dp)
+                            .clip(RoundedCornerShape(Radius.pill))
+                            .background(if (vm.isOnline) GreenSuccess else TextMuted)
+                            .border(2.dp, ScreenBg, RoundedCornerShape(Radius.pill)),
                     )
                 }
             }
@@ -441,63 +485,10 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 onProfileClick = { nav.navigateApp(Routes.PROFILE) },
             )
 
-            EarningsOverviewCard(
-                today = vm.todayEarnings,
-                week = vm.weekEarnings,
-                month = vm.monthEarnings,
-                walletBalance = vm.walletBalance,
-                pendingSettlement = vm.holdBalance,
-                todayTarget = vm.dailyGoal,
-                bonusProgress = bonusProgress,
-                onToday = { nav.navigateApp(Routes.EARNINGS) },
-                onWeek = { nav.navigateApp(Routes.EARNINGS) },
-                onMonth = { nav.navigateApp(Routes.EARNINGS) },
-                // Keeps the daily-goal editor reachable — it used to live on the old
-                // "Today's Earnings" card that this overview replaces.
-                onEditTarget = { showGoalDialog = true },
-            )
-
-            TodaysProgressCard(
-                completed = vm.todayCompleted,
-                total = vm.todayJobs,
-                earnings = vm.todayEarnings,
-                cancelled = vm.todayCancelled,
-                incentive = todayIncentive,
-            )
-
-            if (nextJob != null) {
-                NextJobCard(
-                    service = nextJob.service,
-                    timeWindow = nextJobWindow,
-                    location = nextJob.location,
-                    distanceKm = nextJob.distanceKm,
-                    etaMins = nextJob.etaMins,
-                    onViewAll = { nav.navigateApp(Routes.BOOKINGS) },
-                    onNavigate = { nav.navigate(Routes.SCHEDULE) },
-                )
-            }
-
-            PerformanceOverviewCard(
-                acceptanceRate = vm.acceptancePct,
-                completionRate = vm.completionPct,
-                punctuality = vm.punctualityPct,
-                cancellationRate = vm.cancellationPct,
-            )
-
-            QuickActionsCard(
-                onAttendance = { nav.navigate(Routes.ATTENDANCE) },
-                onWallet = { nav.navigateApp(Routes.WALLET) },
-                onShifts = { nav.navigate(Routes.P_AVAILABILITY) },
-                onSupport = { nav.navigate(Routes.P_HELP) },
-                onSos = { vm.sendSos(null, null) { msg -> toast(sosCtx, msg) } },
-            )
-
-            AnnouncementsCard(onViewAll = { nav.navigate(Routes.P_NOTIFICATIONS) })
-
-            // Active job — keep the in-progress service reachable from Home so the worker
-            // can jump back to the timer / OTP / end-service screen after navigating away.
+            // ─── Live job ─── highest-priority state on the screen, so it leads. It used to
+            // render below the refer banner, under everything else.
             vm.activeJob?.let { job ->
-                val resumeRoute = when (vm.jobStatus) {
+                val route = when (vm.jobStatus) {
                     JobStatus.REQUESTED -> Routes.NEW_JOB
                     JobStatus.ACCEPTED -> Routes.JOB_DETAILS
                     JobStatus.ON_THE_WAY -> Routes.ON_THE_WAY
@@ -505,103 +496,195 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
                     else -> null
                 }
-                val label = when (vm.jobStatus) {
-                    JobStatus.REQUESTED -> "New job request"
-                    JobStatus.ACCEPTED -> "Job accepted"
-                    JobStatus.ON_THE_WAY -> "On the way to customer"
-                    JobStatus.ARRIVED -> "Arrived — start the service"
-                    JobStatus.IN_PROGRESS -> "Service in progress"
-                    else -> "Active job"
-                }
-                if (resumeRoute != null) {
-                    // Full-bleed green "resume active job" hero — the highest-priority CTA on Home.
-                    Box(
-                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(Radius.card))
-                            .clickable { nav.navigate(resumeRoute) }
-                            .padding(Space.l),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(44.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
-                                contentAlignment = Alignment.Center,
-                            ) { Text("🛠", fontSize = 20.sp) }
-                            Spacer(Modifier.width(Space.m))
-                            Column(Modifier.weight(1f)) {
-                                Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("${job.services.joinToString(", ")} · tap to resume", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
-                            }
-                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                        }
-                    }
+                if (route != null) {
+                    ActiveJobBanner(
+                        label = when (vm.jobStatus) {
+                            JobStatus.REQUESTED -> "New job request"
+                            JobStatus.ACCEPTED -> "Job accepted"
+                            JobStatus.ON_THE_WAY -> "On the way to customer"
+                            JobStatus.ARRIVED -> "Arrived — start the service"
+                            JobStatus.IN_PROGRESS -> "Service in progress"
+                            else -> "Active job"
+                        },
+                        subtitle = "${job.services.joinToString(", ")} · tap to resume",
+                        onResume = { nav.navigate(route) },
+                    )
                 }
             }
 
+            // ─── Next job ─── only when a REAL customer booking exists. Nothing is fabricated:
+            // no booking in the feed means no card, which is what makes this the app's
+            // "a customer has requested you" surface. It leads the page for the same reason.
+            if (nextJob != null) {
+                NextJobHeroCard(
+                    job = nextJob,
+                    timeWindow = nextJobWindow,
+                    onNavigate = { nav.navigate(Routes.SCHEDULE) },
+                    onCall = { nav.navigateApp(Routes.BOOKINGS) },
+                    // Start Job used to just open the Jobs list, which is why tapping it
+                    // appeared to do nothing. It now drives the real lifecycle: resume the
+                    // live job at whatever stage it is at, or pull the next real booking.
+                    onStart = {
+                        val live = when (vm.jobStatus) {
+                            JobStatus.REQUESTED -> Routes.NEW_JOB
+                            JobStatus.ACCEPTED -> Routes.JOB_DETAILS
+                            JobStatus.ON_THE_WAY -> Routes.ON_THE_WAY
+                            JobStatus.ARRIVED -> Routes.ARRIVED
+                            JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
+                            else -> null
+                        }
+                        if (vm.activeJob != null && live != null) {
+                            nav.navigate(live)
+                        } else {
+                            vm.requestJob { found ->
+                                if (found) nav.navigate(Routes.NEW_JOB)
+                                else toast(homeCtx, "No job ready to start yet")
+                            }
+                        }
+                    },
+                )
+            }
 
-            // ─── Live online-session card (only while online) ───
-            if (vm.isOnline) {
-                Card {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        PulseDot(GreenSuccess, 9.dp)
-                        Spacer(Modifier.width(Space.s))
-                        Column(Modifier.weight(1f)) {
-                            Text("You're Online", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
-                            Text("Receiving job requests nearby", fontSize = 12.sp, color = TextGray)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Online today", fontSize = 11.sp, color = TextGray)
-                            Text(fmtOnline(vm.onlineTodayMs(nowMs)), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = GreenSuccess)
-                        }
-                    }
+            // ─── Today's Summary ─── the four headline figures.
+            SectionHeading("Today's Summary", "View all") { nav.navigateApp(Routes.EARNINGS) }
+            StatTilesRow(
+                todayEarnings = vm.todayEarnings,
+                dailyTarget = vm.dailyGoal,
+                jobsCompleted = vm.todayCompleted,
+                jobsToday = vm.todayJobs,
+                rating = vm.workerRating,
+                walletBalance = vm.walletBalance,
+                onEarnings = { nav.navigateApp(Routes.EARNINGS) },
+                onJobs = { nav.navigateApp(Routes.BOOKINGS) },
+                onRating = { nav.navigate(Routes.PERFORMANCE) },
+                onWallet = { nav.navigateApp(Routes.WALLET) },
+            )
+
+            // ─── Today's schedule ─── hidden entirely when the feed is empty, rather than
+            // rendering an empty timeline shell.
+            if (vm.schedule.isNotEmpty()) {
+                TodayScheduleCard(
+                    items = vm.schedule.take(3),
+                    onViewAll = { nav.navigateApp(Routes.BOOKINGS) },
+                    onItem = { nav.navigateApp(Routes.BOOKINGS) },
+                )
+            }
+
+            // Quick Actions removed. Every destination it held stays reachable: Withdraw and
+            // Wallet from the bottom nav, My Jobs from the Jobs tab, Messages from the bell,
+            // Support from the drawer, and Emergency from the SOS button in the top bar.
+
+            // ─── Status slot ───────────────────────────────────────────────────────────────
+            // Exactly ONE strip renders here, always at the same height. Home is fit-to-screen,
+            // so anything that appears only while online used to push the natural height up and
+            // shrink the entire dashboard the moment the worker tapped "Go Online" — the screen
+            // visibly zoomed out. Online state now swaps the strip's contents instead of adding
+            // to the stack, so going online changes what this row says, never how big Home is.
+            when {
+                vm.isOnline && vm.hasIncomingJob -> {
+                    val jobCtx = LocalContext.current
+                    OnlineStatusStrip(
+                        background = BrandGradient,
+                        onLight = false,
+                        title = "New Job Request",
+                        subtitle = "A customer needs your service — tap to view",
+                        trailing = null,
+                        onClick = {
+                            vm.requestJob { found ->
+                                if (found) nav.navigate(Routes.NEW_JOB) else toast(jobCtx, "That job was just taken")
+                            }
+                        },
+                    )
+                }
+                vm.isOnline -> {
+                    val idleCtx = LocalContext.current
+                    OnlineStatusStrip(
+                        background = null,
+                        onLight = true,
+                        title = "You're Online",
+                        subtitle = "Waiting for job requests nearby",
+                        trailing = fmtOnline(vm.onlineTodayMs(nowMs)),
+                        onClick = {
+                            vm.requestJob { found ->
+                                if (found) nav.navigate(Routes.NEW_JOB) else toast(idleCtx, "No new job requests right now")
+                            }
+                        },
+                    )
+                }
+                // Offline and idle: nothing here. The announcements ticker that used to fill
+                // this slot carried placeholder copy, and the reference has no such strip.
+                else -> Unit
+            }
+
+            // ─── Incentive progress ─── closes the page. Only rendered when the backend really
+            // reports a bonus target, so no invented goal is ever shown.
+            vm.shaktiBonus?.let { s ->
+                val target = s.tiers.lastOrNull()?.days ?: 0
+                if (target > 0) {
+                    IncentiveProgressBanner(
+                        done = s.workingDays,
+                        target = target,
+                        reward = s.tiers.lastOrNull()?.amount ?: 0,
+                        onOpen = { nav.navigate(Routes.SHAKTI) },
+                    )
                 }
             }
 
-
-            if (vm.isOnline && vm.activeJob == null) {
-                val ctx = LocalContext.current
-                if (vm.hasIncomingJob) {
-                    // A real customer has booked — show the New Job Request notification.
-                    Box(
-                        Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(Radius.card))
-                            .clickable {
-                                vm.requestJob { found ->
-                                    if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
-                                }
-                            }
-                            .padding(Space.l),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(44.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Filled.Notifications, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
-                            Spacer(Modifier.width(Space.m))
-                            Column(Modifier.weight(1f)) {
-                                Text("New Job Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                                Text("A customer needs your service — tap to view", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
-                            }
-                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                        }
-                    }
-                } else {
-                    // Online and idle — waiting for a real booking (no fake/demo jobs).
-                    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(Radius.card)).padding(Space.l)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(9.dp).background(GreenSuccess, RoundedCornerShape(Radius.pill)))
-                            Spacer(Modifier.width(Space.m))
-                            Column(Modifier.weight(1f)) {
-                                Text("Waiting for job requests…", color = TextDark, fontWeight = FontWeight.SemiBold)
-                                Text("You'll be notified when a customer books", color = TextGray, fontSize = 12.sp)
-                            }
-                        }
-                    }
-                    OutlineButton("🔄  Check for Jobs", modifier = Modifier.fillMaxWidth()) {
-                        vm.requestJob { found ->
-                            if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "No new job requests right now")
-                        }
-                    }
-                }
-            }
+            // The active-job banner moved to the TOP of this column — a job in progress is the
+            // most important thing on the screen and used to render here, below everything.
+            // The live-session card, the "Waiting for job requests…" box and the "Check for Jobs"
+            // button folded into the status slot above.
         }
+    }
+}
+
+/**
+ * The one-line strip in Home's status slot: announcements when offline, online/idle state or an
+ * incoming job request when online. Fixed single-line height in every variant, so switching
+ * between them never changes Home's natural height (and so never re-triggers FitToScreen's
+ * shrink). [background] paints a gradient variant; null uses the light tint.
+ */
+@Composable
+private fun OnlineStatusStrip(
+    background: Brush?,
+    onLight: Boolean,
+    title: String,
+    subtitle: String,
+    trailing: String?,
+    onClick: () -> Unit,
+) {
+    val base = Modifier.fillMaxWidth().height(StatusSlotHeight).clip(RoundedCornerShape(Radius.button))
+    val painted = if (background != null) base.background(background) else base.background(PurpleLight)
+    Row(
+        painted.clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PulseDot(if (onLight) GreenSuccess else Color.White, 9.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                color = if (onLight) TextDark else Color.White,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            )
+            Text(
+                subtitle,
+                color = if (onLight) TextGray else Color.White.copy(alpha = 0.9f),
+                fontSize = 11.5.sp, maxLines = 1,
+            )
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                trailing,
+                color = if (onLight) GreenSuccess else Color.White,
+                fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+            )
+        }
+        Icon(
+            Icons.Filled.ChevronRight, contentDescription = null,
+            tint = if (onLight) Purple else Color.White, modifier = Modifier.size(18.dp),
+        )
     }
 }
 

@@ -1603,7 +1603,19 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         } else null to null
     } catch (_: Exception) { null to null }
 
-    DetailScaffold("Attendance", nav) {
+    // White scaffold, not the violet gradient one: attendance is a utility screen the worker
+    // opens to do one thing, and a 200dp brand header pushed that one thing below the fold.
+    WhiteDetailScaffold("Attendance", nav) {
+        // ── Hero: status, today's times, and the primary action ─────────────────────────
+        // Check In / Check Out used to sit at the very bottom, under the shift picker, the
+        // availability grid and a location notice — a worker arriving for their shift had to
+        // scroll past four cards to do the only thing they came here for. It now leads.
+        AttendanceHeroCard(
+            att = att,
+            onCheckIn = { val (la, ln) = lastLoc(); vm.checkIn(la, ln) { toast(ctx, "Checked in ✓") } },
+            onCheckOut = { val (la, ln) = lastLoc(); vm.checkOut(la, ln) { toast(ctx, "Checked out ✓") } },
+        )
+
         // ── Shift plan picker (min-guarantee model) ──
         Card {
             SectionLabel("Your Shift Plan")
@@ -1643,53 +1655,33 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
 
-        // ── Today's attendance status (judged against the chosen shift) ──
+        // ── This month at a glance ── status and today's times now live in the hero, so this
+        // card carries only what the hero doesn't: the running month totals.
         Card {
-            val (dot, label) = when {
-                att.checkedOut -> GreenSuccess to "Checked Out"
-                att.checkedIn -> GreenSuccess to "Checked In · Working"
-                else -> TextMuted to "Not Checked In"
+            SectionLabel("This Month")
+            Spacer(Modifier.height(Space.s))
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                AttendanceStat(
+                    Modifier.weight(1f),
+                    "${att.attendedThisMonth}",
+                    if (att.attendedThisMonth == 1) "day attended" else "days attended",
+                    Purple,
+                )
+                Box(Modifier.padding(horizontal = Space.s).width(1.dp).fillMaxHeight().background(Divider))
+                AttendanceStat(
+                    Modifier.weight(1f),
+                    if (att.minGuarantee > 0) "₹${att.minGuarantee}" else "—",
+                    "min. guarantee",
+                    GreenSuccess,
+                )
+                Box(Modifier.padding(horizontal = Space.s).width(1.dp).fillMaxHeight().background(Divider))
+                AttendanceStat(
+                    Modifier.weight(1f),
+                    if (att.shiftName.isNotBlank()) att.shiftName else "—",
+                    "your shift",
+                    TextDark,
+                )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconChip(Icons.Filled.AccessTime, dot, if (att.checkedIn || att.checkedOut) GreenLight else FieldFill)
-                Spacer(Modifier.width(Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
-                    Text(
-                        if (att.shiftName.isNotBlank()) "${att.shiftName} shift · ${att.shiftStart}–${att.shiftEnd}" else "Choose a shift plan above",
-                        fontSize = 12.sp, color = TextGray,
-                    )
-                }
-                Box(Modifier.size(12.dp).background(dot, RoundedCornerShape(Radius.pill)))
-            }
-            // On-time / late banner once the worker has checked in.
-            if (att.checkedIn && att.shiftName.isNotBlank()) {
-                Spacer(Modifier.height(Space.m))
-                val onTime = att.onTime
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
-                        .background(if (onTime) GreenLight else RedLight).padding(Space.m),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (onTime) Icons.Filled.CheckCircle else Icons.Filled.Close,
-                        contentDescription = null,
-                        tint = if (onTime) GreenSuccess else RedCancel,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(Space.s))
-                    Text(
-                        if (onTime) "On time — no penalty" else "Late by ${att.lateMinutes} min · −₹${att.penalty} deducted",
-                        color = if (onTime) GreenSuccess else RedCancel, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                    )
-                }
-            }
-            Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.s))
-            LabeledRow("Check-in time", att.checkInAt.ifBlank { "—" })
-            LabeledRow("Check-out time", att.checkOutAt.ifBlank { "—" })
-            LabeledRow("Shift", if (att.shiftName.isNotBlank()) "${att.shiftName} · ${att.shiftStart}–${att.shiftEnd}" else "Not set")
-            if (att.minGuarantee > 0) LabeledRow("Minimum guarantee", "₹${att.minGuarantee}", GreenSuccess)
-            LabeledRow("Days attended this month", "${att.attendedThisMonth} ${if (att.attendedThisMonth == 1) "day" else "days"}", Purple)
         }
         // ── Assigned apartment (geofence): must stay within the radius during the shift ──
         if (att.siteName.isNotBlank()) {
@@ -1759,19 +1751,111 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
                 modifier = Modifier.clickable { nav.navigate(Routes.LEAVE) }.padding(top = Space.xs),
             )
         }
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(PurpleLight).padding(Space.m),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("📍", fontSize = 16.sp)
-            Spacer(Modifier.width(Space.s))
-            Text("Your location is captured at check-in / check-out for verification.", fontSize = 12.sp, color = TextDark, lineHeight = 16.sp)
+        // Privacy notice: a plain caption, not a tinted banner. It is a disclosure, not an
+        // action, and as a filled violet block it competed with the things that are.
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.LocationOn, contentDescription = null, tint = TextMuted, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Your location is captured at check-in and check-out for verification.",
+                fontSize = 11.5.sp, color = TextMuted, lineHeight = 15.sp,
+            )
         }
+        Spacer(Modifier.height(Space.xs))
+    }
+}
+
+/** One figure in the attendance "This Month" row — value first, label under it. */
+@Composable
+private fun AttendanceStat(modifier: Modifier, value: String, label: String, valueColor: Color) {
+    Column(modifier.padding(horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = valueColor, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = TextGray, fontSize = 12.sp, maxLines = 1, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * The attendance hero — status, today's check-in/out pair, and the primary action in one card.
+ *
+ * Everything a worker needs on arrival is above the fold here: what state they're in, whether
+ * they were on time, and the single button that changes it. The screen's other cards (shift
+ * plan, geofence, availability) are all things they set up occasionally, not daily.
+ */
+@Composable
+private fun AttendanceHeroCard(
+    att: com.homehelp.pro.network.AttendanceDto,
+    onCheckIn: () -> Unit,
+    onCheckOut: () -> Unit,
+) {
+    val (accent, tint, label) = when {
+        att.checkedOut -> Triple(GreenSuccess, GreenLight, "Shift complete")
+        att.checkedIn -> Triple(GreenSuccess, GreenLight, "Checked in · Working")
+        else -> Triple(TextMuted, FieldFill, "Not checked in")
+    }
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconChip(Icons.Filled.AccessTime, accent, tint, size = 44)
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 19.sp)
+                Text(
+                    if (att.shiftName.isNotBlank()) "${att.shiftName} shift · ${att.shiftStart}–${att.shiftEnd}"
+                    else "Pick a shift plan below to get started",
+                    fontSize = 13.sp, color = TextGray,
+                )
+            }
+        }
+
+        // On-time / late verdict, once there is one to give.
+        if (att.checkedIn && att.shiftName.isNotBlank()) {
+            Spacer(Modifier.height(Space.m))
+            val onTime = att.onTime
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
+                    .background(if (onTime) GreenLight else RedLight).padding(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (onTime) Icons.Filled.CheckCircle else Icons.Filled.Close,
+                    contentDescription = null,
+                    tint = if (onTime) GreenSuccess else RedCancel,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(Space.s))
+                Text(
+                    if (onTime) "On time — no penalty" else "Late by ${att.lateMinutes} min · −₹${att.penalty} deducted",
+                    color = if (onTime) GreenSuccess else RedCancel, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(Space.l))
+        // Today's two timestamps, side by side and large — the previous label-and-value rows
+        // gave "Check-in time" the same visual weight as the time itself.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            AttendanceStat(
+                Modifier.weight(1f),
+                att.checkInAt.ifBlank { "—" },
+                "checked in",
+                if (att.checkedIn) GreenSuccess else TextMuted,
+            )
+            Box(Modifier.padding(horizontal = Space.s).width(1.dp).fillMaxHeight().background(Divider))
+            AttendanceStat(
+                Modifier.weight(1f),
+                att.checkOutAt.ifBlank { "—" },
+                "checked out",
+                if (att.checkedOut) GreenSuccess else TextMuted,
+            )
+        }
+
+        Spacer(Modifier.height(Space.l))
         when {
-            !att.checkedIn -> PrimaryButton("Check In") { val (la, ln) = lastLoc(); vm.checkIn(la, ln) { toast(ctx, "Checked in ✓") } }
-            !att.checkedOut -> PrimaryButton("Check Out") { val (la, ln) = lastLoc(); vm.checkOut(la, ln) { toast(ctx, "Checked out ✓") } }
+            !att.checkedIn -> PrimaryButton("Check In", onClick = onCheckIn)
+            !att.checkedOut -> PrimaryButton("Check Out", onClick = onCheckOut)
             else -> Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(GreenLight).padding(Space.l),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
+                    .background(GreenLight).padding(Space.l),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
