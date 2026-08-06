@@ -166,12 +166,6 @@ fun StartDeadlineBanner(vm: AppViewModel) {
     }
 }
 
-// The nine steps of the job flow, as the 6_jobFLow reference draws them across the top.
-private val JOB_FLOW_STEPS = listOf(
-    "New Job\nOffer", "Navigate", "Arrived", "OTP\nVerification", "Before\nPhoto",
-    "Work in\nProgress", "After\nPhoto", "Customer\nRating", "Job\nCompleted",
-)
-
 @Composable
 fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
@@ -210,7 +204,6 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
             )
             Spacer(Modifier.width(38.dp))
         }
-        JobFlowStepper(current = 1)
         HairlineDivider()
 
         Column(
@@ -477,63 +470,6 @@ private fun JobDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, 
     }
 }
 
-/** The 9-step progress rail — numbered circles + labels + dashed connectors, current step highlighted. */
-@Composable
-private fun JobFlowStepper(current: Int) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s, vertical = 10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        JOB_FLOW_STEPS.forEachIndexed { i, label ->
-            val step = i + 1
-            val done = step < current
-            val active = step == current
-            Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.fillMaxWidth().height(30.dp)) {
-                    if (i > 0) StepConnector(Modifier.align(Alignment.CenterStart).width(20.dp), coloured = step <= current)
-                    if (i < JOB_FLOW_STEPS.lastIndex) StepConnector(Modifier.align(Alignment.CenterEnd).width(20.dp), coloured = step < current)
-                    Box(
-                        Modifier.align(Alignment.Center).size(28.dp).clip(CircleShape)
-                            .background(if (done || active) Purple else Color.White)
-                            .border(if (done || active) 0.dp else 1.5.dp, if (done || active) Color.Transparent else Divider, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (done) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                        else Text("$step", color = if (active) Color.White else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    label, color = if (active) Purple else if (done) TextDark else TextMuted,
-                    fontSize = 9.5.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    textAlign = TextAlign.Center, lineHeight = 11.sp,
-                )
-                if (active) {
-                    Spacer(Modifier.height(3.dp))
-                    Box(Modifier.width(28.dp).height(2.dp).clip(RoundedCornerShape(Radius.pill)).background(Purple))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StepConnector(modifier: Modifier, coloured: Boolean) {
-    val color = if (coloured) Purple else Divider
-    Box(
-        modifier.height(2.dp).drawBehind {
-            if (coloured) {
-                drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height)
-            } else {
-                drawLine(
-                    color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f),
-                )
-            }
-        },
-    )
-}
-
 /** Bordered round call/chat button used on the offer card. */
 @Composable
 private fun OfferIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
@@ -696,7 +632,6 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 2)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
@@ -835,7 +770,6 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 3)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -1080,7 +1014,6 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 4)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m),
@@ -1368,7 +1301,6 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 6)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -1818,7 +1750,6 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadJobState() }   // so the photo summary + counts are populated
     Column(Modifier.fillMaxSize().background(Color.White)) {
         JobWhiteBar("Job Completed", onBack = null)
-        JobFlowStepper(current = 9)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
