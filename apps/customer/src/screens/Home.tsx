@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, User, Wallet as WalletIcon, Headset, Crown } from 'lucide-react'
 import { BottomNav, useToast } from '../components/UI'
+import AddressSheet from '../components/AddressSheet'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
 import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
@@ -38,6 +39,7 @@ export default function Home() {
   const [banners, setBanners] = useState<HomeBanner[]>([])
   const [active, setActive] = useState(0)
   const [scrolled, setScrolled] = useState(false)   // past the hero → collapse the header to white
+  const [addrSheet, setAddrSheet] = useState(false) // saved-address picker, opened from the header
 
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
@@ -52,13 +54,17 @@ export default function Home() {
   }, [pincode])
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
-  // Header address: the saved label ("Home"/"Work") reads as the title and the full street line sits
-  // under it - same label-over-line convention the saved-address list uses. Falls back to the city
-  // alone when no address is saved yet, so a new user still sees something tappable.
+  // Header address: the saved label ("Home"/"Work") reads as the title, with a SHORT "flat, city"
+  // summary under it - the full street line is in the address sheet a tap away. Falls back to the
+  // city alone when no address is saved yet, so a new user still sees something tappable.
   const addrTitle = addr?.label || cityLabel
-  const addrFull = addr
-    ? [addr.line, addr.pincode && !(addr.line || '').includes(addr.pincode) ? addr.pincode : ''].filter(Boolean).join(' ')
-    : ''
+  const addrShort = useMemo(() => {
+    if (!addr) return ''
+    const flat = (addr.house || (addr.line || '').split(',')[0] || '').trim()
+    const place = (addr.city || '').trim()
+    // de-duped: a one-line address like "Hyderabad" would otherwise read "Hyderabad, Hyderabad"
+    return [flat, place].filter(Boolean).filter((v, i, a) => a.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i).join(', ')
+  }, [addr])
   const firstName = (user?.name || 'there').split(' ')[0]
   // Show every service, but order the ones offered in this zone first; the rest are rendered as
   // "Coming Soon" (not bookable) so the customer sees what will arrive rather than a blank gap.
@@ -121,7 +127,7 @@ export default function Home() {
       {/* top bar — matches the hero at the top, collapses to solid white on scroll */}
       <div className={`hd-top${scrolled ? ' solid' : ''}`}>
         <div className="hd-top-main">
-        <button className="hd-loc" onClick={() => nav('/locations')}>
+        <button className="hd-loc" onClick={() => setAddrSheet(true)}>
           <MapPin size={16} className="hd-loc-pin" />
           <span className="hd-loc-title"><b>{addrTitle}</b><ChevronDown size={15} /></span>
         </button>
@@ -140,10 +146,9 @@ export default function Home() {
           </button>
         </div>
         </div>
-        {/* full street line on its own row - across the whole bar it fits the real address instead of
-            being squeezed into the ~190px left over beside the wallet/bell/avatar */}
-        {addrFull && (
-          <button className="hd-loc-full" onClick={() => nav('/locations')}>{addrFull}</button>
+        {/* short "flat, city" line under the label - the full address is in the sheet */}
+        {addrShort && (
+          <button className="hd-loc-full" onClick={() => setAddrSheet(true)}>{addrShort}</button>
         )}
       </div>
 
@@ -194,10 +199,13 @@ export default function Home() {
             )}
           </div>
 
-          {/* continue booking — shown here (in place of Quick Actions), only if one is in progress */}
+          {/* continue booking — shown here (in place of Quick Actions), only if one is in progress.
+              The card is one live booking, so it goes straight to that job's tracking screen rather
+              than via the list — `cont` is continuable by definition, which is the same branch the
+              list's Continue button takes. */}
           {cont && (<>
             <div className="hd-sec-head"><h3>Continue Booking</h3></div>
-            <button className="hd-cont" onClick={() => nav('/continue-booking')}>
+            <button className="hd-cont" onClick={() => nav(`/track/${cont.id}`)}>
               <span className="hd-cont-img">
                 <img src={`/services/${cont.items[0]?.id}.jpg`} alt=""
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
@@ -206,7 +214,7 @@ export default function Home() {
                 <b>{cont.items[0]?.name || 'Booking'}{cont.items.length > 1 ? ` +${cont.items.length - 1}` : ''}</b>
                 <small>{bkWhen(cont)}</small>
               </span>
-              <span className="hd-cont-btn">View</span>
+              <span className="hd-cont-btn">Track</span>
             </button>
           </>)}
 
@@ -230,6 +238,7 @@ export default function Home() {
 
         </>)}
       </div>
+      <AddressSheet open={addrSheet} onClose={() => setAddrSheet(false)} onSelect={setAddr} />
       <BottomNav />
     </div>
   )
