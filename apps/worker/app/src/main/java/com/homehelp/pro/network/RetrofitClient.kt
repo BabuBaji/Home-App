@@ -30,8 +30,23 @@ object RetrofitClient {
     private const val FALLBACK_URL = "http://localhost:8080/"
     private const val CONFIG_URL = "https://raw.githubusercontent.com/BabuBaji/Home-App/Baji/app-config.json"
 
-    /** Current backend base URL — updated by [refreshBaseUrl]. */
-    @Volatile var baseUrl: String = FALLBACK_URL
+    /**
+     * Dev override. When non-blank this wins over BOTH [FALLBACK_URL] and whatever [CONFIG_URL]
+     * publishes, and [refreshBaseUrl] becomes a no-op.
+     *
+     * Set because the published config on the `Baji` branch still names 192.168.0.109, a machine
+     * that is no longer serving the worker API — its health endpoint answers, but the worker
+     * auth routes close the connection mid-request. Every login therefore failed with "could not
+     * reach the server" even though this PC's stack was healthy on 192.168.0.113.
+     *
+     * The durable fix is to publish the right apiBase — update app-config.json on the `Baji`
+     * branch (the repo root copy is already correct) — and then blank this constant, which
+     * restores normal config-driven behaviour. Blank it before any release build.
+     */
+    private const val PINNED_BASE_URL = "http://192.168.0.113:8080/"
+
+    /** Current backend base URL — updated by [refreshBaseUrl] unless [PINNED_BASE_URL] is set. */
+    @Volatile var baseUrl: String = PINNED_BASE_URL.ifBlank { FALLBACK_URL }
 
     /** Bearer token issued by /api/worker/auth/verify; attached to every later call. */
     @Volatile var token: String? = null
@@ -49,7 +64,8 @@ object RetrofitClient {
         // Config-driven: the app follows whatever apiBase go-live.ps1 published, so it works on any
         // network (Wi-Fi or mobile data) with no cable and no `adb reverse`. If the config can't be
         // fetched we keep FALLBACK_URL (localhost:8080 via `adb reverse`) for USB testing.
-        // Re-add `if (true) return` here to pin to USB-only when the published tunnel is dead.
+        // A pinned URL wins outright — see PINNED_BASE_URL for why one is set right now.
+        if (PINNED_BASE_URL.isNotBlank()) return
         if (refreshed) return
         try {
             val req = Request.Builder().url(CONFIG_URL + "?t=" + System.currentTimeMillis()).build()
