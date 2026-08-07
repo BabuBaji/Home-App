@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
@@ -25,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -92,6 +96,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -718,7 +723,10 @@ private val ProfBlueBg = Color(0xFFEAF1FE)
 
 @Composable
 fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
-    val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
+    // Uppercased: the fallback stands in for a photo, and "baji" rendered a lowercase "b" that
+    // read as a stray glyph rather than a monogram.
+    val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }
+        .take(2).joinToString("").uppercase().ifBlank { "?" }
     val tier = vm.tier
     val nextTier = WorkerTier.next(tier)
     val progressCur = if (nextTier != null) vm.jobsCompleted.coerceAtMost(nextTier.minJobs) else vm.jobsCompleted
@@ -726,37 +734,62 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
     val progressFrac = if (nextTier != null) (progressCur.toFloat() / progressMax).coerceIn(0f, 1f) else 1f
     val kycVerified = vm.workerStatus.equals("active", true) || vm.bankApproved
 
-    Column(Modifier.fillMaxSize().background(Color.White).verticalScroll(rememberScrollState())) {
-        // ── White header: title · notifications · settings
+    Column(Modifier.fillMaxSize().background(ScreenBg).verticalScroll(rememberScrollState())) {
+        // ── Header: title + strapline on the left, bell and settings as floating white circles
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = 10.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = Space.m).padding(top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Profile", color = TextDark, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, modifier = Modifier.weight(1f))
-            Box(Modifier.clip(CircleShape).clickable { nav.navigate(Routes.P_NOTIFICATIONS) }.padding(2.dp)) {
-                Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(23.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Profile", color = TextDark, fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp)
+                Text("Manage your account and performance", color = TextGray, fontSize = 12.5.sp, maxLines = 1)
+            }
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                ProfileCircleButton({ nav.navigate(Routes.P_NOTIFICATIONS) }) {
+                    Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(21.dp))
+                }
                 if (vm.unreadNotifications > 0) {
                     Box(
-                        Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(15.dp).clip(CircleShape).background(RedCancel),
+                        Modifier.align(Alignment.TopEnd).defaultMinSize(minWidth = 19.dp, minHeight = 19.dp)
+                            .clip(CircleShape).background(RedCancel).border(2.dp, ScreenBg, CircleShape)
+                            .padding(horizontal = 4.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text("${vm.unreadNotifications.coerceAtMost(9)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+                    ) {
+                        Text(
+                            if (vm.unreadNotifications > 99) "99+" else "${vm.unreadNotifications}",
+                            color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.width(Space.l))
-            Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = TextDark, modifier = Modifier.size(23.dp).clip(CircleShape).clickable { nav.navigate(Routes.SETTINGS) })
+            Spacer(Modifier.width(6.dp))
+            ProfileCircleButton({ nav.navigate(Routes.SETTINGS) }) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = TextDark, modifier = Modifier.size(21.dp))
+            }
         }
 
-        // ═══════════════ White content ═══════════════
+        // ═══════════════ Content ═══════════════
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = Space.m).padding(top = 4.dp, bottom = Space.l),
+            Modifier.fillMaxWidth().padding(horizontal = Space.m).padding(top = 2.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ── Identity — white card: avatar · name · rating · contact · Edit
-            Card {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            // ── Identity — avatar with camera badge, name + verified tick, contact lines, Edit
+            Box(
+                Modifier.fillMaxWidth()
+                    .shadow(3.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(CardBg),
+            ) {
+                // Faint lavender bloom in the top-right corner, as the reference draws it.
+                Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 28.dp, y = (-26).dp)
+                        .size(120.dp).clip(CircleShape).background(Primary50),
+                )
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         Box(
-                            Modifier.size(62.dp).clip(CircleShape).background(PurpleLight).border(2.dp, Purple, CircleShape),
+                            Modifier.size(74.dp).clip(CircleShape).background(PurpleLight)
+                                .border(2.5.dp, Purple.copy(alpha = 0.55f), CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             if (vm.avatarUrl.isNotBlank()) {
@@ -765,104 +798,155 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                                     contentDescription = "Profile photo",
                                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                                     contentScale = ContentScale.Crop,
-                                    loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
-                                    error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
+                                    loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 22.sp) },
+                                    error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 22.sp) },
                                 )
                             } else {
-                                Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                                Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 22.sp)
                             }
                         }
                         Box(
-                            Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(Purple).border(2.dp, CardBg, CircleShape).clickable { nav.navigate(Routes.P_PERSONAL) },
+                            Modifier.align(Alignment.BottomEnd).size(26.dp).clip(CircleShape).background(Purple)
+                                .border(2.5.dp, CardBg, CircleShape).clickable { nav.navigate(Routes.P_PERSONAL) },
                             contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(11.dp)) }
+                        ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(13.dp)) }
                     }
-                    Spacer(Modifier.width(Space.m))
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(vm.workerName.ifBlank { "HomeHelp Partner" }, color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                            if (kycVerified) { Spacer(Modifier.width(5.dp)); Icon(Icons.Filled.Verified, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp)) }
+                            Text(
+                                vm.workerName.ifBlank { "HomeHelp Partner" }, color = TextDark,
+                                fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (kycVerified) {
+                                Spacer(Modifier.width(5.dp))
+                                Icon(Icons.Filled.Verified, contentDescription = "Verified", tint = ProfBlue, modifier = Modifier.size(17.dp))
+                            }
                         }
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(5.dp))
+                        if (vm.workerPhone.isNotBlank()) {
+                            ProfileIconLine(Icons.Filled.Phone, vm.workerPhone)
+                            Spacer(Modifier.height(3.dp))
+                        }
+                        if (vm.workerCity.isNotBlank()) {
+                            ProfileIconLine(Icons.Filled.LocationOn, "${vm.workerCity}, India")
+                            Spacer(Modifier.height(3.dp))
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (vm.workerRating > 0) String.format("%.1f", vm.workerRating) else "—",
+                                color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            )
                             Spacer(Modifier.width(4.dp))
-                            Text("${vm.workerRating}", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text(if (vm.jobsCompleted > 0) "  ·  ${vm.jobsCompleted} jobs done" else "  ·  New partner", color = TextGray, fontSize = 12.sp)
+                            Text("Rating", color = TextGray, fontSize = 13.sp)
                         }
-                        if (vm.workerPhone.isNotBlank()) { Spacer(Modifier.height(3.dp)); ProfileIconLine(Icons.Filled.Phone, vm.workerPhone) }
                     }
-                    Spacer(Modifier.width(Space.s))
-                    Box(
-                        Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).clickable { nav.navigate(Routes.P_PERSONAL) }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    Spacer(Modifier.width(8.dp))
+                    // Outlined pill, as the reference draws it — an outline reads as secondary
+                    // next to the filled actions elsewhere on the page.
+                    Row(
+                        Modifier.clip(RoundedCornerShape(Radius.pill))
+                            .border(1.4.dp, Purple, RoundedCornerShape(Radius.pill))
+                            .clickable { nav.navigate(Routes.P_PERSONAL) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Edit", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Edit Profile", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
 
-            // ── Level — white card with purple accents (progress in purple, no heavy gradient block)
-            Card {
+            // ── Level — the violet gradient card
+            Column(
+                Modifier.fillMaxWidth()
+                    .shadow(8.dp, RoundedCornerShape(20.dp), spotColor = Purple.copy(alpha = 0.35f))
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF6D4AF0), Color(0xFF5B32E8))))
+                    .clickable { nav.navigate(Routes.PERFORMANCE) }
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
-                    }
-                    Spacer(Modifier.width(Space.m))
+                    Box(
+                        Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                            .background(Brush.linearGradient(listOf(Color(0xFFD9954B), Color(0xFF9C5C1F)))),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = Color.White, modifier = Modifier.size(23.dp)) }
+                    Spacer(Modifier.width(11.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Level ${tier.label}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Text(if (nextTier != null) "Keep going to reach ${nextTier.label}" else "You're at the top tier", color = TextGray, fontSize = 11.5.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Level ", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text(tier.label, color = Gold, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            if (nextTier != null) "Keep going to reach ${nextTier.label} level" else "You're at the top tier",
+                            color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                    Row(Modifier.clip(RoundedCornerShape(Radius.pill)).clickable { nav.navigate(Routes.PERFORMANCE) }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Benefits", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("View Benefits", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Radius.pill)).background(FieldFill)) {
-                    Box(Modifier.fillMaxWidth(progressFrac).height(8.dp).clip(RoundedCornerShape(Radius.pill)).background(Brush.horizontalGradient(listOf(Purple, Color(0xFF7C5CFC)))))
+                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Radius.pill)).background(Color.White.copy(alpha = 0.25f))) {
+                    Box(Modifier.fillMaxWidth(progressFrac).fillMaxHeight().clip(RoundedCornerShape(Radius.pill)).background(Color.White))
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(if (nextTier != null) "Progress to ${nextTier.label}" else "Highest tier reached", color = TextGray, fontSize = 11.5.sp)
-                    Text(if (nextTier != null) "$progressCur / $progressMax jobs" else "$progressCur jobs", color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (nextTier != null) "Progress to ${nextTier.label}" else "Highest tier reached",
+                        color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp,
+                    )
+                    Text(
+                        if (nextTier != null) "$progressCur / $progressMax jobs" else "$progressCur jobs",
+                        color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    )
                 }
             }
-            // Stats — one unified card with four columns, so it reads as a single native panel
-            // rather than a grid of separate boxes.
-            Card(padding = Dp16.S) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    ProfileStatCol(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, "${vm.jobsCompleted}", "Jobs")
-                    StatVDivider()
-                    ProfileStatCol(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, vm.acceptancePct?.let { "$it%" } ?: "—", "Accept")
-                    StatVDivider()
-                    ProfileStatCol(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, vm.completionPct?.let { "$it%" } ?: "—", "Complete")
-                    StatVDivider()
-                    ProfileStatCol(Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "${vm.workerRating}", "Rating")
-                }
+
+            // ── Stats — four separate cards, each a circular icon over its figure, per the
+            // reference. Values render "—" rather than 0% when the backend has not reported a
+            // rate yet, so a new worker is not shown a 0% acceptance score they did not earn.
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, "Jobs Completed", "${vm.jobsCompleted}", "Total")
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, "Acceptance Rate", vm.acceptancePct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, "Completion Rate", vm.completionPct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStatCard(
+                    Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "Customer Rating",
+                    if (vm.workerRating > 0) String.format("%.1f", vm.workerRating) else "—", "Out of 5",
+                )
             }
 
             // ── Earnings insights — same prominent carousel as the Earnings tab.
             EarningsInsightsCarousel(nav)
 
-            // ── Menu list
-            Card(padding = Dp16.XS) {
-                ProfileMenuRow(Icons.Filled.Person, "Personal Information", "View and update your personal details") { nav.navigate(Routes.P_PERSONAL) }
-                HairlineDivider()
-                ProfileMenuRow(Icons.Filled.VerifiedUser, "KYC Verification", "Aadhaar, PAN, Bank & other documents", verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
-                HairlineDivider()
-                ProfileMenuRow(Icons.Filled.AccountBalance, "Bank Account", "Manage your bank account details") { nav.navigate(Routes.BANK_ACCOUNTS) }
-                HairlineDivider()
-                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, "Wallet & Earnings", "View earnings, incentives & withdrawals") { nav.navigate(Routes.WALLET) }
-                HairlineDivider()
-                ProfileMenuRow(Icons.Filled.CalendarMonth, "My Shifts", "View your shifts and availability") { nav.navigate(Routes.MY_SHIFTS) }
-                HairlineDivider()
-                ProfileMenuRow(Icons.Filled.WorkspacePremium, "Performance", "View your performance and stats") { nav.navigate(Routes.PERFORMANCE) }
-                HairlineDivider()
-                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support", "FAQs, help center & contact support") { nav.navigate(Routes.P_HELP) }
+            // ── Menu list. The reference shows four rows; My Shifts, Performance and Wallet are
+            // dropped from here rather than deleted — all three are one tap away from the bottom
+            // nav (Wallet) and the level card (Performance), and My Shifts sits on Home's
+            // quick-action strip. Nothing became unreachable.
+            Column(
+                Modifier.fillMaxWidth()
+                    .shadow(3.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(CardBg)
+                    .padding(vertical = 4.dp),
+            ) {
+                ProfileMenuRow(Icons.Filled.Person, Purple, "Personal Information", "View and update your personal details") { nav.navigate(Routes.P_PERSONAL) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.VerifiedUser, GreenSuccess, "KYC Verification", null, verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, ProfBlue, "Bank Details", "Manage your bank accounts") { nav.navigate(Routes.BANK_ACCOUNTS) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, Amber, "Help & Support", "Get help and view FAQs") { nav.navigate(Routes.P_HELP) }
             }
 
             // ── Logout
@@ -897,38 +981,84 @@ private fun ProfileIconLine(icon: ImageVector, text: String) {
     }
 }
 
-/** One column in the profile's unified stat panel (icon chip + big value + short label). */
+/** A floating white circle button — the Profile header's bell and settings affordances. */
 @Composable
-private fun ProfileStatCol(modifier: Modifier, icon: ImageVector, tint: Color, tintBg: Color, value: String, label: String) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(tintBg), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+private fun ProfileCircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        Modifier.size(42.dp)
+            .shadow(4.dp, CircleShape, spotColor = Color(0x1A101828))
+            .clip(CircleShape)
+            .background(CardBg)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = { content() },
+    )
+}
+
+/**
+ * One of the four stat cards: a circular tinted icon over a caption, figure and footnote.
+ *
+ * [fillMaxHeight] matters — the four sit in an IntrinsicSize.Min row, and "Customer Rating"
+ * wraps to two lines while its neighbours do not. Without it the cards come out different
+ * heights and the row looks broken.
+ */
+@Composable
+private fun ProfileStatCard(
+    modifier: Modifier,
+    icon: ImageVector,
+    tint: Color,
+    tintBg: Color,
+    label: String,
+    value: String,
+    footnote: String,
+) {
+    Column(
+        modifier.fillMaxHeight()
+            .shadow(3.dp, RoundedCornerShape(16.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardBg)
+            .padding(horizontal = 4.dp, vertical = 11.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
         }
-        Spacer(Modifier.height(7.dp))
-        Text(value, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Spacer(Modifier.height(1.dp))
-        Text(label, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            label, color = TextGray, fontSize = 9.5.sp, lineHeight = 12.sp,
+            fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2,
+        )
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(5.dp))
+        Text(value, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Text(footnote, color = TextMuted, fontSize = 9.sp, textAlign = TextAlign.Center, maxLines = 1)
     }
 }
 
-/** Thin vertical hairline separating stat columns in the unified panel. */
+/** Inset hairline between menu rows — inset so it starts under the text, not the icon. */
 @Composable
-private fun StatVDivider() {
-    Box(Modifier.height(38.dp).width(1.dp).background(Divider))
+private fun ProfileRowDivider() {
+    Box(Modifier.fillMaxWidth().padding(start = 58.dp, end = 14.dp).height(1.dp).background(Divider))
 }
 
-/** Menu row: tinted icon chip + title (with optional Verified pill) + subtitle + chevron. Tall
- *  enough (~56dp) to be an easy tap target for a worker on the move. */
+/** Menu row: circular tinted icon + title (with optional Verified pill) + subtitle + chevron.
+ *  Tall enough (~56dp) to be an easy tap target for a worker on the move. */
 @Composable
-private fun ProfileMenuRow(icon: ImageVector, title: String, subtitle: String, verified: Boolean = false, onClick: () -> Unit) {
+private fun ProfileMenuRow(
+    icon: ImageVector,
+    tint: Color,
+    title: String,
+    subtitle: String?,
+    verified: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 6.dp, vertical = 9.dp),
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
-        }
-        Spacer(Modifier.width(Space.m))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
@@ -937,8 +1067,10 @@ private fun ProfileMenuRow(icon: ImageVector, title: String, subtitle: String, v
                     StatusPill("Verified", GreenLight, GreenSuccess)
                 }
             }
-            Spacer(Modifier.height(1.dp))
-            Text(subtitle, color = TextGray, fontSize = 11.5.sp, lineHeight = 14.sp)
+            if (subtitle != null) {
+                Spacer(Modifier.height(1.dp))
+                Text(subtitle, color = TextGray, fontSize = 11.5.sp, lineHeight = 14.sp)
+            }
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
     }
@@ -1020,29 +1152,43 @@ fun EarningsInsightsCarousel(nav: NavHostController, modifier: Modifier = Modifi
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(Space.m),
         ) {
+            // Solid accent faces rather than white cards with a tinted chip: at this size the
+            // colour IS the affordance — it is what makes the strip read as swipeable next to
+            // the flat white panels above and below it.
             items.forEach { it ->
                 Column(
                     Modifier
                         .width(166.dp)
                         .height(156.dp)
-                        .shadow(2.dp, RoundedCornerShape(18.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0F101828))
+                        .shadow(6.dp, RoundedCornerShape(18.dp), spotColor = it.accent.copy(alpha = 0.45f))
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White)
-                        .border(1.dp, Divider, RoundedCornerShape(18.dp))
+                        .background(it.accent)
                         .clickable { nav.navigate(it.route) }
                         .padding(15.dp),
                 ) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                        Box(
-                            Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(it.accent.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(it.icon, contentDescription = null, tint = it.accent, modifier = Modifier.size(23.dp)) }
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
-                    }
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(Color.White.copy(alpha = 0.24f)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(it.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(23.dp)) }
                     Spacer(Modifier.weight(1f))
-                    Text(it.title, color = TextDark, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, lineHeight = 19.sp, maxLines = 2)
+                    Text(it.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, lineHeight = 19.sp, maxLines = 2)
                     Spacer(Modifier.height(4.dp))
-                    Text(it.sub, color = TextGray, fontSize = 11.5.sp, lineHeight = 14.sp, maxLines = 2)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            it.sub, color = Color.White.copy(alpha = 0.92f), fontSize = 11.5.sp,
+                            lineHeight = 14.sp, maxLines = 2, modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.26f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null,
+                                tint = Color.White, modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

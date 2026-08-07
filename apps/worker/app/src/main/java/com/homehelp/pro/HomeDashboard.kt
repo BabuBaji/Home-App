@@ -6,62 +6,649 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.CurrencyRupee
+import androidx.compose.material.icons.filled.DonutLarge
+import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.PlayCircleFilled
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.homehelp.pro.network.ScheduleItem
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Home dashboard sections, built to the reference design: a stat-tile strip, a
-// "next job" hero, today's schedule timeline, and the refer-&-earn banner.
+// Home dashboard, built to the supplied reference screen:
 //
-// Home scrolls (see HomeScreen) — this content is roughly 1.4 screens tall, so it
-// is NOT the fit-to-screen dashboard the earlier layout was.
+//   header → online toggle → NEXT JOB hero → Attendance/My Shift/Emergency →
+//   TODAY → NEXT UP → bonus banner
+//
+// Every figure is bound to real AppViewModel state. The reference's ₹1,000 / "0 / 3" /
+// "Deep Cleaning" are its sample data, not values baked in here: an empty backend renders
+// ₹0 and no schedule rather than inventing jobs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Indian-grouped rupees ("₹2,450"). Local copy so this file stands alone. */
+/** Indian-grouped rupees ("₹2,450"). */
 private fun money(v: Int): String =
     "₹" + java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(v)
 
-/** A section title with a trailing action link, as the reference draws above each block. */
+/**
+ * Sample jobs shown ONLY when the worker API returns an empty schedule, so the NEXT JOB hero
+ * and the NEXT UP panel are visible for design review and demos. Mirrors the reference screen.
+ *
+ * ⚠ DEMO DATA. A real worker must never be shown a booking that does not exist — they would
+ * travel to it. Delete this list (or wrap the fallback in `if (BuildConfig.DEBUG)`) before any
+ * release build. The live path is unaffected: the moment the API returns even one job, these
+ * rows are never read.
+ */
+val SampleSchedule: List<ScheduleItem> = listOf(
+    ScheduleItem(
+        time = "10:30 AM", service = "Deep Cleaning", location = "Jubilee Hills",
+        durationMins = 120, customerName = "Mrs. Priya Sharma", status = "Upcoming",
+        distanceKm = 2.3, etaMins = 45,
+    ),
+    ScheduleItem(
+        time = "1:00 PM", service = "Bathroom Cleaning", location = "Banjara Hills",
+        durationMins = 60, customerName = "Mr. Ramesh", status = "Upcoming", distanceKm = 4.1,
+    ),
+    ScheduleItem(
+        time = "4:30 PM", service = "Kitchen Cleaning", location = "Madhapur",
+        durationMins = 90, customerName = "Ms. Anjali", status = "Upcoming", distanceKm = 6.2,
+    ),
+)
+
+// Card geometry shared by every white panel on Home.
+//
+// Home is sized to fit ONE screen — no scrolling. On this device (411×914dp) the app area is
+// ~833dp and the floating nav takes ~86dp, leaving ~730dp for eight sections plus their gaps.
+// Every measurement below is therefore deliberately tight; raising any of them pushes the
+// bonus banner off the bottom. The reference screen is built to the same density.
+private val PanelRadius = 18.dp
+private val PanelPad = 11.dp
+
+// The reference's hero violet, and the deeper violet its primary action uses.
+private val JobHeroGradient = Brush.linearGradient(listOf(Color(0xFF7B5CF6), Color(0xFF5B32E8)))
+private val BonusGradient = Brush.linearGradient(listOf(Color(0xFF7B5CF6), Color(0xFF6C47F5)))
+private val StartJobViolet = Color(0xFF4A22C9)
+
+// Accent used by the "Today's Target" tile.
+private val OrangeAccent = Color(0xFFF97316)
+private val OrangeLight = Color(0xFFFFF1E6)
+
+/** The white rounded panel every section is drawn on. */
+@Composable
+private fun Panel(
+    modifier: Modifier = Modifier,
+    padH: Dp = PanelPad,
+    padV: Dp = PanelPad,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .shadow(3.dp, RoundedCornerShape(PanelRadius), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
+            .clip(RoundedCornerShape(PanelRadius))
+            .background(CardBg)
+            .padding(horizontal = padH, vertical = padV),
+        content = content,
+    )
+}
+
+/** Section caption + "View all ›", the header each panel carries. */
+@Composable
+private fun PanelHeader(title: String, action: String, onAction: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            title, color = TextDark, fontSize = 13.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp, modifier = Modifier.weight(1f),
+        )
+        Row(
+            Modifier.clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onAction)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(action, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+// ── Rating pill ──────────────────────────────────────────────────────────────
+
+/** The "★ 4.5" chip that sits under the greeting. */
+@Composable
+fun RatingPill(rating: Double, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .shadow(3.dp, RoundedCornerShape(Radius.pill), spotColor = Color(0x1A101828))
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(CardBg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Stars, contentDescription = null, tint = Gold, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            if (rating > 0) String.format("%.1f", rating) else "—",
+            color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+// ── Online toggle ────────────────────────────────────────────────────────────
+
+/**
+ * "You are Online / Available for new jobs" with the availability switch.
+ *
+ * This is the primary online control — the bottom-nav FAB toggles the same state, but a
+ * worker reading their dashboard needs to see availability without hunting for it.
+ */
+@Composable
+fun OnlineToggleCard(online: Boolean, onToggle: (Boolean) -> Unit) {
+    Panel(padV = 6.dp) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(10.dp).clip(CircleShape)
+                    .background(if (online) GreenSuccess else TextMuted),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row {
+                    Text("You are ", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (online) "Online" else "Offline",
+                        color = if (online) GreenSuccess else TextGray,
+                        fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    if (online) "Available for new jobs" else "You won't receive new jobs",
+                    color = TextGray, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = online,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Purple,
+                    checkedBorderColor = Purple,
+                    uncheckedThumbColor = Color.White,
+                    uncheckedTrackColor = Color(0xFFCBD5E1),
+                    uncheckedBorderColor = Color(0xFFCBD5E1),
+                ),
+            )
+        }
+    }
+}
+
+// ── Next job hero ────────────────────────────────────────────────────────────
+
+/**
+ * NEXT JOB — the violet hero: what, who, how far, and the three actions a worker takes from
+ * Home. Rendered only when a scheduled job actually exists; nothing is invented.
+ */
+@Composable
+fun NextJobHeroCard(
+    job: ScheduleItem,
+    timeWindow: String,
+    onNavigate: () -> Unit,
+    onCall: () -> Unit,
+    onStart: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxWidth()
+            .shadow(12.dp, RoundedCornerShape(22.dp), spotColor = Purple.copy(alpha = 0.4f))
+            .clip(RoundedCornerShape(22.dp))
+            .background(JobHeroGradient),
+    ) {
+        // Faint tool watermark, as the reference draws behind the hero text.
+        Icon(
+            Icons.Filled.CleaningServices,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.13f),
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 26.dp, top = 26.dp).size(120.dp),
+        )
+        Column(Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(Radius.pill))
+                        .background(Color.White.copy(alpha = 0.20f))
+                        .padding(horizontal = 9.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        "NEXT JOB", color = Color.White,
+                        fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                // "Starts in 45 min" only when the backend supplies an ETA — no invented countdown.
+                if (job.etaMins != null && job.etaMins > 0) {
+                    Column(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("Starts in", color = TextGray, fontSize = 9.5.sp, maxLines = 1)
+                        Text(
+                            "${job.etaMins} min", color = Purple,
+                            fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(46.dp).clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.22f))
+                        .padding(3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth().fillMaxHeight().clip(CircleShape).background(Color.White),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Home, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        job.service.ifBlank { "Service" },
+                        color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        job.customerName.ifBlank { "Customer" },
+                        color = Color.White.copy(alpha = 0.93f), fontSize = 13.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        HeroMeta(
+                            Icons.Filled.LocationOn,
+                            job.distanceKm?.let { String.format("%.1f km away", it) } ?: job.location.ifBlank { "—" },
+                        )
+                        Box(
+                            Modifier.padding(horizontal = 10.dp)
+                                .width(1.dp).height(13.dp).background(Color.White.copy(alpha = 0.45f)),
+                        )
+                        // Start time only, as the reference shows. The full window is a tooltip's
+                        // worth of detail that pushed this line to two rows on narrower phones.
+                        HeroMeta(Icons.Filled.Schedule, job.time.ifBlank { timeWindow })
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White, Purple, onNavigate)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White, Purple, onCall)
+                HeroAction(Modifier.weight(1.15f), Icons.Filled.PlayArrow, "Start Job", StartJobViolet, Color.White, onStart)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroMeta(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.92f), modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text, color = Color.White.copy(alpha = 0.92f), fontSize = 12.5.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun HeroAction(
+    modifier: Modifier,
+    icon: ImageVector,
+    label: String,
+    bg: Color,
+    fg: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier.height(34.dp).clip(RoundedCornerShape(11.dp)).background(bg).clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+// ── Quick actions ────────────────────────────────────────────────────────────
+
+/** The three-up shortcut strip: Attendance · My Shift · Emergency. */
+@Composable
+fun QuickActionStrip(onAttendance: () -> Unit, onShifts: () -> Unit, onEmergency: () -> Unit) {
+    Panel(padH = 4.dp, padV = 5.dp) {
+        Row(
+            Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            QuickAction(Modifier.weight(1f), Icons.Filled.EventAvailable, "Attendance", Purple, onAttendance)
+            Box(Modifier.width(1.dp).height(32.dp).background(Divider))
+            QuickAction(Modifier.weight(1f), Icons.Filled.CalendarMonth, "My Shift", BlueAccent, onShifts)
+            Box(Modifier.width(1.dp).height(32.dp).background(Divider))
+            QuickAction(Modifier.weight(1f), Icons.Filled.Shield, "Emergency", RedCancel, onEmergency, sosGlyph = true)
+        }
+    }
+}
+
+@Composable
+private fun QuickAction(
+    modifier: Modifier,
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+    sosGlyph: Boolean = false,
+) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
+            // The reference draws Emergency as the word SOS inside a red shield.
+            if (sosGlyph) {
+                Text("SOS", color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+        )
+    }
+}
+
+// ── Today ────────────────────────────────────────────────────────────────────
+
+/**
+ * TODAY — jobs done, money earned, the target and progress toward it, over a bar and a
+ * one-line prompt telling the worker what is left.
+ */
+@Composable
+fun TodayPanel(
+    completed: Int,
+    totalJobs: Int,
+    earned: Int,
+    target: Int,
+    onViewAll: () -> Unit,
+    onEditTarget: () -> Unit,
+) {
+    // Progress is measured in money against the money target — that is what "Today's Target
+    // ₹1,000" promises. The prompt underneath counts jobs, which is the lever the worker pulls.
+    val pct = if (target > 0) (earned.toFloat() / target).coerceIn(0f, 1f) else 0f
+    val jobsLeft = (totalJobs - completed).coerceAtLeast(0)
+    Panel(padH = 0.dp, padV = 7.dp) {
+        Box(Modifier.padding(horizontal = PanelPad)) {
+            PanelHeader("TODAY", "View all", onViewAll)
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            TodayCell(Modifier.weight(1f), Icons.Filled.Work, Purple, Primary50, "Jobs Completed", "$completed / $totalJobs")
+            CellDivider()
+            TodayCell(Modifier.weight(1f), Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Earned", money(earned))
+            CellDivider()
+            TodayCell(
+                Modifier.weight(1f).clickable(onClick = onEditTarget),
+                Icons.Filled.TrackChanges, OrangeAccent, OrangeLight, "Today's Target", money(target),
+            )
+            CellDivider()
+            TodayCell(Modifier.weight(1f), Icons.Filled.DonutLarge, Purple, Primary50, "Progress", "${(pct * 100).toInt()}%")
+        }
+        Spacer(Modifier.height(7.dp))
+        Box(
+            Modifier.padding(horizontal = PanelPad).fillMaxWidth().height(6.dp)
+                .clip(RoundedCornerShape(Radius.pill)).background(PurpleLight),
+        ) {
+            // A sliver is always drawn so the track reads as a progress bar at 0%, exactly as
+            // the reference shows it on an empty day.
+            Box(
+                Modifier.fillMaxWidth(pct.coerceAtLeast(0.04f)).fillMaxHeight()
+                    .clip(RoundedCornerShape(Radius.pill)).background(Purple),
+            )
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            when {
+                target > 0 && earned >= target -> "Target reached — nice work!"
+                jobsLeft > 0 -> "Complete $jobsLeft more job${if (jobsLeft == 1) "" else "s"} to reach your target"
+                else -> "No jobs scheduled yet — go online to get requests"
+            },
+            color = TextGray, fontSize = 11.5.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = PanelPad),
+        )
+    }
+}
+
+@Composable
+private fun TodayCell(
+    modifier: Modifier,
+    icon: ImageVector,
+    tint: Color,
+    tintBg: Color,
+    label: String,
+    value: String,
+) {
+    // 24dp plate, 3dp gutters and an 8sp caption. Four cells across a 393dp screen give ~98dp
+    // each; at 32dp/8dp/9.5sp the captions clipped to "Jobs Com…" and "Today's Ta…". The
+    // reference sets these captions far smaller than their figures for exactly this reason.
+    Row(
+        modifier.fillMaxHeight().padding(horizontal = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(24.dp).clip(CircleShape).background(tintBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+        }
+        Spacer(Modifier.width(4.dp))
+        Column {
+            Text(
+                label, color = TextGray, fontSize = 8.sp, lineHeight = 10.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Hairline between the cells of a metric row. */
+@Composable
+private fun CellDivider() {
+    Box(Modifier.width(1.dp).fillMaxHeight().background(Divider))
+}
+
+// ── Next up ──────────────────────────────────────────────────────────────────
+
+/**
+ * NEXT UP — the jobs queued AFTER the one in the hero. Renders nothing when there are none,
+ * rather than showing an empty shell.
+ */
+@Composable
+fun NextUpPanel(items: List<ScheduleItem>, onViewSchedule: () -> Unit, onItem: (ScheduleItem) -> Unit) {
+    Panel(padV = 6.dp) {
+        PanelHeader("NEXT UP", "View Schedule", onViewSchedule)
+        items.forEachIndexed { i, item ->
+            NextUpRow(item) { onItem(item) }
+            if (i != items.lastIndex) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
+            }
+        }
+    }
+}
+
+@Composable
+private fun NextUpRow(item: ScheduleItem, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Time as a two-line lavender plate ("1:00" over "PM"), as the reference draws it.
+        val (clock, meridiem) = splitTime(item.time)
+        Column(
+            Modifier.width(46.dp).clip(RoundedCornerShape(10.dp)).background(Primary50)
+                .padding(vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(clock, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            if (meridiem.isNotBlank()) {
+                Text(meridiem, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.service.ifBlank { "Service" }, color = TextDark, fontSize = 14.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    item.customerName.ifBlank { item.location }, color = TextGray, fontSize = 11.5.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                if (item.distanceKm != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Filled.LocationOn, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
+                    Text(
+                        String.format("%.1f km away", item.distanceKm),
+                        color = TextMuted, fontSize = 11.sp, maxLines = 1,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        Box(
+            Modifier.clip(RoundedCornerShape(Radius.pill)).background(Primary50)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            Text(
+                item.status.ifBlank { "Upcoming" }, color = Purple,
+                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            )
+        }
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+    }
+}
+
+/** Split "1:00 PM" into its clock and meridiem halves for the two-line time plate. */
+private fun splitTime(time: String): Pair<String, String> {
+    val t = time.trim()
+    if (t.isBlank()) return "—" to ""
+    val parts = t.split(" ")
+    return if (parts.size >= 2 && parts[1].length <= 2) parts[0] to parts[1].uppercase() else t to ""
+}
+
+// ── Bonus banner ─────────────────────────────────────────────────────────────
+
+/** The violet bonus card closing the page. */
+@Composable
+fun BonusBanner(title: String, subtitle: String, onDetails: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(20.dp), spotColor = Purple.copy(alpha = 0.35f))
+            .clip(RoundedCornerShape(20.dp))
+            .background(BonusGradient)
+            .clickable(onClick = onDetails),
+    ) {
+        Icon(
+            Icons.Filled.Redeem, contentDescription = null,
+            tint = Color.White.copy(alpha = 0.28f),
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 18.dp).size(104.dp),
+        )
+        // The reference stacks "View Details" BELOW the copy. Here it sits inline to the right:
+        // the stacked version is ~37dp taller, which is the difference between this banner
+        // landing on screen and being pushed under the nav. Same content, same actions.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(28.dp).clip(CircleShape).background(Gold.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Stars, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+            }
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(
+                    subtitle, color = Color.White.copy(alpha = 0.93f), fontSize = 11.5.sp,
+                    lineHeight = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White)
+                    .clickable(onClick = onDetails)
+                    .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Details", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+// ── Retained by other screens ────────────────────────────────────────────────
+
+/** A section title with a trailing action link, used by screens outside Home. */
 @Composable
 fun SectionHeading(title: String, action: String, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -76,172 +663,40 @@ fun SectionHeading(title: String, action: String, onAction: () -> Unit) {
     }
 }
 
-// ── Stat tiles ───────────────────────────────────────────────────────────────
-
 /**
- * The four headline figures, sized to fit the width exactly — no horizontal scroll.
- *
- * They were a scrollable strip of fixed-width tiles, but the row arrived scrolled a third of
- * the way across on load, clipping "Today's Earnings" off the left edge. Measuring the
- * reference, its own tiles are ~87dp on a 393dp frame, so four equal weights is what it
- * actually draws; making them fit removes both the overflow and the stray scroll offset.
- * Labels wrap to two lines so nothing is truncated at this width.
+ * The resume-active-job banner. It sits at the very top of Home when a job is live: a job in
+ * progress is the single most important thing on the screen.
  */
 @Composable
-fun StatTilesRow(
-    todayEarnings: Int,
-    dailyTarget: Int,
-    jobsCompleted: Int,
-    jobsToday: Int,
-    rating: Double,
-    walletBalance: Int,
-    onEarnings: () -> Unit,
-    onJobs: () -> Unit,
-    onRating: () -> Unit,
-    onWallet: () -> Unit,
-) {
+fun ActiveJobBanner(label: String, subtitle: String, onResume: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        StatTile(
-            Modifier.weight(1f),
-            icon = Icons.Filled.AccountBalanceWallet, tint = Purple, tintBg = Primary50,
-            value = money(todayEarnings), label = "Today's\nEarnings",
-            footer = if (dailyTarget > 0) "of ${money(dailyTarget)}" else null,
-            footerColor = Purple, footerBg = Primary50, onClick = onEarnings,
-        )
-        StatTile(
-            Modifier.weight(1f),
-            icon = Icons.Filled.CheckCircle, tint = GreenSuccess, tintBg = GreenLight,
-            value = "$jobsCompleted", label = "Jobs\nCompleted",
-            footer = if (jobsToday > 0) "$jobsToday today" else null,
-            footerColor = GreenSuccess, footerBg = GreenLight, onClick = onJobs,
-        )
-        StatTile(
-            Modifier.weight(1f),
-            icon = Icons.Filled.Star, tint = Gold, tintBg = GoldLight,
-            value = if (rating > 0) String.format("%.1f", rating) else "—", label = "Your\nRating",
-            footer = if (rating >= 4.5) "Top Rated" else null,
-            footerColor = Amber, footerBg = GoldLight, onClick = onRating,
-        )
-        StatTile(
-            Modifier.weight(1f),
-            icon = Icons.Filled.AccountBalanceWallet, tint = Color(0xFF2563EB), tintBg = Color(0xFFE8F0FE),
-            value = money(walletBalance), label = "Wallet\nBalance",
-            footer = "View ›", footerColor = Color(0xFF2563EB), footerBg = Color(0xFFE8F0FE),
-            onClick = onWallet,
-        )
-    }
-}
-
-@Composable
-private fun StatTile(
-    modifier: Modifier,
-    icon: ImageVector,
-    tint: Color,
-    tintBg: Color,
-    value: String,
-    label: String,
-    footer: String?,
-    footerColor: Color,
-    footerBg: Color,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(CardBg)
-            .border(1.dp, CardBorder, RoundedCornerShape(Radius.card))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(Modifier.size(38.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
-        }
-        Spacer(Modifier.height(8.dp))
-        // Label above value, as the reference draws it: the caption names the metric, the
-        // figure below it is the payload.
-        Text(
-            label, color = TextGray, fontSize = 10.5.sp, lineHeight = 13.sp,
-            maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            value, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-            maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.weight(1f))
-        if (footer != null) {
-            Spacer(Modifier.height(8.dp))
-            Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.pill)).background(footerBg)
-                    .padding(horizontal = 4.dp, vertical = 5.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(footer, color = footerColor, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            }
-        }
-    }
-}
-
-// ── Daily target ─────────────────────────────────────────────────────────────
-
-/**
- * Progress towards today's earnings goal, and the only route to the goal editor.
- *
- * The editor used to hang off the earnings card's "Today's Target" row; when that card became
- * the stat-tile strip the dialog was left in HomeScreen with nothing able to open it. Tapping
- * this bar opens it again.
- */
-@Composable
-fun DailyTargetBar(todayEarnings: Int, dailyTarget: Int, onEditTarget: () -> Unit) {
-    val pct = if (dailyTarget > 0) (todayEarnings.toFloat() / dailyTarget).coerceIn(0f, 1f) else 0f
-    Column(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(CardBg)
-            .border(1.dp, CardBorder, RoundedCornerShape(Radius.card))
-            .clickable(onClick = onEditTarget)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .shadow(6.dp, RoundedCornerShape(PanelRadius), spotColor = GreenSuccess.copy(alpha = 0.4f))
+            .clip(RoundedCornerShape(PanelRadius))
+            .background(GreenSuccess)
+            .clickable(onClick = onResume)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.TrackChanges, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Daily Target", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(
-                "${money(todayEarnings)} / ${money(dailyTarget)}",
-                color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-            )
-        }
-        Spacer(Modifier.height(10.dp))
         Box(
-            Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Radius.pill)).background(FieldFill),
+            Modifier.size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f)),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                Modifier.fillMaxWidth(pct).fillMaxHeight().clip(RoundedCornerShape(Radius.pill)).background(BrandGradient),
+            Icon(Icons.Filled.CleaningServices, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(
+                subtitle, color = Color.White.copy(alpha = 0.92f), fontSize = 11.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(Modifier.height(7.dp))
-        Text(
-            if (dailyTarget > 0 && todayEarnings >= dailyTarget) "Target reached — nice work!"
-            else "${(pct * 100).toInt()}% of today's goal · tap to change",
-            color = TextGray, fontSize = 11.5.sp, maxLines = 1,
-        )
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
     }
 }
 
-// ── Attendance ───────────────────────────────────────────────────────────────
-
-/**
- * Shift check-in / check-out — the one thing a worker must do every single day, and which was
- * only reachable through the drawer after Quick Actions was removed. Late check-ins are
- * penalised (see AttendanceScreen), so burying it two taps deep costs the worker money.
- *
- * [onOpen] leads to the full attendance screen; [onCheckIn] / [onCheckOut] act directly.
- */
+/** Kept for the attendance route: the check-in / check-out strip other screens still link to. */
 @Composable
 fun AttendanceStrip(
     att: com.homehelp.pro.network.AttendanceDto,
@@ -254,42 +709,39 @@ fun AttendanceStrip(
         att.checkedIn -> Triple(GreenSuccess, GreenLight, "Checked in")
         else -> Triple(Amber, GoldLight, "Not checked in")
     }
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(CardBg)
-            .border(1.dp, CardBorder, RoundedCornerShape(Radius.card))
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(38.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Schedule, contentDescription = null, tint = accent, modifier = Modifier.size(19.dp))
-        }
-        Spacer(Modifier.width(11.dp))
-        Column(Modifier.weight(1f)) {
-            Text(label, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Text(
-                when {
-                    att.checkedOut && att.checkOutAt.isNotBlank() -> "Out at ${att.checkOutAt}"
-                    att.checkedIn && att.checkInAt.isNotBlank() -> "In at ${att.checkInAt}"
-                    att.shiftName.isNotBlank() -> "${att.shiftName} · ${att.shiftStart}–${att.shiftEnd}"
-                    else -> "Pick a shift to get started"
-                },
-                color = TextGray, fontSize = 12.sp, maxLines = 1,
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        when {
-            !att.checkedIn -> AttendanceAction("Check In", BrandGradient, onCheckIn)
-            !att.checkedOut -> AttendanceAction("Check Out", null, onCheckOut)
-            else -> Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
+    Panel {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(Radius.field)).background(tintBg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Schedule, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).clickable(onClick = onOpen)) {
+                Text(label, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(
+                    when {
+                        att.checkedOut && att.checkOutAt.isNotBlank() -> "Out at ${att.checkOutAt}"
+                        att.checkedIn && att.checkInAt.isNotBlank() -> "In at ${att.checkInAt}"
+                        att.shiftName.isNotBlank() -> "${att.shiftName} · ${att.shiftStart}–${att.shiftEnd}"
+                        else -> "Pick a shift to get started"
+                    },
+                    color = TextGray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            when {
+                !att.checkedIn -> AttendanceAction("Check In", BrandGradient, onCheckIn)
+                !att.checkedOut -> AttendanceAction("Check Out", null, onCheckOut)
+                else -> Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun AttendanceAction(label: String, fill: androidx.compose.ui.graphics.Brush?, onClick: () -> Unit) {
+private fun AttendanceAction(label: String, fill: Brush?, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(Radius.pill))
             .then(if (fill != null) Modifier.background(fill) else Modifier.background(FieldFill))
@@ -301,313 +753,5 @@ private fun AttendanceAction(label: String, fill: androidx.compose.ui.graphics.B
             label, color = if (fill != null) Color.White else TextDark,
             fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
         )
-    }
-}
-
-// ── Active job ───────────────────────────────────────────────────────────────
-
-/**
- * The resume-active-job banner. It sits at the very top of Home when a job is live: it used to
- * render below the refer-&-earn banner, i.e. under everything else, even though a job in
- * progress is the single most important thing on the screen.
- */
-@Composable
-fun ActiveJobBanner(label: String, subtitle: String, onResume: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(GreenSuccess)
-            .clickable(onClick = onResume)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f)),
-            contentAlignment = Alignment.Center,
-        ) { Text("🛠", fontSize = 19.sp) }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(subtitle, color = Color.White.copy(alpha = 0.92f), fontSize = 12.5.sp, maxLines = 1)
-        }
-        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-    }
-}
-
-// ── Next job ─────────────────────────────────────────────────────────────────
-
-/**
- * NEXT JOB — the reference's lavender hero: who, what, how far, and the two actions a worker
- * takes from Home. Rendered only when a scheduled job actually exists; nothing is invented.
- */
-@Composable
-fun NextJobHeroCard(
-    job: ScheduleItem,
-    timeWindow: String,
-    onNavigate: () -> Unit,
-    onCall: () -> Unit,
-    onStart: () -> Unit,
-) {
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(ActiveJobTint)
-            .border(1.dp, ActiveJobBorder, RoundedCornerShape(Radius.card))
-            .padding(16.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.clip(RoundedCornerShape(Radius.pill)).background(Primary50)
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
-            ) {
-                Text("NEXT JOB", color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
-            }
-            Spacer(Modifier.weight(1f))
-            // "45 min left" only when the backend actually supplies an ETA — no invented countdown.
-            if (job.etaMins != null && job.etaMins > 0) {
-                Row(
-                    Modifier.clip(RoundedCornerShape(Radius.pill)).background(CardBg)
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("${job.etaMins} min left", color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // Initial-badge stands in for the customer photo: the schedule feed carries a name
-            // but no avatar URL, so there is no image to load.
-            Box(
-                Modifier.size(48.dp).clip(CircleShape).background(BrandGradient),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    job.customerName.trim().take(1).uppercase().ifBlank { "C" },
-                    color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    job.customerName.ifBlank { "Customer" },
-                    color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(job.service, color = TextGray, fontSize = 13.sp, maxLines = 1)
-                Spacer(Modifier.height(5.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.LocationOn, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(3.dp))
-                    Text(
-                        job.distanceKm?.let { String.format("%.1f km away", it) } ?: job.location.ifBlank { "—" },
-                        color = TextMuted, fontSize = 12.sp, maxLines = 1,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(3.dp))
-                    Text(timeWindow.ifBlank { job.time }, color = TextMuted, fontSize = 12.sp, maxLines = 1)
-                }
-            }
-        }
-        Spacer(Modifier.height(14.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", onNavigate)
-            OutlinedAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", onCall)
-            FilledAction(Modifier.weight(1.15f), Icons.Filled.PlayCircleFilled, "Start Job", onStart)
-        }
-    }
-}
-
-@Composable
-private fun OutlinedAction(modifier: Modifier, icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(
-        modifier.height(46.dp).clip(RoundedCornerShape(Radius.button))
-            .background(CardBg).border(1.4.dp, Purple, RoundedCornerShape(Radius.button))
-            .clickable(onClick = onClick),
-        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(label, color = Purple, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun FilledAction(modifier: Modifier, icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(
-        modifier.height(46.dp).clip(RoundedCornerShape(Radius.button))
-            .background(BrandGradient).clickable(onClick = onClick),
-        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-// ── Today's schedule ─────────────────────────────────────────────────────────
-
-/**
- * TODAY'S SCHEDULE — a timeline of the day's jobs. The first upcoming row is marked "Next" and
- * carries a filled dot; the rest are hollow. Renders nothing when the schedule feed is empty
- * rather than showing placeholder rows.
- */
-@Composable
-fun TodayScheduleCard(items: List<ScheduleItem>, onViewAll: () -> Unit, onItem: (ScheduleItem) -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Today's Schedule", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Row(
-                Modifier.clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onViewAll).padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("View all", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Card(padding = Dp16.S) {
-            items.forEachIndexed { i, item ->
-                ScheduleRow(item, isNext = i == 0, isLast = i == items.lastIndex, onClick = { onItem(item) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScheduleRow(item: ScheduleItem, isNext: Boolean, isLast: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp)) {
-        // Timeline rail: dot plus the connector down to the next row.
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(18.dp)) {
-            Box(
-                Modifier.size(11.dp).clip(CircleShape)
-                    .background(if (isNext) GreenSuccess else Color.Transparent)
-                    .border(if (isNext) 0.dp else 1.5.dp, if (isNext) Color.Transparent else Divider, CircleShape),
-            )
-            if (!isLast) {
-                Spacer(Modifier.height(4.dp))
-                Box(Modifier.width(1.dp).height(40.dp).background(Divider))
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            item.time, color = if (isNext) GreenSuccess else TextGray,
-            fontSize = 13.sp, fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1, modifier = Modifier.width(72.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(item.service, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Text(item.customerName.ifBlank { item.location }, color = TextGray, fontSize = 12.sp, maxLines = 1)
-        }
-        Spacer(Modifier.width(8.dp))
-        val badgeBg = if (isNext) GreenLight else Primary50
-        val badgeFg = if (isNext) GreenSuccess else Purple
-        Box(
-            Modifier.clip(RoundedCornerShape(Radius.pill)).background(badgeBg).padding(horizontal = 10.dp, vertical = 5.dp),
-        ) {
-            Text(
-                if (isNext) "Next" else item.status.ifBlank { "Upcoming" },
-                color = badgeFg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-            )
-        }
-    }
-}
-
-// ── Incentive progress ───────────────────────────────────────────────────────
-
-/**
- * INCENTIVE PROGRESS — the purple banner closing the page. Rendered only when the backend
- * actually reports a bonus target, so it never shows an invented goal.
- */
-@Composable
-fun IncentiveProgressBanner(done: Int, target: Int, reward: Int, onOpen: () -> Unit) {
-    val remaining = (target - done).coerceAtLeast(0)
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(BrandGradient)
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🏆", fontSize = 14.sp)
-                Spacer(Modifier.width(6.dp))
-                Text("Incentive Progress", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(5.dp))
-            Text(
-                if (remaining > 0) "Complete $remaining more jobs to earn ₹$reward extra!"
-                else "Target complete — ₹$reward unlocked!",
-                color = Color.White.copy(alpha = 0.92f), fontSize = 12.5.sp, lineHeight = 17.sp,
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val stroke = 7.dp.toPx()
-                val inset = stroke / 2
-                val arc = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
-                drawArc(
-                    color = Color.White.copy(alpha = 0.28f), startAngle = -90f, sweepAngle = 360f,
-                    useCenter = false, topLeft = Offset(inset, inset), size = arc,
-                    style = Stroke(width = stroke, cap = StrokeCap.Round),
-                )
-                val frac = if (target > 0) (done.toFloat() / target).coerceIn(0f, 1f) else 0f
-                if (frac > 0f) {
-                    drawArc(
-                        color = Gold, startAngle = -90f, sweepAngle = 360f * frac,
-                        useCenter = false, topLeft = Offset(inset, inset), size = arc,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round),
-                    )
-                }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("$done/$target", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text("Jobs", color = Color.White.copy(alpha = 0.85f), fontSize = 9.sp, maxLines = 1)
-            }
-        }
-        Spacer(Modifier.width(10.dp))
-        Text("🎁", fontSize = 30.sp)
-    }
-}
-
-// ── Refer & earn ─────────────────────────────────────────────────────────────
-
-/** The purple refer-a-friend banner that closes the page in the reference design. */
-@Composable
-fun ReferEarnBanner(onRefer: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.card))
-            .background(BrandGradient)
-            .clickable(onClick = onRefer)
-            .padding(horizontal = 18.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Refer & Earn", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Refer a friend and earn up to ₹500 bonus!",
-                color = Color.White.copy(alpha = 0.92f), fontSize = 13.sp, lineHeight = 18.sp,
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Text("🎁", fontSize = 34.sp)
-        Spacer(Modifier.width(12.dp))
-        Row(
-            Modifier.clip(RoundedCornerShape(Radius.button)).background(Color.White)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Refer Now", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp))
-        }
     }
 }

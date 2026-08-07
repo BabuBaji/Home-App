@@ -102,6 +102,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -375,10 +376,15 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     // Any live or upcoming job, not just "Upcoming". The backend reports a job the worker has
     // already accepted as "In progress", so an exact-match on "Upcoming" hid the Next Job card
     // for exactly the job the worker most needs to act on.
-    val nextJob = vm.schedule.firstOrNull {
+    //
+    // When the API returns NO schedule at all, Home falls back to [SampleSchedule] so the
+    // NEXT JOB hero and NEXT UP panel still render. That is demo data — see the warning on
+    // SampleSchedule before shipping a release build.
+    val scheduleItems = vm.schedule.ifEmpty { SampleSchedule }
+    val nextJob = scheduleItems.firstOrNull {
         it.status.equals("Upcoming", true) || it.status.equals("In progress", true) ||
             it.status.equals("Accepted", true) || it.status.equals("Confirmed", true)
-    } ?: vm.schedule.firstOrNull()
+    } ?: scheduleItems.firstOrNull()
     val nextJobWindow = remember(nextJob?.time, nextJob?.durationMins) { jobTimeWindow(nextJob?.time, nextJob?.durationMins) }
 
     // Home scrolls, and deliberately so. Measured on a 1080×2408 @440dpi device: this layout's
@@ -387,108 +393,40 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     // and 19sp figures read as 10sp. No amount of trimming closes a 680dp gap; dropping the
     // schedule, banner and ticker together still only reached ~0.76. Scrolling is what lets the
     // type and cards render at the size they are designed at.
+    // Home scrolls. The sections below are compact enough that almost all of the page is
+    // visible at once, but nothing is scaled to force a fit: type renders at the size it is
+    // designed at, and the last card is reached by scrolling. An earlier revision shrank the
+    // whole page to fit exactly one screen — that is deliberately NOT done here.
     Column(
         Modifier.fillMaxSize().background(ScreenBg).verticalScroll(rememberScrollState()),
     ) {
-        // Screen padding 20dp and 12dp between sections (the design system's 20dp section gap,
         Column(
-            // Bottom padding clears the floating bottom nav, which is drawn over this content
-            // rather than below it — without it the last card sits behind the nav pill.
-            // The floating bottom nav is drawn over this content, not below it. Measured on the
-            // device it occupies ~83dp plus the ~46dp system gesture bar, so the last card needs
-            // ~130dp of clearance before it stops sitting behind the nav pill — plus a margin so
-            // it does not sit flush against it.
-            Modifier.padding(horizontal = Space.xl).padding(top = 10.dp, bottom = 190.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            // The bottom nav floats OVER this content rather than sitting below it, so the last
+            // card needs the pill's height (~86dp) plus its bottom margin as clearance.
+            // Only 24dp at the bottom. FloatingBottomNav sits in the Scaffold's bottomBar slot,
+            // so the NavHost is ALREADY inset by the pill's full height — reserving it again
+            // here (it was 180dp) just added dead scroll. This covers the centre FAB, which
+            // overhangs the bar's top edge and is not part of the measured bottomBar.
+            Modifier.padding(horizontal = Space.m).padding(top = 2.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // ─── Top bar: drawer · notifications · support (per the 1_home design) ───
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .clickable { openDrawer() },
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(24.dp)) }
-                Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .clickable { nav.navigate(Routes.P_NOTIFICATIONS) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // Outlined (hollow/white-filled) bell, matching the reference.
-                    Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(24.dp))
-                    if (vm.unreadNotifications > 0) {
-                        // Red count circle riding the bell's top-right, as in the reference.
-                        Box(
-                            Modifier.align(Alignment.Center)
-                                .offset(x = 9.dp, y = (-9).dp)
-                                .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
-                                .clip(RoundedCornerShape(Radius.pill))
-                                .background(RedCancel)
-                                .border(1.5.dp, ScreenBg, RoundedCornerShape(Radius.pill))
-                                .padding(horizontal = 4.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                if (vm.unreadNotifications > 99) "99+" else "${vm.unreadNotifications}",
-                                color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                            )
-                        }
-                    }
-                }
-                // SOS lives here now that the Quick Actions grid is gone. It is a lone-worker
-                // safety control, so it keeps a one-tap home: the only other idle-time route to
-                // it is Support → SOS, and pushing an emergency action to two taps to tidy the
-                // layout is not a trade worth making.
-                Box(
-                    Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .background(RedLight)
-                        .clickable { vm.sendSos(null, null) { msg -> toast(sosCtx, msg) } },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("SOS", color = RedCancel, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.width(6.dp))
-                // Avatar sits in the top bar, as the reference draws it, with a presence dot on
-                // its corner. Plain photo rather than VerifiedAvatar: that one already carries a
-                // KYC badge at bottom-end, and the two badges landed on top of each other.
-                Box(Modifier.size(42.dp)) {
-                    Image(
-                        painterResource(R.drawable.dummy_avatar),
-                        contentDescription = "Profile",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(40.dp)
-                            .clip(RoundedCornerShape(Radius.pill))
-                            .border(2.dp, Purple.copy(alpha = 0.35f), RoundedCornerShape(Radius.pill))
-                            .clickable { nav.navigateApp(Routes.PROFILE) },
-                    )
-                    Box(
-                        Modifier.align(Alignment.BottomEnd).size(12.dp)
-                            .clip(RoundedCornerShape(Radius.pill))
-                            .background(if (vm.isOnline) GreenSuccess else TextMuted)
-                            .border(2.dp, ScreenBg, RoundedCornerShape(Radius.pill)),
-                    )
-                }
-            }
-
-            WorkerProfileHeader(
+            // ─── Header ─── drawer handle, greeting and rating on the left; bell and avatar on
+            // the right, as the reference draws them.
+            HomeHeaderRow(
                 greeting = greeting,
                 firstName = firstName,
+                rating = vm.workerRating,
+                unread = vm.unreadNotifications,
                 online = vm.isOnline,
-                onToggleOnline = { vm.goOnline(!vm.isOnline) },
+                onMenu = { openDrawer() },
+                onNotifications = { nav.navigate(Routes.P_NOTIFICATIONS) },
+                onProfile = { nav.navigateApp(Routes.PROFILE) },
+                onRating = { nav.navigate(Routes.PERFORMANCE) },
             )
 
-            // ─── Attendance ─── check-in / check-out, the one thing a worker does every single
-            // day. AttendanceStrip and its homeLastLoc() helper were both written for Home but
-            // never actually called, so the drawer was the only route to it. Late check-ins are
-            // penalised (see AttendanceScreen), so leaving it two taps deep cost the worker money.
-            // Always rendered: "not checked in" is exactly the state that needs the prompt.
-            AttendanceStrip(
-                att = vm.attendance,
-                onOpen = { nav.navigate(Routes.ATTENDANCE) },
-                onCheckIn = { val (lat, lng) = homeLastLoc(homeCtx); vm.checkIn(lat, lng) },
-                onCheckOut = { val (lat, lng) = homeLastLoc(homeCtx); vm.checkOut(lat, lng) },
-            )
+            // ─── Availability ─── the primary online control. goOnline() is the same call the
+            // nav FAB makes, so the switch and the FAB stay in step.
+            OnlineToggleCard(online = vm.isOnline, onToggle = { vm.goOnline(it) })
 
             // ─── Live job ─── highest-priority state on the screen, so it leads. It used to
             // render below the refer banner, under everything else.
@@ -501,7 +439,12 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
                     else -> null
                 }
-                if (route != null) {
+                // Suppressed while the NEXT JOB hero is on screen: with a live job the hero is
+                // showing that same booking, and its "Start Job" resumes it at exactly the stage
+                // this banner would have navigated to. Two cards for one job cost ~75dp and made
+                // the page overflow. With no hero (empty schedule) the banner is the only route
+                // back into a live job, so it still renders.
+                if (route != null && nextJob == null) {
                     ActiveJobBanner(
                         label = when (vm.jobStatus) {
                             JobStatus.REQUESTED -> "New job request"
@@ -550,104 +493,72 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 )
             }
 
-            // ─── Today's Summary ─── the four headline figures.
-            SectionHeading("Today's Summary", "View all") { nav.navigateApp(Routes.EARNINGS) }
-            StatTilesRow(
-                todayEarnings = vm.todayEarnings,
-                dailyTarget = vm.dailyGoal,
-                jobsCompleted = vm.todayCompleted,
-                jobsToday = vm.todayJobs,
-                rating = vm.workerRating,
-                walletBalance = vm.walletBalance,
-                onEarnings = { nav.navigateApp(Routes.EARNINGS) },
-                onJobs = { nav.navigateApp(Routes.BOOKINGS) },
-                onRating = { nav.navigate(Routes.PERFORMANCE) },
-                onWallet = { nav.navigateApp(Routes.WALLET) },
+            // ─── Quick actions ─── Attendance · My Shift · Emergency. Emergency is a lone-worker
+            // safety control, so it keeps a one-tap home here rather than sitting two taps deep
+            // behind Support.
+            QuickActionStrip(
+                onAttendance = { nav.navigate(Routes.ATTENDANCE) },
+                onShifts = { nav.navigate(Routes.MY_SHIFTS) },
+                onEmergency = { vm.sendSos(null, null) { msg -> toast(sosCtx, msg) } },
             )
 
-            // ─── Daily target ─── progress toward today's goal, and the ONLY route to the goal
-            // editor. GoalDialog was already built and wired above, but nothing ever set
-            // showGoalDialog to true, so the editor was unreachable dead code — the "of ₹1,000"
-            // footer on the earnings tile named a target the worker had no way to change.
-            DailyTargetBar(
-                todayEarnings = vm.todayEarnings,
-                dailyTarget = vm.dailyGoal,
+            // ─── Today ─── jobs done against today's total, money earned, the target and the
+            // progress toward it. Tapping the target cell opens the goal editor, which is the
+            // only route to it.
+            TodayPanel(
+                completed = vm.todayCompleted,
+                // Falls back to the schedule's length when the API reports no jobs for today, so
+                // the count agrees with the rows NEXT UP is actually showing.
+                totalJobs = if (vm.todayJobs > 0) vm.todayJobs else scheduleItems.size,
+                earned = vm.todayEarnings,
+                target = vm.dailyGoal,
+                onViewAll = { nav.navigateApp(Routes.EARNINGS) },
                 onEditTarget = { showGoalDialog = true },
             )
 
-            // ─── Today's schedule ─── hidden entirely when the feed is empty, rather than
-            // rendering an empty timeline shell.
-            if (vm.schedule.isNotEmpty()) {
-                TodayScheduleCard(
-                    items = vm.schedule.take(3),
-                    onViewAll = { nav.navigateApp(Routes.BOOKINGS) },
+            // ─── Next up ─── the jobs queued AFTER the hero's. Dropping the hero job keeps the
+            // two sections from showing the same booking twice; hidden entirely when nothing is
+            // left, rather than rendering an empty shell.
+            val upcoming = scheduleItems.filter { it !== nextJob }.take(3)
+            if (upcoming.isNotEmpty()) {
+                NextUpPanel(
+                    items = upcoming,
+                    onViewSchedule = { nav.navigate(Routes.SCHEDULE) },
                     onItem = { nav.navigateApp(Routes.BOOKINGS) },
                 )
             }
 
-            // Quick Actions removed. Every destination it held stays reachable: Withdraw and
-            // Wallet from the bottom nav, My Jobs from the Jobs tab, Messages from the bell,
-            // Support from the drawer, and Emergency from the SOS button in the top bar.
-
-            // ─── Status slot ───────────────────────────────────────────────────────────────
-            // Exactly ONE strip renders here, always at the same height. Home is fit-to-screen,
-            // so anything that appears only while online used to push the natural height up and
-            // shrink the entire dashboard the moment the worker tapped "Go Online" — the screen
-            // visibly zoomed out. Online state now swaps the strip's contents instead of adding
-            // to the stack, so going online changes what this row says, never how big Home is.
-            when {
-                vm.isOnline && vm.hasIncomingJob -> {
-                    val jobCtx = LocalContext.current
-                    OnlineStatusStrip(
-                        background = BrandGradient,
-                        onLight = false,
-                        title = "New Job Request",
-                        subtitle = "A customer needs your service — tap to view",
-                        trailing = null,
-                        onClick = {
-                            vm.requestJob { found ->
-                                if (found) nav.navigate(Routes.NEW_JOB) else toast(jobCtx, "That job was just taken")
-                            }
-                        },
-                    )
-                }
-                vm.isOnline -> {
-                    val idleCtx = LocalContext.current
-                    OnlineStatusStrip(
-                        background = null,
-                        onLight = true,
-                        title = "You're Online",
-                        subtitle = "Waiting for job requests nearby",
-                        trailing = fmtOnline(vm.onlineTodayMs(nowMs)),
-                        onClick = {
-                            vm.requestJob { found ->
-                                if (found) nav.navigate(Routes.NEW_JOB) else toast(idleCtx, "No new job requests right now")
-                            }
-                        },
-                    )
-                }
-                // Offline and idle: nothing here. The announcements ticker that used to fill
-                // this slot carried placeholder copy, and the reference has no such strip.
-                else -> Unit
+            // ─── Incoming request ───────────────────────────────────────────────────────────
+            // ONLY the incoming-job strip renders here now. The idle "You're Online / Waiting
+            // for job requests" variant was removed: the availability card at the top of the
+            // page already says exactly that, and the reference has no second copy of it.
+            if (vm.isOnline && vm.hasIncomingJob) {
+                val jobCtx = LocalContext.current
+                OnlineStatusStrip(
+                    background = BrandGradient,
+                    onLight = false,
+                    title = "New Job Request",
+                    subtitle = "A customer needs your service — tap to view",
+                    trailing = null,
+                    onClick = {
+                        vm.requestJob { found ->
+                            if (found) nav.navigate(Routes.NEW_JOB) else toast(jobCtx, "That job was just taken")
+                        }
+                    },
+                )
             }
 
-            // ─── Incentive progress ─── closes the page. Only rendered when the backend really
-            // reports a bonus target, so no invented goal is ever shown.
-            vm.shaktiBonus?.let { s ->
-                val target = s.tiers.lastOrNull()?.days ?: 0
-                if (target > 0) {
-                    IncentiveProgressBanner(
-                        done = s.workingDays,
-                        target = target,
-                        reward = s.tiers.lastOrNull()?.amount ?: 0,
-                        onOpen = { nav.navigate(Routes.SHAKTI) },
-                    )
-                }
-            }
-
-            // ─── Refer & earn ─── closes the page, as the reference design draws it. Built but
-            // never called; the drawer was its only route.
-            ReferEarnBanner(onRefer = { nav.navigate(Routes.REFER) })
+            // ─── Bonus banner ─── closes the page. When the backend reports a Sitara tier the
+            // banner quotes ITS reward and target; with no tier reported it falls back to the
+            // generic weekend copy rather than naming a bonus the worker cannot actually earn.
+            val nextBonusTier = vm.shaktiBonus?.tiers?.firstOrNull { it.days > (vm.shaktiBonus?.workingDays ?: 0) }
+            BonusBanner(
+                title = "Weekend Bonus!",
+                subtitle = nextBonusTier
+                    ?.let { "Earn ₹${it.amount} extra after ${it.days} working days" }
+                    ?: "Extra incentive on weekend jobs — tap for details",
+                onDetails = { nav.navigate(Routes.SHAKTI) },
+            )
 
             // The active-job banner moved to the TOP of this column — a job in progress is the
             // most important thing on the screen and used to render here, below everything.
@@ -655,6 +566,100 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             // button folded into the status slot above.
         }
     }
+}
+
+/**
+ * Home's header row, per the reference: the drawer handle as a floating white circle on the
+ * left, and the notification bell (with its unread count) plus the avatar on the right.
+ *
+ * SOS is NOT here — the reference puts it in the quick-action strip, where it still sits one
+ * tap from Home.
+ */
+@Composable
+private fun HomeHeaderRow(
+    greeting: String,
+    firstName: String,
+    rating: Double,
+    unread: Int,
+    online: Boolean,
+    onMenu: () -> Unit,
+    onNotifications: () -> Unit,
+    onProfile: () -> Unit,
+    onRating: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        CircleButton(onClick = onMenu) {
+            Icon(Icons.Filled.Menu, contentDescription = "Open menu", tint = TextDark, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        // Greeting sits beside the drawer handle, with the rating chip hanging under the name.
+        Column(Modifier.weight(1f)) {
+            Text("$greeting,", fontSize = 13.sp, color = TextGray, maxLines = 1)
+            Text(
+                "$firstName 👋",
+                fontSize = 21.sp, fontWeight = FontWeight.Bold, color = TextDark,
+                letterSpacing = (-0.5).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            RatingPill(rating = rating, onClick = onRating)
+        }
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+            CircleButton(onClick = onNotifications) {
+                Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(22.dp))
+            }
+            if (unread > 0) {
+                Box(
+                    Modifier.align(Alignment.TopEnd)
+                        .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                        .clip(RoundedCornerShape(Radius.pill))
+                        .background(RedCancel)
+                        .border(2.dp, ScreenBg, RoundedCornerShape(Radius.pill))
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (unread > 99) "99+" else "$unread",
+                        color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(2.dp))
+        // Avatar, ringed in brand violet with a presence dot on its corner.
+        Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
+            Image(
+                painterResource(R.drawable.dummy_avatar),
+                contentDescription = "Profile",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(46.dp)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .border(2.dp, Purple.copy(alpha = 0.5f), RoundedCornerShape(Radius.pill))
+                    .clickable(onClick = onProfile),
+            )
+            Box(
+                Modifier.align(Alignment.BottomEnd).size(12.dp)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(if (online) GreenSuccess else TextMuted)
+                    .border(2.dp, ScreenBg, RoundedCornerShape(Radius.pill)),
+            )
+        }
+    }
+}
+
+/** A floating white circle button — the header's drawer and bell affordance. */
+@Composable
+private fun CircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        Modifier.size(42.dp)
+            .shadow(4.dp, RoundedCornerShape(Radius.pill), spotColor = Color(0x1A101828))
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(CardBg)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = { content() },
+    )
 }
 
 /**

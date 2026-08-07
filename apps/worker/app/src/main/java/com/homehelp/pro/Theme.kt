@@ -50,6 +50,8 @@ val GreenLight = Color(0xFFE7F8EF)    // success tint
 val Gold = Color(0xFFF5B301)          // ratings gold
 val Amber = Color(0xFFF59E0B)         // warning / pending
 val GoldLight = Color(0xFFFEF3DA)     // amber tint
+val BlueAccent = Color(0xFF2563EB)    // wallet / balance accent
+val BlueAccentLight = Color(0xFFE8F0FE) // wallet tint
 val RedCancel = Color(0xFFEF4444)     // error / destructive
 val RedLight = Color(0xFFFDECEC)      // error tint
 
@@ -156,6 +158,16 @@ private val Scheme = lightColorScheme(
     onBackground = TextDark,
     surface = CardBg,
     onSurface = TextDark,
+    // M3 tints any Surface whose colour equals `surface` with `surfaceTint` in proportion to its
+    // tonal elevation. CardBg IS `surface`, so every elevated card, the navigation bar and the
+    // app bar came out violet-washed (#F3F1FE) instead of the white this palette specifies.
+    //
+    // The tint is set to CardBg — i.e. the surface colour itself — so the composite is white on
+    // white at any elevation. NOT Color.Transparent: `surfaceColorAtElevation` composites
+    // `surfaceTint.copy(alpha = …)` over `surface`, and Color.Transparent is transparent BLACK,
+    // so it greys every card out (#EDEDED) instead of leaving it alone. M3's real shadows are
+    // drawn separately and survive either way.
+    surfaceTint = CardBg,
     surfaceVariant = FieldFill,
     onSurfaceVariant = TextGray,
     error = RedCancel,
