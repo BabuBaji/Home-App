@@ -32,7 +32,7 @@ function loadRazorpay(): Promise<boolean> {
 }
 
 // Booked length in minutes — mirrors the server's rule (durationId first, then the label).
-const DUR: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+const DUR: Record<string, number> = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
 function bookedMinutes(b: { items?: { durationId?: string }[]; duration?: string }): number {
   const id = b.items?.[0]?.durationId
   if (id && DUR[id]) return DUR[id]

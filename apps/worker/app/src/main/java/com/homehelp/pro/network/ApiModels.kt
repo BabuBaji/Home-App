@@ -524,6 +524,9 @@ data class ExtensionsResponse(
     val ok: Boolean = true,
     val extensions: List<ExtensionDto> = emptyList(),
     val extensionMinutes: Int = 0,
+    // Where the clock now ends (ISO-8601, UTC). Carried here as well as on the job because this is
+    // what the app polls while the customer decides — the active job isn't refetched on approval.
+    val serviceEndAt: String? = null,
 )
 
 data class ExtensionRequestBody(val minutes: Int, val reasonCode: String, val reasonText: String = "")

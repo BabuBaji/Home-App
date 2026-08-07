@@ -24,7 +24,7 @@ const SEGMENTS = [
   { value: 'birthday', label: 'Birthday' },
 ]
 const DURATIONS = [
-  { value: '', label: 'All durations' }, { value: '60m', label: '60 min' }, { value: '90m', label: '90 min' },
+  { value: '', label: 'All durations' }, { value: '30m', label: '30 min' }, { value: '60m', label: '60 min' }, { value: '90m', label: '90 min' },
   { value: '2h', label: '2 hrs' }, { value: '2h30', label: '2.5 hrs' }, { value: '3h', label: '3 hrs' },
   { value: '3h30', label: '3.5 hrs' }, { value: '4h', label: '4 hrs' },
 ]

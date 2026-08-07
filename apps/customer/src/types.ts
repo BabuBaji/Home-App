@@ -135,7 +135,11 @@ export interface Booking {
   otp_released?: boolean         // false while a future scheduled booking is still waiting
   started_at?: string | null
   completed_at?: string | null   // when the worker ended the service (for actual duration)
-  extension_minutes?: number     // extra approved minutes; added to the booked duration for the live clock
+  extension_minutes?: number     // extra approved minutes — the honest tally, for display
+  // Where the service clock actually ends. Set once time has been granted: extra minutes approved
+  // after an overrun run FROM approval, which start + booked + extension cannot express. Null =
+  // never extended, so fall back to that sum.
+  service_end_at?: string | null
   extension_total?: number       // ₹ charged across all approved extensions (for history + invoice)
   extensions?: import('./api').BookingExtension[] // full extension history on the booking detail
   work_photo?: string | null     // worker's proof-of-work photo captured at completion

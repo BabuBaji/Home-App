@@ -874,7 +874,7 @@ async function mergeProfile(wid, patch) {
 
 // Booked service length in minutes — mirrors the dispatch service so the restored (post-relaunch)
 // timer matches the live one. Prefer the item's durationId, else parse the label.
-const DUR_MIN = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+const DUR_MIN = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
 function bookingDurationMinutes(b) {
   const id = b?.items?.[0]?.durationId
   if (id && DUR_MIN[id]) return DUR_MIN[id]

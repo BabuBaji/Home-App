@@ -1249,9 +1249,17 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     // Booked time is up once elapsed reaches the duration. Freeze the on-screen timer at the
     // booked length and raise a one-time "service time completed" popup (worker still ends
     // the service manually with the proof photo).
-    // Booked time plus whatever extra the customer has approved — the extension grows the clock,
-    // it never rewrites the booked figure.
-    val targetSec = (job.durationMinutes + vm.extensionMinutes).coerceAtLeast(1) * 60
+    // The backend owns where the clock ends. Time approved after the booked window has already run
+    // out is granted FROM the approval, so it buys real working minutes rather than ones that have
+    // already elapsed — that cannot be expressed as booked + extension, hence serviceEndAt.
+    // Falls back to the old sum for jobs that were never extended.
+    val targetSec = remember(vm.serviceEndAtIso, job.serviceEndAt, job.durationMinutes, vm.extensionMinutes, startMs) {
+        // Prefer the polled value — it lands the moment the customer approves, whereas the job
+        // payload only refreshes when the job itself is reloaded.
+        val endMs = parseIsoMillis(vm.serviceEndAtIso ?: job.serviceEndAt)
+        if (endMs != null) (((endMs - startMs) / 1000L).toInt()).coerceAtLeast(60)
+        else (job.durationMinutes + vm.extensionMinutes).coerceAtLeast(1) * 60
+    }
     val timeUp = rawElapsed >= targetSec
     val elapsed = if (timeUp) targetSec else rawElapsed
     var timeUpDismissed by remember { mutableStateOf(false) }

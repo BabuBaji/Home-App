@@ -140,6 +140,10 @@ data class Job(
     // anchored to this so the worker app and customer app show the SAME elapsed time.
     val startedAt: String? = null,
     val completedAt: String? = null,
+    // Where the service clock ends (ISO-8601, UTC), owned by the backend. Extra time approved
+    // after the booked window has already run out is granted FROM the approval, so it cannot be
+    // derived from startedAt + booked + extension. Null until the job is extended.
+    val serviceEndAt: String? = null,
 )
 
 // Nullable String fields are defensive: this is deserialized from JSON by Gson, which bypasses
@@ -902,6 +906,9 @@ class AppViewModel : ViewModel() {
         private set
     var extensionMinutes by mutableIntStateOf(0)
         private set
+    /** Server-owned end of the clock once time has been granted (ISO-8601, UTC); null = unextended. */
+    var serviceEndAtIso by mutableStateOf<String?>(null)
+        private set
     var extensionEarnings by mutableIntStateOf(0)
         private set
 
@@ -933,6 +940,7 @@ class AppViewModel : ViewModel() {
     fun refreshExtensions() = sync {
         val r = api.jobExtensions()
         extensionMinutes = r.extensionMinutes
+        serviceEndAtIso = r.serviceEndAt ?: serviceEndAtIso
         extensionEarnings = r.extensions.filter { it.status == "approved" }.sumOf { it.payout }
         val prev = pendingExtension
         pendingExtension = r.extensions.firstOrNull { it.status == "pending" }
@@ -1096,7 +1104,7 @@ class AppViewModel : ViewModel() {
         customerRating = 0; customerNotes = ""
         extras = emptyList(); extrasTotal = 0; jobPaused = false; pausedMs = 0L
         extensionOptions = null; pendingExtension = null; lastExtensionOutcome = null
-        extensionMinutes = 0; extensionEarnings = 0
+        extensionMinutes = 0; extensionEarnings = 0; serviceEndAtIso = null
         messages.clear(); beforePhoto = null
     }
 

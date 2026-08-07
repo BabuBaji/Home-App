@@ -8,7 +8,7 @@ import { Capacitor } from '@capacitor/core'
 import { Share } from '@capacitor/share'
 import { Loading, useToast } from '../../components/UI'
 import { pushBackHandler } from '../../backStack'
-import { useJob, proName, proRating, serviceNames, fmtDateTime } from './useJob'
+import { useJob, useAutoAdvance, proName, proRating, serviceNames, fmtDateTime } from './useJob'
 import { WorkerAvatar } from './parts'
 import { isLive } from '../../orders'
 import type { Booking } from '../../types'
@@ -22,6 +22,10 @@ export default function JobTracking() {
   const toast = useToast()
   const { b } = useJob(id)
   const [menu, setMenu] = useState(false)
+
+  // The worker marking arrival takes the customer straight to the start OTP — no tapping the
+  // status card. Cancel is still reachable: this fires once, so coming back here stays put.
+  useAutoAdvance(b, 'arrived', (bid) => `/job/${bid}/otp`)
 
   // Android hardware back closes the menu instead of leaving the screen.
   useEffect(() => { if (menu) return pushBackHandler(() => setMenu(false)) }, [menu])
@@ -102,23 +106,9 @@ export default function JobTracking() {
           <span className="jt-badge-confirm"><ShieldCheck size={15} /> Your booking is confirmed</span>
         </div>
 
-        {/* details + address */}
-        <div className="jt-card jt-details">
-          <Row label="Booking ID" value={b.ref} />
-          <Row label="Service" value={serviceNames(b)} />
-          <Row label="Date & Time" value={fmtDateTime(b)} />
-          <div className="jt-addr">
-            <span className="jt-addr-ic"><MapPin size={16} /></span>
-            <div className="jt-addr-main">
-              <div className="jt-addr-k">Address</div>
-              {addr.flat && <div className="jt-addr-primary">{addr.flat}</div>}
-              <div className="jt-addr-line">{addr.area || '—'}</div>
-              {addr.landmark && <div className="jt-addr-land">Near {addr.landmark}</div>}
-            </div>
-          </div>
-          <button className="jt-addr-map" onClick={() => nav(`/job/${b.id}/map`)}><MapPin size={16} /> View on Map</button>
-        </div>
-
+        {/* Order: expert → where → what was booked. Who is coming (or already working) is what the
+            customer opens this screen for, so it leads; the reference/service rows are the detail
+            you check last and sit below the address. */}
         {/* worker — compact single row: avatar + info (→ profile) + small chat/call icons */}
         {assigned ? (
           <div className="jt-card jt-worker2">
@@ -142,6 +132,34 @@ export default function JobTracking() {
             </div>
           </div>
         )}
+
+        {/* where */}
+        <div className="jt-card jt-details">
+          <div className="jt-addr">
+            <span className="jt-addr-ic"><MapPin size={16} /></span>
+            <div className="jt-addr-main">
+              <div className="jt-addr-k">Address</div>
+              {addr.flat && <div className="jt-addr-primary">{addr.flat}</div>}
+              <div className="jt-addr-line">{addr.area || '—'}</div>
+              {addr.landmark && <div className="jt-addr-land">Near {addr.landmark}</div>}
+            </div>
+          </div>
+          {/* No map button here at any stage — the address card says where the service is, and that
+              is all this screen needs to say. While the expert is travelling, the live status card
+              below ("Worker is on the way") still opens the map, so the route isn't orphaned. */}
+        </div>
+
+        {/* what was booked — reference/service/timing, below the address */}
+        <div className="jt-card jt-details">
+          <Row label="Booking ID" value={b.ref} />
+          <Row label="Service" value={serviceNames(b)} />
+          <Row label="Date & Time" value={fmtDateTime(b)} />
+          {/* Approved extra time was invisible here, and this is the screen the Home "Track" button
+              lands on — so a customer who had just paid for more time saw no sign of it. */}
+          {!!b.extension_minutes && (
+            <Row label="Extra time" value={`+${b.extension_minutes} min${b.extension_total ? ` · ₹${b.extension_total}` : ''}`} />
+          )}
+        </div>
 
         {/* live status card */}
         {arr && (

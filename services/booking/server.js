@@ -147,16 +147,60 @@ async function init() {
       created TIMESTAMPTZ NOT NULL DEFAULT now(),
       decided TIMESTAMPTZ
     )`,
+    // Authoritative end of the service clock. Needed because approved time is granted FROM THE
+    // MOMENT OF APPROVAL once a job has already overrun — start + booked + extension_minutes can't
+    // express that, and a late grant would otherwise buy minutes that had already elapsed.
+    // NULL means "never extended": clients fall back to start + booked.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_end_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS ix_ext_booking ON booking_extensions(booking_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
   ])
+  // Bookings extended before service_end_at existed: replay their approved grants under the same
+  // never-shorten rule so an in-flight job doesn't keep the old "already elapsed" end. Idempotent —
+  // only rows that were extended and have no end stored yet.
+  const { rows: legacy } = await pool.query(
+    'SELECT * FROM bookings WHERE service_end_at IS NULL AND extension_minutes > 0 AND started_at IS NOT NULL')
+  for (const r of legacy) {
+    const b = rowTo(r)
+    const { rows: exts } = await pool.query(
+      "SELECT minutes, decided FROM booking_extensions WHERE booking_id=$1 AND status='approved' ORDER BY decided", [b.id])
+    let end = currentEndMs(b)
+    for (const e of exts) end = Math.max(end, e.decided ? new Date(e.decided).getTime() : end) + e.minutes * 60000
+    await pool.query('UPDATE bookings SET service_end_at=$2 WHERE id=$1', [b.id, new Date(end).toISOString()])
+    console.log(`[booking] backfilled service_end_at for ${b.ref} -> ${new Date(end).toISOString()}`)
+  }
   console.log('[booking] Postgres ready (bookings, favourites)')
 }
 
 /* ---------- helpers ---------- */
 const rowTo = (r) => (r ? { ...r, items: typeof r.items === 'string' ? JSON.parse(r.items) : r.items, settled: !!r.settled } : null)
+
+/* ---------- the service clock ----------
+ * Booked length, from the durationId first (authoritative) and the free-text label as a fallback —
+ * the same rule dispatch, worker and the apps apply, so the four can't disagree. */
+const DUR_MIN = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+function bookedMinutes(b) {
+  const id = (b.items || [])[0]?.durationId
+  if (id && DUR_MIN[id]) return DUR_MIN[id]
+  const s = String(b.duration || '')
+  const n = parseInt(s, 10)
+  if (!n) return 60
+  return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
+}
+/** When the clock currently runs out: the stored end once extended, else start + booked. */
+function currentEndMs(b) {
+  if (b.service_end_at) return new Date(b.service_end_at).getTime()
+  if (!b.started_at) return null
+  return new Date(b.started_at).getTime() + bookedMinutes(b) * 60000
+}
+/* Granting time NEVER shortens the clock and NEVER hands over minutes that have already burnt:
+ * from the later of "now" and the current end. Past the end (the case that prompted this) the
+ * worker gets the full granted stretch from approval; with time still left it is added to what
+ * remains, which is what both sides mean by "15 more minutes". */
+const extendedEndMs = (b, minutes, atMs = Date.now()) =>
+  Math.max(currentEndMs(b) ?? atMs, atMs) + minutes * 60000
 async function getBooking(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM bookings WHERE id=$1', [id]); return rowTo(rows[0]) }
 
 /* Is the check-in window open — i.e. may the customer see and use the start OTP?
@@ -504,9 +548,11 @@ app.post('/api/bookings/:id/extensions/:extId/approve', auth, async (req, res) =
   const { rows } = await pool.query(
     `UPDATE booking_extensions SET status='approved', decided=now(), payment_method=$2 WHERE id=$1 RETURNING *`,
     [row.id, method])
+  // extension_minutes/total stay as the honest tally of what was granted and paid (invoice + the
+  // "+15 min added" line); service_end_at carries where the clock actually now ends.
   await pool.query(
-    'UPDATE bookings SET extension_minutes = extension_minutes + $2, extension_total = extension_total + $3 WHERE id=$1',
-    [b.id, row.minutes, row.price])
+    'UPDATE bookings SET extension_minutes = extension_minutes + $2, extension_total = extension_total + $3, service_end_at = $4 WHERE id=$1',
+    [b.id, row.minutes, row.price, new Date(extendedEndMs(b, row.minutes)).toISOString()])
   const ext = extDto(rows[0])
   const after = await getBooking(b.id)
   await emitBookingUpdate(b.id)

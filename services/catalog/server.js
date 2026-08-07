@@ -383,7 +383,9 @@ async function buildCtx(customerId) {
   }
 }
 
-// Customer catalogue: each service priced (60-min base) through the engine for this zone + customer.
+// Customer catalogue: each service priced at its SHORTEST duration through the engine for this zone
+// + customer — the card reads "From <price>", so it has to track the cheapest bookable slot (30 min)
+// rather than a hardcoded 60-min base.
 async function catalogueFor(zoneId, customerId) {
   const zmap = await zonePriceMap(zoneId)
   // A zone that has ANY active zone_pricing rows is treated as explicitly configured: it OFFERS only
@@ -395,7 +397,8 @@ async function catalogueFor(zoneId, customerId) {
     pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services ORDER BY sort, name'),
   ])
   return rows.map((s) => {
-    const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: '60m', listPrice: zoneBase(s, zmap) }], campaigns, ctx, applyCoupons: false })
+    const cheapest = durationsFor(zoneBase(s, zmap))[0]
+    const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: cheapest.id, listPrice: cheapest.price }], campaigns, ctx, applyCoupons: false })
     const it = r.items[0]
     const available = !!s.available && (!zoneConfigured || zmap[s.id] != null)
     return withImage({ ...s, available, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount })

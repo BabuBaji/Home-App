@@ -1,21 +1,24 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Phone, MessageCircle, Star, BadgeCheck, MapPin, Sparkles, CheckCircle2 } from 'lucide-react'
-import { Loading } from '../../components/UI'
-import { fetchExtensions, type ExtensionState } from '../../api'
+import { Loading, useToast } from '../../components/UI'
+import { fetchExtensions, completeBooking, type ExtensionState } from '../../api'
 import { useJob, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
 
 // Module 6 · #50 — Live Progress. A circular service timer (elapsed vs the booked duration — the same
 // real math the Track screen uses) plus who's working, what service is running, and where. Nothing is
 // faked: per-task ticks only fill once the backend marks the booking completed.
-const DUR_MIN: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+const DUR_MIN: Record<string, number> = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
 
 export default function LiveProgress() {
   const { id } = useParams()
   const nav = useNavigate()
+  const toast = useToast()
   const { b } = useJob(id)
   const [, tick] = useState(0)
+  const [ending, setEnding] = useState(false)     // confirm sheet open
+  const [busy, setBusy] = useState(false)
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(i) }, [])
 
   // Extension state: a pending ask needs answering, and approved minutes lengthen the timer below.
@@ -39,7 +42,10 @@ export default function LiveProgress() {
   const extraMin = ext?.extensionMinutes ?? 0
   const targetMin = bookedMin + extraMin
   const startedMs = b.started_at ? new Date(b.started_at).getTime() : Date.now()
-  const targetSec = targetMin * 60
+  // The server owns where the clock ends: time approved after an overrun runs FROM approval, which
+  // start + booked + extra cannot express. Fall back to that sum when the job was never extended.
+  const endMs = b.service_end_at ? new Date(b.service_end_at).getTime() : startedMs + targetMin * 60000
+  const targetSec = Math.max(60, Math.round((endMs - startedMs) / 1000))
   const rawElapsed = Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
   // Freeze at the target once the time is up, exactly as the worker's timer does. Left running it
   // would climb past the booked length ("Elapsed 95:20 / Booked 90 min") while remaining sat at 0.
@@ -65,6 +71,19 @@ export default function LiveProgress() {
   const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
   const call = () => { const ph = b.pro?.phone; if (ph) window.location.href = `tel:${ph}`; else nav(`/job/${b.id}/call`) }
   const chat = () => nav(`/job/${b.id}/chat`)
+
+  // Customer-side finish: the same /complete endpoint the Track screen uses, so it settles the
+  // booking (payout + cashback) exactly as a worker-ended job does. Confirmed first — it closes
+  // the job for both sides and can't be undone from here.
+  async function endService() {
+    if (busy) return
+    setBusy(true)
+    try {
+      await completeBooking(b!.id)
+      setEnding(false)
+      nav(`/rate/${b!.id}`, { replace: true })
+    } catch (e) { toast((e as Error).message); setBusy(false) }
+  }
 
   const addr = b.addr
   const flat = addr ? [addr.house, addr.apartment, addr.floor && `Floor ${addr.floor}`].filter(Boolean).join(', ') : ''
@@ -169,6 +188,9 @@ export default function LiveProgress() {
         {area && (<>
           <div className="jt-lp-sec-h"><MapPin size={15} /> Service location</div>
           <div className="jt-card jt-lp-loc-card">
+            {/* No "View on Map" here: once the expert has started, they're at the address — the
+                map only answers "where are they now?", which is a pre-arrival question. It stays
+                on Booking Details for that stage. */}
             <div className="jt-lp-loc">
               <span className="jt-addr-ic"><MapPin size={16} /></span>
               <div className="jt-lp-loc-main">
@@ -176,16 +198,38 @@ export default function LiveProgress() {
                 <div className="jt-lp-loc-area">{area}</div>
               </div>
             </div>
-            <button className="jt-addr-map" onClick={() => nav(`/job/${b.id}/map`)}><MapPin size={16} /> View on Map</button>
           </div>
         </>)}
       </div>
 
       <div className="jt-foot">
-        {done
-          ? <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}>View Summary</button>
-          : <button className="jt-btn" onClick={() => nav(`/job/${b.id}`)}>View Booking Details</button>}
+        {done ? (
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}>View Summary</button>
+        ) : (<>
+          <button className="jt-btn ghost" onClick={() => nav(`/job/${b.id}`)}>Booking Details</button>
+          {/* The customer can close the job themselves — useful when the expert has finished but
+              hasn't ended it on their app. */}
+          <button className="jt-btn" onClick={() => setEnding(true)}><CheckCircle2 size={16} /> End Service</button>
+        </>)}
       </div>
+
+      {ending && (
+        <div className="cf-backdrop" onClick={() => !busy && setEnding(false)}>
+          <div className="cf-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="cf-title">End this service?</div>
+            <div className="cf-text">
+              {timeUp
+                ? 'The booked time is over. '
+                : `${mmss(remaining)} of the booked ${bookedMin} min is still left. `}
+              Ending marks the job complete for {proName(b)} and finalises payment. You'll be asked to rate it next.
+            </div>
+            <div className="cf-btns">
+              <button className="cf-cancel" onClick={() => setEnding(false)} disabled={busy}>Not yet</button>
+              <button className="cf-del" onClick={endService} disabled={busy}>{busy ? 'Ending…' : 'End Service'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
