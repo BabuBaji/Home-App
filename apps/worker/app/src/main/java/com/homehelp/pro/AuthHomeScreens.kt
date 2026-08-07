@@ -485,6 +485,18 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 onProfileClick = { nav.navigateApp(Routes.PROFILE) },
             )
 
+            // ─── Attendance ─── check-in / check-out, the one thing a worker does every single
+            // day. AttendanceStrip and its homeLastLoc() helper were both written for Home but
+            // never actually called, so the drawer was the only route to it. Late check-ins are
+            // penalised (see AttendanceScreen), so leaving it two taps deep cost the worker money.
+            // Always rendered: "not checked in" is exactly the state that needs the prompt.
+            AttendanceStrip(
+                att = vm.attendance,
+                onOpen = { nav.navigate(Routes.ATTENDANCE) },
+                onCheckIn = { val (lat, lng) = homeLastLoc(homeCtx); vm.checkIn(lat, lng) },
+                onCheckOut = { val (lat, lng) = homeLastLoc(homeCtx); vm.checkOut(lat, lng) },
+            )
+
             // ─── Live job ─── highest-priority state on the screen, so it leads. It used to
             // render below the refer banner, under everything else.
             vm.activeJob?.let { job ->
@@ -560,6 +572,16 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 onWallet = { nav.navigateApp(Routes.WALLET) },
             )
 
+            // ─── Daily target ─── progress toward today's goal, and the ONLY route to the goal
+            // editor. GoalDialog was already built and wired above, but nothing ever set
+            // showGoalDialog to true, so the editor was unreachable dead code — the "of ₹1,000"
+            // footer on the earnings tile named a target the worker had no way to change.
+            DailyTargetBar(
+                todayEarnings = vm.todayEarnings,
+                dailyTarget = vm.dailyGoal,
+                onEditTarget = { showGoalDialog = true },
+            )
+
             // ─── Today's schedule ─── hidden entirely when the feed is empty, rather than
             // rendering an empty timeline shell.
             if (vm.schedule.isNotEmpty()) {
@@ -629,6 +651,10 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     )
                 }
             }
+
+            // ─── Refer & earn ─── closes the page, as the reference design draws it. Built but
+            // never called; the drawer was its only route.
+            ReferEarnBanner(onRefer = { nav.navigate(Routes.REFER) })
 
             // The active-job banner moved to the TOP of this column — a job in progress is the
             // most important thing on the screen and used to render here, below everything.
