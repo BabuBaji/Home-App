@@ -46,9 +46,7 @@ fun WorkerProfileHeader(
     greeting: String,
     firstName: String,
     online: Boolean,
-    rating: Double,
     onToggleOnline: () -> Unit,
-    onProfileClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Greeting block only: the avatar moved into the top bar and the rating became a stat tile,

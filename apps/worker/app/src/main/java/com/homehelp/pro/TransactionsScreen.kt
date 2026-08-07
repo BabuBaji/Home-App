@@ -33,7 +33,7 @@ import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Percent
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -214,7 +214,7 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                 ) {
                     Text(if (recentFirst) "Recent First" else "Oldest First", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.width(5.dp))
-                    Icon(Icons.Filled.Sort, contentDescription = null, tint = TextGray, modifier = Modifier.size(17.dp))
+                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = TextGray, modifier = Modifier.size(17.dp))
                 }
             }
 

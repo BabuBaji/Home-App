@@ -65,16 +65,16 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Sms
-import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
@@ -787,7 +787,6 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
 
         // One rich card per document.
         vm.documents.forEach { doc ->
-            val hasFile = doc.fileName.isNotBlank()
             val isRequired = vm.documentRequired[doc.name] != false
             val uploading = vm.uploadingDoc == doc.name
             KycDocCard(
@@ -2283,7 +2282,7 @@ fun HelpSupportScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(Space.s))
                 vm.tickets.forEachIndexed { i, t ->
                     Row(Modifier.fillMaxWidth().padding(vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
-                        IconChip(Icons.Filled.HelpOutline, Purple, PurpleLight)
+                        IconChip(Icons.AutoMirrored.Filled.HelpOutline, Purple, PurpleLight)
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(t.subject.ifBlank { "Support request" }, fontWeight = FontWeight.Medium, color = TextDark, fontSize = 14.sp)
@@ -2426,7 +2425,7 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(Space.s))
             Text("Logout", color = RedCancel, fontWeight = FontWeight.SemiBold)
         }
@@ -2447,7 +2446,7 @@ fun CommPreferencesScreen(vm: AppViewModel, nav: NavHostController) {
                 color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
             )
             Spacer(Modifier.height(Space.xs))
-            ToggleRow(Icons.Filled.Chat, Purple, PurpleLight, "WhatsApp", "Updates & alerts on WhatsApp", vm.commWhatsapp) { vm.commWhatsapp = it; vm.saveComm() }
+            ToggleRow(Icons.AutoMirrored.Filled.Chat, Purple, PurpleLight, "WhatsApp", "Updates & alerts on WhatsApp", vm.commWhatsapp) { vm.commWhatsapp = it; vm.saveComm() }
             HairlineDivider()
             ToggleRow(Icons.Filled.Sms, Purple, PurpleLight, "SMS", "Text messages", vm.commSms) { vm.commSms = it; vm.saveComm() }
             HairlineDivider()

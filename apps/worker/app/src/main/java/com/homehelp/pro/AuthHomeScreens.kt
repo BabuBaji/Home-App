@@ -43,7 +43,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.outlined.Notifications
@@ -58,7 +58,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Tune
@@ -368,11 +368,6 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val greeting = when { greetHour < 12 -> "Good morning"; greetHour < 17 -> "Good afternoon"; else -> "Good evening" }
     val firstName = vm.workerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "Partner" }
 
-    val homeInitials = remember(vm.workerName) {
-        vm.workerName.trim().split(Regex("\\s+")).mapNotNull { it.firstOrNull()?.toString() }
-            .take(2).joinToString("").uppercase().ifBlank { "P" }
-    }
-
     // Today's incentive was derived here for the progress card. That figure left Home when the
     // card was cut to the two job counts, so the wallet-ledger scan it needed went with it.
 
@@ -480,9 +475,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 greeting = greeting,
                 firstName = firstName,
                 online = vm.isOnline,
-                rating = vm.workerRating,
                 onToggleOnline = { vm.goOnline(!vm.isOnline) },
-                onProfileClick = { nav.navigateApp(Routes.PROFILE) },
             )
 
             // ─── Attendance ─── check-in / check-out, the one thing a worker does every single
@@ -920,7 +913,7 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerRow(Icons.Filled.Person, "My Profile", Purple) { go(Routes.PROFILE) }
             DrawerRow(Icons.Filled.Description, "Documents", Color(0xFF0EA5E9)) { go(Routes.P_DOCUMENTS) }
             DrawerRow(Icons.Filled.WorkspacePremium, "Skills & Services", Color(0xFF7C3AED)) { go(Routes.P_SKILLS) }
-            DrawerRow(Icons.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
+            DrawerRow(Icons.AutoMirrored.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
             DrawerRow(Icons.Filled.Inventory2, "My Equipment", Color(0xFF0891B2)) { go(Routes.P_EQUIPMENT) }
             DrawerRow(Icons.Filled.AccountBalance, "Bank Accounts", Color(0xFF14B8A6)) { go(Routes.BANK_ACCOUNTS) }
             DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
@@ -931,7 +924,7 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerRow(Icons.Filled.Info, "About Us", TextGray) { go(Routes.P_ABOUT) }
 
             Spacer(Modifier.height(8.dp)); HairlineDivider(Modifier.padding(horizontal = 20.dp)); Spacer(Modifier.height(8.dp))
-            DrawerRow(Icons.Filled.Logout, "Logout", RedCancel) {
+            DrawerRow(Icons.AutoMirrored.Filled.Logout, "Logout", RedCancel) {
                 close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
             }
 

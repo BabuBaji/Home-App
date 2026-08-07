@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
@@ -464,7 +464,7 @@ private fun PinPad(
                         ) {
                             when (key) {
                                 "" -> Unit
-                                "<" -> Icon(Icons.Filled.Backspace, contentDescription = "Delete", tint = TextDark, modifier = Modifier.size(22.dp))
+                                "<" -> Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = TextDark, modifier = Modifier.size(22.dp))
                                 else -> Text(key, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
@@ -644,7 +644,6 @@ fun WithdrawalHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 rows.forEach { w ->
-                    val paid = w.status == "Paid"
                     val failed = w.status == "Failed" || w.status == "Rejected"
                     val accent = if (failed) RedCancel else GreenSuccess
                     val accentBg = if (failed) RedLight else GreenLight
@@ -694,7 +693,6 @@ fun WithdrawalHistoryScreen(vm: AppViewModel, nav: NavHostController) {
 
 @Composable
 fun BankAccountsScreen(vm: AppViewModel, nav: NavHostController) {
-    val ctx = LocalContext.current
     var confirmDelete by remember { mutableStateOf<BankAccount?>(null) }
     LaunchedEffect(Unit) { vm.loadBankAccounts(); vm.loadDocumentTypes() }
 
@@ -870,7 +868,6 @@ private fun KycStatusBanner(vm: AppViewModel) {
 
 @Composable
 fun AddBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
-    val ctx = LocalContext.current
     var holder by remember { mutableStateOf(vm.workerName) }
     var bankName by remember { mutableStateOf("") }
     var account by remember { mutableStateOf("") }

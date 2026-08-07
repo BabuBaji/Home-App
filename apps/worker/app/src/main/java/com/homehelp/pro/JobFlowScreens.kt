@@ -52,13 +52,13 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.Assignment
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
@@ -74,7 +74,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -242,7 +242,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                         }
                         OfferIconButton(Icons.Filled.Phone) { dialNumber(ctx, job.customerPhone) }
                         Spacer(Modifier.width(8.dp))
-                        OfferIconButton(Icons.Filled.Chat) { nav.navigate(Routes.JOB_CHAT) }
+                        OfferIconButton(Icons.AutoMirrored.Filled.Chat) { nav.navigate(Routes.JOB_CHAT) }
                     }
                     Spacer(Modifier.height(14.dp))
                     val building = job.address.split(",").dropLast(2).joinToString(",").trim()
@@ -295,7 +295,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
             ) {
                 Column(Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+                        Icon(Icons.AutoMirrored.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(Space.s))
                         Text("Job Details", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
@@ -401,7 +401,7 @@ private fun InProgressCustomerStrip(job: Job, unread: Int, onChat: () -> Unit) {
                         Modifier.size(36.dp).clip(CircleShape).background(PurpleLight).clickable { onChat() },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Filled.Chat, contentDescription = "Chat with customer", tint = Purple, modifier = Modifier.size(19.dp))
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat with customer", tint = Purple, modifier = Modifier.size(19.dp))
                     }
                     if (unread > 0) {
                         Box(
@@ -553,11 +553,11 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionTitle("Job Details")
                 Spacer(Modifier.height(Space.xs))
                 LabeledRow("Services", job.services.joinToString(", "))
-                Divider(color = Divider)
+                HorizontalDivider(color = Divider)
                 LabeledRow("Date & Time", job.dateTime)
-                Divider(color = Divider)
+                HorizontalDivider(color = Divider)
                 LabeledRow("Duration", "${job.durationHours} Hours")
-                Divider(color = Divider)
+                HorizontalDivider(color = Divider)
                 LabeledRow("Address", job.area)
             }
             Card {
@@ -710,7 +710,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                     Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
                     Spacer(Modifier.width(Space.l))
-                    Icon(Icons.Filled.Chat, contentDescription = "Chat", tint = Purple,
+                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })
                 }
                 Spacer(Modifier.height(Space.m))
@@ -866,7 +866,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── Quick actions.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                ArrivedAction(Modifier.weight(1f), Icons.Filled.Chat, "Chat with Customer") { nav.navigate(Routes.JOB_CHAT) }
+                ArrivedAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, "Chat with Customer") { nav.navigate(Routes.JOB_CHAT) }
                 ArrivedAction(Modifier.weight(1f), Icons.Filled.Phone, "Customer Not Reachable") { dialNumber(ctx, job.customerPhone) }
                 ArrivedAction(Modifier.weight(1f), Icons.Filled.Schedule, "I'm Waiting") { toast(ctx, "Marked as waiting") }
             }
@@ -1734,7 +1734,7 @@ private fun PauseReasonDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                         Spacer(Modifier.width(Space.m))
                         Text(r, fontSize = 14.sp, color = TextDark)
                     }
-                    Divider(color = Divider)
+                    HorizontalDivider(color = Divider)
                 }
             }
         },
@@ -1790,7 +1790,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
             FlowCard {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(76.dp).clip(CircleShape).background(Primary50), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(38.dp))
+                        Icon(Icons.AutoMirrored.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(38.dp))
                         Box(Modifier.align(Alignment.BottomEnd).offset(x = (-6).dp, y = (-6).dp).size(24.dp).clip(CircleShape).background(GreenSuccess), contentAlignment = Alignment.Center) {
                             Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                         }
@@ -1927,7 +1927,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, "Contact Support") { nav.navigate(Routes.WALLET_HELP) }
-                    CompletedFooterButton(Modifier.weight(1f), Icons.Filled.Assignment, "Download Invoice") {
+                    CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.Assignment, "Download Invoice") {
                         toast(ctx, if (downloadInvoice(ctx, job)) "Invoice saved to Downloads" else "Couldn't save the invoice")
                     }
                 }
@@ -2196,7 +2196,7 @@ private fun CancelDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
                         fontSize = 15.sp,
                         modifier = Modifier.fillMaxWidth().clickable { onConfirm(r) }.padding(vertical = Space.s),
                     )
-                    Divider(color = Divider)
+                    HorizontalDivider(color = Divider)
                 }
             }
         },

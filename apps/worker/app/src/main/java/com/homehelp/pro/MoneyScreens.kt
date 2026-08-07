@@ -46,7 +46,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
@@ -874,7 +874,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             ) {
                 Row(Modifier.fillMaxWidth().padding(Space.m), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(36.dp).clip(RoundedCornerShape(Radius.field)).background(Color.White), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(18.dp))
                     }
                     Spacer(Modifier.width(Space.m))
                     Column {

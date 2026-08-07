@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MonetizationOn
@@ -286,7 +286,7 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                 Text("Share via", color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth()) {
-                    ShareChip(Modifier.weight(1f), Icons.Filled.Chat, "WhatsApp", Color(0xFF25D366)) { shareWhatsApp(ctx, msg) }
+                    ShareChip(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, "WhatsApp", Color(0xFF25D366)) { shareWhatsApp(ctx, msg) }
                     ShareChip(Modifier.weight(1f), Icons.Filled.Sms, "SMS", Color(0xFF3B82F6)) { shareSms(ctx, msg) }
                     ShareChip(Modifier.weight(1f), Icons.Filled.ContentCopy, "Copy", Purple) { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } }
                     ShareChip(Modifier.weight(1f), Icons.Filled.Share, "More", TextGray) { shareText(ctx, msg) }
