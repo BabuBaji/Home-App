@@ -122,6 +122,7 @@ const onError = (err, req, res) => {
 // here) so payment webhook HMAC signatures verify over the exact bytes downstream.
 const proxy = createProxyMiddleware({
   changeOrigin: true,
+  xfwd: true,        // forward X-Forwarded-For/Host/Proto so services can see the real client IP
   logLevel: 'warn',
   target: U.catalog, // fallback; router() overrides per request
   router: (req) => req._target,

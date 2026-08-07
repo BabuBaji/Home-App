@@ -116,6 +116,16 @@ class JobAlertService : Service() {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    // Like openAppIntent, but deep-links to a screen: MainActivity reads "nav_route" and navigates
+    // there. Used so tapping a customer-message alert opens the chat, not just the app.
+    private fun openRouteIntent(req: Int, route: String) = PendingIntent.getActivity(
+        this, req,
+        Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra("nav_route", route),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     private fun ongoingNotification(): Notification =
         NotificationCompat.Builder(this, ONGOING_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
@@ -167,7 +177,7 @@ class JobAlertService : Service() {
             .setContentText(latest)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
-            .setContentIntent(openAppIntent(2))
+            .setContentIntent(openRouteIntent(2, Routes.JOB_CHAT)) // tap → open the chat thread
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setDefaults(NotificationCompat.DEFAULT_ALL)

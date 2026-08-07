@@ -96,6 +96,9 @@ async function init() {
       id SERIAL PRIMARY KEY, admin TEXT NOT NULL, action TEXT NOT NULL, target TEXT,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Real client IP + parsed device captured on admin actions (for the Activity Logs audit trail).
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS device TEXT`,
     // RBAC. A role is a named bundle of permission keys (from @homehelp/shared PERMISSION_CATALOG).
     // The 4 system roles are seeded + reset to their canonical bundle on every boot (self-healing,
     // read-only in the UI); custom roles are freely editable and never touched by the seed.
@@ -285,12 +288,34 @@ async function getPublicSettings() {
   for (const k of SECRET_KEYS) if (s[k]) s[k] = '••••••••' + String(s[k]).slice(-4)
   return s
 }
-async function logAudit(admin, action, target) {
-  await pool.query('INSERT INTO audit_log (admin,action,target,created) VALUES ($1,$2,$3,$4)', [admin, action, target || null, nowIso()])
+// Best-effort parse of a User-Agent into "OS · Browser" for the audit trail. No library.
+function parseDevice(ua) {
+  if (!ua) return null
+  const os = /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown'
+  let m, br = 'Unknown'
+  if ((m = ua.match(/Edg\/(\d+)/))) br = 'Edge ' + m[1]
+  else if ((m = ua.match(/OPR\/(\d+)/))) br = 'Opera ' + m[1]
+  else if (/Chrome\/(\d+)/.test(ua) && !/Edg\//.test(ua) && (m = ua.match(/Chrome\/(\d+)/))) br = 'Chrome ' + m[1]
+  else if ((m = ua.match(/Firefox\/(\d+)/))) br = 'Firefox ' + m[1]
+  else if (/Safari/.test(ua) && (m = ua.match(/Version\/(\d+)/))) br = 'Safari ' + m[1]
+  return `${os} · ${br}`
+}
+// Normalise req.ip (strip IPv6-mapped IPv4 prefix, drop loopback noise).
+function clientIp(req) {
+  const ip = (req?.ip || req?.headers?.['x-forwarded-for'] || '').toString().split(',')[0].trim().replace(/^::ffff:/, '')
+  return ip && ip !== '::1' && ip !== '127.0.0.1' ? ip : (ip || null)
+}
+// `req` is optional; when passed we stamp the real client IP + device on the audit row.
+async function logAudit(admin, action, target, req) {
+  const ip = req ? clientIp(req) : null
+  const device = req ? parseDevice(req.headers?.['user-agent']) : null
+  await pool.query('INSERT INTO audit_log (admin,action,target,ip,device,created) VALUES ($1,$2,$3,$4,$5,$6)', [admin, action, target || null, ip, device, nowIso()])
   publishEvent(REDIS_URL, 'admin.action', { actorType: 'admin', actorName: admin, action: 'admin.' + action, detail: target || null })
 }
 
 const app = express()
+app.set('trust proxy', true)   // behind the gateway; read the real client IP from X-Forwarded-For
 app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'admin', ok: true }))
 
@@ -603,7 +628,7 @@ async function submitAction(action, params, req, res) {
   if (!(rule.enabled && amount >= (rule.threshold || 0))) {
     try {
       const result = await spec.execute(params)
-      await logAudit(req.admin.email, action, spec.summarize(params, amount))
+      await logAudit(req.admin.email, action, spec.summarize(params, amount), req)
       return res.json({ ok: true, executed: true, result })
     } catch (e) { return res.status(e.status || 502).json({ error: e.error || e.message || 'Action failed' }) }
   }
@@ -1154,7 +1179,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
     const patch = {}
     for (const k of ['name', 'email', 'city']) if (req.body?.[k] != null) patch[k] = req.body[k]
     if (Object.keys(patch).length) await internalPatch(U.auth, `/api/internal/users/${user.id}`, patch)
-    await logAudit(req.admin?.name || 'admin', 'customer.create', String(user.id))
+    await logAudit(req.admin?.name || 'admin', 'customer.create', String(user.id), req)
     res.json({ ok: true, id: user.id })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
@@ -1200,7 +1225,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   // Admin audit entries for this customer (profile edits, wallet adjustments, plan/address/note actions)
   // so the Activity Logs tab can attribute them to the admin who performed them. The target string
   // always leads with the customer's #id, so we match on that.
-  const auditRows = (await pool.query("SELECT admin, action, target, created FROM audit_log WHERE action LIKE 'customer.%' ORDER BY id DESC LIMIT 300")).rows
+  const auditRows = (await pool.query("SELECT admin, action, target, ip, device, created FROM audit_log WHERE action LIKE 'customer.%' ORDER BY id DESC LIMIT 300")).rows
   const audit = auditRows.filter((r) => { const m = String(r.target || '').match(/#(\d+)/); return m && m[1] === String(id) })
   res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers, tickets, audit })
 })
@@ -1264,7 +1289,7 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
       bookingId: b.bookingId || null, bookingRef: b.bookingRef || null,
       author: req.admin?.name || 'Admin', authorRole: await roleDisplayName(req.admin?.role),
     })
-    await logAudit(req.admin?.name || 'admin', 'customer.note_add', `#${req.params.id}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.note_add', `#${req.params.id}`, req)
     res.json(row)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1273,7 +1298,7 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
 app.post('/api/admin/customers/:id/addresses', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/addresses`, req.body || {})
-    await logAudit(req.admin?.name || 'admin', 'customer.address_add', `#${req.params.id}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.address_add', `#${req.params.id}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1281,14 +1306,14 @@ app.patch('/api/admin/customers/:id/addresses/:aid', admin, requirePerm('custome
   try {
     const r = await internalPatch(U.auth, `/api/internal/addresses/${req.params.aid}`, req.body || {})
     const what = req.body?.archived === true ? 'archive' : req.body?.archived === false ? 'restore' : 'edit'
-    await logAudit(req.admin?.name || 'admin', 'customer.address_' + what, `#${req.params.id} addr#${req.params.aid}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.address_' + what, `#${req.params.id} addr#${req.params.aid}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
 app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/addresses/${req.params.aid}/default`, {})
-    await logAudit(req.admin?.name || 'admin', 'customer.address_default', `#${req.params.id} addr#${req.params.aid}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.address_default', `#${req.params.id} addr#${req.params.aid}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1296,7 +1321,7 @@ app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('
 app.post('/api/admin/customers/:id/membership', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/membership/set`, { plan: req.body?.plan, cycle: req.body?.cycle || 'monthly', method: req.body?.method || 'admin' })
-    await logAudit(req.admin?.name || 'admin', 'customer.membership_change', `#${req.params.id} → ${req.body?.plan}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.membership_change', `#${req.params.id} → ${req.body?.plan}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1310,7 +1335,7 @@ app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), asyn
     delete body.phone
     const result = await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, body)
     const fields = Object.keys(body)
-    await logAudit(req.admin?.name || 'admin', 'customer.edit', `#${req.params.id}${fields.length ? ` (${fields.join(', ')})` : ''}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.edit', `#${req.params.id}${fields.length ? ` (${fields.join(', ')})` : ''}`, req)
     res.json(result)
   } catch (e) { res.status(500).json({ error: e.message }) }
 })

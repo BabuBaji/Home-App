@@ -84,8 +84,14 @@ export function invoiceHTML(b: Booking, inv: InvoiceInfo | null, bill?: { name?:
   const gRate = taxable > 0 ? Math.round((b.tax / taxable) * 100) : 0
   const half = gRate / 2
   const cgst = Math.round(b.tax / 2), sgst = b.tax - cgst
-  const inWords = amountInWords(b.total)
+  // Approved extensions are extra paid time billed on top of the base service. Itemise them and roll
+  // them into the grand total (and the amount-in-words), so the invoice reflects everything paid.
+  const exts = (b.extensions || []).filter((x) => x.status === 'approved')
+  const extTotal = exts.reduce((s, x) => s + (x.price || 0), 0)
+  const grand = b.total + extTotal
+  const inWords = amountInWords(grand)
   const rows = b.items.map((i) => `<tr><td>${esc(i.name)}${i.durationLabel ? ` <span class="dim">· ${esc(i.durationLabel)}</span>` : ''}</td><td class="dim">${esc(seller.sac)}</td><td class="r">${money(i.price)}</td></tr>`).join('')
+    + exts.map((x) => `<tr><td>Extra time <span class="dim">· +${x.minutes} min${x.paymentMethod ? ` · ${esc(x.paymentMethod.toUpperCase())}` : ''}</span></td><td class="dim">${esc(seller.sac)}</td><td class="r">${x.price > 0 ? money(x.price) : '—'}</td></tr>`).join('')
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;color:#1c1830;background:#eceaf2;padding:14px;-webkit-font-smoothing:antialiased}
@@ -147,7 +153,9 @@ ${b.discount ? `<div class="row"><span>Discount${b.coupon ? ` (${esc(b.coupon)})
 <div class="row"><span>CGST @ ${half}%</span><span>${money(cgst)}</span></div>
 <div class="row"><span>SGST @ ${half}%</span><span>${money(sgst)}</span></div>
 <div class="row"><span>Platform fee</span><span>${money(b.fee)}</span></div>
-<div class="row grand"><span>Total ${paid ? 'Paid' : 'Payable'}</span><span>${money(b.total)}</span></div>
+<div class="row${extTotal > 0 ? '' : ' grand'}"><span>${extTotal > 0 ? 'Service total' : `Total ${paid ? 'Paid' : 'Payable'}`}</span><span>${money(b.total)}</span></div>
+${extTotal > 0 ? `<div class="row"><span>Service extensions (${b.extension_minutes || 0} min)</span><span>${money(extTotal)}</span></div>
+<div class="row grand"><span>Total ${paid ? 'Paid' : 'Payable'}</span><span>${money(grand)}</span></div>` : ''}
 ${seller.gstInclusive ? `<div style="font-size:10px;color:#9a97ad;text-align:right;margin-top:4px">GST is included in the item price shown above.</div>` : ''}
 </div>
 <div style="clear:both;font-size:11.5px;color:#4a4660;padding:4px 0 8px;line-height:1.5"><b>Amount in words:</b> Rupees ${esc(inWords)} Only</div>

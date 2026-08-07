@@ -26,6 +26,7 @@ const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
+const PAYMENT_URL = (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, '')
 
 // A single malformed request must never take the service down.
 process.on('unhandledRejection', (e) => console.error('[booking] unhandledRejection:', e?.message || e))
@@ -187,6 +188,86 @@ function distanceKm(aLat, aLng, bLat, bLng) {
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
 }
 
+/* ---------- worker selection: zone-first, load-balanced, never double-books ----------
+   Both assignment paths (immediate-on-create and the 15s autoAssignSweep) route through here, so
+   they can't drift apart. Previously only the sweep excluded busy experts while the create path
+   sorted on raw distance alone — and because a booking is assigned the moment it's created, the
+   sweep never saw it and the busy check never ran. One expert standing a couple of metres closer
+   than the rest therefore won every single job in the zone, however many he was already holding.
+
+   Order of preference:
+     1. ZONE   - on-shift experts for the booking's zone (falls back to any qualified expert only
+                 when the zone has nobody on shift, so a booking still gets served).
+     2. FREE   - anyone already on an active job is dropped entirely.
+     3. FAIR   - fewest active jobs first, then fewest lifetime jobs = round-robin. With everyone
+                 idle this rotates through the roster instead of pinning one person.
+     4. NEAR   - distance only breaks ties, and only beyond NEAR_TIE_M. Below that the workers are
+                 effectively at the same place and a 1-2 m edge must not outrank fairness. */
+const AA_BUSY_STATES = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+const NEAR_TIE_M = 250   // within this radius, treat distances as equal and let fairness decide
+
+async function busyWorkerIds() {
+  const { rows } = await pool.query(
+    'SELECT DISTINCT worker_id FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1)', [AA_BUSY_STATES])
+  return new Set(rows.map((r) => r.worker_id))
+}
+
+// Active-job count per worker — the round-robin signal. Zero rows for idle workers, so callers
+// must default to 0 rather than assume a key exists.
+async function activeJobCounts() {
+  const { rows } = await pool.query(
+    'SELECT worker_id, count(*)::int n FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1) GROUP BY worker_id', [AA_BUSY_STATES])
+  return new Map(rows.map((r) => [r.worker_id, r.n]))
+}
+
+// Resolve the zone from the pincode when it wasn't stamped at create time (or the zone was added later).
+async function resolveZoneId(zoneId, pincode) {
+  if (zoneId) return zoneId
+  if (!pincode) return null
+  const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null)
+  return (zr?.zoneId && zr.live) ? zr.zoneId : null
+}
+
+/* Returns the expert to assign, or null when nobody is free. `serviceNames` is a comma-joined list. */
+async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, requireZone = false }) {
+  const zid = await resolveZoneId(zoneId, pincode)
+
+  // 1) Zone + on-shift + qualified.
+  let cands = []
+  if (zid) {
+    const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zid}&services=${encodeURIComponent(serviceNames)}`, { workers: [] })
+    cands = (feed.workers || []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.available, lat: w.last?.lat, lng: w.last?.lng, jobs: 0 }))
+  }
+  // Fall back to any qualified active expert when the zone has nobody rostered. The sweep asks for
+  // requireZone so it never assigns outside the zone; the create path prefers serving the customer.
+  if (!cands.length && !requireZone) {
+    const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}`, [])
+    cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0 }))
+  }
+  if (!cands.length) return null
+
+  // 2) Online, and not already on a job.
+  const busy = await busyWorkerIds()
+  const free = cands.filter((w) => w.online && !busy.has(w.id))
+  if (!free.length) return null
+
+  // 3)+4) Fairness first, distance only as a real tie-break.
+  const active = await activeJobCounts()
+  const distM = (w) => { const km = distanceKm(custLat, custLng, w.lat, w.lng); return km == null ? null : km * 1000 }
+  free.sort((a, b) => {
+    const aa = active.get(a.id) || 0, ab = active.get(b.id) || 0
+    if (aa !== ab) return aa - ab                       // fewest active jobs
+    if ((a.jobs || 0) !== (b.jobs || 0)) return (a.jobs || 0) - (b.jobs || 0)  // then fewest lifetime jobs
+    const da = distM(a), db = distM(b)
+    if (da == null && db == null) return 0
+    if (da == null) return 1
+    if (db == null) return -1
+    if (Math.abs(da - db) <= NEAR_TIE_M) return 0       // same place → keep the fair order above
+    return da - db
+  })
+  return { ...free[0], zoneId: zid }
+}
+
 async function cancelCfg() {
   return {
     commission_percent: await getSettingInt(ADMIN_URL, 'commission_percent', 20),
@@ -224,6 +305,8 @@ const extDto = (r) => r && ({
   price: r.price, payout: r.payout, reasonCode: r.reason_code,
   reasonLabel: EXT_REASONS[r.reason_code]?.label || r.reason_code,
   reasonText: r.reason_text, status: r.status, created: r.created, decided: r.decided,
+  // How the customer paid for this extension (razorpay | wallet | ''), for the history + invoice.
+  paymentMethod: r.payment_method || '',
 })
 
 const extensionsFor = async (bookingId) =>
@@ -393,15 +476,28 @@ app.post('/api/bookings/:id/extensions/:extId/approve', auth, async (req, res) =
 
   let method = ''
   if (row.price > 0) {
-    // Wallet is the only settled rail for extensions today; a gateway charge mid-service needs the
-    // customer to complete a checkout, which the approval sheet can't yet drive. Fail loudly
-    // rather than granting time nobody paid for.
-    try {
-      await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`,
-        { type: 'debit', title: `Service extension +${row.minutes} min`, amount: row.price })
-      method = 'wallet'
-    } catch (e) {
-      return res.status(402).json({ error: e.message || 'Insufficient wallet balance', needsTopUp: true, amount: row.price })
+    // Charge FIRST: if the money doesn't move, the clock doesn't either, so a worker is never told
+    // to carry on against an unpaid extension. Two settled rails:
+    //  - Razorpay (paymentId present): the customer completed a gateway checkout in the app; the
+    //    payment service verifies the signature and records the transaction. This is the default path.
+    //  - Wallet (no paymentId): unchanged legacy fallback — debits the customer wallet in auth.
+    const paymentId = String(req.body?.paymentId || '').trim()
+    if (paymentId) {
+      try {
+        await internalPost(PAYMENT_URL, '/api/internal/payment/extension',
+          { bookingId: b.id, extId: row.id, customerId: b.user_id, amount: row.price, paymentId })
+        method = 'razorpay'
+      } catch (e) {
+        return res.status(402).json({ error: e.message || 'Payment could not be confirmed', amount: row.price })
+      }
+    } else {
+      try {
+        await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`,
+          { type: 'debit', title: `Service extension +${row.minutes} min`, amount: row.price })
+        method = 'wallet'
+      } catch (e) {
+        return res.status(402).json({ error: e.message || 'Insufficient wallet balance', needsTopUp: true, amount: row.price })
+      }
     }
   }
 
@@ -526,7 +622,10 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
       street: a.street || '', landmark: a.landmark || '', line: a.line || '', city: a.city || '', pincode: a.pincode || '',
     }
   }
-  res.json({ ...publicBooking(b), serviceAvailable, pro, addr, ...travel })
+  // Include the full extension history (minutes/amount/method/status) so the booking detail and the
+  // invoice can itemise the paid extra time alongside the base service.
+  const extensions = await extensionsFor(b.id)
+  res.json({ ...publicBooking(b), serviceAvailable, pro, addr, extensions, ...travel })
 })
 
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
@@ -677,24 +776,17 @@ app.post('/api/bookings', auth, async (req, res) => {
     const wp = await tryGet(WORKER_URL, `/internal/workers/${chosenId}/public-profile`, null)
     if (wp && wp.name) await assignWorker(chosenId, wp.name, wp.rating)
   } else {
-    // "Any available worker" → pick the nearest online expert for this service.
+    // "Any available worker" → zone-first, load-balanced pick (see pickWorker). Leaving the booking
+    // unassigned when everyone in the zone is busy is deliberate: autoAssignSweep retries every 15s
+    // and hands it to the first expert who frees up, which beats stacking a fourth job on someone
+    // already mid-service.
     const svc = priced.items.map((i) => i.name).join(',')
-    const cand = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(svc)}`, [])
-    if (Array.isArray(cand) && cand.length) {
-      const cl = booking.cust_lat, cn = booking.cust_lng
-      const dist = (w) => (w.lat != null && cl != null && cn != null) ? distanceKm(cl, cn, w.lat, w.lng) : null
-      const online = cand.filter((w) => w.online)
-      const list = online.length ? online : cand
-      list.sort((a, b2) => {
-        const da = dist(a), db = dist(b2)
-        if (da != null && db != null) return da - db
-        if (da != null) return -1
-        if (db != null) return 1
-        return (b2.jobs || 0) - (a.jobs || 0) // no GPS → most-experienced first
-      })
-      const pick = list[0]
-      if (pick) await assignWorker(pick.id, pick.name, pick.rating)
-    }
+    const pick = await pickWorker({
+      zoneId: booking.zone_id, pincode: booking.pincode, serviceNames: svc,
+      custLat: booking.cust_lat, custLng: booking.cust_lng,
+    })
+    if (pick) await assignWorker(pick.id, pick.name, pick.rating)
+    else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for autoAssignSweep`)
   }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
@@ -1152,29 +1244,30 @@ subscribeEvents(REDIS_URL, 'booking', async (type, data) => {
    the best FREE on-shift qualified expert in that zone — the "instant"/Snabbit push model, so the
    customer doesn't wait for a worker to pull. Inert until you roster shifts + create live zones.
    Runs every 15s (ahead of the 5-min auto-cancel, so rostered supply gets first shot). */
-const AA_ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+const AA_ACTIVE = AA_BUSY_STATES
 async function autoAssignSweep() {
   try {
     if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
     const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
     if (!open.length) return
-    const busy = new Set((await pool.query('SELECT DISTINCT worker_id FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1)', [AA_ACTIVE])).rows.map((r) => r.worker_id))
+    // Track who we hand work to inside this pass: pickWorker reads committed rows, so without this
+    // two bookings in the same sweep could both land on the same idle expert.
+    const takenThisPass = new Set()
     for (const b of open) {
-      // Resolve the zone from the pincode if it wasn't stamped at create time (or the zone was created later).
-      let zoneId = b.zone_id
-      if (!zoneId && b.pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(b.pincode)}`, null); if (zr?.zoneId && zr.live) zoneId = zr.zoneId }
-      if (!zoneId) continue
       const names = (b.items || []).map((i) => i.name).join(',')
-      const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zoneId}&services=${encodeURIComponent(names)}`, { workers: [] })
-      const cands = (feed.workers || []).filter((w) => w.available && !busy.has(w.id))
-      if (!cands.length) continue
-      if (b.cust_lat != null) cands.sort((a, c) => ((distanceKm(a.last?.lat, a.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity) - ((distanceKm(c.last?.lat, c.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity))
-      const w = cands[0]
+      // requireZone: the sweep must never assign outside the booking's zone, unlike the create path.
+      let w = await pickWorker({
+        zoneId: b.zone_id, pincode: b.pincode, serviceNames: names,
+        custLat: b.cust_lat, custLng: b.cust_lng, requireZone: true,
+      })
+      if (w && takenThisPass.has(w.id)) w = null
+      if (!w) continue
+      const zoneId = w.zoneId || b.zone_id
+      takenThisPass.add(w.id)
       const upd = await pool.query(
         "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, zone_id=$4, status='worker_assigned' WHERE id=$5 AND worker_id IS NULL AND status='confirmed' RETURNING *",
         [w.id, w.name || 'Expert', w.rating || 4.8, zoneId, b.id])
-      if (!upd.rowCount) continue
-      busy.add(w.id)
+      if (!upd.rowCount) { takenThisPass.delete(w.id); continue }
       await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})
       await emitBookingUpdate(b.id)
       publishEvent(REDIS_URL, 'booking.assigned', { booking: rowTo(upd.rows[0]), workerId: w.id, auto: true })

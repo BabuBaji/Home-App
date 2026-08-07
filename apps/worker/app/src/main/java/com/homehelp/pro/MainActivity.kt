@@ -1,5 +1,6 @@
 package com.homehelp.pro
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -49,9 +50,25 @@ object DebugNav {
     var consumed: Boolean = false
 }
 
+/** A destination requested from OUTSIDE the composition — e.g. tapping a notification. Held as
+ *  Compose state so AppRoot navigates as soon as it's set, whether the app was cold-started by the
+ *  tap (onCreate) or already running (onNewIntent). Consumed once, then cleared. */
+object NavIntent {
+    val route = androidx.compose.runtime.mutableStateOf<String?>(null)
+    fun fromIntent(intent: Intent?) { intent?.getStringExtra("nav_route")?.let { route.value = it } }
+}
+
 class MainActivity : ComponentActivity() {
+    override fun onNewIntent(intent: Intent) {
+        // App already running (notifications use SINGLE_TOP) → the tap arrives here, not onCreate.
+        super.onNewIntent(intent)
+        setIntent(intent)
+        NavIntent.fromIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NavIntent.fromIntent(intent) // cold-started by a notification tap
         if (BuildConfig.DEBUG) {
             DebugNav.route = intent?.getStringExtra("debug_route")
             DebugNav.login = intent?.getBooleanExtra("debug_login", false) == true
@@ -193,6 +210,16 @@ fun AppRoot() {
 
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
+
+    // Deep-link from a notification tap (e.g. a customer message → open the chat). Runs whenever
+    // NavIntent.route is set; navigates once the worker is signed in, then clears it.
+    androidx.compose.runtime.LaunchedEffect(NavIntent.route.value) {
+        val target = NavIntent.route.value ?: return@LaunchedEffect
+        if (Session.isLoggedIn) {
+            NavIntent.route.value = null
+            nav.navigate(target)
+        }
+    }
 
     // DEBUG ONLY — drive to a deep screen from `am start --es debug_route <route> [--ez debug_login true]`
     // for headless UI verification when touch injection is blocked. No-op in release / without the extra.

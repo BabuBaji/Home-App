@@ -284,7 +284,7 @@ export default function AdminBookingDetail() {
                     <thead>
                       <tr>
                         <th>Requested</th><th>By</th><th>Extra time</th>
-                        <th>Customer ₹</th><th>Worker ₹</th><th>Reason</th><th>Status</th><th>Decided</th>
+                        <th>Customer ₹</th><th>Paid via</th><th>Worker ₹</th><th>Reason</th><th>Status</th><th>Decided</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -296,6 +296,7 @@ export default function AdminBookingDetail() {
                           {/* A ₹0 charge is a deliberate outcome (worker overran their own estimate),
                               not missing data — say so rather than showing a bare 0. */}
                           <td>{x.price > 0 ? `₹${x.price}` : <span className="muted">not charged</span>}</td>
+                          <td>{x.paymentMethod ? <span style={{ textTransform: 'uppercase' }}>{x.paymentMethod}</span> : <span className="muted">—</span>}</td>
                           <td>{x.payout > 0 ? `₹${x.payout}` : <span className="muted">—</span>}</td>
                           <td style={{ fontSize: 12.5 }}>{x.reasonLabel}{x.reasonText ? ` — ${x.reasonText}` : ''}</td>
                           <td>

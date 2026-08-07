@@ -52,6 +52,13 @@ export default function Home() {
   }, [pincode])
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
+  // Header address: the saved label ("Home"/"Work") reads as the title and the full street line sits
+  // under it - same label-over-line convention the saved-address list uses. Falls back to the city
+  // alone when no address is saved yet, so a new user still sees something tappable.
+  const addrTitle = addr?.label || cityLabel
+  const addrFull = addr
+    ? [addr.line, addr.pincode && !(addr.line || '').includes(addr.pincode) ? addr.pincode : ''].filter(Boolean).join(' ')
+    : ''
   const firstName = (user?.name || 'there').split(' ')[0]
   // Show every service, but order the ones offered in this zone first; the rest are rendered as
   // "Coming Soon" (not bookable) so the customer sees what will arrive rather than a blank gap.
@@ -113,8 +120,10 @@ export default function Home() {
     <div className="screen has-nav m2 rain-sky">
       {/* top bar — matches the hero at the top, collapses to solid white on scroll */}
       <div className={`hd-top${scrolled ? ' solid' : ''}`}>
+        <div className="hd-top-main">
         <button className="hd-loc" onClick={() => nav('/locations')}>
-          <MapPin size={16} /> <b>{cityLabel}</b> <ChevronDown size={15} />
+          <MapPin size={16} className="hd-loc-pin" />
+          <span className="hd-loc-title"><b>{addrTitle}</b><ChevronDown size={15} /></span>
         </button>
         <div className="hd-top-r">
           {/* wallet with the live available balance shown inline, like the notification count */}
@@ -130,6 +139,12 @@ export default function Home() {
             {firstName && firstName !== 'there' ? firstName[0].toUpperCase() : <User size={19} />}
           </button>
         </div>
+        </div>
+        {/* full street line on its own row - across the whole bar it fits the real address instead of
+            being squeezed into the ~190px left over beside the wallet/bell/avatar */}
+        {addrFull && (
+          <button className="hd-loc-full" onClick={() => nav('/locations')}>{addrFull}</button>
+        )}
       </div>
 
       <div className="content hd-content" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 60)}>
