@@ -152,6 +152,13 @@ async function init() {
     // express that, and a late grant would otherwise buy minutes that had already elapsed.
     // NULL means "never extended": clients fall back to start + booked.
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_end_at TIMESTAMPTZ`,
+    /* Offer chain. A booking is no longer handed straight to an expert: it is OFFERED to one at a
+     * time, who has OFFER_TTL_SEC to accept. offer_worker_id/offer_at hold the live offer;
+     * declined_by remembers everyone who said no (or let it lapse) so the chain always moves on
+     * instead of re-asking the same person. */
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_worker_id INTEGER`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_at TIMESTAMPTZ`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS declined_by INTEGER[] NOT NULL DEFAULT '{}'`,
     `CREATE INDEX IF NOT EXISTS ix_ext_booking ON booking_extensions(booking_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
@@ -273,7 +280,7 @@ async function resolveZoneId(zoneId, pincode) {
 }
 
 /* Returns the expert to assign, or null when nobody is free. `serviceNames` is a comma-joined list. */
-async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, requireZone = false }) {
+async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, requireZone = false, exclude = [] }) {
   const zid = await resolveZoneId(zoneId, pincode)
 
   // 1) Zone + on-shift + qualified.
@@ -290,9 +297,10 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
   }
   if (!cands.length) return null
 
-  // 2) Online, and not already on a job.
+  // 2) Online, not already on a job, and not someone this booking has already been offered to.
   const busy = await busyWorkerIds()
-  const free = cands.filter((w) => w.online && !busy.has(w.id))
+  const skip = new Set((exclude || []).map(Number))
+  const free = cands.filter((w) => w.online && !busy.has(w.id) && !skip.has(Number(w.id)))
   if (!free.length) return null
 
   // 3)+4) Fairness first, distance only as a real tie-break.
@@ -831,8 +839,11 @@ app.post('/api/bookings', auth, async (req, res) => {
       zoneId: booking.zone_id, pincode: booking.pincode, serviceNames: svc,
       custLat: booking.cust_lat, custLng: booking.cust_lng,
     })
-    if (pick) await assignWorker(pick.id, pick.name, pick.rating)
-    else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for autoAssignSweep`)
+    // OFFER, don't assign. The expert has OFFER_TTL_SEC to accept; a decline or a lapse passes the
+    // booking to the next available expert (see offerSweep). The booking stays 'confirmed' until
+    // somebody accepts, which is what the customer's "finding your expert" state reflects.
+    if (pick) await offerTo(booking, pick)
+    else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
   }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
@@ -1230,6 +1241,22 @@ app.get('/api/internal/bookings', internalOnly, async (req, res) => {
   const { rows } = await pool.query(sql, vals)
   res.json(rows.map(rowTo))
 })
+/* Dispatch: the expert rejected the offer. Records the decline and frees the booking so the very
+ * next offerSweep hands it to someone else — the expert should not have to wait out their own
+ * 2-minute window after saying no. */
+app.post('/api/internal/bookings/:id/decline', internalOnly, async (req, res) => {
+  const id = Number(req.params.id)
+  const workerId = Number(req.body?.worker_id)
+  if (!id || !workerId) return res.status(400).json({ ok: false, error: 'bad decline' })
+  const b = await getBooking(id)
+  // Only the expert actually holding the offer can decline it; a stale client must not knock the
+  // booking off whoever it has since moved to.
+  if (!b || b.worker_id != null || Number(b.offer_worker_id) !== workerId) return res.json({ ok: true, stale: true })
+  await declineOffer(id, workerId, 'rejected the offer')
+  offerSweep().catch(() => {})   // re-offer now rather than up to 10s later
+  res.json({ ok: true })
+})
+
 // Admin (via payment service): mark a cancelled booking as refunded.
 app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => {
   await pool.query("UPDATE bookings SET payment_status='refunded', refund_status='refunded', refund=COALESCE(refund, total) WHERE id=$1", [Number(req.params.id)])
@@ -1238,8 +1265,22 @@ app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => 
 // Dispatch: atomic claim of a job by a worker.
 app.post('/api/internal/bookings/:id/assign', internalOnly, async (req, res) => {
   const { worker_id, pro_name, pro_rating } = req.body || {}
+  /* Only the expert the booking is CURRENTLY offered to may claim it.
+   *
+   * Without the offer_worker_id test this checked nothing but "still unclaimed", so a worker whose
+   * `offered_booking` had gone stale could accept a job that had since moved to someone else — the
+   * booking then showed up on a worker who was never offered it, while the one who was offered it
+   * sat waiting. `offer_worker_id IS NULL` stays allowed for the direct-assign paths (a
+   * customer-chosen expert, and admin reassignment), which never go through an offer.
+   *
+   * Clearing the offer in the same statement is what ends the chain: claim and teardown are one
+   * atomic write, so a sweep running concurrently cannot re-offer a booking already taken.
+   */
   const upd = await pool.query(
-    "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned' WHERE id=$4 AND worker_id IS NULL AND status='confirmed' RETURNING *",
+    `UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned',
+       offer_worker_id=NULL, offer_at=NULL
+      WHERE id=$4 AND worker_id IS NULL AND status='confirmed'
+        AND (offer_worker_id IS NULL OR offer_worker_id = $1) RETURNING *`,
     [worker_id, pro_name || 'Expert', pro_rating || 4.8, Number(req.params.id)])
   if (!upd.rowCount) return res.json({ ok: false }) // already claimed
   await emitBookingUpdate(Number(req.params.id))
@@ -1291,38 +1332,77 @@ subscribeEvents(REDIS_URL, 'booking', async (type, data) => {
    customer doesn't wait for a worker to pull. Inert until you roster shifts + create live zones.
    Runs every 15s (ahead of the 5-min auto-cancel, so rostered supply gets first shot). */
 const AA_ACTIVE = AA_BUSY_STATES
-async function autoAssignSweep() {
+/* ---------- the offer chain ----------
+ * Bookings used to be stamped 'worker_assigned' the instant they were created, so the expert had
+ * no say: no accept, no reject, and a job could land on someone who never answered. Now a booking
+ * is OFFERED to one expert at a time. They get OFFER_TTL_SEC to accept; saying no — or saying
+ * nothing — passes it straight to the next available expert, and the customer's expert card
+ * updates over the existing booking:update socket once somebody accepts.
+ *
+ * If the chain runs out of experts the booking simply stays unassigned, which autoCancelNoService
+ * already handles: past dispatch_timeout_min it cancels and refunds in full.
+ */
+const OFFER_TTL_SEC = Number(process.env.OFFER_TTL_SEC || 120)
+
+/** Put `b` in front of `w`, and tell the worker service so the expert's app sees it. */
+async function offerTo(b, w) {
+  const upd = await pool.query(
+    `UPDATE bookings SET offer_worker_id=$1, offer_at=now(), zone_id=COALESCE($2, zone_id)
+      WHERE id=$3 AND worker_id IS NULL AND status='confirmed' RETURNING *`,
+    [w.id, w.zoneId || b.zone_id, b.id])
+  if (!upd.rowCount) return false
+  await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})
+  publishEvent(REDIS_URL, 'booking.offered', { bookingId: b.id, ref: b.ref, workerId: w.id })
+  console.log(`[booking] offered ${b.ref} -> ${w.name} (${OFFER_TTL_SEC}s to accept)`)
+  return true
+}
+
+/** Record that `workerId` will not take `bookingId`, and free it for the next expert. */
+async function declineOffer(bookingId, workerId, why) {
+  await pool.query(
+    `UPDATE bookings SET declined_by = CASE WHEN $1 = ANY(declined_by) THEN declined_by ELSE array_append(declined_by, $1) END,
+       offer_worker_id=NULL, offer_at=NULL
+      WHERE id=$2`, [Number(workerId), Number(bookingId)])
+  await internalPost(WORKER_URL, `/internal/workers/${workerId}/offered`, { bookingId: null }).catch(() => {})
+  console.log(`[booking] booking ${bookingId}: worker ${workerId} ${why} — moving to the next expert`)
+}
+
+async function offerSweep() {
   try {
     if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
     const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
     if (!open.length) return
-    // Track who we hand work to inside this pass: pickWorker reads committed rows, so without this
-    // two bookings in the same sweep could both land on the same idle expert.
+    // Track who we offer to inside this pass: pickWorker reads committed rows, so without this two
+    // bookings in the same sweep could both land on the same idle expert.
     const takenThisPass = new Set()
     for (const b of open) {
+      // A live offer is left alone until its window closes — that is the expert's 2 minutes.
+      const offerAgeSec = b.offer_at ? (Date.now() - new Date(b.offer_at).getTime()) / 1000 : null
+      if (b.offer_worker_id && offerAgeSec != null && offerAgeSec < OFFER_TTL_SEC) {
+        takenThisPass.add(b.offer_worker_id)
+        continue
+      }
+      // The window closed with no answer. Treat silence as a decline so the chain moves on, and so
+      // ignoring offers costs the same as rejecting them.
+      if (b.offer_worker_id) {
+        await declineOffer(b.id, b.offer_worker_id, 'let the offer lapse')
+        b.declined_by = [...(b.declined_by || []), b.offer_worker_id]
+      }
       const names = (b.items || []).map((i) => i.name).join(',')
-      // requireZone: the sweep must never assign outside the booking's zone, unlike the create path.
+      // requireZone: the sweep must never reach outside the booking's zone, unlike the create path.
       let w = await pickWorker({
         zoneId: b.zone_id, pincode: b.pincode, serviceNames: names,
         custLat: b.cust_lat, custLng: b.cust_lng, requireZone: true,
+        exclude: [...(b.declined_by || []), ...takenThisPass],
       })
-      if (w && takenThisPass.has(w.id)) w = null
-      if (!w) continue
-      const zoneId = w.zoneId || b.zone_id
+      if (!w) continue   // nobody left right now; autoCancelNoService is the backstop
       takenThisPass.add(w.id)
-      const upd = await pool.query(
-        "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, zone_id=$4, status='worker_assigned' WHERE id=$5 AND worker_id IS NULL AND status='confirmed' RETURNING *",
-        [w.id, w.name || 'Expert', w.rating || 4.8, zoneId, b.id])
-      if (!upd.rowCount) { takenThisPass.delete(w.id); continue }
-      await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})
-      await emitBookingUpdate(b.id)
-      publishEvent(REDIS_URL, 'booking.assigned', { booking: rowTo(upd.rows[0]), workerId: w.id, auto: true })
-      publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Auto-dispatch', action: 'booking.autoassign', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Auto-assigned to ${w.name} (on shift)`, meta: { worker_id: w.id } })
-      console.log(`[booking] auto-assigned ${b.ref} -> ${w.name} (zone ${b.zone_id})`)
+      if (!(await offerTo(b, w))) takenThisPass.delete(w.id)
     }
-  } catch (e) { console.error('[booking] autoAssignSweep:', e.message) }
+  } catch (e) { console.error('[booking] offerSweep:', e.message) }
 }
-setInterval(autoAssignSweep, 15_000)
+// Well under the accept window so a lapsed offer moves on promptly rather than at TTL x2.
+setInterval(offerSweep, 10_000)
 
 /* ---------- auto-cancel: no expert accepted the booking → cancel + full refund ----------
    A booking still 'confirmed' + unassigned is auto-cancelled and — if the customer already paid —

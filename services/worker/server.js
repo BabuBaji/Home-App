@@ -79,6 +79,9 @@ async function init() {
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_worker_snap ON worker_metric_snapshots(worker_id, snap_date)`,
     // Columns added on top of the earlier worker schema (idempotent).
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
+    // When the current offer was made. The accept window is enforced against this, so an offer
+    // expires on its own even if the app that was showing it is backgrounded or killed.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_at TIMESTAMPTZ`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS bank_status TEXT DEFAULT 'Pending'`,
     // Wallet module: a worker can hold several payout accounts and pick a default. The old
@@ -4885,6 +4888,7 @@ app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
   res.json({
     services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available,
     status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null,
+    offered_at: w?.offered_at ?? null,
     last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null,
     // Phase 11: the worker's own weekly hours cap. Dispatch already calls this on every request,
     // so the limit rides along rather than costing another round trip.
@@ -4899,7 +4903,9 @@ app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
 app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => {
   const wid = Number(req.params.id)
   const bookingId = req.body?.bookingId ?? null
-  await pool.query('UPDATE workers SET offered_booking=$1 WHERE id=$2', [bookingId, wid])
+  // Stamp when the offer was made (and clear the stamp when the offer is withdrawn) so the
+  // accept window can be measured server-side rather than by whichever screen happens to be open.
+  await pool.query('UPDATE workers SET offered_booking=$1, offered_at=CASE WHEN $1::int IS NULL THEN NULL ELSE now() END WHERE id=$2', [bookingId, wid])
   // Log every offer so the acceptance rate has a denominator. Re-offering the same booking
   // to the same worker must not create a second row, hence ON CONFLICT DO NOTHING.
   if (bookingId != null) {
@@ -5164,6 +5170,46 @@ function scheduleMetricSnapshots() {
   setTimeout(() => snapshotMetrics().catch((e) => console.error('[worker] snapshot error:', e.message)), 25000)
 }
 
+/* Release offers nobody answered within the accept window.
+ *
+ * The window used to be a countdown inside the app's NewJobScreen, which meant it only ran while
+ * that screen was open — background the app (or never open the offer) and the booking stayed
+ * pinned to that worker forever, invisible to them and unreleasable by anyone else. Enforcing it
+ * here makes the deadline real: the sweep runs whatever the app is doing.
+ *
+ * Counted as 'declined' in job_offers so an ignored offer hurts the acceptance rate exactly as a
+ * tapped Reject does — otherwise ignoring offers would be the cost-free way to dodge work.
+ */
+const OFFER_TTL_SEC = Number(process.env.OFFER_TTL_SEC || 120)
+async function sweepExpiredOffers() {
+  // The booking id has to be captured BEFORE the update — RETURNING reports post-update values,
+  // which for the cleared column is always NULL.
+  const { rows } = await pool.query(
+    `WITH expired AS (
+       SELECT id, offered_booking FROM workers
+        WHERE offered_booking IS NOT NULL
+          AND offered_at IS NOT NULL
+          AND offered_at < now() - make_interval(secs => $1)
+     )
+     UPDATE workers w SET offered_booking=NULL, offered_at=NULL
+       FROM expired e WHERE w.id = e.id
+       RETURNING w.id, e.offered_booking AS booking_id`,
+    [OFFER_TTL_SEC],
+  )
+  for (const r of rows) {
+    await pool.query(
+      `UPDATE job_offers SET outcome='declined', responded_at=now()
+        WHERE worker_id=$1 AND booking_id=$2 AND outcome='offered'`,
+      [r.id, r.booking_id],
+    ).catch((e) => console.error('[worker] expire offer-outcome:', e?.message || e))
+  }
+  if (rows.length) console.log(`[worker] released ${rows.length} expired offer(s) after ${OFFER_TTL_SEC}s`)
+}
+function scheduleOfferSweep() {
+  // Well under the TTL, so a released offer returns to the pool promptly rather than at TTL x2.
+  setInterval(() => sweepExpiredOffers().catch((e) => console.error('[worker] offer sweep:', e?.message || e)), 15000)
+}
+
 init()
   .then(async () => {
     // Create the KYC bucket if it isn't there. Non-fatal: the service still serves everything
@@ -5172,5 +5218,6 @@ init()
     await ensurePublicBucket().catch((e) => console.error('[worker] public storage init failed:', e.message))
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
     scheduleMetricSnapshots()
+    scheduleOfferSweep()
   })
   .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) });

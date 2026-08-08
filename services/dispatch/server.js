@@ -339,6 +339,53 @@ app.get('/api/worker/jobs/current', auth, async (req, res) => {
   })
 })
 
+/* Is the offer the app is showing still real, and how long is left on it?
+ *
+ * The accept window used to be a local countdown in NewJobScreen, and nothing ever checked whether
+ * the booking was still up for grabs — so a worker could sit on a full 2:00 timer for a job another
+ * worker had already taken, and only learn it from a 409 when they finally tapped Accept. The app
+ * polls this while an offer is pending and drops the screen the moment the answer stops being
+ * PENDING.
+ *
+ * Both terminal answers release the offer here rather than waiting for the worker svc sweep, so the
+ * booking returns to the pool immediately.
+ */
+const OFFER_TTL_SEC = Number(process.env.OFFER_TTL_SEC || 120)
+async function releaseOffer(workerId, bookingId, outcome) {
+  await internalPost(WORKER_URL, `/internal/workers/${workerId}/offered`, { bookingId: null })
+  if (outcome) await internalPost(WORKER_URL, `/internal/workers/${workerId}/offer-outcome`, { bookingId, outcome })
+}
+app.get('/api/worker/jobs/offer', auth, async (req, res) => {
+  const offeredId = req.worker.offered_booking
+  if (!offeredId) return res.json({ ok: true, state: 'NONE', bookingId: null, remainingSec: 0 })
+
+  // No stamp means the offer predates offered_at — treat it as fresh rather than instantly killing
+  // an offer the worker is legitimately looking at.
+  const offeredAtMs = req.worker.offered_at ? Date.parse(req.worker.offered_at) : Date.now()
+  const elapsedSec = Math.floor((Date.now() - offeredAtMs) / 1000)
+  const remainingSec = Math.max(0, OFFER_TTL_SEC - elapsedSec)
+
+  if (remainingSec <= 0) {
+    await releaseOffer(req.worker.id, offeredId, 'declined')
+    return res.json({ ok: true, state: 'EXPIRED', bookingId: offeredId, remainingSec: 0 })
+  }
+
+  // Still claimable only while unassigned — assign() sets worker_id and moves it off 'confirmed'.
+  const b = await tryGet(BOOKING_URL, `/api/internal/bookings/${offeredId}`, null)
+  const takenByOther = !b || (b.worker_id != null && Number(b.worker_id) !== req.worker.id) || (b.status && b.status !== 'confirmed')
+  if (takenByOther) {
+    // Not counted as a decline: the worker was never given the chance to answer, so it must not
+    // dent their acceptance rate.
+    await releaseOffer(req.worker.id, offeredId, null)
+    return res.json({ ok: true, state: 'TAKEN', bookingId: offeredId, remainingSec: 0 })
+  }
+
+  // The job payload rides along so the app can raise the offer screen straight from this poll.
+  // Offers are now PUSHED by the booking service, so the app can no longer rely on having called
+  // /jobs/request to already hold the job it is being asked about.
+  res.json({ ok: true, state: 'PENDING', bookingId: offeredId, remainingSec, job: await jobFromBooking(b) })
+})
+
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
   const wl = req.worker.workLimit
   if (wl?.capped) return res.json({ job: null, jobStatus: 'NONE', capped: true, error: cappedMsg(wl) })
@@ -350,8 +397,16 @@ app.post('/api/worker/jobs/request', auth, async (req, res) => {
 
 app.post('/api/worker/jobs/accept', auth, async (req, res) => {
   const offeredId = req.worker.offered_booking
+  // Age the offer BEFORE clearing it, so a late tap loses the job even if the app's own countdown
+  // never ran (screen closed, process killed) — the deadline can't be dodged by not looking at it.
+  const offeredAtMs = req.worker.offered_at ? Date.parse(req.worker.offered_at) : null
+  const staleOffer = offeredAtMs != null && Math.floor((Date.now() - offeredAtMs) / 1000) > OFFER_TTL_SEC
   await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: null })
   if (!offeredId) return res.status(409).json({ ok: false, error: 'Job no longer available' })
+  if (staleOffer) {
+    await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offer-outcome`, { bookingId: offeredId, outcome: 'declined' })
+    return res.status(409).json({ ok: false, error: 'This job expired — the 2-minute window passed' })
+  }
   // Log the acceptance before claiming: the worker said yes, so it counts toward their
   // acceptance rate even if another worker wins the race for the booking below.
   await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offer-outcome`, { bookingId: offeredId, outcome: 'accepted' })
@@ -368,6 +423,10 @@ app.post('/api/worker/jobs/reject', auth, async (req, res) => {
     skipSet(req.worker.id).add(offeredId)
     await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: null })
     await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offer-outcome`, { bookingId: offeredId, outcome: 'declined' })
+    // Hand the booking on. Without this the rejection was purely local to the worker service and
+    // the booking sat on its dead offer until the window lapsed, delaying the customer for no
+    // reason. Best-effort: the sweep still re-offers if this call fails.
+    await internalPost(BOOKING_URL, `/api/internal/bookings/${offeredId}/decline`, { worker_id: req.worker.id }).catch(() => {})
   }
   res.json({ ok: true, jobStatus: 'NONE' })
 })
