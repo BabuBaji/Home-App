@@ -43,6 +43,11 @@ class JobAlertService : Service() {
         get() = prefs.getInt(KEY_LAST_JOB, 0)
         set(v) { prefs.edit().putInt(KEY_LAST_JOB, v).apply() }
 
+    // Booking id of the last OFFER announced. Kept in memory rather than prefs: an offer only
+    // lives two minutes, so re-announcing one after a service restart is right — the worker may
+    // still have time to take it.
+    private var lastOfferId = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -75,6 +80,7 @@ class JobAlertService : Service() {
                     if (count > 0 && lastCount == 0) notifyNewJob(count)  // rising edge only
                     lastCount = count
                 } catch (_: Exception) { /* keep polling */ }
+                try { pollOffer() } catch (_: Exception) { /* keep polling */ }
                 try { pollAssignment() } catch (_: Exception) { /* keep polling */ }
                 try { pollMessages() } catch (_: Exception) { /* keep polling */ }
                 delay(8000)
@@ -92,6 +98,26 @@ class JobAlertService : Service() {
      * "what is mine" instead. Fires once per booking id, persisted, so neither a service restart nor
      * the 8s tick re-announces the same job; and only for a job the worker has not started moving
      * on, so accepting or driving to it doesn't produce a second alert. */
+    /* Announce a PENDING offer the moment it lands.
+     *
+     * The offer is pushed by the booking service and dies in two minutes, so waiting for the worker
+     * to open the app would waste most of the window. The full-screen intent is what makes this
+     * reach someone whose phone is in their pocket.
+     *
+     * The 8s tick is the floor on how fast an offer can surface here; the app's own 2s poll is
+     * quicker whenever it happens to be open.
+     */
+    private suspend fun pollOffer() {
+        val o = RetrofitClient.api.offerStatus()
+        if (o.state != "PENDING" || o.bookingId == null) {
+            lastOfferId = 0   // offer gone → the next one is news again, even for the same booking
+            return
+        }
+        if (o.bookingId == lastOfferId) return
+        lastOfferId = o.bookingId
+        notifyOffer(o.job?.services?.firstOrNull().orEmpty(), o.job?.customerName.orEmpty())
+    }
+
     private suspend fun pollAssignment() {
         val cur = RetrofitClient.api.currentJob()
         val id = cur.bookingId ?: return          // nothing assigned — leave the watermark alone
@@ -182,6 +208,36 @@ class JobAlertService : Service() {
         try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(ASSIGN_ID, n) } catch (_: Exception) { }
     }
 
+    /* An OFFER, which is a different thing from an assignment: it expires in two minutes and needs
+     * an answer. Posted with a full-screen intent so it behaves like an incoming call — the
+     * accept/reject screen comes up over the lock screen instead of waiting to be noticed in the
+     * tray. Android falls back to a heads-up banner where full-screen isn't permitted. */
+    private fun notifyOffer(service: String, customer: String) {
+        if (!online) return
+        val what = service.ifBlank { "A new job" }
+        val text = if (customer.isNotBlank()) "$what for $customer — accept within 2 minutes" else "$what — accept within 2 minutes"
+        val full = PendingIntent.getActivity(
+            this, 7,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra("nav_route", Routes.NEW_JOB),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = NotificationCompat.Builder(this, ALERT_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("New job request")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(full)
+            .setFullScreenIntent(full, true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+        try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(OFFER_ID, n) } catch (_: Exception) { }
+    }
+
     private fun notifyMessages(incoming: List<JobMessage>) {
         if (!online) return   // last gate before anything reaches the worker's tray
         val latest = incoming.last().body
@@ -210,6 +266,7 @@ class JobAlertService : Service() {
         const val GEOFENCE_ID = 4713
         const val MSG_ID = 4714
         const val ASSIGN_ID = 4715
+        const val OFFER_ID = 4716
         private const val PREFS = "hh_pro_alerts"
         private const val KEY_LAST_MSG = "last_msg_id"
         private const val KEY_LAST_JOB = "last_job_id"
@@ -271,6 +328,7 @@ class JobAlertService : Service() {
                 val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 nm.cancel(ALERT_ID)
                 nm.cancel(ASSIGN_ID)
+                nm.cancel(OFFER_ID)
             } catch (_: Exception) { }
             try { ctx.stopService(Intent(ctx, JobAlertService::class.java)) } catch (_: Exception) { }
         }

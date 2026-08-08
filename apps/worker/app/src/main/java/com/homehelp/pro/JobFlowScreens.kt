@@ -168,18 +168,35 @@ fun StartDeadlineBanner(vm: AppViewModel) {
 
 @Composable
 fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
+    // Leave with the offer. The ViewModel's offer watch clears it when the accept window closes or
+    // another worker claims the booking — this must sit BEFORE the early return below, or the
+    // screen would keep showing a job that is no longer on offer.
+    LaunchedEffect(vm.activeJob, vm.jobStatus) {
+        if (vm.activeJob == null && vm.jobStatus == JobStatus.NONE) {
+            nav.popBackStack(Routes.HOME, inclusive = false)
+        }
+    }
+
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
-    var secs by remember { mutableIntStateOf(ACCEPT_WINDOW_SEC) }
+
+    /* The server owns the deadline (it is stamped when the offer is made), so the ring follows
+     * vm.offerRemainingSec and merely ticks locally between polls to stay smooth. Starting a fresh
+     * 2:00 here — as this screen used to — handed back the full window every time the worker
+     * navigated away and returned.
+     */
+    var secs by remember { mutableIntStateOf(vm.offerRemainingSec ?: ACCEPT_WINDOW_SEC) }
+    LaunchedEffect(vm.offerRemainingSec) { vm.offerRemainingSec?.let { secs = it } }
 
     LaunchedEffect(job.id) {
-        secs = ACCEPT_WINDOW_SEC
         // Only count down (and auto-reject) while the offer is still pending. If the worker has
         // already accepted — or re-entered this screen via Back — never reject the live job.
         while (secs > 0 && vm.jobStatus == JobStatus.REQUESTED) {
             delay(1000)
             secs--
         }
+        // Fallback for a phone that can't reach the backend: the poll can't tell us the offer is
+        // dead, so honour the deadline locally. The server enforces it independently.
         if (vm.jobStatus == JobStatus.REQUESTED) {
             vm.rejectJob()
             nav.popBackStack(Routes.HOME, inclusive = false)
@@ -279,7 +296,12 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.height(18.dp))
                     PrimaryButton("ACCEPT") {
                         vm.acceptJob()
-                        nav.navigate(Routes.JOB_DETAILS) { popUpTo(Routes.NEW_JOB) { inclusive = true } }
+                        /* Back to Home, which already shows the accepted job — the NEXT JOB hero,
+                         * or the "Job accepted · tap to resume" banner — with its Start Job action
+                         * resuming at whatever stage the job is at. Accept used to push straight
+                         * into JOB_DETAILS, which dropped the worker into a sub-screen and left
+                         * Home (and everything else on it) behind the moment they said yes. */
+                        nav.popBackStack(Routes.HOME, inclusive = false)
                     }
                     Spacer(Modifier.height(10.dp))
                     OutlineButton("REJECT", modifier = Modifier.fillMaxWidth()) {
@@ -728,7 +750,15 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
-                PrimaryButton("Reached Location") {
+                /* Distance-aware, but never a hard block: below 150 m this is the plain
+                 * "Reached Location" call to action; further out it still works but says how far
+                 * off the GPS thinks the worker is. Refusing outright would strand anyone whose
+                 * fix is poor indoors — and they are the ones standing at the door. */
+                val nearCustomer = distKm != null && distKm <= 0.15
+                PrimaryButton(
+                    if (nearCustomer || distKm == null) "Reached Location"
+                    else "Reached Location (%.1f km away)".format(distKm),
+                ) {
                     vm.markArrived(); nav.navigate(Routes.ARRIVED)
                 }
             }
@@ -931,14 +961,57 @@ private fun ArrivedAction(modifier: Modifier, icon: androidx.compose.ui.graphics
  * `geo:`, (4) the directions URL in a browser. Each step degrades gracefully if the prior is absent.
  */
 // Open the phone dialer pre-filled with the customer's number (no CALL permission needed).
-private fun dialNumber(ctx: Context, phone: String?) {
+internal fun dialNumber(ctx: Context, phone: String?) {
     val p = phone?.trim().orEmpty()
     if (p.isEmpty()) { toast(ctx, "No phone number on file"); return }
     try { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$p"))) }
     catch (_: Exception) { toast(ctx, "Could not open dialer") }
 }
 
-private fun launchNavigation(
+/**
+ * Navigate to a free-text address, for bookings that carry no usable coordinates.
+ *
+ * Instant bookings taken from a saved address don't always have lat/lng stamped on them, and
+ * [launchNavigation] needs a point. Handing Maps the address string still gets the worker moving,
+ * which beats a button that does nothing.
+ */
+/**
+ * Best-effort last known position, for screens that need a distance but don't run their own
+ * location loop. Returns null without permission or before any provider has a fix.
+ */
+internal fun workerLastLoc(ctx: Context): Pair<Double, Double>? = try {
+    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        null
+    } else {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.PASSIVE_PROVIDER)
+        loc?.let { it.latitude to it.longitude }
+    }
+} catch (_: Exception) { null }
+
+internal fun navigateToAddress(ctx: Context, address: String) {
+    val q = Uri.encode(address)
+    // Turn-by-turn first, same order of preference as launchNavigation.
+    try {
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$q&mode=d"))
+                .setPackage("com.google.android.apps.maps"),
+        )
+        return
+    } catch (_: Exception) { }
+    val dirUrl = "https://www.google.com/maps/dir/?api=1&destination=$q&travelmode=driving"
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dirUrl)).setPackage("com.google.android.apps.maps"))
+        return
+    } catch (_: Exception) { }
+    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$q"))); return } catch (_: Exception) { }
+    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dirUrl))) }
+    catch (_: Exception) { toast(ctx, "No maps or browser app available to navigate") }
+}
+
+internal fun launchNavigation(
     ctx: Context,
     destLat: Double,
     destLng: Double,
@@ -1208,7 +1281,7 @@ private fun lastKnownLatLng(ctx: Context): Pair<Double, Double>? {
 }
 
 // Great-circle distance in km between two lat/lng points (for live distance + ETA).
-private fun haversineKm(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
+internal fun haversineKm(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
     val r = 6371.0
     val sLat = Math.sin(Math.toRadians(bLat - aLat) / 2)
     val sLng = Math.sin(Math.toRadians(bLng - aLng) / 2)

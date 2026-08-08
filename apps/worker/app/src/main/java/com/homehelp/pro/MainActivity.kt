@@ -257,6 +257,24 @@ fun AppRoot() {
         if (vm.isOnline) JobAlertService.start(alertCtx) else JobAlertService.stop(alertCtx)
     }
 
+    /* A pushed job offer takes over the screen and rings until it is answered.
+     *
+     * Offers now arrive on their own (the booking service hands them out), so the app has to raise
+     * the accept/reject screen itself — a worker cannot be expected to be sitting on Home watching
+     * for a card to appear when the offer only lives for two minutes. */
+    androidx.compose.runtime.LaunchedEffect(vm.incomingOfferSignal) {
+        if (vm.incomingOfferSignal > 0) {
+            OfferRingtone.start(alertCtx)
+            nav.navigate(Routes.NEW_JOB)
+        }
+    }
+    // Silence follows the offer leaving REQUESTED, whichever way it went — accepted, rejected,
+    // expired, or taken by someone else. One place to stop it, so no path can leave it ringing.
+    androidx.compose.runtime.LaunchedEffect(vm.jobStatus) {
+        if (vm.jobStatus != JobStatus.REQUESTED) OfferRingtone.stop()
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { OfferRingtone.stop() } }
+
     // Re-pull backend data every time the app comes to the foreground, so a completed job /
     // updated earnings appear immediately instead of only after a full relaunch.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -411,6 +429,31 @@ fun AppRoot() {
                 androidx.compose.material3.TextButton(onClick = { vm.dismissGeofenceAlert() }) { Text("OK", color = Purple) }
             },
             title = { Text("⚠  Left your assigned area", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(msg) },
+        )
+    }
+
+    // An action the app refused, and why — currently only "you can't go offline mid-job".
+    vm.actionBlockedMessage?.let { msg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.clearActionBlockedMessage() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.clearActionBlockedMessage() }) { Text("OK", color = Purple) }
+            },
+            title = { Text("Still on a job", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(msg) },
+        )
+    }
+
+    /* Why the job that was on screen just vanished. Without this the offer simply disappeared and
+     * the worker had no way to tell "someone else was faster" from "the app lost my job". */
+    vm.offerLostReason?.let { msg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.clearOfferLostReason() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.clearOfferLostReason() }) { Text("OK", color = Purple) }
+            },
+            title = { Text("Job no longer available", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
             text = { Text(msg) },
         )
     }

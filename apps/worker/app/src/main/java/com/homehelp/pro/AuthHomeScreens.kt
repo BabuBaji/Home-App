@@ -82,6 +82,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -377,14 +378,104 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     // already accepted as "In progress", so an exact-match on "Upcoming" hid the Next Job card
     // for exactly the job the worker most needs to act on.
     //
-    // When the API returns NO schedule at all, Home falls back to [SampleSchedule] so the
-    // NEXT JOB hero and NEXT UP panel still render. That is demo data — see the warning on
-    // SampleSchedule before shipping a release build.
-    val scheduleItems = vm.schedule.ifEmpty { SampleSchedule }
-    val nextJob = scheduleItems.firstOrNull {
+    // Strictly the real feed. This used to fall back to a hard-coded SampleSchedule whenever the
+    // API returned nothing, which put invented bookings ("Deep Cleaning · Mrs. Priya Sharma") on
+    // Home for every worker with an empty day — including workers who were OFFLINE, since the
+    // fallback answered to no state at all. A worker cannot tell an invented job from a real one
+    // and would set out for it, so an empty feed must render an empty Home.
+    val scheduleItems = vm.schedule
+
+    /* The job the worker is actually on, rendered as a schedule row so the NEXT JOB hero can show
+     * it. `schedule` comes from the bootstrap feed, which has not been refetched at the moment a
+     * job is accepted — so straight after Accept the hero had nothing to draw and Home fell back
+     * to the thin "tap to resume" strip. Building the row from activeJob puts the real card up
+     * immediately, and the feed simply agrees with it once it next loads.
+     */
+    val liveJobItem = vm.activeJob?.let { j ->
+        if (vm.jobStatus == JobStatus.NONE || vm.jobStatus == JobStatus.REQUESTED) null
+        else com.homehelp.pro.network.ScheduleItem(
+            // dateTime arrives as "8/8/2026, 9:49:16 AM" — the hero wants just the clock part.
+            time = j.dateTime.substringAfter(", ", j.dateTime).trim(),
+            service = j.services.firstOrNull().orEmpty(),
+            location = j.area.ifBlank { j.address },
+            durationMins = j.durationMinutes,
+            customerName = j.customerName,
+            status = when (vm.jobStatus) {
+                JobStatus.ACCEPTED -> "Accepted"
+                JobStatus.ON_THE_WAY -> "On the way"
+                JobStatus.ARRIVED -> "Arrived"
+                JobStatus.IN_PROGRESS -> "In progress"
+                else -> "Upcoming"
+            },
+            distanceKm = j.distanceKm.takeIf { d -> d > 0 },
+            ref = j.id,
+        )
+    }
+
+    /* ---- Arrival detection ----
+     * Distance from the worker to the customer, refreshed while a job is live. Tapping Navigate
+     * hands the worker to Maps; when they come back this is what lets Home offer "Reached
+     * Location" instead of making them dig into the job screens to find it.
+     */
+    var myLoc by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    LaunchedEffect(vm.activeJob?.id, vm.jobStatus) {
+        while (vm.activeJob != null && vm.jobStatus != JobStatus.NONE) {
+            myLoc = workerLastLoc(homeCtx)
+            delay(10_000)
+        }
+    }
+    val toCustomerKm = run {
+        val j = vm.activeJob
+        val me = myLoc
+        if (j == null || me == null || (j.lat == 0.0 && j.lng == 0.0)) null
+        else haversineKm(me.first, me.second, j.lat, j.lng)
+    }
+    // 150 m: comfortably inside a building footprint without letting someone mark arrival from the
+    // next street. GPS in dense areas is rarely better than this.
+    val atCustomer = toCustomerKm != null && toCustomerKm <= 0.15
+
+    /* Live service clock for the card's top-right corner. Anchored to the SERVER's started_at, the
+     * same source the in-service screen and the customer app use, so all three agree rather than
+     * each counting from when they happened to open. Paused time is excluded. */
+    var clockNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(vm.jobStatus) {
+        while (vm.jobStatus == JobStatus.IN_PROGRESS) { clockNow = System.currentTimeMillis(); delay(1000) }
+    }
+    /* Freezes at the booked length, exactly as the in-service screen does — the clock is what the
+     * worker is paid against, so letting Home run past the booked time (32:03 on a 30-minute job)
+     * both contradicted that screen and read as "the service is overrunning" when what had really
+     * happened is that the booked time finished and nobody pressed End Service yet.
+     */
+    var serviceTimeUp by remember { mutableStateOf(false) }
+    val serviceElapsedText = if (vm.jobStatus != JobStatus.IN_PROGRESS) null else {
+        val startMs = parseIsoMillisPublic(vm.activeJob?.startedAt)
+            ?: vm.serviceStartMs.takeIf { it > 0L }
+        if (startMs == null) null else {
+            val job = vm.activeJob
+            // Same rule as InProgressScreen: the backend's end time wins (extensions are granted
+            // FROM approval), else booked + whatever extra was approved.
+            val endMs = parseIsoMillisPublic(vm.serviceEndAtIso ?: job?.serviceEndAt)
+            val targetSec = if (endMs != null) ((endMs - startMs) / 1000L).coerceAtLeast(60L)
+            else ((job?.durationMinutes ?: 60) + vm.extensionMinutes).coerceAtLeast(1).toLong() * 60L
+            val raw = ((clockNow - startMs - vm.pausedMsAt(clockNow)) / 1000L).coerceAtLeast(0L)
+            serviceTimeUp = raw >= targetSec
+            val s = if (serviceTimeUp) targetSec else raw
+            if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
+            else "%d:%02d".format(s / 60, s % 60)
+        }
+    }
+
+    /* The live job outranks anything in the feed — it is the one the worker has committed to.
+     *
+     * Only genuinely OPEN feed rows qualify. There used to be a bare `?: scheduleItems.first()`
+     * fallback, and because today's schedule includes finished bookings, a worker who had completed
+     * their only job of the day got that job back as "NEXT JOB" — a card for work already done,
+     * with Navigate and Start Job live on it. No open row now means no card.
+     */
+    val nextJob = liveJobItem ?: scheduleItems.firstOrNull {
         it.status.equals("Upcoming", true) || it.status.equals("In progress", true) ||
             it.status.equals("Accepted", true) || it.status.equals("Confirmed", true)
-    } ?: scheduleItems.firstOrNull()
+    }
     val nextJobWindow = remember(nextJob?.time, nextJob?.durationMins) { jobTimeWindow(nextJob?.time, nextJob?.durationMins) }
 
     // Home scrolls, and deliberately so. Measured on a 1080×2408 @440dpi device: this layout's
@@ -467,8 +558,30 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 NextJobHeroCard(
                     job = nextJob,
                     timeWindow = nextJobWindow,
-                    onNavigate = { nav.navigate(Routes.SCHEDULE) },
-                    onCall = { nav.navigateApp(Routes.BOOKINGS) },
+                    /* Navigate and Call do the real thing now. They used to open the Schedule and
+                     * the Bookings list — a worker tapping "Call" on the card in front of a
+                     * customer's building got a list of jobs, not a phone call. */
+                    onNavigate = {
+                        val j = vm.activeJob
+                        // Setting off IS the "on the way" signal — the customer's tracking screen
+                        // should say so the moment the worker starts driving, not only if they
+                        // happen to open the job screen and press a button there.
+                        if (j != null && vm.jobStatus == JobStatus.ACCEPTED) vm.startOnTheWay()
+                        val lat = j?.lat ?: 0.0
+                        val lng = j?.lng ?: 0.0
+                        val label = nextJob.service.ifBlank { nextJob.customerName.ifBlank { "Customer" } }
+                        if (lat != 0.0 || lng != 0.0) {
+                            // No origin passed: google.navigation: starts from the device's own
+                            // location, and Home has no GPS fix of its own to hand over.
+                            launchNavigation(homeCtx, lat, lng, label)
+                        } else {
+                            // No coordinates stamped on the booking — go by address text.
+                            val addr = (j?.address?.ifBlank { null } ?: nextJob.location).trim()
+                            if (addr.isBlank() || addr == "—") toast(homeCtx, "No address on this job yet")
+                            else navigateToAddress(homeCtx, addr)
+                        }
+                    },
+                    onCall = { dialNumber(homeCtx, vm.activeJob?.customerPhone) },
                     // Start Job used to just open the Jobs list, which is why tapping it
                     // appeared to do nothing. It now drives the real lifecycle: resume the
                     // live job at whatever stage it is at, or pull the next real booking.
@@ -481,14 +594,50 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                             JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
                             else -> null
                         }
-                        if (vm.activeJob != null && live != null) {
-                            nav.navigate(live)
-                        } else {
-                            vm.requestJob { found ->
+                        when {
+                            // At the door on the way over: confirm arrival straight from the card
+                            // and go on to the OTP screen, which is the next thing they need.
+                            vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> {
+                                vm.markArrived()
+                                nav.navigate(Routes.ARRIVED)
+                            }
+                            vm.activeJob != null && live != null -> nav.navigate(live)
+                            else -> vm.requestJob { found ->
                                 if (found) nav.navigate(Routes.NEW_JOB)
                                 else toast(homeCtx, "No job ready to start yet")
                             }
                         }
+                    },
+                    /* Only flips once the worker is actually there. Showing "Reached Location"
+                     * from across the city would invite marking arrival early, which is what the
+                     * customer's ETA and the start-window bonus are both measured against. */
+                    startLabel = when {
+                        vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> "Reached Location"
+                        vm.jobStatus == JobStatus.ON_THE_WAY -> "On The Way"
+                        vm.jobStatus == JobStatus.ARRIVED -> "Start Service"
+                        // Points at the one action left once the booked time is done.
+                        vm.jobStatus == JobStatus.IN_PROGRESS && serviceTimeUp -> "End Service"
+                        vm.jobStatus == JobStatus.IN_PROGRESS -> "Continue"
+                        else -> "Start Job"
+                    },
+                    startIcon = when {
+                        vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> Icons.Filled.CheckCircle
+                        vm.jobStatus == JobStatus.ARRIVED -> Icons.Filled.PlayArrow
+                        else -> Icons.Filled.PlayArrow
+                    },
+                    // Navigate/Call are pointless once the worker is inside doing the work — they
+                    // already drove there and the customer is in the room.
+                    actionsEnabled = vm.jobStatus != JobStatus.IN_PROGRESS,
+                    timerText = serviceElapsedText,
+                    timerLabel = if (serviceTimeUp) "Time up" else "Elapsed",
+                    badge = when (vm.jobStatus) {
+                        // The booked time finishing is NOT the service ending — the worker still
+                        // has to end it with the proof photo. Say which of the two has happened.
+                        JobStatus.IN_PROGRESS -> if (serviceTimeUp) "TIME COMPLETE" else "IN PROGRESS"
+                        JobStatus.ON_THE_WAY -> "ON THE WAY"
+                        JobStatus.ARRIVED -> "ARRIVED"
+                        JobStatus.ACCEPTED -> "ACCEPTED"
+                        else -> "NEXT JOB"
                     },
                 )
             }
@@ -516,16 +665,39 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 onEditTarget = { showGoalDialog = true },
             )
 
-            // ─── Next up ─── the jobs queued AFTER the hero's. Dropping the hero job keeps the
-            // two sections from showing the same booking twice; hidden entirely when nothing is
-            // left, rather than rendering an empty shell.
-            val upcoming = scheduleItems.filter { it !== nextJob }.take(3)
+            // ─── Upcoming services ─── the jobs queued AFTER the hero's. Dropping the hero job
+            // keeps the two sections from showing the same booking twice. Shown only when there
+            // is something queued; with nothing coming up, RECENT SERVICES below leads instead.
+            // Matched on ref as well as identity: the hero's row may be the synthesized live job
+            // rather than an object from this list, and the feed's copy of that same booking must
+            // not then show up again under UPCOMING.
+            // Open rows only — a completed or cancelled booking is not "upcoming", and today's
+            // schedule feed carries both.
+            val upcoming = scheduleItems
+                .filter { it !== nextJob && (nextJob?.ref == null || it.ref != nextJob.ref) }
+                .filter { !it.status.equals("Completed", true) && !it.status.equals("Cancelled", true) }
+                .take(3)
             if (upcoming.isNotEmpty()) {
                 NextUpPanel(
                     items = upcoming,
                     onViewSchedule = { nav.navigate(Routes.SCHEDULE) },
                     onItem = { nav.navigateApp(Routes.BOOKINGS) },
                 )
+            }
+
+            // ─── Recent services / welcome ──────────────────────────────────────────────────
+            // Everything below TODAY used to vanish for a worker with no schedule, leaving a slab
+            // of empty white under the bonus banner. One of these two always renders: the last
+            // three completed services, or a welcome for someone who hasn't finished one yet.
+            val recentServices = vm.bookings.filter { it.status == "Completed" }
+            if (recentServices.isNotEmpty()) {
+                RecentServicesPanel(
+                    items = recentServices.take(3),   // feed is newest-first (bookings are id DESC)
+                    onViewAll = { nav.navigateApp(Routes.BOOKINGS) },
+                    onItem = { nav.navigateApp(Routes.BOOKINGS) },
+                )
+            } else {
+                WelcomeCard(name = firstName, greeting = greeting, online = vm.isOnline)
             }
 
             // ─── Incoming request ───────────────────────────────────────────────────────────

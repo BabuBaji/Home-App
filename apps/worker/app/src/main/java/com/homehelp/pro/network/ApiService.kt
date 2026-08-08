@@ -164,6 +164,10 @@ interface ApiService {
     @GET("api/worker/jobs/current")
     suspend fun currentJob(): CurrentJobResponse
 
+    /** Whether the pending offer is still live, and the seconds left on its accept window. */
+    @GET("api/worker/jobs/offer")
+    suspend fun offerStatus(): OfferStatusResponse
+
     @POST("api/worker/jobs/request")
     suspend fun requestJob(): RequestJobResponse
 

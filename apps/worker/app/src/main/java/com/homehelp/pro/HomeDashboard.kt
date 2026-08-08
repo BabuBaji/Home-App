@@ -72,30 +72,9 @@ import com.homehelp.pro.network.ScheduleItem
 private fun money(v: Int): String =
     "₹" + java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(v)
 
-/**
- * Sample jobs shown ONLY when the worker API returns an empty schedule, so the NEXT JOB hero
- * and the NEXT UP panel are visible for design review and demos. Mirrors the reference screen.
- *
- * ⚠ DEMO DATA. A real worker must never be shown a booking that does not exist — they would
- * travel to it. Delete this list (or wrap the fallback in `if (BuildConfig.DEBUG)`) before any
- * release build. The live path is unaffected: the moment the API returns even one job, these
- * rows are never read.
- */
-val SampleSchedule: List<ScheduleItem> = listOf(
-    ScheduleItem(
-        time = "10:30 AM", service = "Deep Cleaning", location = "Jubilee Hills",
-        durationMins = 120, customerName = "Mrs. Priya Sharma", status = "Upcoming",
-        distanceKm = 2.3, etaMins = 45,
-    ),
-    ScheduleItem(
-        time = "1:00 PM", service = "Bathroom Cleaning", location = "Banjara Hills",
-        durationMins = 60, customerName = "Mr. Ramesh", status = "Upcoming", distanceKm = 4.1,
-    ),
-    ScheduleItem(
-        time = "4:30 PM", service = "Kitchen Cleaning", location = "Madhapur",
-        durationMins = 90, customerName = "Ms. Anjali", status = "Upcoming", distanceKm = 6.2,
-    ),
-)
+// The demo SampleSchedule that used to live here was REMOVED. Home rendered it whenever the API
+// returned an empty schedule, so workers with a free day — offline ones included — saw three
+// invented bookings they could not distinguish from real work. Home now shows the live feed only.
 
 // Card geometry shared by every white panel on Home.
 //
@@ -237,6 +216,19 @@ fun NextJobHeroCard(
     onNavigate: () -> Unit,
     onCall: () -> Unit,
     onStart: () -> Unit,
+    /* The primary action follows the stage the job is at — "Start Job" while heading out, then
+     * "Reached Location" once the worker is actually at the address. A single fixed label sent
+     * them back into the job screens to find the arrival button that this card can just offer. */
+    startLabel: String = "Start Job",
+    startIcon: ImageVector = Icons.Filled.PlayArrow,
+    /** Pill at the top-left: "NEXT JOB", "IN PROGRESS", "ON THE WAY"… */
+    badge: String = "NEXT JOB",
+    /** Live service clock ("MM:SS" / "H:MM:SS") shown top-right while the service runs. */
+    timerText: String? = null,
+    /** Caption above the clock — "Elapsed" while running, "Time up" once the booked time is done. */
+    timerLabel: String = "Elapsed",
+    /** Navigate + Call are dead once the worker is at the customer and working. */
+    actionsEnabled: Boolean = true,
 ) {
     Box(
         Modifier.fillMaxWidth()
@@ -258,14 +250,32 @@ fun NextJobHeroCard(
                         .background(Color.White.copy(alpha = 0.20f))
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 ) {
+                    /* Says what the job IS doing, not always "NEXT JOB" — a service already
+                     * running is not the next one, and the worker coming back to Home needs to
+                     * see at a glance that it is still going. */
                     Text(
-                        "NEXT JOB", color = Color.White,
+                        badge, color = Color.White,
                         fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                // "Starts in 45 min" only when the backend supplies an ETA — no invented countdown.
-                if (job.etaMins != null && job.etaMins > 0) {
+                // Running service clock takes this corner while the job is in progress — it is the
+                // number the worker checks most, and it beats a "starts in" for a job already
+                // started. Otherwise "Starts in 45 min", and only when the backend supplies an ETA
+                // (no invented countdown).
+                if (timerText != null) {
+                    Column(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(timerLabel, color = TextGray, fontSize = 9.5.sp, maxLines = 1)
+                        Text(
+                            timerText, color = Purple,
+                            fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                        )
+                    }
+                } else if (job.etaMins != null && job.etaMins > 0) {
                     Column(
                         Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White)
                             .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -324,9 +334,9 @@ fun NextJobHeroCard(
             }
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White, Purple, onNavigate)
-                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White, Purple, onCall)
-                HeroAction(Modifier.weight(1.15f), Icons.Filled.PlayArrow, "Start Job", StartJobViolet, Color.White, onStart)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White, Purple, onNavigate, actionsEnabled)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White, Purple, onCall, actionsEnabled)
+                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, StartJobViolet, Color.White, onStart)
             }
         }
     }
@@ -352,14 +362,20 @@ private fun HeroAction(
     bg: Color,
     fg: Color,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
+    // Dimmed and inert rather than hidden: the worker can still see the action exists, which keeps
+    // the card's three-button shape steady instead of reflowing mid-job.
+    val a = if (enabled) 1f else 0.45f
     Row(
-        modifier.height(34.dp).clip(RoundedCornerShape(11.dp)).background(bg).clickable(onClick = onClick),
+        modifier.height(34.dp).clip(RoundedCornerShape(11.dp))
+            .background(bg.copy(alpha = bg.alpha * a))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = null, tint = fg.copy(alpha = a), modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(label, color = fg.copy(alpha = a), fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -517,19 +533,102 @@ private fun CellDivider() {
 // ── Next up ──────────────────────────────────────────────────────────────────
 
 /**
- * NEXT UP — the jobs queued AFTER the one in the hero. Renders nothing when there are none,
- * rather than showing an empty shell.
+ * UPCOMING SERVICES — the jobs queued AFTER the one in the hero. Renders nothing when there are
+ * none, rather than showing an empty shell.
  */
 @Composable
 fun NextUpPanel(items: List<ScheduleItem>, onViewSchedule: () -> Unit, onItem: (ScheduleItem) -> Unit) {
     Panel(padV = 6.dp) {
-        PanelHeader("NEXT UP", "View Schedule", onViewSchedule)
+        PanelHeader("UPCOMING SERVICES", "View All", onViewSchedule)
         items.forEachIndexed { i, item ->
             NextUpRow(item) { onItem(item) }
             if (i != items.lastIndex) {
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
             }
         }
+    }
+}
+
+// ── Recent services / welcome ────────────────────────────────────────────────
+
+/**
+ * The worker's last completed services, newest first (the feed arrives id-DESC).
+ *
+ * Sits between TODAY and the bonus banner, where the page previously ran out of content and left
+ * a block of empty white below the fold.
+ */
+@Composable
+fun RecentServicesPanel(items: List<Booking>, onViewAll: () -> Unit, onItem: (Booking) -> Unit) {
+    Panel(padV = 6.dp) {
+        PanelHeader("RECENT SERVICES", "View All", onViewAll)
+        items.forEachIndexed { i, b ->
+            RecentServiceRow(b) { onItem(b) }
+            if (i != items.lastIndex) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentServiceRow(b: Booking, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(GreenLight),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(18.dp)) }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                b.service?.ifBlank { null } ?: "Service", color = TextDark, fontSize = 14.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                listOfNotNull(b.customerName?.ifBlank { null }, b.timeInfo?.ifBlank { null }).joinToString(" · "),
+                color = TextGray, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(6.dp))
+        // The worker's own share, which is what bookingDto already sends — not the customer's total.
+        Text("₹${b.amount}", color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+    }
+}
+
+/**
+ * Shown in place of [RecentServicesPanel] for a worker who has not completed anything yet.
+ *
+ * A brand-new worker would otherwise meet an empty panel or bare white space on their first
+ * screen; this greets them and points at the one thing they can act on — going online.
+ */
+@Composable
+fun WelcomeCard(name: String, greeting: String, online: Boolean) {
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).background(PurpleLight),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Redeem, contentDescription = null, tint = Purple, modifier = Modifier.size(21.dp)) }
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (name.isBlank()) greeting else "$greeting, $name!",
+                    color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text("Welcome to HomeHelp", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Spacer(Modifier.height(9.dp))
+        Text(
+            if (online) "You're online — your first service will appear here as soon as a customer books you."
+            else "Go online to start receiving jobs. Your completed services will show up here.",
+            color = TextGray, fontSize = 12.sp,
+        )
     }
 }
 

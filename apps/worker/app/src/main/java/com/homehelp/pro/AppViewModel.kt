@@ -597,8 +597,18 @@ class AppViewModel : ViewModel() {
         }
         // Restore any job the worker is mid-way through, so relaunching the app (or coming
         // back to Home) keeps the active/in-progress job visible instead of losing it.
-        activeJob = b.activeJob
-        jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
+        /* A PENDING OFFER must survive this.
+         *
+         * Bootstrap reports the worker's ACTIVE booking, and an offer is not one — the booking is
+         * still 'confirmed' and unassigned until it's accepted. So bootstrap answers
+         * activeJob=null/NONE while an offer is live, and this assignment used to wipe the offer the
+         * offer-watch had just adopted. Every foreground refresh (~8s) therefore tore down the
+         * accept/reject screen and dropped the worker back on Home mid-offer. The watch owns the
+         * offer's lifetime; bootstrap stays out of it. */
+        if (jobStatus != JobStatus.REQUESTED) {
+            activeJob = b.activeJob
+            jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
+        }
         // Re-hydrate the in-service working state (ticks/photos/extras/pause) for a job that was
         // already running when the app was killed — this is what makes it survive a restart.
         if (activeJob != null) loadJobState()
@@ -738,11 +748,23 @@ class AppViewModel : ViewModel() {
     /** Clear the session and return to the login screen. */
     fun logout() {
         Session.clear()
-        RetrofitClient.token = null
         isLoggedIn = false
         isOnline = false
         onlineSinceMs = 0L
         onlineAccumMs = 0L
+        availabilityState = "Offline"
+        /* Mark offline on the SERVER before dropping the token, or auto-assign keeps handing jobs
+         * to a worker who has logged out — `workers.available` would still read true forever.
+         * The token has to outlive the call by a moment, hence clearing it here rather than above;
+         * the UI has already returned to Login, so nothing is waiting on this. */
+        viewModelScope.launch {
+            runCatching {
+                kotlinx.coroutines.withTimeoutOrNull(4000) {
+                    api.setStatus(com.homehelp.pro.network.StatusBody("Offline"))
+                }
+            }
+            RetrofitClient.token = null
+        }
     }
 
     /** Load the worker's persisted daily goal (called once the session is ready). */
@@ -786,19 +808,64 @@ class AppViewModel : ViewModel() {
         private set
     private var pollingStarted = false
 
-    fun goOnline(v: Boolean) {
+    /**
+     * Home's online switch.
+     *
+     * [pushState] tells the BACKEND about the change, and must stay true for every caller except
+     * [changeAvailabilityState] (which sends its own, richer state and would otherwise have this
+     * overwrite "Break"/"Busy" with a plain "Offline").
+     *
+     * This used to be local-only state. Auto-assign picks workers on `workers.available`, which is
+     * written by /api/worker/status — so a worker who flipped this switch off stayed `available` in
+     * the database and kept being assigned jobs, and kept being notified about them. The switch
+     * said offline; nothing else in the system agreed.
+     */
+    /** One-shot explanation for an action the app refused (e.g. going offline mid-job). */
+    var actionBlockedMessage by mutableStateOf<String?>(null)
+        private set
+    fun clearActionBlockedMessage() { actionBlockedMessage = null }
+
+    /** True while the worker is committed to a job — accepted through to in-service. */
+    val hasCommittedJob: Boolean
+        get() = activeJob != null && jobStatus in setOf(
+            JobStatus.ACCEPTED, JobStatus.ON_THE_WAY, JobStatus.ARRIVED, JobStatus.IN_PROGRESS,
+        )
+
+    fun goOnline(v: Boolean, pushState: Boolean = true) {
         if (v == isOnline) return
+        /* Going offline mid-job is refused. The customer is waiting on this worker and the job is
+         * already theirs; dropping availability underneath it would strand the booking and stop
+         * the live-position updates the customer's tracking screen reads. Finish or cancel first. */
+        if (!v && hasCommittedJob) {
+            actionBlockedMessage = "You're on a job — finish or cancel it before going offline."
+            return
+        }
         val now = System.currentTimeMillis()
         if (v) {
             onlineSinceMs = now
             startJobPolling()
+            startOfferWatch()   // offers are pushed — start listening the moment we go online
         } else {
             // Bank the just-finished online stretch into today's total.
             if (onlineSinceMs > 0) onlineAccumMs += now - onlineSinceMs
             onlineSinceMs = 0L
             hasIncomingJob = false
+            // Going offline gives back any offer still waiting on an answer. Leaving it held would
+            // keep an offer on screen for a worker who just said they aren't available, and would
+            // strand the booking on them until the window ran out instead of freeing it now.
+            if (jobStatus == JobStatus.REQUESTED) {
+                activeJob = null
+                jobStatus = JobStatus.NONE
+                offerRemainingSec = null
+                sync { api.rejectJob() }
+            }
         }
         isOnline = v
+        if (pushState) {
+            val state = if (v) "Available" else "Offline"
+            availabilityState = state
+            sync { runCatching { api.setStatus(com.homehelp.pro.network.StatusBody(state)) } }
+        }
     }
 
     // While online and idle, poll the backend for a real waiting booking. When one
@@ -835,6 +902,8 @@ class AppViewModel : ViewModel() {
                     activeJob = r.job
                     jobStatus = JobStatus.REQUESTED
                     hasIncomingJob = false
+                    offerRemainingSec = null   // the watch fills this from the server's clock
+                    startOfferWatch()
                     onResult(true)
                 } else {
                     hasIncomingJob = false
@@ -854,18 +923,117 @@ class AppViewModel : ViewModel() {
         private set
     val startWindowMinutes = 15
 
+    /* ---- Pending-offer watch -------------------------------------------------------------
+     * Seconds left on the offer, per the SERVER. Null while nothing is pending. The countdown
+     * used to be a local 2:00 started on screen entry, so it restarted whenever the worker
+     * revisited the screen and kept ticking on jobs that were already gone.
+     */
+    var offerRemainingSec by mutableStateOf<Int?>(null)
+        private set
+
+    /** Why the offer on screen disappeared, for a one-shot message. Cleared once shown. */
+    var offerLostReason by mutableStateOf<String?>(null)
+        private set
+
+    fun clearOfferLostReason() { offerLostReason = null }
+
+    private var offerWatchStarted = false
+
+    /** Drop the pending offer locally. [reason] non-null surfaces a message to the worker. */
+    private fun dropOffer(reason: String?) {
+        activeJob = null
+        jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
+        offerRemainingSec = null
+        hasIncomingJob = false
+        offerLostReason = reason
+    }
+
+    /* Poll the offer's validity while one is pending.
+     *
+     * Covers the two ways an offer dies that the app previously never noticed: the accept window
+     * running out, and another worker claiming the booking first. Without this the worker sat on a
+     * full timer for a job that was already someone else's, and found out only from a 409 when they
+     * tapped Accept.
+     */
+    private fun startOfferWatch() {
+        if (offerWatchStarted) return
+        offerWatchStarted = true
+        viewModelScope.launch {
+            while (true) {
+                // Poll while an offer is on screen, AND while online and idle — offers are PUSHED
+                // by the booking service now, so the app has to notice one arriving rather than
+                // only tracking one it asked for.
+                val watching = jobStatus == JobStatus.REQUESTED ||
+                    (isLoggedIn && isOnline && activeJob == null && jobStatus == JobStatus.NONE)
+                if (watching) {
+                    try {
+                        val r = api.offerStatus()
+                        backendConnected = true
+                        when (r.state) {
+                            "PENDING" -> {
+                                offerRemainingSec = r.remainingSec
+                                // A brand-new offer: adopt it and raise the accept/reject screen.
+                                if (jobStatus != JobStatus.REQUESTED && r.job != null) {
+                                    activeJob = r.job
+                                    jobStatus = JobStatus.REQUESTED
+                                    hasIncomingJob = false
+                                    incomingOfferSignal++
+                                }
+                            }
+                            "TAKEN" -> if (jobStatus == JobStatus.REQUESTED) dropOffer("This job was accepted by another expert.")
+                            "EXPIRED" -> if (jobStatus == JobStatus.REQUESTED) dropOffer("The 2-minute window passed, so this job went to another expert.")
+                            "NONE" -> if (jobStatus == JobStatus.REQUESTED) dropOffer(null)
+                        }
+                    } catch (e: Exception) {
+                        // Offline: leave the offer alone. The server holds the real deadline and
+                        // will refuse a late accept, so nothing is lost by not guessing here.
+                        backendConnected = false
+                    }
+                }
+                delay(2000)
+            }
+        }
+    }
+
+    /**
+     * Bumped each time a NEW offer arrives. AppRoot watches it to open the offer screen and start
+     * the ringtone — a counter rather than a flag so two offers in a row both register.
+     */
+    var incomingOfferSignal by mutableStateOf(0)
+        private set
+
     fun acceptJob() {
         jobStatus = JobStatus.ACCEPTED
         jobAcceptedAtMs = System.currentTimeMillis()
+        offerRemainingSec = null
         clearJobState()          // never inherit the previous job's ticks/photos/extras
-        sync { api.acceptJob() }
-        loadJobState()           // seeds the checklist for this job's services
+        // NOT fire-and-forget: the server can refuse (another worker won the race, or the window
+        // closed). Swallowing that left the worker on a job screen for a job they did not have.
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.acceptJob()
+                backendConnected = true
+                if (r.ok) {
+                    r.activeJob?.let { activeJob = it }
+                    loadJobState()   // seeds the checklist for this job's services
+                } else {
+                    dropOffer(r.error ?: "This job is no longer available.")
+                }
+            } catch (e: Exception) {
+                val lost = (e as? retrofit2.HttpException)?.code() == 409
+                if (lost) dropOffer("This job was taken by another expert.")
+                else { backendConnected = false; loadJobState() }
+            }
+        }
     }
 
     fun rejectJob() {
         activeJob = null
         jobStatus = JobStatus.NONE
         jobAcceptedAtMs = 0L
+        offerRemainingSec = null
         sync { api.rejectJob() }
     }
 
@@ -1346,6 +1514,21 @@ class AppViewModel : ViewModel() {
     private fun applyWorker(w: WorkerDto) {
         workerName = w.name
         if (w.status.isNotBlank()) workerStatus = w.status
+        /* Restore the online flag from the SERVER, which is the thing that decides whether jobs
+         * are offered. isOnline lives only in memory, so every relaunch (or an Android process
+         * kill of a backgrounded app) came back reading "You are Offline" while the backend still
+         * had the worker available — the app looked offline and dropped its polling for no reason.
+         * Set directly rather than through goOnline(): this is us catching UP to the server, not a
+         * change to report back to it. */
+        val serverOnline = w.availabilityState == "Available"
+        if (serverOnline != isOnline) {
+            isOnline = serverOnline
+            if (serverOnline) {
+                if (onlineSinceMs == 0L) onlineSinceMs = System.currentTimeMillis()
+                startJobPolling()
+                startOfferWatch()
+            }
+        }
         onboardingSubmittedAt = w.onboarding?.submittedAt
         workerPhone = w.phone
         workerEmail = w.email
@@ -1851,7 +2034,9 @@ class AppViewModel : ViewModel() {
     fun changeAvailabilityState(state: String) {
         availabilityState = state
         val online = state == "Available"
-        if (online != isOnline) goOnline(online)
+        // pushState=false: this function sends the real state below. Letting goOnline push too
+        // would turn "Break" into "Offline" in a second, racing write.
+        if (online != isOnline) goOnline(online, pushState = false)
         sync { runCatching { api.setStatus(com.homehelp.pro.network.StatusBody(state)) } }
     }
 

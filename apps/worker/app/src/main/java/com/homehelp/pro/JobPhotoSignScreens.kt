@@ -542,7 +542,11 @@ fun BeforePhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScre
     notesPlaceholder = "Any special instructions or observations before starting…",
     footerNote = "Please capture all required photos before starting the service. You can't edit photos after starting.",
     ctaLabel = "Continue to Work in Progress",
-    onContinue = { nav.navigate(Routes.IN_PROGRESS) { popUpTo(Routes.BEFORE_PHOTOS) { inclusive = true } } },
+    /* Clear the whole pre-service chain, not just this screen. Popping only BEFORE_PHOTOS left the
+     * OTP screen sitting underneath, so Back out of a running service landed the worker on "enter
+     * the customer's code" for a job they had already started. Back now goes to Home, which shows
+     * the service in progress. */
+    onContinue = { nav.navigate(Routes.IN_PROGRESS) { popUpTo(Routes.HOME) { inclusive = false } } },
 )
 
 /** STEP 7 — After Photos (module 17). */

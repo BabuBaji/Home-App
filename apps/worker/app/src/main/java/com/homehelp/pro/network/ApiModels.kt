@@ -560,6 +560,25 @@ data class CurrentJobResponse(
     val service: String = "",
 )
 
+/**
+ * Server's verdict on the offer currently on screen.
+ *
+ * [state] is `PENDING` while it can still be accepted, `EXPIRED` once the accept window ran out,
+ * `TAKEN` when another worker claimed the booking first, and `NONE` when there is no offer at all.
+ * Anything other than PENDING means the offer screen must come down.
+ *
+ * [remainingSec] is the authority for the countdown — the app used to start its own 2:00 timer on
+ * screen entry, which restarted on every revisit and kept running against a job already gone.
+ */
+data class OfferStatusResponse(
+    val ok: Boolean = true,
+    val state: String = "NONE",
+    val bookingId: Int? = null,
+    val remainingSec: Int = 0,
+    /** The offered booking. Present on PENDING, since offers are pushed rather than pulled. */
+    val job: Job? = null,
+)
+
 data class MessageBody(val text: String)
 
 data class JobMessage(
