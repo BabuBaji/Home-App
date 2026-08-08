@@ -44,6 +44,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountBalance
@@ -62,21 +65,47 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Sms
-import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Kitchen
+import androidx.compose.material.icons.filled.LocalLaundryService
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Handyman
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Bathtub
+import androidx.compose.material.icons.filled.Iron
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Weekend
+import androidx.compose.material.icons.filled.Window
+import androidx.compose.material.icons.filled.Plumbing
+import androidx.compose.material.icons.filled.ElectricalServices
+import androidx.compose.material.icons.filled.FormatPaint
+import androidx.compose.material.icons.filled.Carpenter
+import androidx.compose.material.icons.filled.PestControl
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.LocalCarWash
+import androidx.compose.material.icons.filled.Grass
+import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Bed
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Sanitizer
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.WorkOutline
@@ -327,10 +356,11 @@ private fun ToggleRow(
     subtitle: String? = null,
     checked: Boolean,
     trackColor: Color = Purple,
+    chipSize: Int = 38,
     onChange: (Boolean) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-        IconChip(icon, tint, bg)
+        IconChip(icon, tint, bg, chipSize)
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
             Text(label, color = TextDark, fontWeight = FontWeight.Medium, fontSize = 14.sp)
@@ -561,81 +591,102 @@ fun SkillsScreen(vm: AppViewModel, nav: NavHostController) {
         vm.skills.forEach { (svc, s) -> claims[svc] = SkillClaim(s.level, s.years) }
     }
 
-    DetailScaffold("Skills & Services", nav) {
-        Card(padding = Dp16.S) {
-            Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                IconChip(Icons.Filled.Info, Purple, PurpleLight)
+    val approved = vm.skills.values.count { it.status == "Approved" }
+    val inReview = vm.skills.values.count { it.status == "Pending" }
+
+    WhiteDetailScaffold("Skills & Services", nav) {
+        // ── Summary hero: icon + intro + Approved / In-review / Selected counts ──
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(20.dp)).padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(46.dp).clip(RoundedCornerShape(13.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.WorkspacePremium, contentDescription = null, tint = Purple, modifier = Modifier.size(24.dp))
+                }
                 Spacer(Modifier.width(Space.m))
-                Text(
-                    "Pick the services you can do and your level. An admin reviews each one — you'll only be sent jobs for skills they approve.",
-                    fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
-                )
+                Column(Modifier.weight(1f)) {
+                    Text("Your Skills", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text("Add the services you can do and your level — an admin reviews each one, and you're only sent jobs for approved skills.", color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KycCountPill(Modifier.weight(1f), "$approved", "Approved", GreenSuccess, GreenLight)
+                KycCountPill(Modifier.weight(1f), "$inReview", "In review", Amber, GoldLight)
+                KycCountPill(Modifier.weight(1f), "${claims.size}", "Selected", Purple, PurpleLight)
             }
         }
 
-        vm.serviceCatalogue.forEach { svc ->
-            val claim = claims[svc]
-            val saved = vm.skills[svc]
-            val picked = claim != null
-            Card {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = picked, onCheckedChange = { on ->
-                        if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
-                        else claims.remove(svc)
-                    })
-                    Text(svc, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-                    // The status of the CLAIM — what the admin decided, not what the worker typed.
-                    when (saved?.status) {
-                        "Approved" -> StatusPill("Approved", GreenLight, GreenSuccess)
-                        "Rejected" -> StatusPill("Rejected", RedLight, RedCancel)
-                        "Pending" -> StatusPill("In review", GoldLight, Amber)
-                        else -> {}
-                    }
-                }
-                if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
-                    Spacer(Modifier.height(Space.xs))
-                    Text("Not approved: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
-                }
-                if (picked) {
-                    Spacer(Modifier.height(Space.s))
-                    HairlineDivider()
-                    Spacer(Modifier.height(Space.s))
-                    Text("Your level", fontSize = 12.sp, color = TextGray)
-                    Spacer(Modifier.height(Space.xs))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        vm.skillLevels.forEach { lvl ->
-                            val on = claim?.level == lvl
-                            Text(
-                                lvl, fontSize = 12.5.sp,
-                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (on) Purple else TextGray,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(Radius.field))
-                                    .background(if (on) PurpleLight else FieldFill)
-                                    .clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }
-                                    .padding(horizontal = Space.m, vertical = Space.s),
-                            )
+        Text("Select your services", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+
+        // One grouped card with hairline-separated compact rows — far less scrolling than a card
+        // per service. A row expands inline to its level / experience / certificate controls.
+        Card(padding = Dp16.XS) {
+            vm.serviceCatalogue.forEachIndexed { i, svc ->
+                val claim = claims[svc]
+                val saved = vm.skills[svc]
+                val picked = claim != null
+                val (icon, tint) = prefStyle(svc)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconChip(icon, tint, tint.copy(alpha = 0.14f), 36)
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(svc, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        when (saved?.status) {
+                            "Approved" -> Text("Approved by admin", color = GreenSuccess, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            "Rejected" -> Text("Not approved — resubmit", color = RedCancel, fontSize = 11.sp, maxLines = 1)
+                            "Pending" -> Text("In review", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            else -> {}
                         }
                     }
-                    Spacer(Modifier.height(Space.m))
-                    Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
-                        claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
-                    }
-                    Spacer(Modifier.height(Space.s))
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
-                            .clickable { certFor = svc; certPicker.launch("*/*") }.padding(Space.m),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.CheckCircle, null, tint = if (saved?.certificate != null) GreenSuccess else TextMuted, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(Space.s))
-                        Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 13.sp, color = TextDark)
-                    }
-                    if (saved?.status == "Approved") {
-                        Spacer(Modifier.height(Space.xs))
-                        Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                    Spacer(Modifier.width(Space.s))
+                    Switch(
+                        checked = picked,
+                        onCheckedChange = { on ->
+                            if (on) claims[svc] = SkillClaim(vm.skillLevels.firstOrNull() ?: "Beginner", "")
+                            else claims.remove(svc)
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Purple),
+                    )
+                }
+                if (picked) {
+                    Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 2.dp, bottom = 10.dp)) {
+                        if (saved?.status == "Rejected" && saved.reason.isNotBlank()) {
+                            Text("Reason: ${saved.reason}", fontSize = 12.sp, color = RedCancel)
+                            Spacer(Modifier.height(Space.s))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            vm.skillLevels.forEach { lvl ->
+                                val on = claim?.level == lvl
+                                Box(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(Radius.button)).background(if (on) Purple else FieldFill).clickable { claims[svc] = SkillClaim(lvl, claim?.years ?: "") }.padding(vertical = 9.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text(lvl, color = if (on) Color.White else TextDark, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, maxLines = 1) }
+                            }
+                        }
+                        Spacer(Modifier.height(Space.s))
+                        Field("Years of experience", claim?.years ?: "", KeyboardType.Number) {
+                            claims[svc] = SkillClaim(claim?.level ?: "Beginner", it.filter(Char::isDigit).take(2))
+                        }
+                        Spacer(Modifier.height(Space.s))
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(FieldFill)
+                                .clickable { certFor = svc; certPicker.launch("*/*") }.padding(horizontal = Space.m, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(if (saved?.certificate != null) Icons.Filled.CheckCircle else Icons.Filled.CloudUpload, null, tint = if (saved?.certificate != null) GreenSuccess else Purple, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(Space.s))
+                            Text(saved?.certificate?.fileName ?: "Attach a certificate (optional)", fontSize = 12.5.sp, color = TextDark, modifier = Modifier.weight(1f), maxLines = 1)
+                            if (saved?.certificate == null) Text("Upload", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (saved?.status == "Approved") {
+                            Spacer(Modifier.height(Space.xs))
+                            Text("Changing this sends it back for review.", fontSize = 11.sp, color = TextGray)
+                        }
                     }
                 }
+                if (i < vm.serviceCatalogue.lastIndex) HairlineDivider()
             }
         }
 
@@ -736,7 +787,6 @@ fun DocumentsScreen(vm: AppViewModel, nav: NavHostController) {
 
         // One rich card per document.
         vm.documents.forEach { doc ->
-            val hasFile = doc.fileName.isNotBlank()
             val isRequired = vm.documentRequired[doc.name] != false
             val uploading = vm.uploadingDoc == doc.name
             KycDocCard(
@@ -1114,7 +1164,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     rowItems.forEach { s ->
                         val selected = vm.shiftStart == s.start && vm.shiftEnd == s.end
-                        ShiftChip(s.label, "${s.start} – ${s.end}", selected, Modifier.weight(1f)) {
+                        ShiftChip(s.label, "${fmt12h(s.start)} – ${fmt12h(s.end)}", selected, Modifier.weight(1f)) {
                             vm.shiftStart = s.start; vm.shiftEnd = s.end
                         }
                     }
@@ -1124,7 +1174,7 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             }
             val shiftSet = vm.shiftStart.isNotBlank() && vm.shiftEnd.isNotBlank()
             HairlineDivider()
-            LabeledRow("Selected", if (shiftSet) "$shiftType • ${vm.shiftStart} – ${vm.shiftEnd}" else "Not set")
+            LabeledRow("Selected", if (shiftSet) "$shiftType • ${fmt12h(vm.shiftStart)} – ${fmt12h(vm.shiftEnd)}" else "Not set")
         }
 
         // The one preference that binds: past this, no more jobs are offered until the worker
@@ -1156,20 +1206,31 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
 private data class ShiftPreset(val label: String, val start: String, val end: String)
 
 // Full-time shifts (longer windows) vs part-time 4-hour slots. The worker first picks a
-// type, then a slot within it.
+// type, then a slot within it. Times are stored as 24-hour HH:MM — the format the backend
+// validates and stores — and only formatted to 12-hour for display via [fmt12h].
 private val FULL_TIME_SHIFTS = listOf(
-    ShiftPreset("Morning", "06:00 AM", "02:00 PM"),
-    ShiftPreset("Day", "08:00 AM", "08:00 PM"),
-    ShiftPreset("Evening", "02:00 PM", "10:00 PM"),
-    ShiftPreset("Full Day", "05:00 AM", "10:00 PM"),
+    ShiftPreset("Morning", "06:00", "14:00"),
+    ShiftPreset("Day", "08:00", "20:00"),
+    ShiftPreset("Evening", "14:00", "22:00"),
+    ShiftPreset("Full Day", "05:00", "22:00"),
 )
 
 private val PART_TIME_SHIFTS = listOf(
-    ShiftPreset("Early", "06:00 AM", "10:00 AM"),
-    ShiftPreset("Midday", "10:00 AM", "02:00 PM"),
-    ShiftPreset("Afternoon", "02:00 PM", "06:00 PM"),
-    ShiftPreset("Evening", "06:00 PM", "10:00 PM"),
+    ShiftPreset("Early", "06:00", "10:00"),
+    ShiftPreset("Midday", "10:00", "14:00"),
+    ShiftPreset("Afternoon", "14:00", "18:00"),
+    ShiftPreset("Evening", "18:00", "22:00"),
 )
+
+/** Format a 24-hour "HH:MM" as a friendly 12-hour "6:00 AM"; passes anything unexpected through. */
+private fun fmt12h(hhmm: String): String {
+    val m = Regex("^(\\d{1,2}):(\\d{2})").find(hhmm.trim()) ?: return hhmm
+    val h = m.groupValues[1].toIntOrNull() ?: return hhmm
+    val min = m.groupValues[2]
+    val ap = if (h < 12) "AM" else "PM"
+    val h12 = ((h + 11) % 12) + 1
+    return "$h12:$min $ap"
+}
 
 // Performance & Incentives — all figures are real (from the worker's own activity/earnings).
 @Composable
@@ -1199,34 +1260,46 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
     val onTime = d.onTime
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // ── White header: back · title · info ──
+        // ── White header: menu box · title · info ──
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 10.dp),
+            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+            Box(
+                Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, Divider, RoundedCornerShape(12.dp))
+                    .clickable { nav.popBackStack() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(20.dp))
             }
-            Text("Performance Overview", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(32.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Performance Overview", color = TextDark, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.size(34.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
             }
         }
 
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.m),
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            // ── Rating + period chip ──
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                PerfPeriodChip(period) { period = it }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("%.1f".format(rating), color = TextDark, fontSize = 44.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.5).sp)
-                Spacer(Modifier.width(10.dp))
-                RatingStars(rating)
-                Spacer(Modifier.width(8.dp))
-                Text("($ratingCount Ratings)", color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            // ── Hero rating card: big rating on the left, period chip on the right ──
+            Surface(
+                Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color.White,
+                shadowElevation = 3.dp, border = BorderStroke(1.dp, Divider),
+            ) {
+                Row(Modifier.padding(horizontal = 22.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("%.1f".format(rating), color = Purple, fontSize = 48.sp, fontWeight = FontWeight.Bold, letterSpacing = (-2).sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Overall Rating", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(2.dp))
+                        Text("($ratingCount Ratings)", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                    Box(Modifier.width(1.dp).height(62.dp).background(Divider))
+                    Spacer(Modifier.width(16.dp))
+                    PerfPeriodChip(period) { period = it }
+                }
             }
 
             // ── 6 stat cards (2 × 3) ──
@@ -1236,16 +1309,20 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
                 PerfStatCard(Modifier.weight(1f), "Completion Rate", Icons.Filled.Flag, Color(0xFF3B82F6), Color(0xFFE8F0FE), "$complete%", null, "Completed Jobs")
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                PerfStatCard(Modifier.weight(1f), "Response Time", Icons.Filled.Close, Color(0xFFF97316), Color(0xFFFFF0E6), "${d.avgResp}", "mins", "Avg. Response")
-                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.AutoMirrored.Filled.TrendingDown, Color(0xFFEF4444), Color(0xFFFDE8E8), "$cancelPct%", null, "Cancelled Jobs")
+                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.Filled.Close, Color(0xFFF97316), Color(0xFFFFF0E6), "${d.avgResp}", "mins", "Avg. Cancellation Time")
+                PerfStatCard(Modifier.weight(1f), "Cancellation Rate", Icons.AutoMirrored.Filled.TrendingDown, Color(0xFFEC4899), Color(0xFFFCE7F3), "$cancelPct%", null, "Cancelled Jobs")
                 PerfStatCard(Modifier.weight(1f), "On-Time Rate", Icons.Filled.Schedule, Color(0xFF14B8A6), Color(0xFFDCF5F1), "$onTime%", null, "On-Time Jobs")
             }
 
-            // ── Rank in Zone banner with mountain illustration ──
+            // ── Rank in Zone banner ──
             RankInZoneCard(rank = d.rank, tier = d.tier)
 
-            // ── Footer note ──
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            // ── Footer note pill ──
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF3F0FF))
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(Modifier.size(22.dp).clip(CircleShape).border(1.2.dp, Purple, CircleShape), contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
                 }
@@ -1343,82 +1420,76 @@ private fun perfDataFor(
     )
 }
 
-/** One white metric card: title on top, tinted circular icon, big value (+optional unit), caption. */
+/** One white metric card: tinted square icon on top, title, big coloured value (+optional unit),
+ *  caption, and a colour-matched underline bar along the bottom edge. */
 @Composable
 private fun PerfStatCard(
     modifier: Modifier, title: String, icon: ImageVector, tint: Color, bg: Color,
     value: String, unit: String?, caption: String,
 ) {
     Surface(
-        modifier = modifier.height(140.dp),
+        modifier = modifier.height(168.dp),
         shape = RoundedCornerShape(18.dp),
         color = Color.White,
         shadowElevation = 3.dp,
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(vertical = 12.dp, horizontal = 5.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(title, color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 14.sp, maxLines = 2)
-            Box(Modifier.size(42.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp, start = 4.dp, end = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(bg), contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                // Reserve two lines for the title so every card's value/caption line up across the row.
+                Text(title, color = TextDark, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 13.sp, minLines = 2, maxLines = 2)
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                    // Never wrap the headline figure — a narrow card must still show "100%" on one line.
+                    Text(value, color = tint, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, maxLines = 1, softWrap = false)
                     if (unit != null) {
                         Spacer(Modifier.width(2.dp))
-                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 3.dp))
+                        Text(unit, color = TextGray, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false, modifier = Modifier.padding(bottom = 3.dp))
                     }
                 }
-                Spacer(Modifier.height(1.dp))
-                Text(caption, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1)
+                Spacer(Modifier.height(2.dp))
+                Text(caption, color = TextGray, fontSize = 9.5.sp, textAlign = TextAlign.Center, lineHeight = 12.sp, maxLines = 2)
             }
+            // Colour-matched accent underline near the bottom edge.
+            Box(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 12.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(tint))
         }
     }
 }
 
-/** "Rank in Zone" card — lavender gradient with a purple mountain range + summit flag on the right. */
+/** "Rank in Zone" card — white surface with a purple chart badge on the left, the rank/tier in the
+ *  middle, and a large pale-lavender growth-chart medallion on the right. */
 @Composable
 private fun RankInZoneCard(rank: String, tier: String) {
-    Box(
-        Modifier.fillMaxWidth().height(128.dp).clip(RoundedCornerShape(20.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFFF3F0FF), Color(0xFFE9E3FF)))),
+    Surface(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color.White,
+        shadowElevation = 3.dp, border = BorderStroke(1.dp, Divider),
     ) {
-        // Mountain illustration (right ~60%).
-        Canvas(Modifier.fillMaxSize()) {
-            val w = size.width; val h = size.height
-            fun mountain(cx: Float, halfW: Float, peakY: Float, color: Color) {
-                val p = Path().apply {
-                    moveTo(cx - halfW, h); lineTo(cx, peakY); lineTo(cx + halfW, h); close()
-                }
-                drawPath(p, color)
+        Row(
+            Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Left: solid purple circle with a white line-chart glyph.
+            Box(Modifier.size(56.dp).clip(CircleShape).background(Purple), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ShowChart, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
             }
-            // Layered ranges, back (lighter) to front (deeper purple).
-            mountain(w * 0.68f, w * 0.30f, h * 0.42f, Color(0xFFC9BEF5).copy(alpha = 0.55f))
-            mountain(w * 0.95f, w * 0.28f, h * 0.30f, Color(0xFFBBAEF2).copy(alpha = 0.65f))
-            mountain(w * 0.82f, w * 0.24f, h * 0.14f, Color(0xFF8B72E8))
-            // Summit flag on the tallest (front) peak.
-            val peakX = w * 0.82f; val peakY = h * 0.14f
-            drawLine(Color(0xFF5B3FD6), Offset(peakX, peakY), Offset(peakX, peakY - h * 0.16f), strokeWidth = 3f)
-            val flag = Path().apply {
-                moveTo(peakX, peakY - h * 0.16f)
-                lineTo(peakX + w * 0.06f, peakY - h * 0.125f)
-                lineTo(peakX, peakY - h * 0.09f); close()
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Rank in Zone", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(rank, color = Purple, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                Spacer(Modifier.height(1.dp))
+                Text(tier, color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             }
-            drawPath(flag, Color(0xFF5B3FD6))
-            // A couple of sparkles.
-            drawCircle(Color.White.copy(alpha = 0.9f), radius = 3f, center = Offset(w * 0.55f, h * 0.30f))
-            drawCircle(Color.White.copy(alpha = 0.7f), radius = 2f, center = Offset(w * 0.60f, h * 0.22f))
-        }
-        // Text overlay on the left.
-        Column(Modifier.padding(18.dp)) {
-            Text("Rank in Zone", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(rank, color = Purple, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-            Spacer(Modifier.height(1.dp))
-            Text(tier, color = TextGray, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            // Right: large pale-lavender medallion with a purple bar-chart glyph.
+            Box(Modifier.size(72.dp).clip(CircleShape).background(Color(0xFFEDE8FB)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.BarChart, contentDescription = null, tint = Purple, modifier = Modifier.size(38.dp))
+            }
         }
     }
 }
@@ -1457,7 +1528,7 @@ fun LeaveScreen(vm: AppViewModel, nav: NavHostController) {
     var to by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    DetailScaffold("Leave", nav) {
+    WhiteDetailScaffold("Request Time Off", nav) {
         Card {
             SectionLabel("Request Leave")
             Spacer(Modifier.height(Space.m))
@@ -1531,7 +1602,19 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         } else null to null
     } catch (_: Exception) { null to null }
 
-    DetailScaffold("Attendance", nav) {
+    // White scaffold, not the violet gradient one: attendance is a utility screen the worker
+    // opens to do one thing, and a 200dp brand header pushed that one thing below the fold.
+    WhiteDetailScaffold("Attendance", nav) {
+        // ── Hero: status, today's times, and the primary action ─────────────────────────
+        // Check In / Check Out used to sit at the very bottom, under the shift picker, the
+        // availability grid and a location notice — a worker arriving for their shift had to
+        // scroll past four cards to do the only thing they came here for. It now leads.
+        AttendanceHeroCard(
+            att = att,
+            onCheckIn = { val (la, ln) = lastLoc(); vm.checkIn(la, ln) { toast(ctx, "Checked in ✓") } },
+            onCheckOut = { val (la, ln) = lastLoc(); vm.checkOut(la, ln) { toast(ctx, "Checked out ✓") } },
+        )
+
         // ── Shift plan picker (min-guarantee model) ──
         Card {
             SectionLabel("Your Shift Plan")
@@ -1571,53 +1654,33 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
 
-        // ── Today's attendance status (judged against the chosen shift) ──
+        // ── This month at a glance ── status and today's times now live in the hero, so this
+        // card carries only what the hero doesn't: the running month totals.
         Card {
-            val (dot, label) = when {
-                att.checkedOut -> GreenSuccess to "Checked Out"
-                att.checkedIn -> GreenSuccess to "Checked In · Working"
-                else -> TextMuted to "Not Checked In"
+            SectionLabel("This Month")
+            Spacer(Modifier.height(Space.s))
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                AttendanceStat(
+                    Modifier.weight(1f),
+                    "${att.attendedThisMonth}",
+                    if (att.attendedThisMonth == 1) "day attended" else "days attended",
+                    Purple,
+                )
+                Box(Modifier.padding(horizontal = Space.s).width(1.dp).fillMaxHeight().background(Divider))
+                AttendanceStat(
+                    Modifier.weight(1f),
+                    if (att.minGuarantee > 0) "₹${att.minGuarantee}" else "—",
+                    "min. guarantee",
+                    GreenSuccess,
+                )
+                Box(Modifier.padding(horizontal = Space.s).width(1.dp).fillMaxHeight().background(Divider))
+                AttendanceStat(
+                    Modifier.weight(1f),
+                    if (att.shiftName.isNotBlank()) att.shiftName else "—",
+                    "your shift",
+                    TextDark,
+                )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconChip(Icons.Filled.AccessTime, dot, if (att.checkedIn || att.checkedOut) GreenLight else FieldFill)
-                Spacer(Modifier.width(Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
-                    Text(
-                        if (att.shiftName.isNotBlank()) "${att.shiftName} shift · ${att.shiftStart}–${att.shiftEnd}" else "Choose a shift plan above",
-                        fontSize = 12.sp, color = TextGray,
-                    )
-                }
-                Box(Modifier.size(12.dp).background(dot, RoundedCornerShape(Radius.pill)))
-            }
-            // On-time / late banner once the worker has checked in.
-            if (att.checkedIn && att.shiftName.isNotBlank()) {
-                Spacer(Modifier.height(Space.m))
-                val onTime = att.onTime
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
-                        .background(if (onTime) GreenLight else RedLight).padding(Space.m),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (onTime) Icons.Filled.CheckCircle else Icons.Filled.Close,
-                        contentDescription = null,
-                        tint = if (onTime) GreenSuccess else RedCancel,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(Space.s))
-                    Text(
-                        if (onTime) "On time — no penalty" else "Late by ${att.lateMinutes} min · −₹${att.penalty} deducted",
-                        color = if (onTime) GreenSuccess else RedCancel, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                    )
-                }
-            }
-            Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.s))
-            LabeledRow("Check-in time", att.checkInAt.ifBlank { "—" })
-            LabeledRow("Check-out time", att.checkOutAt.ifBlank { "—" })
-            LabeledRow("Shift", if (att.shiftName.isNotBlank()) "${att.shiftName} · ${att.shiftStart}–${att.shiftEnd}" else "Not set")
-            if (att.minGuarantee > 0) LabeledRow("Minimum guarantee", "₹${att.minGuarantee}", GreenSuccess)
-            LabeledRow("Days attended this month", "${att.attendedThisMonth} ${if (att.attendedThisMonth == 1) "day" else "days"}", Purple)
         }
         // ── Assigned apartment (geofence): must stay within the radius during the shift ──
         if (att.siteName.isNotBlank()) {
@@ -1687,19 +1750,111 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
                 modifier = Modifier.clickable { nav.navigate(Routes.LEAVE) }.padding(top = Space.xs),
             )
         }
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(PurpleLight).padding(Space.m),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("📍", fontSize = 16.sp)
-            Spacer(Modifier.width(Space.s))
-            Text("Your location is captured at check-in / check-out for verification.", fontSize = 12.sp, color = TextDark, lineHeight = 16.sp)
+        // Privacy notice: a plain caption, not a tinted banner. It is a disclosure, not an
+        // action, and as a filled violet block it competed with the things that are.
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.LocationOn, contentDescription = null, tint = TextMuted, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Your location is captured at check-in and check-out for verification.",
+                fontSize = 11.5.sp, color = TextMuted, lineHeight = 15.sp,
+            )
         }
+        Spacer(Modifier.height(Space.xs))
+    }
+}
+
+/** One figure in the attendance "This Month" row — value first, label under it. */
+@Composable
+private fun AttendanceStat(modifier: Modifier, value: String, label: String, valueColor: Color) {
+    Column(modifier.padding(horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = valueColor, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = TextGray, fontSize = 12.sp, maxLines = 1, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * The attendance hero — status, today's check-in/out pair, and the primary action in one card.
+ *
+ * Everything a worker needs on arrival is above the fold here: what state they're in, whether
+ * they were on time, and the single button that changes it. The screen's other cards (shift
+ * plan, geofence, availability) are all things they set up occasionally, not daily.
+ */
+@Composable
+private fun AttendanceHeroCard(
+    att: com.homehelp.pro.network.AttendanceDto,
+    onCheckIn: () -> Unit,
+    onCheckOut: () -> Unit,
+) {
+    val (accent, tint, label) = when {
+        att.checkedOut -> Triple(GreenSuccess, GreenLight, "Shift complete")
+        att.checkedIn -> Triple(GreenSuccess, GreenLight, "Checked in · Working")
+        else -> Triple(TextMuted, FieldFill, "Not checked in")
+    }
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconChip(Icons.Filled.AccessTime, accent, tint, size = 44)
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 19.sp)
+                Text(
+                    if (att.shiftName.isNotBlank()) "${att.shiftName} shift · ${att.shiftStart}–${att.shiftEnd}"
+                    else "Pick a shift plan below to get started",
+                    fontSize = 13.sp, color = TextGray,
+                )
+            }
+        }
+
+        // On-time / late verdict, once there is one to give.
+        if (att.checkedIn && att.shiftName.isNotBlank()) {
+            Spacer(Modifier.height(Space.m))
+            val onTime = att.onTime
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
+                    .background(if (onTime) GreenLight else RedLight).padding(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (onTime) Icons.Filled.CheckCircle else Icons.Filled.Close,
+                    contentDescription = null,
+                    tint = if (onTime) GreenSuccess else RedCancel,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(Space.s))
+                Text(
+                    if (onTime) "On time — no penalty" else "Late by ${att.lateMinutes} min · −₹${att.penalty} deducted",
+                    color = if (onTime) GreenSuccess else RedCancel, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(Space.l))
+        // Today's two timestamps, side by side and large — the previous label-and-value rows
+        // gave "Check-in time" the same visual weight as the time itself.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            AttendanceStat(
+                Modifier.weight(1f),
+                att.checkInAt.ifBlank { "—" },
+                "checked in",
+                if (att.checkedIn) GreenSuccess else TextMuted,
+            )
+            Box(Modifier.padding(horizontal = Space.s).width(1.dp).fillMaxHeight().background(Divider))
+            AttendanceStat(
+                Modifier.weight(1f),
+                att.checkOutAt.ifBlank { "—" },
+                "checked out",
+                if (att.checkedOut) GreenSuccess else TextMuted,
+            )
+        }
+
+        Spacer(Modifier.height(Space.l))
         when {
-            !att.checkedIn -> PrimaryButton("Check In") { val (la, ln) = lastLoc(); vm.checkIn(la, ln) { toast(ctx, "Checked in ✓") } }
-            !att.checkedOut -> PrimaryButton("Check Out") { val (la, ln) = lastLoc(); vm.checkOut(la, ln) { toast(ctx, "Checked out ✓") } }
+            !att.checkedIn -> PrimaryButton("Check In", onClick = onCheckIn)
+            !att.checkedOut -> PrimaryButton("Check Out", onClick = onCheckOut)
             else -> Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(GreenLight).padding(Space.l),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field))
+                    .background(GreenLight).padding(Space.l),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
@@ -1777,36 +1932,95 @@ private fun ShiftChip(title: String, subtitle: String, selected: Boolean, modifi
 @Composable
 fun PreferencesScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    DetailScaffold("Preferences", nav) {
+    WhiteDetailScaffold("Preferences", nav) {
+        val services = vm.jobPreferences.keys.toList()
+        val enabled = vm.jobPreferences.count { it.value }
+        val allOn = services.isNotEmpty() && enabled == services.size
+
+        Text(
+            "Choose the jobs you'd like to be offered. We'll only send you the services you switch on.",
+            color = TextGray, fontSize = 13.sp, lineHeight = 18.sp,
+        )
+
+        // Master "all job types" toggle + live count.
         Card {
-            SectionLabel("Job types you want to receive")
-            Spacer(Modifier.height(Space.s))
-            val services = vm.jobPreferences.keys.toList()
-            services.forEachIndexed { i, service ->
-                val on = vm.jobPreferences[service] ?: false
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { vm.jobPreferences[service] = !on }
-                        .padding(vertical = Space.s),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconChip(Icons.Filled.WorkOutline, if (on) Purple else TextMuted, if (on) PurpleLight else FieldFill)
-                    Spacer(Modifier.width(Space.m))
-                    Text(service, color = TextDark, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    Checkbox(
-                        checked = on,
-                        onCheckedChange = { vm.jobPreferences[service] = it },
-                        colors = CheckboxDefaults.colors(checkedColor = Purple),
-                    )
+            ToggleRow(
+                Icons.Filled.Tune, Purple, PurpleLight,
+                "All Job Types", "$enabled of ${services.size} enabled",
+                checked = allOn, chipSize = 44,
+            ) { on -> services.forEach { vm.jobPreferences[it] = on } }
+        }
+
+        if (services.isEmpty()) {
+            Card { EmptyState("🧰", "No job types yet", "Your job preferences will appear here once your services are set.") }
+        } else {
+            Card {
+                SectionLabel("Job types you want to receive")
+                Spacer(Modifier.height(Space.s))
+                services.forEachIndexed { i, service ->
+                    val on = vm.jobPreferences[service] ?: false
+                    val (icon, tint) = prefStyle(service)
+                    ToggleRow(
+                        icon, tint, tint.copy(alpha = 0.14f),
+                        service, if (on) "Receiving these jobs" else "Turned off",
+                        checked = on, chipSize = 44,
+                    ) { vm.jobPreferences[service] = it }
+                    if (i < services.lastIndex) HairlineDivider()
                 }
-                if (i < services.lastIndex) HairlineDivider()
             }
         }
+
         PrimaryButton("Save Preferences") {
             vm.savePreferences()
             val n = vm.jobPreferences.count { it.value }
             toast(ctx, "Preferences saved • $n job types enabled")
         }
+    }
+}
+
+/** Pick a distinct, relevant icon AND a professional accent colour for a job/service name. Order
+ *  matters — specific keywords match before broad ones ("utensil wash" → dishes not laundry;
+ *  "car wash" → car not laundry). The chip background is derived as a soft tint of this colour. */
+private fun prefStyle(service: String): Pair<ImageVector, Color> {
+    val s = service.lowercase()
+    return when {
+        // Kitchen & dishes
+        "utensil" in s || "dish" in s || "cutlery" in s || "cook" in s -> Icons.Filled.Restaurant to Color(0xFFF97316) // orange
+        "kitchen" in s -> Icons.Filled.Kitchen to Color(0xFFEF4444) // red
+        // Bathroom
+        "bathroom" in s || "toilet" in s || "shower" in s || "washroom" in s -> Icons.Filled.Bathtub to Color(0xFF0EA5E9) // sky
+        // Carpet / car (before the generic "wash" laundry rule)
+        "carpet" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
+        "car wash" in s || "vehicle" in s -> Icons.Filled.LocalCarWash to Color(0xFF06B6D4) // cyan
+        // Clothes / laundry
+        "iron" in s -> Icons.Filled.Iron to Color(0xFF8B5CF6) // violet
+        "laundry" in s || "cloth" in s || "wash" in s || "dry clean" in s -> Icons.Filled.LocalLaundryService to Color(0xFF6366F1) // indigo
+        // Floor & surface cleaning
+        "mop" in s || "sweep" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
+        "dust" in s -> Icons.Filled.AutoAwesome to Color(0xFFF59E0B) // amber
+        "sofa" in s || "upholst" in s -> Icons.Filled.Weekend to Color(0xFF8B5CF6) // violet
+        "window" in s || "glass" in s -> Icons.Filled.Window to Color(0xFF06B6D4) // cyan
+        // Trades
+        "plumb" in s -> Icons.Filled.Plumbing to Color(0xFF3B82F6) // blue
+        "electric" in s || "wiring" in s -> Icons.Filled.ElectricalServices to Color(0xFFF59E0B) // amber
+        "paint" in s -> Icons.Filled.FormatPaint to Color(0xFFEC4899) // pink
+        "carpen" in s || "furniture" in s -> Icons.Filled.Carpenter to Color(0xFFB45309) // brown
+        "pest" in s -> Icons.Filled.PestControl to Color(0xFF16A34A) // green
+        "air cond" in s || "a/c" in s || "hvac" in s -> Icons.Filled.AcUnit to Color(0xFF06B6D4) // cyan
+        "garden" in s || "lawn" in s || "plant" in s -> Icons.Filled.Grass to Color(0xFF22C55E) // green
+        "baby" in s || "child" in s || "elder" in s || "nanny" in s || "care" in s -> Icons.Filled.ChildCare to Color(0xFFEC4899) // pink
+        "repair" in s || "fix" in s || "handy" in s -> Icons.Filled.Handyman to Color(0xFF64748B) // slate
+        // Appliances, rooms & specialty services (checked before the broad home/clean fallbacks)
+        "fan" in s -> Icons.Filled.Air to Color(0xFF06B6D4) // cyan
+        "refriger" in s || "fridge" in s -> Icons.Filled.Kitchen to Color(0xFFEF4444) // red
+        "bed" in s || "mattress" in s -> Icons.Filled.Bed to Color(0xFF8B5CF6) // violet
+        "garbage" in s || "trash" in s || "waste" in s || "disposal" in s -> Icons.Filled.Delete to Color(0xFF64748B) // slate
+        "saniti" in s || "disinfect" in s || "sanitation" in s -> Icons.Filled.Sanitizer to Color(0xFF16A34A) // green
+        "organiz" in s || "organis" in s -> Icons.Filled.Inventory2 to Color(0xFF3B82F6) // blue
+        // Whole-home / generic cleaning
+        "home" in s || "house" in s || "full" in s -> Icons.Filled.Home to Purple
+        "clean" in s -> Icons.Filled.CleaningServices to Color(0xFF14B8A6) // teal
+        else -> Icons.Filled.WorkOutline to Purple
     }
 }
 
@@ -1829,46 +2043,46 @@ private data class NotifItem(
     val highlight: Boolean = false, // faint tinted card background (focused item)
 )
 
-/**
- * Backend rows carry no category, so the icon/tint is derived from the notification's own words —
- * purely how the row is drawn, never what it says. Anything unrecognised stays a neutral notice.
- */
-private fun NotificationItem.toNotifItem(wasUnread: Boolean): NotifItem {
-    val t = text.lowercase()
-    val (icon, tint, chip) = when {
-        listOf("job", "booking", "order").any { it in t } -> Triple(Icons.Filled.CalendarMonth, Purple, PurpleLight)
-        listOf("credit", "paid", "payout", "wallet", "earn", "₹").any { it in t } ->
-            Triple(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight)
-        listOf("bonus", "incentive").any { it in t } -> Triple(Icons.Filled.CardGiftcard, Amber, GoldLight)
-        listOf("penalty", "late", "cancel").any { it in t } -> Triple(Icons.Filled.Warning, RedCancel, RedLight)
-        else -> Triple(Icons.Filled.Campaign, NotifBlue, NotifBlueBg)
-    }
-    // The wallet service sends "Title — body"; split it back so the card keeps its two-line shape.
-    val parts = text.split(" — ", limit = 2)
+/** Style bucket for a notification — derives icon/colour/category from the message so wallet, job,
+ *  shift and training notices are visually distinct (mirrors the mock's colour coding). Backend rows
+ *  carry no category of their own, so this is purely how a row is drawn, never what it says. */
+private class NotifStyle(val icon: ImageVector, val tint: Color, val bg: Color, val category: String)
+
+private fun notifStyle(lower: String): NotifStyle = when {
+    "penalt" in lower || "deduct" in lower || "zone" in lower || "geofence" in lower -> NotifStyle(Icons.Filled.Warning, RedCancel, RedLight, "Wallet")
+    "credit" in lower || "payment" in lower || "paid" in lower || "withdraw" in lower || "guarantee" in lower || "settle" in lower -> NotifStyle(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Wallet")
+    "incentive" in lower || "bonus" in lower || "reward" in lower -> NotifStyle(Icons.Filled.CardGiftcard, Amber, GoldLight, "Wallet")
+    "job" in lower || "offer" in lower || "booking" in lower -> NotifStyle(Icons.Filled.CalendarMonth, Purple, PurpleLight, "Jobs")
+    "shift" in lower || "attendance" in lower || "roster" in lower || "tomorrow" in lower || "leave" in lower -> NotifStyle(Icons.Filled.Campaign, NotifBlue, NotifBlueBg, "HR")
+    "training" in lower || "quiz" in lower || "certif" in lower -> NotifStyle(Icons.Filled.School, Purple, PurpleLight, "Training")
+    else -> NotifStyle(Icons.Filled.Notifications, Purple, PurpleLight, "System")
+}
+
+/** Turn a backend notification (title — body text) into the card model used by [NotifCard]. */
+private fun toNotifItem(n: NotificationItem): NotifItem {
+    val dash = n.text.indexOf(" — ")
+    val title = (if (dash > 0) n.text.substring(0, dash) else n.text).trim()
+    val body = (if (dash > 0) n.text.substring(dash + 3) else "").trim()
+    val st = notifStyle(n.text.lowercase())
     return NotifItem(
-        icon = icon, tint = tint, chipBg = chip,
-        title = parts.firstOrNull().orEmpty().ifBlank { "Notification" },
-        line1 = parts.getOrNull(1).orEmpty(),
-        time = time.ifBlank { date },
-        category = "All",
-        accent = if (wasUnread) tint else null,
+        icon = st.icon, tint = st.tint, chipBg = st.bg,
+        title = title, line1 = body,
+        time = n.time.ifBlank { n.date }, category = st.category,
+        accent = if (!n.read) st.tint else null,
     )
 }
 
 @Composable
 fun NotificationsScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
-    // Which rows were unread when this screen opened — marking them read below would otherwise
-    // erase the distinction before the list is even drawn.
-    val unreadIds = remember { vm.notifications.filter { !it.read }.map { it.id }.toSet() }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        vm.refreshNotifications()
-        vm.markNotificationsRead()
-    }
-    val todayDate = remember { java.time.LocalDate.now().toString() }
-    val rows = vm.notifications.map { it.toNotifItem(it.id in unreadIds) to it.date }
-    val today = rows.filter { it.second == todayDate }.map { it.first }
-    val earlier = rows.filter { it.second != todayDate }.map { it.first }
+    // Load the real backend notifications on open; mark them read on leave so the bell badge clears
+    // only after the worker has actually seen them (unread items keep their coloured accent here).
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshNotifications() }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.markNotificationsRead() } }
+    val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()) }
+    val rows = vm.notifications.map { it to toNotifItem(it) }
+    val today = rows.filter { (n, _) -> n.date == todayStr }.map { it.second }
+    val earlier = rows.filter { (n, _) -> n.date != todayStr }.map { it.second }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         // Clean white top bar — title + search + overflow, as the reference draws it (no back arrow;
@@ -2068,7 +2282,7 @@ fun HelpSupportScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(Space.s))
                 vm.tickets.forEachIndexed { i, t ->
                     Row(Modifier.fillMaxWidth().padding(vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
-                        IconChip(Icons.Filled.HelpOutline, Purple, PurpleLight)
+                        IconChip(Icons.AutoMirrored.Filled.HelpOutline, Purple, PurpleLight)
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(t.subject.ifBlank { "Support request" }, fontWeight = FontWeight.Medium, color = TextDark, fontSize = 14.sp)
@@ -2088,7 +2302,7 @@ fun HelpSupportScreen(vm: AppViewModel, nav: NavHostController) {
                 "How do I receive jobs?" to "Go online from the Home screen. When a nearby job matches your services and shift, it's offered to you — tap Accept, then navigate to the customer.",
                 "When do I get paid?" to "Earnings for a completed job are credited to your wallet right away. Withdraw to your bank anytime from the Wallet tab.",
                 "How is my rating calculated?" to "It's the average of the star ratings customers leave after each completed job. A higher rating gets you more job offers.",
-                "How do I withdraw my earnings?" to "Open the Wallet tab → Withdraw, enter the amount and confirm. Add and verify your bank details first under Profile → Bank Details.",
+                "How do I withdraw my earnings?" to "Open the Wallet tab → Withdraw, enter the amount and confirm. Add and verify your bank details first under Profile → Bank Account.",
             )
             val open = remember { mutableStateOf(-1) }
             faqs.forEachIndexed { i, (q, a) ->
@@ -2211,7 +2425,7 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = RedCancel, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(Space.s))
             Text("Logout", color = RedCancel, fontWeight = FontWeight.SemiBold)
         }
@@ -2232,7 +2446,7 @@ fun CommPreferencesScreen(vm: AppViewModel, nav: NavHostController) {
                 color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
             )
             Spacer(Modifier.height(Space.xs))
-            ToggleRow(Icons.Filled.Chat, Purple, PurpleLight, "WhatsApp", "Updates & alerts on WhatsApp", vm.commWhatsapp) { vm.commWhatsapp = it; vm.saveComm() }
+            ToggleRow(Icons.AutoMirrored.Filled.Chat, Purple, PurpleLight, "WhatsApp", "Updates & alerts on WhatsApp", vm.commWhatsapp) { vm.commWhatsapp = it; vm.saveComm() }
             HairlineDivider()
             ToggleRow(Icons.Filled.Sms, Purple, PurpleLight, "SMS", "Text messages", vm.commSms) { vm.commSms = it; vm.saveComm() }
             HairlineDivider()

@@ -1,7 +1,8 @@
 package com.homehelp.pro
 
-import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -15,10 +16,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -26,22 +27,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CardGiftcard
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SupportAgent
-import androidx.compose.material.icons.filled.TrackChanges
-import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,14 +43,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -71,16 +60,16 @@ private fun rupee(v: Int?): String =
     if (v == null) "—"
     else "₹" + java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(v)
 
-/** Formats a percentage, or "—" when the value is unknown. */
-private fun pct(v: Int?): String = if (v == null) "—" else "$v%"
-
 /**
- * EARNINGS OVERVIEW — the brand-gradient card: three tappable period tiles over a
- * four-column strip of wallet / settlement / target / bonus figures.
+ * EARNINGS OVERVIEW — the brand-gradient hero, and the visual anchor of Home.
  *
- * [pendingSettlement] is the wallet's hold balance (withdrawals in flight); the wallet
- * service's own `pending` field is hard-coded to 0 and would always read "₹0".
- * [bonusProgress] is 0f..1f, or null when the Sitara bonus hasn't loaded.
+ * Deliberately short. An earlier version stacked a section label, the hero figure, two boxed
+ * period tiles, a dashed rule, a target strip and a bonus/pending caption — six bands and
+ * ~300dp for a card whose job is to answer "how much have I made today?". It now carries the
+ * figure, progress against today's target, and the two other periods on one plain line.
+ *
+ * Dropped, not lost: the bonus percentage lives on the Sitara screen and pending settlement in
+ * the wallet, both a tap away and neither something a worker acts on from Home.
  */
 @Composable
 fun EarningsOverviewCard(
@@ -88,210 +77,168 @@ fun EarningsOverviewCard(
     week: Int,
     month: Int,
     walletBalance: Int,
-    pendingSettlement: Int,
     todayTarget: Int,
-    bonusProgress: Float?,
     onToday: () -> Unit,
     onWeek: () -> Unit,
     onMonth: () -> Unit,
     onEditTarget: () -> Unit,
 ) {
+    val pctToTarget = if (todayTarget > 0) (today.toFloat() / todayTarget).coerceIn(0f, 1f) else 0f
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.card))
             .background(EarningsGradient)
-            .padding(horizontal = 11.dp, vertical = 10.dp),
+            .padding(horizontal = 18.dp, vertical = 20.dp),
     ) {
-        Text(
-            "EARNINGS OVERVIEW",
-            color = Color.White.copy(alpha = 0.92f),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.9.sp,
-        )
-        Spacer(Modifier.height(7.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            PeriodTile(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, "Today", today, onToday)
-            PeriodTile(Modifier.weight(1f), Icons.Filled.CalendarMonth, "This Week", week, onWeek)
-            PeriodTile(Modifier.weight(1f), Icons.Filled.BarChart, "This Month", month, onMonth)
-        }
-        Spacer(Modifier.height(8.dp))
-        DashedDivider()
-        Spacer(Modifier.height(8.dp))
-        // All four figures on one row, as in the reference. At phone widths that leaves ~72dp
-        // per column, so labels are small and wrap to two lines rather than clip.
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            HeroFigure(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, "Wallet Balance") {
-                Text(rupee(walletBalance), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            HeroFigureDivider()
-            HeroFigure(Modifier.weight(1f), Icons.Filled.Schedule, "Pending Settlement") {
-                Text(rupee(pendingSettlement), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            HeroFigureDivider()
-            HeroFigure(Modifier.weight(1f), Icons.Filled.TrackChanges, "Today's Target", Modifier.clickable(onClick = onEditTarget)) {
-                Text(rupee(todayTarget), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            HeroFigureDivider()
-            HeroFigure(Modifier.weight(1f), Icons.Filled.CardGiftcard, "Bonus Progress") {
+        // Hero figure and wallet share a baseline, so the two numbers align rather than one
+        // floating above the other.
+        Row(Modifier.fillMaxWidth().clickable(onClick = onToday), verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(1f)) {
+                Text("Today's Earnings", color = Color.White.copy(alpha = 0.8f), fontSize = 12.5.sp)
                 Text(
-                    if (bonusProgress == null) "—" else "${(bonusProgress * 100).toInt()}%",
-                    color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                    rupee(today),
+                    color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = (-1.2).sp, maxLines = 1,
                 )
-                if (bonusProgress != null) {
-                    Spacer(Modifier.height(5.dp))
-                    Box(
-                        Modifier.fillMaxWidth().height(5.dp)
-                            .clip(RoundedCornerShape(Radius.pill))
-                            .background(Color.White.copy(alpha = 0.25f)),
-                    ) {
-                        Box(
-                            Modifier.fillMaxWidth(bonusProgress.coerceIn(0f, 1f)).fillMaxHeight()
-                                .clip(RoundedCornerShape(Radius.pill))
-                                .background(Gold),
-                        )
-                    }
-                }
+            }
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 5.dp)) {
+                Text("Wallet", color = Color.White.copy(alpha = 0.8f), fontSize = 12.5.sp, maxLines = 1)
+                Text(rupee(walletBalance), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
-    }
-}
 
-@Composable
-private fun PeriodTile(modifier: Modifier, icon: ImageVector, label: String, amount: Int, onClick: () -> Unit) {
-    Column(
-        modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.13f))
-            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(15.dp))
-            Spacer(Modifier.width(5.dp))
-            Text(label, color = Color.White.copy(alpha = 0.9f), fontSize = 11.sp, maxLines = 1)
-        }
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                rupee(amount),
-                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.4).sp, maxLines = 1, modifier = Modifier.weight(1f),
-            )
-            // Chevron pinned to the tile's right edge, as in the reference.
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
-        }
-    }
-}
-
-@Composable
-private fun HeroFigure(
-    modifier: Modifier,
-    icon: ImageVector,
-    label: String,
-    innerModifier: Modifier = Modifier,
-    value: @Composable () -> Unit,
-) {
-    // A one-line box, as the mock draws these labels. The height is explicit because the
-    // enclosing Row sizes itself with IntrinsicSize.Min, and intrinsic measurement ignores
-    // maxLines — it would hand the row too little and the values would spill past the clip.
-    val labelHeight = with(LocalDensity.current) { 11.sp.toDp() }
-    Column(modifier.then(innerModifier)) {
-        Row(verticalAlignment = Alignment.Top) {
-            Icon(
-                icon, contentDescription = null, tint = Color.White.copy(alpha = 0.85f),
-                modifier = Modifier.size(11.dp).padding(top = 1.dp),
-            )
-            Spacer(Modifier.width(3.dp))
-            // Two lines, not clipped: "Pending Settlement" cannot fit one line in ~72dp.
-            Text(
-                label, color = Color.White.copy(alpha = 0.85f),
-                fontSize = 8.5.sp, lineHeight = 10.sp, maxLines = 1,
-                modifier = Modifier.height(labelHeight),
+        Spacer(Modifier.height(13.dp))
+        // Target: one bar and one caption, in place of the old icon row + bar + bonus row.
+        Box(
+            Modifier.fillMaxWidth().height(6.dp)
+                .clip(RoundedCornerShape(Radius.pill))
+                .background(Color.White.copy(alpha = 0.22f))
+                .clickable(onClick = onEditTarget),
+        ) {
+            Box(
+                Modifier.fillMaxWidth(pctToTarget).fillMaxHeight()
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(Gold),
             )
         }
-        Spacer(Modifier.height(3.dp))
-        value()
-    }
-}
-
-@Composable
-private fun HeroFigureDivider() {
-    // 7dp each side: enough that text never touches the rule, tight enough that four
-    // columns still fit across a phone.
-    Box(
-        Modifier.padding(horizontal = 7.dp)
-            .width(1.dp).fillMaxHeight()
-            .background(Color.White.copy(alpha = 0.22f)),
-    )
-}
-
-@Composable
-private fun DashedDivider() {
-    Canvas(Modifier.fillMaxWidth().height(1.dp)) {
-        drawLine(
-            color = Color.White.copy(alpha = 0.3f),
-            start = Offset(0f, 0f),
-            end = Offset(size.width, 0f),
-            strokeWidth = size.height,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f), 0f),
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "${rupee(today)} of ${rupee(todayTarget)} daily target",
+            color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1,
         )
+
+        Spacer(Modifier.height(13.dp))
+        HairlineOnGradient()
+        Spacer(Modifier.height(11.dp))
+        // Week and month as plain figures on one line — the boxed tiles they replace were two
+        // more bordered surfaces competing with the figure above them.
+        Row(Modifier.fillMaxWidth()) {
+            PeriodFigure(Modifier.weight(1f), "This Week", week, onWeek)
+            PeriodFigure(Modifier.weight(1f), "This Month", month, onMonth)
+        }
     }
 }
+
+/** A soft white rule for use inside the gradient hero. */
+@Composable
+private fun HairlineOnGradient() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.2f)))
+}
+
+/** One secondary earnings period — label over value, no box, no chevron. */
+@Composable
+private fun PeriodFigure(modifier: Modifier, label: String, amount: Int, onClick: () -> Unit) {
+    Column(modifier.clickable(onClick = onClick)) {
+        Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1)
+        Text(rupee(amount), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+
 
 /**
- * TODAY'S PROGRESS — completed/total jobs with a progress bar over a four-column
- * breakdown. [cancelled] and [incentive] are nullable: pass null to render "—" when the
- * figure isn't available from the backend.
+ * TODAY'S PROGRESS — a completion ring beside the two job counts.
+ *
+ * [cancelled] is nullable: pass null to render "—" when the figure isn't available from the
+ * backend. Today's earnings and incentive used to appear here too; earnings duplicated the
+ * hero figure on the card above, and incentive is "—" until a bonus lands.
  */
 @Composable
 fun TodaysProgressCard(
     completed: Int,
     total: Int,
-    earnings: Int,
     cancelled: Int?,
-    incentive: Int?,
 ) {
     val progress = if (total > 0) completed.toFloat() / total else 0f
-    Card(padding = Dp16.XS) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Today's Progress", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("$completed / $total Jobs", color = TextGray, fontSize = 13.sp)
-            Spacer(Modifier.width(Space.m))
-            Text(
-                if (total > 0) "${(progress * 100).toInt()}%" else "—",
-                color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+    // Animated so the ring sweeps in on load and grows as jobs land, rather than snapping.
+    val sweep by animateFloatAsState(targetValue = progress, animationSpec = tween(900), label = "progress")
+    Card(padding = Dp16.M) {
+        Text("Today's Progress", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(14.dp))
+        // Ring, then the two counts as equal-weight columns across the remaining width. Stacking
+        // them in a narrow column left the card's right half empty and the whole thing lopsided.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // The ring carries the headline number. A full-width bar read as chrome — thin,
+            // grey, and easy to miss at a glance; a ring is the piece of the card the eye
+            // lands on first, which is the right place for "how is today going".
+            ProgressRing(
+                sweep = sweep,
+                centre = if (total > 0) "${(progress * 100).toInt()}%" else "—",
+                caption = "$completed of $total",
             )
-        }
-        Spacer(Modifier.height(6.dp))
-        ProgressBar(progress, Modifier.fillMaxWidth())
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            Spacer(Modifier.width(Space.l))
+            // Two figures, not four. "Earnings" repeated the hero number one card above, and
+            // "Incentive" reads "—" until a bonus lands; both were noise beside the job counts,
+            // which are the only part of today's progress this card uniquely reports.
             ProgressFigure(Modifier.weight(1f), "Completed", "$completed", GreenSuccess)
-            ProgressFigureDivider()
             ProgressFigure(Modifier.weight(1f), "Cancelled", cancelled?.toString() ?: "—", RedCancel)
-            ProgressFigureDivider()
-            ProgressFigure(Modifier.weight(1f), "Earnings", rupee(earnings), TextDark)
-            ProgressFigureDivider()
-            ProgressFigure(Modifier.weight(1f), "Incentive", rupee(incentive), Purple)
+        }
+    }
+}
+
+/**
+ * The today's-progress dial: a soft track with a brand-gradient sweep, the percentage in the
+ * middle and the raw job count beneath it. Drawn rather than composed so the cap stays round
+ * and the sweep can be animated smoothly.
+ */
+@Composable
+private fun ProgressRing(sweep: Float, centre: String, caption: String) {
+    Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 10.dp.toPx()
+            val inset = stroke / 2
+            val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+            drawArc(
+                color = FieldFill,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                topLeft = Offset(inset, inset), size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            if (sweep > 0f) {
+                drawArc(
+                    brush = Brush.sweepGradient(listOf(Purple, Violet, PurpleMid, Purple)),
+                    startAngle = -90f, sweepAngle = 360f * sweep.coerceIn(0f, 1f), useCenter = false,
+                    topLeft = Offset(inset, inset), size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(centre, color = TextDark, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(caption, color = TextGray, fontSize = 11.sp, maxLines = 1)
         }
     }
 }
 
 @Composable
 private fun ProgressFigure(modifier: Modifier, label: String, value: String, valueColor: Color) {
-    Column(modifier.padding(horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = TextGray, fontSize = 11.5.sp, maxLines = 1)
-        Spacer(Modifier.height(4.dp))
-        Text(value, color = valueColor, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    // Value above label, and clearly larger: the number is the content, the label only names it.
+    // Start-aligned now that these sit in a 2×2 grid — centred columns left ragged gutters.
+    Column(modifier.padding(end = 2.dp)) {
+        Text(value, color = valueColor, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(label, color = TextGray, fontSize = 12.sp, maxLines = 1)
     }
-}
-
-@Composable
-private fun ProgressFigureDivider() {
-    Box(Modifier.padding(horizontal = 6.dp).width(1.dp).fillMaxHeight().background(Divider))
 }
 
 /**
@@ -379,131 +326,24 @@ fun NextJobCard(
     }
 }
 
-/**
- * PERFORMANCE OVERVIEW — four rate metrics. Every value is nullable: only completion rate
- * is derivable client-side today, so the rest render "—" until the worker API exposes them
- * (the figures exist, but only on the admin-only worker endpoint).
- */
-@Composable
-fun PerformanceOverviewCard(
-    acceptanceRate: Int?,
-    completionRate: Int?,
-    punctuality: Int?,
-    cancellationRate: Int?,
-) {
-    Card(padding = Dp16.XS) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Performance Overview", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("Weekly", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
-        }
-        Spacer(Modifier.height(Space.s))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            PerfFigure(Modifier.weight(1f), Icons.Filled.CheckCircle, GreenSuccess, GreenLight, "Acceptance Rate", pct(acceptanceRate))
-            PerfFigure(Modifier.weight(1f), Icons.Filled.Star, Purple, Primary50, "Completion Rate", pct(completionRate))
-            PerfFigure(Modifier.weight(1f), Icons.Filled.Schedule, Amber, GoldLight, "Punctuality", pct(punctuality))
-            PerfFigure(Modifier.weight(1f), Icons.Filled.Cancel, RedCancel, RedLight, "Cancellation Rate", pct(cancellationRate))
-        }
-    }
-}
+// PERFORMANCE OVERVIEW was removed from Home. Home is a fit-to-screen dashboard (see
+// FitToScreen), so every section it carries shrinks the others: the four rate metrics cost
+// ~110dp and forced 9.5sp labels on a card whose values are mostly "—", because only
+// completion rate is derivable client-side today. The same figures already have two better
+// homes — the Profile stat row and the dedicated Routes.PERFORMANCE screen — so nothing is
+// lost by dropping the card, and the height it frees goes to the earnings hero.
+
+// QUICK ACTIONS was removed from Home — see the note at its old call site in AuthHomeScreens.
+// Its five destinations all remain reachable (bottom nav / drawer / top bar), and SOS kept a
+// one-tap route by moving into the top bar. The ic_qa_* drawables are now unused.
 
 /**
- * One performance metric, laid out as the mock draws it: icon chip beside its label, value on
- * the line below. Half the height of the icon-above-label stack it replaces (72dp vs 147dp for
- * the card), which is most of what let Home render near full size instead of shrunk.
- *
- * Labels are single-line, as the mock draws them: reserving a second line only ever rendered as
- * a blank gap above each value.
+ * Height of Home's status slot — the row that shows announcements when offline and online /
+ * incoming-job state when online. Every variant is pinned to this so switching between them
+ * cannot change Home's natural height (which would make FitToScreen rescale the dashboard, and
+ * read to the worker as the screen zooming out the moment they tapped "Go Online").
  */
-@Composable
-private fun PerfFigure(
-    modifier: Modifier,
-    icon: ImageVector,
-    tint: Color,
-    tintBg: Color,
-    label: String,
-    value: String,
-) {
-    Column(modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(24.dp).clip(RoundedCornerShape(Radius.pill)).background(tintBg),
-                contentAlignment = Alignment.Center,
-            ) { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp)) }
-            Spacer(Modifier.width(5.dp))
-            Text(label, color = TextGray, fontSize = 9.5.sp, lineHeight = 11.5.sp, maxLines = 1)
-        }
-        Spacer(Modifier.height(5.dp))
-        // Centred across the column, not left-aligned under the icon: the four values then sit on
-        // an even pitch regardless of how wide each label is.
-        Text(
-            value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-/**
- * QUICK ACTIONS — five rounded tiles wired to the app's existing destinations.
- *
- * The glyphs are bitmaps lifted from the reference design rather than Material icons:
- * Material ships no briefcase-with-star or SOS shield, and its SupportAgent is a person
- * wearing a headset instead of the headset itself.
- */
-@Composable
-fun QuickActionsCard(
-    onAttendance: () -> Unit,
-    onWallet: () -> Unit,
-    onShifts: () -> Unit,
-    onSupport: () -> Unit,
-    onSos: () -> Unit,
-) {
-    Card(padding = Dp16.XS) {
-        Text("Quick Actions", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        // Equal-weight columns rather than SpaceBetween: the columns are as wide as their
-        // labels ("Attendance" vs "SOS"), so distributing the leftover space between them
-        // spaced the tiles by label width. Equal columns put the tiles on an even pitch.
-        Row(Modifier.fillMaxWidth()) {
-            QuickTile(Modifier.weight(1f), R.drawable.ic_qa_attendance, "Attendance", Primary50, onAttendance)
-            QuickTile(Modifier.weight(1f), R.drawable.ic_qa_wallet, "Wallet", Primary50, onWallet)
-            QuickTile(Modifier.weight(1f), R.drawable.ic_qa_shifts, "My Shifts", Primary50, onShifts)
-            QuickTile(Modifier.weight(1f), R.drawable.ic_qa_support, "Support", Primary50, onSupport)
-            QuickTile(Modifier.weight(1f), R.drawable.ic_qa_sos, "SOS", RedLight, onSos)
-        }
-    }
-}
-
-@Composable
-private fun QuickTile(
-    modifier: Modifier,
-    @DrawableRes icon: Int,
-    label: String,
-    tintBg: Color,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier.clickable(onClick = onClick).padding(horizontal = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(tintBg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(icon),
-                contentDescription = label,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.size(32.dp),
-            )
-        }
-        Spacer(Modifier.height(5.dp))
-        Text(
-            label, color = TextGray, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
-            maxLines = 1, textAlign = TextAlign.Center,
-        )
-    }
-}
+val StatusSlotHeight = 52.dp
 
 /** One slide in the announcements carousel. */
 data class Announcement(val text: String, val time: String, val isNew: Boolean)
@@ -520,15 +360,21 @@ private val DEMO_ANNOUNCEMENTS = listOf(
 )
 
 /**
- * ANNOUNCEMENTS — an auto-advancing carousel. The app has no announcements endpoint, so the
- * slides are the [DEMO_ANNOUNCEMENTS] placeholders; the worker's real notifications are still
- * one tap away via "View All".
+ * ANNOUNCEMENTS — a single auto-advancing line rather than a titled card.
+ *
+ * The card version spent a whole header row ("Announcements" + "View All") and a tinted slide
+ * box on placeholder copy, for ~99dp. On a fit-to-screen dashboard that height was taken from
+ * the earnings figure, which is the thing workers actually open the app for. The ticker keeps
+ * the same rotating content and the same tap target at roughly half the height.
+ *
+ * The app still has no announcements endpoint, so the slides remain [DEMO_ANNOUNCEMENTS]
+ * placeholders; real notifications stay one tap away.
  */
 @Composable
-fun AnnouncementsCard(onViewAll: () -> Unit) {
+fun AnnouncementTicker(onViewAll: () -> Unit) {
     val slides = DEMO_ANNOUNCEMENTS
     // Index + AnimatedContent rather than a HorizontalPager: the pager's animateScrollToPage
-    // fires a bring-into-view that drags the whole Home scroll down on every tick.
+    // fires a bring-into-view that drags the whole Home layout on every tick.
     var index by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -537,45 +383,41 @@ fun AnnouncementsCard(onViewAll: () -> Unit) {
         }
     }
 
-    Card(padding = Dp16.XS) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Campaign, contentDescription = null, tint = Purple, modifier = Modifier.size(21.dp))
-            Spacer(Modifier.width(Space.s))
-            Text("Announcements", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text(
-                "View All", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable(onClick = onViewAll),
-            )
-        }
-        Spacer(Modifier.height(9.dp))
+    Row(
+        Modifier.fillMaxWidth()
+            // Fixed height, shared with Home's other status-slot strips (see StatusSlotHeight):
+            // the slot must measure the same whether it shows announcements or online state, or
+            // Home's natural height changes and FitToScreen rescales the whole dashboard.
+            .height(StatusSlotHeight)
+            .clip(RoundedCornerShape(Radius.button))
+            .background(Primary50)
+            .clickable(onClick = onViewAll)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Campaign, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(9.dp))
         AnimatedContent(
             targetState = index,
             transitionSpec = {
                 (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut())
             },
             label = "announcement",
+            modifier = Modifier.weight(1f),
         ) { page ->
             val a = slides[page]
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Primary50)
-                    .clickable(onClick = onViewAll)
-                    .padding(horizontal = 11.dp, vertical = 11.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 if (a.isNew) {
                     Box(
                         Modifier.clip(RoundedCornerShape(6.dp)).background(Purple)
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) { Text("NEW", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-                    Spacer(Modifier.width(Space.s))
+                    Spacer(Modifier.width(7.dp))
                 }
-                Text(a.text, color = TextDark, fontSize = 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
-                Spacer(Modifier.width(Space.s))
-                Text(a.time, color = TextMuted, fontSize = 11.sp, maxLines = 1)
-                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                Text(a.text, color = TextDark, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
             }
         }
-        // No page dots: the mock doesn't draw them, and the carousel advances on its own — they
-        // cost a row of height on a screen that has to fit without scrolling.
+        Spacer(Modifier.width(7.dp))
+        Icon(Icons.Filled.ChevronRight, contentDescription = "View all announcements", tint = Purple, modifier = Modifier.size(18.dp))
     }
 }

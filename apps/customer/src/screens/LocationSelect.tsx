@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../components/UI'
 import { fetchMapsKey } from '../api'
-import { loadGoogleMaps } from '../maps'
+import { loadPickerMap } from '../maps'
 import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
 
 const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GPS is unavailable
@@ -30,9 +30,7 @@ export default function LocationSelect() {
   async function resolveCentre() {
     const m = mapRef.current
     if (!m) return
-    const c = m.getCenter()
-    if (!c) return
-    const lat = c.lat(), lng = c.lng()
+    const { lat, lng } = m.getCenter()
     setResolving(true)
     const g = await reverseGeocodeFull(lat, lng)
     setResolving(false)
@@ -48,19 +46,15 @@ export default function LocationSelect() {
     ;(async () => {
       try {
         const { key } = await fetchMapsKey()
-        const gmaps = await loadGoogleMaps(key)
-        if (cancelled || !mapDiv.current) return
         // a search result passes an explicit centre; otherwise use the live GPS fix (fall back to Hyderabad)
         let centre = initCentre || HYD
         if (!initCentre) { try { centre = await getCurrentPosition() } catch { /* keep default centre */ } }
         if (cancelled || !mapDiv.current) return
-        const map = new gmaps.Map(mapDiv.current, {
-          center: centre, zoom: 17, disableDefaultUI: true, gestureHandling: 'greedy',
-          clickableIcons: false, keyboardShortcuts: false,
-        })
+        const map = await loadPickerMap(mapDiv.current, centre, key)
+        if (cancelled) return
         mapRef.current = map
         setReady(true)
-        map.addListener('idle', () => {
+        map.onIdle(() => {
           if (revTimer.current) clearTimeout(revTimer.current)
           revTimer.current = setTimeout(resolveCentre, 350)
         })

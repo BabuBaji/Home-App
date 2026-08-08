@@ -133,7 +133,10 @@ data class Job(
     val area: String,
     val distanceKm: Double,
     val earnings: Int,
-    val otp: String,
+    // NOTE: there is deliberately no `otp` field. The check-in code belongs to the customer and
+    // is never sent to the worker device — the worker must be told it verbally and the SERVER
+    // does the comparison (see verifyOtpAndStart). Gson ignores the key if an older backend
+    // still emits it.
     val lat: Double,
     val lng: Double,
     // Server timestamp (ISO-8601, UTC) when the service started. The live timer is
@@ -599,6 +602,10 @@ class AppViewModel : ViewModel() {
         // Re-hydrate the in-service working state (ticks/photos/extras/pause) for a job that was
         // already running when the app was killed — this is what makes it survive a restart.
         if (activeJob != null) loadJobState()
+        // Seeded demo figures must outlast this: the bootstrap kicked off by login lands
+        // asynchronously, after the deep-link handler has already seeded, and would otherwise
+        // zero the dashboard again. Re-applying here is idempotent and ordering-independent.
+        if (demoFigures) applyDemoFigures()
     }
 
     // ---- lifecycle transitions ----
@@ -716,6 +723,9 @@ class AppViewModel : ViewModel() {
      *  was completed/assigned server-side — shows up right away instead of after a full relaunch. */
     fun refresh() {
         if (!isLoggedIn) return
+        // Demo figures are seeded for design review and would be wiped by the ON_RESUME refresh
+        // the moment the app came back to the foreground. DEBUG-only — see [applyDemoFigures].
+        if (demoFigures) return
         sync { applyBootstrap(api.bootstrap()) }
     }
 
@@ -737,6 +747,39 @@ class AppViewModel : ViewModel() {
 
     /** Load the worker's persisted daily goal (called once the session is ready). */
     fun loadDailyGoal() { dailyGoal = Session.dailyGoal }
+
+    /** True while Home is showing seeded demo figures instead of live backend data. */
+    var demoFigures by mutableStateOf(false)
+        private set
+
+    /**
+     * DEBUG ONLY — fill Home's figures with representative numbers so the dashboard can be
+     * reviewed with realistic content instead of a column of zeros.
+     *
+     * Nothing in the shipped app calls this: the only caller is MainActivity's debug deep-link
+     * handler, which is itself inside `if (BuildConfig.DEBUG)`. Setting [demoFigures] also parks
+     * [refresh] so the seeded numbers survive the app coming back to the foreground; the flag is
+     * never persisted, so a normal relaunch is back on live data.
+     */
+    fun applyDemoFigures() {
+        demoFigures = true
+        todayEarnings = 1240
+        weekEarnings = 7850
+        monthEarnings = 28400
+        walletBalance = 3250
+        holdBalance = 480
+        dailyGoal = 1500
+        todayJobs = 6
+        todayCompleted = 4
+        todayCancelled = 1
+        workerRating = 4.8
+        acceptancePct = 96
+        completionPct = 98
+        punctualityPct = 94
+        cancellationPct = 2
+        // No fabricated schedule. The Next Job card and the timeline must only ever show real
+        // customer bookings, so demo mode seeds figures only and leaves the job feed alone.
+    }
 
     /** True when a real customer booking is waiting — drives the "New Job Request" notification. */
     var hasIncomingJob by mutableStateOf(false)
@@ -842,26 +885,35 @@ class AppViewModel : ViewModel() {
         sync { api.arrived() }
     }
 
-    /** OTP-gated start. Returns true if the OTP matches and service begins.
+    /** OTP-gated start. The code is checked by the SERVER — never on-device — because the worker
+     *  app is not told the customer's OTP; the only way through is for the customer to read it
+     *  out. That also means there is no offline path: a failed request leaves the job un-started
+     *  rather than optimistically starting it.
+     *
      *  We adopt the server's job snapshot from the response so the live timer anchors to
      *  the SERVER's started_at (the same value the customer app uses) — otherwise the two
-     *  timers drift by the request round-trip / local-clock difference. */
-    fun verifyOtpAndStart(input: String): Boolean {
-        val job = activeJob ?: return false
-        if (input != job.otp) return false
-        jobStatus = JobStatus.IN_PROGRESS
-        jobAcceptedAtMs = 0L                           // start window met — hide the countdown banner
-        serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
-        serviceEndMs = 0L
+     *  timers drift by the request round-trip / local-clock difference.
+     *
+     *  [onResult] receives null on success, or a message to show the worker. */
+    fun verifyOtpAndStart(input: String, onResult: (String?) -> Unit) {
+        if (activeJob == null) { onResult("No active job."); return }
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
-                val r = api.verifyOtp(OtpBody(input))
-                r.activeJob?.let { activeJob = it }    // now carries the server started_at
+                val r = api.verifyOtp(OtpBody(input.trim()))
                 backendConnected = true
-            } catch (e: Exception) { backendConnected = false }
+                if (!r.ok) { onResult(r.error ?: "Incorrect OTP. Try again."); return@launch }
+                jobStatus = JobStatus.IN_PROGRESS
+                jobAcceptedAtMs = 0L                          // start window met — hide the countdown banner
+                serviceStartMs = System.currentTimeMillis()  // fallback until the server started_at lands
+                serviceEndMs = 0L
+                r.activeJob?.let { activeJob = it }           // now carries the server started_at
+                onResult(null)
+            } catch (e: Exception) {
+                backendConnected = false
+                onResult("Couldn't reach the server. Check your connection and try again.")
+            }
         }
-        return true
     }
 
     // ─── In-service job state: checklist · before/after photos · extras · pause ───────────
@@ -1161,6 +1213,10 @@ class AppViewModel : ViewModel() {
 
     // ---- wallet module ----
     private fun applyWalletSummary(s: WalletSummaryDto) {
+        // This is the one place every wallet refresh path funnels through to write Home's
+        // figures, so it is where the DEBUG demo seed has to be defended: the wallet poll that
+        // follows going online lands here and would otherwise reset the dashboard to zeros.
+        if (demoFigures) return
         walletBalance = s.available
         pendingAmount = s.pending
         holdBalance = s.hold
@@ -1757,9 +1813,37 @@ class AppViewModel : ViewModel() {
     fun checkOut(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             try { attendance = api.checkOut(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            checkNextDayPrompt()   // finishing the shift is what triggers the "coming tomorrow?" ask
             onDone()
         }
     }
+
+    // ---- next-day availability ("Are you coming in tomorrow?") ----
+    var nextDayPrompt by mutableStateOf(false)
+        private set
+    var nextDayDate by mutableStateOf("")
+        private set
+    /** Ask the backend whether the prompt is due (shift finished + not yet answered for tomorrow). */
+    fun checkNextDayPrompt() {
+        if (!isLoggedIn) return
+        viewModelScope.launch {
+            try {
+                val s = api.getNextDay()
+                nextDayDate = s.forDate
+                nextDayPrompt = s.prompt
+                backendConnected = true
+            } catch (_: Exception) {}
+        }
+    }
+    /** Store the worker's answer for tomorrow and close the prompt. */
+    fun submitNextDay(coming: Boolean, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { api.postNextDay(com.homehelp.pro.network.NextDayBody(coming)); backendConnected = true } catch (_: Exception) {}
+            nextDayPrompt = false
+            onDone()
+        }
+    }
+    fun dismissNextDayPrompt() { nextDayPrompt = false }
 
     // ---- availability state (Available | Busy | Break | Offline | Leave) ----
     var availabilityState by mutableStateOf("Offline")

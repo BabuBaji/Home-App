@@ -564,7 +564,6 @@ fun AfterPhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScree
  */
 @Composable
 fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
-    val ctx = LocalContext.current
     val job = vm.activeJob
     var rating by remember { mutableIntStateOf(0) }
     var notes by remember { mutableStateOf("") }

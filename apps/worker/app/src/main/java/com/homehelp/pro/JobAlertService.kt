@@ -46,6 +46,14 @@ class JobAlertService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A null intent means Android restarted this service on its own after killing it. That
+        // must NOT resume job alerts: the worker may have gone offline in the meantime, and a
+        // system-resurrected poller would notify them about jobs they are not available for.
+        // [online] is only ever true between start() and stop(), so it is the authority here.
+        if (!online) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         ensureChannels(this)
         val ongoing = ongoingNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -54,7 +62,10 @@ class JobAlertService : Service() {
             startForeground(ONGOING_ID, ongoing)
         }
         scope.launch {
-            while (isActive) {
+            // `online` as well as `isActive`: stop() flips it synchronously, whereas cancelling the
+            // scope only takes effect at the next suspension point. Without it a tick already past
+            // the check could still post an alert a second or two after the worker went offline.
+            while (isActive && online) {
                 try { RetrofitClient.refreshBaseUrl() } catch (_: Exception) { }
                 // Separate try blocks: with no active job the messages call 409s, and that must not
                 // stop job alerts from being polled (they shared one try/catch before).
@@ -69,7 +80,9 @@ class JobAlertService : Service() {
                 delay(8000)
             }
         }
-        return START_STICKY
+        // NOT START_STICKY: see the null-intent guard above. Alerts are a function of being
+        // online, and only the app knows that — so the app starts this service, never the system.
+        return START_NOT_STICKY
     }
 
     /* Ping the worker when a job is put ON them.
@@ -137,6 +150,7 @@ class JobAlertService : Service() {
             .build()
 
     private fun notifyNewJob(count: Int) {
+        if (!online) return   // last gate before anything reaches the worker's tray
         val n = NotificationCompat.Builder(this, ALERT_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("New Job Request")
@@ -151,6 +165,7 @@ class JobAlertService : Service() {
     }
 
     private fun notifyNewAssignment(job: CurrentJobResponse) {
+        if (!online) return   // last gate before anything reaches the worker's tray
         val what = job.service.ifBlank { "A new job" }
         val text = if (job.ref.isNotBlank()) "$what · ${job.ref} — tap to view" else "$what — tap to view"
         val n = NotificationCompat.Builder(this, ALERT_CHANNEL)
@@ -168,6 +183,7 @@ class JobAlertService : Service() {
     }
 
     private fun notifyMessages(incoming: List<JobMessage>) {
+        if (!online) return   // last gate before anything reaches the worker's tray
         val latest = incoming.last().body
         val more = incoming.size - 1
         val text = if (more > 0) "$latest\n(+$more earlier message${if (more > 1) "s" else ""})" else latest
@@ -202,6 +218,18 @@ class JobAlertService : Service() {
         @Volatile
         var chatVisible = false
 
+        /**
+         * Whether the worker is currently online. The single gate on every job alert: a worker
+         * who is offline has told the app they are not taking work, so pinging them about a job
+         * is both wrong and the fastest way to get notifications disabled entirely.
+         *
+         * Flipped synchronously by [start] / [stop] rather than read from the ViewModel, because
+         * the service also runs while no Activity exists.
+         */
+        @Volatile
+        var online = false
+            private set
+
         /** Dismiss any message alert — called when the worker opens the chat. */
         fun clearMessageAlert(ctx: Context) {
             try { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(MSG_ID) } catch (_: Exception) { }
@@ -224,11 +252,26 @@ class JobAlertService : Service() {
         }
 
         fun start(ctx: Context) {
+            online = true
             val i = Intent(ctx, JobAlertService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
         }
 
+        /**
+         * Stop polling AND clear anything already in the notification tray.
+         *
+         * Cancelling matters: a job alert posted a moment before the worker went offline would
+         * otherwise sit in the shade, and tapping it opens a job they are no longer available
+         * for. The ongoing "You're online" notification goes with the foreground service, but
+         * the heads-up alerts are independent of it and have to be dismissed explicitly.
+         */
         fun stop(ctx: Context) {
+            online = false
+            try {
+                val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(ALERT_ID)
+                nm.cancel(ASSIGN_ID)
+            } catch (_: Exception) { }
             try { ctx.stopService(Intent(ctx, JobAlertService::class.java)) } catch (_: Exception) { }
         }
 

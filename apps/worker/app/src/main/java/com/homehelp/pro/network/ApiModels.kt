@@ -407,6 +407,17 @@ data class SelectShiftBody(val shiftId: Int)
 
 data class AttendanceBody(val lat: Double? = null, val lng: Double? = null)
 
+/** "Are you coming in tomorrow?" — prompt state + the worker's stored answer for the target date. */
+data class NextDayStatus(
+    val forDate: String = "",
+    val prompt: Boolean = false,
+    val responded: Boolean = false,
+    val coming: Boolean? = null,
+    val note: String = "",
+)
+
+data class NextDayBody(val coming: Boolean, val note: String? = null)
+
 data class StatusBody(val state: String)
 data class TicketItem(val id: Int = 0, val subject: String = "", val message: String = "", val status: String = "Open", val created: String = "")
 data class TicketBody(val subject: String, val message: String)

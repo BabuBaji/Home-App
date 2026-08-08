@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../../components/UI'
 import { fetchMapsKey } from '../../api'
-import { loadGoogleMaps } from '../../maps'
+import { loadPickerMap } from '../../maps'
 import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, GeoError, type Place } from '../../geo'
 
 export interface PickedLocation { label: string; name: string; sub: string; pincode: string | null; city: string; lat: number; lng: number }
@@ -25,8 +25,7 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
 
   async function resolveCentre() {
     const m = mapRef.current; if (!m) return
-    const c = m.getCenter(); if (!c) return
-    const lat = c.lat(), lng = c.lng()
+    const { lat, lng } = m.getCenter()
     setResolving(true)
     const g = await reverseGeocodeFull(lat, lng)
     setResolving(false)
@@ -38,15 +37,14 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
     ;(async () => {
       try {
         const { key } = await fetchMapsKey()
-        const gmaps = await loadGoogleMaps(key)
-        if (cancelled || !mapDiv.current) return
         let centre = HYD
         try { centre = await getCurrentPosition() } catch { /* keep default */ }
         if (cancelled || !mapDiv.current) return
-        const map = new gmaps.Map(mapDiv.current, { center: centre, zoom: 17, disableDefaultUI: true, gestureHandling: 'greedy', clickableIcons: false, keyboardShortcuts: false })
+        const map = await loadPickerMap(mapDiv.current, centre, key)
+        if (cancelled) return
         mapRef.current = map
         setReady(true)
-        map.addListener('idle', () => { if (revTimer.current) clearTimeout(revTimer.current); revTimer.current = setTimeout(resolveCentre, 350) })
+        map.onIdle(() => { if (revTimer.current) clearTimeout(revTimer.current); revTimer.current = setTimeout(resolveCentre, 350) })
       } catch (e) { setLoadErr((e as Error).message || 'Could not load the map') }
     })()
     return () => { cancelled = true; if (revTimer.current) clearTimeout(revTimer.current) }

@@ -27,9 +27,9 @@ import androidx.compose.ui.unit.sp
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ---- Brand (indigo → violet — exact premium spec) ----
-val Purple = Color(0xFF4F46E5)        // primary — indigo (#4F46E5)
-val PurpleDark = Color(0xFF4338CA)    // primary pressed / deep indigo
-val PurpleMid = Color(0xFF6366F1)     // gradient middle stop (#6366F1)
+val Purple = Color(0xFF5B3DF5)        // primary — brand violet (#5B3DF5)
+val PurpleDark = Color(0xFF4A2FD6)    // primary pressed / deep violet
+val PurpleMid = Color(0xFF6D52F8)     // secondary / gradient middle stop (#6D52F8)
 val Violet = Color(0xFF7C3AED)        // brand violet — gradient end (#7C3AED)
 val VioletDeep = Color(0xFF5B21B6)    // deep violet — layered accents
 val IndigoNight = Color(0xFF312E81)   // dark indigo — hero depth / overlays
@@ -50,6 +50,8 @@ val GreenLight = Color(0xFFE7F8EF)    // success tint
 val Gold = Color(0xFFF5B301)          // ratings gold
 val Amber = Color(0xFFF59E0B)         // warning / pending
 val GoldLight = Color(0xFFFEF3DA)     // amber tint
+val BlueAccent = Color(0xFF2563EB)    // wallet / balance accent
+val BlueAccentLight = Color(0xFFE8F0FE) // wallet tint
 val RedCancel = Color(0xFFEF4444)     // error / destructive
 val RedLight = Color(0xFFFDECEC)      // error tint
 
@@ -60,8 +62,8 @@ val CardBg = Color(0xFFFFFFFF)        // surface — pure white
 // viewport by scaling down (see FitToScreen), so labels render well under their nominal size
 // and the lighter greys went faint on-device.
 val TextDark = Color(0xFF0F172A)      // text primary — near-black slate ink
-val TextGray = Color(0xFF4B5563)      // text secondary — muted slate
-val TextMuted = Color(0xFF6B7280)     // text tertiary — captions / placeholders
+val TextGray = Color(0xFF64748B)      // text secondary — slate (never used for key figures)
+val TextMuted = Color(0xFF64748B)     // text tertiary — captions / placeholders
 val Divider = Color(0xFFE5E7EB)       // hairline borders / separators
 val CardBorder = Color(0xFFEEF0F4)    // ultra-light card outline under soft shadows
 val FieldFill = Color(0xFFF3F4F6)     // filled text-field / segmented-track background
@@ -101,8 +103,8 @@ object Space {
 // ─────────────────────────────────────────────────────────────────────────────
 object Radius {
     val field: Dp = 12.dp
-    val button: Dp = 14.dp
-    val card: Dp = 22.dp   // design frame 390×844: cards are 20–24dp rounded
+    val button: Dp = 18.dp
+    val card: Dp = 24.dp
     val sheet: Dp = 24.dp
     val pill: Dp = 50.dp
 }
@@ -111,20 +113,24 @@ object Radius {
 // Typography — enterprise scale (Screen 28/Bold, Section 20/SemiBold, Body 16,
 // Caption 13, Button 16/SemiBold). Mapped onto the M3 roles the framework uses.
 // ─────────────────────────────────────────────────────────────────────────────
+// Only three weights are used anywhere in the app — Bold for figures and screen titles,
+// SemiBold for section titles and buttons, Regular for everything else. Medium was the fourth
+// weight in the old scale and read as "almost bold" beside SemiBold, which is what made the
+// hierarchy look inconsistent rather than deliberate.
 val AppTypography = Typography(
-    // Screen title — 28 Bold
-    headlineMedium = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, color = TextDark),
-    headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = TextDark),
-    // Section title — 20 SemiBold
-    titleLarge = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp, color = TextDark),
-    titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextDark),
-    titleSmall = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark),
-    // Body — 16 / 14
+    // Screen title — 32 Bold
+    headlineMedium = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp, color = TextDark),
+    headlineSmall = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, color = TextDark),
+    // Section title — 22 SemiBold
+    titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp, color = TextDark),
+    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = TextDark),
+    titleSmall = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextDark),
+    // Body — 15
     bodyLarge = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Normal, lineHeight = 24.sp, color = TextDark),
-    bodyMedium = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Normal, lineHeight = 20.sp, color = TextGray),
+    bodyMedium = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, lineHeight = 21.sp, color = TextGray),
     // Caption — 13
     bodySmall = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp, color = TextGray),
-    labelSmall = TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = TextGray),
+    labelSmall = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal, color = TextGray),
     // Button — 16 SemiBold
     labelLarge = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
 )
@@ -152,6 +158,16 @@ private val Scheme = lightColorScheme(
     onBackground = TextDark,
     surface = CardBg,
     onSurface = TextDark,
+    // M3 tints any Surface whose colour equals `surface` with `surfaceTint` in proportion to its
+    // tonal elevation. CardBg IS `surface`, so every elevated card, the navigation bar and the
+    // app bar came out violet-washed (#F3F1FE) instead of the white this palette specifies.
+    //
+    // The tint is set to CardBg — i.e. the surface colour itself — so the composite is white on
+    // white at any elevation. NOT Color.Transparent: `surfaceColorAtElevation` composites
+    // `surfaceTint.copy(alpha = …)` over `surface`, and Color.Transparent is transparent BLACK,
+    // so it greys every card out (#EDEDED) instead of leaving it alone. M3's real shadows are
+    // drawn separately and survive either way.
+    surfaceTint = CardBg,
     surfaceVariant = FieldFill,
     onSurfaceVariant = TextGray,
     error = RedCancel,
