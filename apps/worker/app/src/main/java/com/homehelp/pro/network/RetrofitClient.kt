@@ -43,7 +43,7 @@ object RetrofitClient {
      * branch (the repo root copy is already correct) — and then blank this constant, which
      * restores normal config-driven behaviour. Blank it before any release build.
      */
-    private const val PINNED_BASE_URL = "http://192.168.0.113:8080/"
+    private const val PINNED_BASE_URL = "http://192.168.0.109:8080/"
 
     /** Current backend base URL — updated by [refreshBaseUrl] unless [PINNED_BASE_URL] is set. */
     @Volatile var baseUrl: String = PINNED_BASE_URL.ifBlank { FALLBACK_URL }
