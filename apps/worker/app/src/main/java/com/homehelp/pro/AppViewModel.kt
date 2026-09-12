@@ -1255,6 +1255,18 @@ class AppViewModel : ViewModel() {
     }
     fun photoFor(phase: String, slot: String): JobPhoto? =
         (if (phase == "after") afterPhotos else beforePhotos).firstOrNull { it.slot == slot }
+    /**
+     * Add-ons sellable on the active job. Empty until [loadAddons] returns, and left empty when
+     * the call fails — the extras screen falls back to its free-text field rather than offering
+     * prices the catalogue hasn't confirmed.
+     */
+    val addons = mutableStateListOf<com.homehelp.pro.network.AddonDto>()
+    fun loadAddons() {
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.jobAddons() } }
+                .onSuccess { addons.clear(); addons.addAll(it.addons) }
+        }
+    }
     fun addExtra(name: String, price: Int) = mutateState { api.addExtra(ExtraBody(name, price)) }
     fun removeExtra(id: Long) = mutateState { api.removeExtra(ExtraRemoveBody(id)) }
     fun pauseJob(reason: String?) = mutateState { api.pauseJob(PauseBody(reason)) }

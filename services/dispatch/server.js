@@ -602,6 +602,20 @@ app.get('/api/worker/jobs/extensions', auth, async (req, res) => {
   res.json({ ok: true, extensions: Array.isArray(rows) ? rows : [], extensionMinutes: b.extension_minutes || 0, serviceEndAt: b.service_end_at || null })
 })
 
+/*
+ * The add-ons a worker may sell on THIS job, priced for the booking's zone.
+ *
+ * The app previously shipped its own list and prices. Serving them from the catalogue keeps the
+ * worker quoting the same figures the customer would see, and lets ops change a price without a
+ * new release. Empty list (rather than an error) when the catalogue can't be reached, so the
+ * extras sheet degrades to "nothing to offer" instead of breaking the job screen.
+ */
+app.get('/api/worker/jobs/addons', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const list = await tryGet(CATALOG_URL, `/api/internal/addons?zoneId=${b.zone_id || ''}`, [])
+  res.json({ addons: Array.isArray(list) ? list : [] })
+})
+
 app.post('/api/worker/jobs/extras', auth, async (req, res) => {
   const b = await activeOr409(req, res); if (!b) return
   const s = await jobState(b)

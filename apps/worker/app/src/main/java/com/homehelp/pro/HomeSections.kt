@@ -1,13 +1,7 @@
 package com.homehelp.pro
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,16 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,7 +43,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
 
 /** Formats an Indian-grouped rupee amount ("₹1,240"), or "—" when the value is unknown. */
 private fun rupee(v: Int?): String =
@@ -338,86 +327,10 @@ fun NextJobCard(
 // one-tap route by moving into the top bar. The ic_qa_* drawables are now unused.
 
 /**
- * Height of Home's status slot — the row that shows announcements when offline and online /
- * incoming-job state when online. Every variant is pinned to this so switching between them
- * cannot change Home's natural height (which would make FitToScreen rescale the dashboard, and
- * read to the worker as the screen zooming out the moment they tapped "Go Online").
+ * Height of Home's status slot — the row that shows online / incoming-job state. Every variant
+ * is pinned to this so switching between them cannot change Home's natural height (which would
+ * make FitToScreen rescale the dashboard, and read to the worker as the screen zooming out the
+ * moment they tapped "Go Online").
  */
 val StatusSlotHeight = 52.dp
 
-/** One slide in the announcements carousel. */
-data class Announcement(val text: String, val time: String, val isNew: Boolean)
-
-/**
- * Placeholder announcements shown while there's no announcements feed in the backend.
- * These are DEMO copy, not real notices — replace them once an endpoint exists.
- */
-private val DEMO_ANNOUNCEMENTS = listOf(
-    Announcement("Incentive boosted for weekend jobs!", "2 hours ago", true),
-    Announcement("New: instant payouts now settle in 30 mins", "Yesterday", true),
-    Announcement("Complete your KYC to unlock higher-value jobs", "2 days ago", false),
-    Announcement("Refer a friend and earn ₹500 per joining", "4 days ago", false),
-)
-
-/**
- * ANNOUNCEMENTS — a single auto-advancing line rather than a titled card.
- *
- * The card version spent a whole header row ("Announcements" + "View All") and a tinted slide
- * box on placeholder copy, for ~99dp. On a fit-to-screen dashboard that height was taken from
- * the earnings figure, which is the thing workers actually open the app for. The ticker keeps
- * the same rotating content and the same tap target at roughly half the height.
- *
- * The app still has no announcements endpoint, so the slides remain [DEMO_ANNOUNCEMENTS]
- * placeholders; real notifications stay one tap away.
- */
-@Composable
-fun AnnouncementTicker(onViewAll: () -> Unit) {
-    val slides = DEMO_ANNOUNCEMENTS
-    // Index + AnimatedContent rather than a HorizontalPager: the pager's animateScrollToPage
-    // fires a bring-into-view that drags the whole Home layout on every tick.
-    var index by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(3000)
-            index = (index + 1) % slides.size
-        }
-    }
-
-    Row(
-        Modifier.fillMaxWidth()
-            // Fixed height, shared with Home's other status-slot strips (see StatusSlotHeight):
-            // the slot must measure the same whether it shows announcements or online state, or
-            // Home's natural height changes and FitToScreen rescales the whole dashboard.
-            .height(StatusSlotHeight)
-            .clip(RoundedCornerShape(Radius.button))
-            .background(Primary50)
-            .clickable(onClick = onViewAll)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Filled.Campaign, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
-        Spacer(Modifier.width(9.dp))
-        AnimatedContent(
-            targetState = index,
-            transitionSpec = {
-                (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut())
-            },
-            label = "announcement",
-            modifier = Modifier.weight(1f),
-        ) { page ->
-            val a = slides[page]
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (a.isNew) {
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(Purple)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) { Text("NEW", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-                    Spacer(Modifier.width(7.dp))
-                }
-                Text(a.text, color = TextDark, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
-            }
-        }
-        Spacer(Modifier.width(7.dp))
-        Icon(Icons.Filled.ChevronRight, contentDescription = "View all announcements", tint = Purple, modifier = Modifier.size(18.dp))
-    }
-}

@@ -550,6 +550,20 @@ data class NotesBody(val phase: String, val text: String)
 data class SignatureBody(val signature: String, val rating: Int, val notes: String)
 data class ExtraBody(val name: String, val price: Int)
 data class ExtraRemoveBody(val id: Long)
+
+/**
+ * One add-on the worker can sell on the active job. [price] is what the booking's zone charges —
+ * the same figure the customer sees — so the app never has to carry a price list of its own.
+ */
+data class AddonDto(
+    val id: String = "",
+    val name: String = "",
+    val price: Int = 0,
+    val listPrice: Int = 0,
+)
+
+/** Reply of GET api/worker/jobs/addons. */
+data class AddonsResponse(val addons: List<AddonDto> = emptyList())
 data class PauseBody(val reason: String? = null)
 /** Reply of GET api/worker/jobs/current — which booking is on this worker, if any. */
 data class CurrentJobResponse(

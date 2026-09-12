@@ -1109,7 +1109,10 @@ fun BankDetailsScreen(vm: AppViewModel, nav: NavHostController) {
 fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-    LaunchedEffect(Unit) { vm.loadAvailability() }
+    // Shift windows are admin-defined (shift_defs) and arrive with the rest of the shift info —
+    // this screen used to offer its own hardcoded list, which could disagree with what ops had
+    // actually published.
+    LaunchedEffect(Unit) { vm.loadAvailability(); vm.loadShifts() }
     LaunchedEffect(vm.availabilityError) { vm.availabilityError?.let { toast(ctx, it); vm.clearAvailabilityError() } }
     WhiteDetailScaffold("Availability", nav) {
         // What the admin decided. Without this the worker assumes what they picked is what they got.
@@ -1152,19 +1155,31 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
             Text("Pick full-time or a 4-hour part-time slot.", fontSize = 12.sp, color = TextGray)
             Spacer(Modifier.height(Space.m))
 
-            // Start on the type that matches the worker's current shift (part-time slots are 4h).
-            var shiftType by remember {
-                mutableStateOf(if (PART_TIME_SHIFTS.any { it.start == vm.shiftStart && it.end == vm.shiftEnd }) "Part Time" else "Full Time")
+            // Published windows, split by length: anything four hours or under reads as part-time.
+            val partTime = vm.shifts.filter { shiftMinutes(it.start, it.end) in 1..PART_TIME_MAX_MIN }
+            val fullTime = vm.shifts.filter { shiftMinutes(it.start, it.end) > PART_TIME_MAX_MIN }
+
+            // Start on the type that matches the worker's current shift.
+            var shiftType by remember(partTime) {
+                mutableStateOf(if (partTime.any { it.start == vm.shiftStart && it.end == vm.shiftEnd }) "Part Time" else "Full Time")
             }
             SegmentedTabs(listOf("Full Time", "Part Time"), shiftType) { shiftType = it }
             Spacer(Modifier.height(Space.m))
 
-            val presets = if (shiftType == "Part Time") PART_TIME_SHIFTS else FULL_TIME_SHIFTS
+            val presets = if (shiftType == "Part Time") partTime else fullTime
+            if (presets.isEmpty()) {
+                Text(
+                    if (vm.shifts.isEmpty()) "No shift windows published yet — your admin sets these."
+                    else "No ${shiftType.lowercase()} windows published.",
+                    fontSize = 12.sp, color = TextGray,
+                )
+                Spacer(Modifier.height(Space.s))
+            }
             presets.chunked(2).forEach { rowItems ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     rowItems.forEach { s ->
                         val selected = vm.shiftStart == s.start && vm.shiftEnd == s.end
-                        ShiftChip(s.label, "${fmt12h(s.start)} – ${fmt12h(s.end)}", selected, Modifier.weight(1f)) {
+                        ShiftChip(s.name, "${fmt12h(s.start)} – ${fmt12h(s.end)}", selected, Modifier.weight(1f)) {
                             vm.shiftStart = s.start; vm.shiftEnd = s.end
                         }
                     }
@@ -1202,25 +1217,26 @@ fun AvailabilityScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
-/** A selectable shift window the worker can choose from on the Availability screen. */
-private data class ShiftPreset(val label: String, val start: String, val end: String)
+// The selectable shift windows come from the backend (shift_defs, published by an admin) and are
+// split here only for presentation. Times are 24-hour "HH:MM" — the format the backend validates
+// and stores — and are formatted to 12-hour for display via [fmt12h].
 
-// Full-time shifts (longer windows) vs part-time 4-hour slots. The worker first picks a
-// type, then a slot within it. Times are stored as 24-hour HH:MM — the format the backend
-// validates and stores — and only formatted to 12-hour for display via [fmt12h].
-private val FULL_TIME_SHIFTS = listOf(
-    ShiftPreset("Morning", "06:00", "14:00"),
-    ShiftPreset("Day", "08:00", "20:00"),
-    ShiftPreset("Evening", "14:00", "22:00"),
-    ShiftPreset("Full Day", "05:00", "22:00"),
-)
+/** A window of this length or shorter is offered under the "Part Time" tab. */
+private const val PART_TIME_MAX_MIN = 4 * 60
 
-private val PART_TIME_SHIFTS = listOf(
-    ShiftPreset("Early", "06:00", "10:00"),
-    ShiftPreset("Midday", "10:00", "14:00"),
-    ShiftPreset("Afternoon", "14:00", "18:00"),
-    ShiftPreset("Evening", "18:00", "22:00"),
-)
+/** Length of a "HH:MM"–"HH:MM" window in minutes; 0 when either end is unparseable. */
+private fun shiftMinutes(start: String, end: String): Int {
+    fun mins(hhmm: String): Int? {
+        val m = Regex("^(\\d{1,2}):(\\d{2})").find(hhmm.trim()) ?: return null
+        val h = m.groupValues[1].toIntOrNull() ?: return null
+        val mi = m.groupValues[2].toIntOrNull() ?: return null
+        return h * 60 + mi
+    }
+    val s = mins(start) ?: return 0
+    val e = mins(end) ?: return 0
+    // An end before the start means the window runs past midnight.
+    return if (e >= s) e - s else (24 * 60 - s) + e
+}
 
 /** Format a 24-hour "HH:MM" as a friendly 12-hour "6:00 AM"; passes anything unexpected through. */
 private fun fmt12h(hhmm: String): String {

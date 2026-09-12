@@ -1069,6 +1069,24 @@ app.get('/api/internal/zones', internalOnly, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
   res.json(rows.map(zoneOut))
 })
+/*
+ * Internal: bookable services priced for a zone, for use as paid add-ons mid-job.
+ *
+ * The worker app used to carry its own hardcoded add-on list and prices, which drifted from this
+ * catalogue (it quoted ₹200 for a fridge clean the catalogue sells at ₹149) and could only be
+ * corrected by shipping a new APK. Add-ons are ordinary services, so they are priced by exactly
+ * the same zone-aware path the customer sees — no second price list to keep in step.
+ *
+ * Unavailable services are dropped: a zone that doesn't offer something must not have it sold
+ * as an extra either.
+ */
+app.get('/api/internal/addons', internalOnly, async (req, res) => {
+  const zoneId = req.query.zoneId ? Number(req.query.zoneId) : null
+  const list = await catalogueFor(zoneId, null)
+  res.json(list
+    .filter((s) => s.available && s.price > 0)
+    .map((s) => ({ id: s.id, name: s.name, price: s.price, listPrice: s.listPrice })))
+})
 
 // Worker/customer ETA via OSRM road routing (free). Distance Matrix (Google) can slot in later
 // when billing is enabled. Returns straight road distance + drive-time estimate.
