@@ -13,6 +13,7 @@ android {
         targetSdk = 34
         versionCode = 16
         versionName = "1.15"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -70,4 +71,15 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // ---- instrumented UI tests (Compose) ----
+    // Run on a connected device/emulator:  ./gradlew.bat connectedDebugAndroidTest
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.06.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test:rules:1.5.0")
+    // Supplies the empty activity the Compose test rule hosts content in.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

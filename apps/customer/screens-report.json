@@ -1,0 +1,1615 @@
+[
+ {
+  "app": "customer",
+  "route": "/onboarding/name",
+  "ok": false,
+  "blank": false,
+  "errs": [
+   "console: Failed to load resource: the server responded with a status of 404 (Not Found)",
+   "console: Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "net": [
+   "404 /favicon.ico",
+   "404 /favicon.ico"
+  ],
+  "chars": 87,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/onboarding/city",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/onboarding/permission",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 269,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/onboarding/country",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 305,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/onboarding/location",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 116,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/address-details",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 116,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/locations",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 167,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/coming-soon",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 240,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/home",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/popular-services",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/continue-booking",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/service/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/configure/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/booking/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/book/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/confirmed/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/notifications",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/cart",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/address",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/schedule",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/summary",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/payment",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/tracking/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/track/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/reschedule/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/cancel/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/worker",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/otw",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/map",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/chat",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/call",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/otp",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/started",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/extend",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/progress",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/job/:id/completed",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/rate/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/rate/:id/photos",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/complaint/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/tip/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/rebook/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/offers",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/offers/applied",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/offers/zone",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/offers/scratch",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/offers/loyalty",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/refer",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/bookings",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/bookings/active",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/bookings/:status",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/booking-details/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/invoice/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/receipt/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/history",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/transactions",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/add",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/cashback",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/referrals",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/gift-cards",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/refunds",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/wallet/settings",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/family",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/payment-methods",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/notifications",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/language",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/privacy",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/about",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/help",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/logout",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/profile/legacy",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/quick-actions",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/compare",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/subscribe",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/active",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/manage",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/usage",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/renewal",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/cancel",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/membership/benefits",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai-home",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/recommendations",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/planner",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/calendar",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/water",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/garbage",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/pest",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/festival",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/budget",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/ai/timeline",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/ticket",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/chat",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/emergency",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/refund-status",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/refund-status/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/cancellation",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/escalation",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/faqs",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/support/legacy",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/addresses",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/addresses/add",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/addresses/saved",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/addresses/default",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/cancellation-policy",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/personal",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "customer",
+  "route": "/terms",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 155,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/dashboard",
+  "ok": false,
+  "blank": false,
+  "errs": [
+   "console: Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "net": [
+   "404 /favicon.ico"
+  ],
+  "chars": 1851,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/customers",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1790,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/customers/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2327,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/workers",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2939,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/workers/new",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2032,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/workers/:id/edit",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1661,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/workers/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 3726,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/worker-wallet",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2381,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/bookings",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1622,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/bookings/:id",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2150,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/cancellations",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1632,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/services",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1914,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/extension-rules",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1347,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/campaigns",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1291,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/membership",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1538,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/home-banners",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1050,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/service-areas",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1607,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones",
+  "ok": false,
+  "blank": false,
+  "errs": [
+   "console: Error: <path> attribute d: Expected moveto path command ('M' or 'm'), \" L 28,172 L 28,17…\".",
+   "console: Error: <path> attribute d: Expected moveto path command ('M' or 'm'), \" L 28,172 L 28,17…\"."
+  ],
+  "net": [],
+  "chars": 1581,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/cities",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 821,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/clusters",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 892,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/apartments",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 893,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/stores",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 850,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/pricing",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 888,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/surge",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1064,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/coverage",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 903,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/zones/inventory",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 894,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/command-center",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1423,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/control-tower",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 990,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/live-ops",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1034,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/roster",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 3050,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/shift-plans",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2096,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/training",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1747,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/equipment",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1400,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/salary-plans",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1545,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/incentive-plans",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1334,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/payroll",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1051,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/compensation-rules",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1113,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/payments",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1759,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/refunds",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1357,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/complaints",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1285,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/notifications",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1642,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/tickets",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1282,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/reports",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2331,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/analytics",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2552,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/activity",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 2426,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/settings",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 3365,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/admins",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1911,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/roles",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 3279,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/approvals",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 941,
+  "note": ""
+ },
+ {
+  "app": "admin",
+  "route": "/organization",
+  "ok": true,
+  "blank": false,
+  "errs": [],
+  "net": [],
+  "chars": 1227,
+  "note": ""
+ }
+]
