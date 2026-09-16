@@ -3,7 +3,7 @@ import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../../components/UI'
 import { fetchMapsKey } from '../../api'
 import { loadPickerMap } from '../../maps'
-import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, GeoError, type Place } from '../../geo'
+import { getCurrentPosition, getCurrentPositionWithin, reverseGeocodeFull, searchPlaces, placeDetails, GeoError, type Place } from '../../geo'
 
 export interface PickedLocation { label: string; name: string; sub: string; pincode: string | null; city: string; lat: number; lng: number }
 
@@ -38,7 +38,8 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
       try {
         const { key } = await fetchMapsKey()
         let centre = HYD
-        try { centre = await getCurrentPosition() } catch { /* keep default */ }
+        // Cap the GPS wait — see LocationSelect: the map must not block on a fix that may never come.
+        try { centre = await getCurrentPositionWithin(4000) } catch { /* keep default */ }
         if (cancelled || !mapDiv.current) return
         const map = await loadPickerMap(mapDiv.current, centre, key)
         if (cancelled) return

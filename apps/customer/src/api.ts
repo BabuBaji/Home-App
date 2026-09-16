@@ -127,6 +127,22 @@ export const fetchQuote = (items: { id: string; durationId: string }[], coupon?:
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
 export const updateMe = (patch: Partial<User>) => req<{ user: User }>('/api/me', { method: 'PATCH', body: JSON.stringify(patch) })
+
+/* Profile photo. Multipart, so it can't go through `req` — that forces a JSON content-type, and
+ * the boundary has to be set by the browser. Shares the same token + expired-session handling. */
+export async function uploadAvatar(blob: Blob, filename = 'avatar.jpg'): Promise<{ user: User }> {
+  const fd = new FormData()
+  fd.append('file', blob, filename)
+  const res = await fetch(API_BASE + '/api/me/avatar', {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}) },   // no Content-Type: fetch adds the boundary
+    body: fd,
+  })
+  if (res.status === 401 && token) { clearToken(); clearUser(); onUnauthorized?.(); throw new Error('Your session expired — please sign in again.') }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Upload failed (${res.status})`) }
+  return res.json()
+}
+export const removeAvatar = () => req<{ user: User }>('/api/me/avatar', { method: 'DELETE' })
 export const deleteAccount = () => req<{ ok: boolean }>('/api/me', { method: 'DELETE' })
 
 /* profile · notifications */
@@ -291,14 +307,21 @@ let lastPos: { lat: number; lng: number; ts: number } | null = (() => {
 })()
 export function getCachedPosition() { return lastPos }
 const POS_FRESH_MS = 30 * 60 * 1000 // treat a fix as current for 30 min
-export async function captureLocationOnOpen(): Promise<void> {
+/**
+ * Capture the GPS fix for bookings/maps.
+ *
+ * `persistToProfile` is opt-in and deliberately NOT set on every app open. The server
+ * reverse-geocodes a raw "lat,lng" and writes it over the customer's saved location AND their
+ * default address (see ensureDefaultAddressFromLocation in the auth service) — so doing it on
+ * launch silently replaced an address the customer had chosen, and re-applied whatever pincode
+ * the geocoder happened to return. The address now only changes when they actually change it.
+ */
+export async function captureLocationOnOpen(persistToProfile = false): Promise<void> {
   try {
     const pos = await getCurrentPosition()
     lastPos = { ...pos, ts: Date.now() }
     try { localStorage.setItem('hh_geo', JSON.stringify(lastPos)) } catch { /* ignore */ }
-    // Store on the user's profile (best-effort) so worker/admin see the live location. The backend
-    // reverse-geocodes raw "lat,lng" into a human-readable address before saving (see auth service).
-    if (token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
+    if (persistToProfile && token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
   } catch { /* permission denied / no fix — keep any previous fix */ }
 }
 

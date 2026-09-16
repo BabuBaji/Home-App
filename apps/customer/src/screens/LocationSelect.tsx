@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../components/UI'
 import { fetchMapsKey } from '../api'
 import { loadPickerMap } from '../maps'
-import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
+import { getCurrentPosition, getCurrentPositionWithin, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
 
 const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GPS is unavailable
 
@@ -13,6 +14,7 @@ const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GP
 export default function LocationSelect() {
   const nav = useNavigate()
   const toast = useToast()
+  const { t } = useTranslation()
   const initCentre = (useLocation().state as { center?: { lat: number; lng: number } } | null)?.center || null
   const mapDiv = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
@@ -48,7 +50,9 @@ export default function LocationSelect() {
         const { key } = await fetchMapsKey()
         // a search result passes an explicit centre; otherwise use the live GPS fix (fall back to Hyderabad)
         let centre = initCentre || HYD
-        if (!initCentre) { try { centre = await getCurrentPosition() } catch { /* keep default centre */ } }
+        // Cap the GPS wait: a fix can take many seconds indoors (or never arrive), and the map
+        // must not sit on "Loading map…" behind it. "Go to current location" recentres later.
+        if (!initCentre) { try { centre = await getCurrentPositionWithin(4000) } catch { /* keep default centre */ } }
         if (cancelled || !mapDiv.current) return
         const map = await loadPickerMap(mapDiv.current, centre, key)
         if (cancelled) return
@@ -95,19 +99,19 @@ export default function LocationSelect() {
     nav('/address-details', { state: { label: addr.label, name: addr.name, sub: addr.sub, pincode: addr.pincode, lat: addr.lat, lng: addr.lng } })
   }
 
-  const headline = resolving ? 'Locating…' : (addr ? (addr.name || addr.label.split(' - ')[0]) : 'Move the map to your spot')
+  const headline = resolving ? 'Locating…' : (addr ? (addr.name || addr.label.split(' - ')[0]) : t('location.moveMap'))
 
   return (
     <div className="mp-screen">
       <div className="mp-top">
         <button className="mp-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
-        <b>Confirm your location</b>
+        <b>{t('location.confirmTitle')}</b>
       </div>
 
       <div className="mp-search">
         <div className="mp-search-box">
           <Search size={18} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search locality, sector, area" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('location.searchPlaceholder')} />
         </div>
         {results.length > 0 && (
           <div className="mp-results">
@@ -126,14 +130,14 @@ export default function LocationSelect() {
         <div className="mp-pin" aria-hidden>
           {addr && (
             <div className="mp-pin-tip">
-              <span>Set this as your location</span>
+              <span>{t('location.setAsLocation')}</span>
               <b>{addr.name || addr.label.split(' - ')[0].split(',')[0]}</b>
             </div>
           )}
           <MapPin size={42} className="mp-pin-ic" fill="currentColor" />
         </div>
-        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> Go to current location</button>
-        {!ready && !loadErr && <div className="mp-map-msg">Loading map…</div>}
+        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> {t('location.goToCurrent')}</button>
+        {!ready && !loadErr && <div className="mp-map-msg">{t('location.loadingMap')}</div>}
         {loadErr && <div className="mp-map-msg err">{loadErr}</div>}
       </div>
 
@@ -142,10 +146,10 @@ export default function LocationSelect() {
           <MapPin size={22} className="mp-addr-ic" />
           <div className="grow">
             <b>{headline}</b>
-            <div className="mp-addr-sub">{addr?.sub || (addr?.pincode ? `Pincode ${addr.pincode}` : 'Pan the map to place the pin')}</div>
+            <div className="mp-addr-sub">{addr?.sub || (addr?.pincode ? `Pincode ${addr.pincode}` : t('location.panHint'))}</div>
           </div>
         </div>
-        <button className="mp-confirm" onClick={confirm} disabled={!addr || checking}>{checking ? 'Checking…' : 'Confirm location'}</button>
+        <button className="mp-confirm" onClick={confirm} disabled={!addr || checking}>{checking ? t('location.checking') : t('location.confirm')}</button>
       </div>
     </div>
   )

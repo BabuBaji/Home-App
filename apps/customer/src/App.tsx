@@ -92,6 +92,9 @@ import SavedAddresses from './screens/SavedAddresses'
 import DefaultAddress from './screens/DefaultAddress'
 import CancelPolicy from './screens/CancelPolicy'
 import PersonalInfo from './screens/PersonalInfo'
+// Settings screen for location access. Distinct from screens/Permissions, which is the
+// one-time onboarding step at /onboarding/permission.
+import LocationPermission from './screens/profile/LocationPermission'
 import Terms from './screens/Terms'
 // Module 6 — Live Job Tracking
 import JobTracking from './screens/job/JobTracking'
@@ -132,9 +135,11 @@ export default function App() {
     return () => { clearTimeout(t); clearTimeout(cap) }
   }, [])
 
-  // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
-  // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
-  useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+  // Capture the customer's GPS as soon as the app opens with a signed-in user (and right after
+  // they log in) so bookings/maps have a fix ready. The fix is cached LOCALLY only — it is written
+  // to the profile just once, for a user who has no location yet, because persisting it on every
+  // open overwrote the address (and pincode) the customer had deliberately chosen.
+  useEffect(() => { if (user) captureLocationOnOpen(!user.location) }, [user?.id, user?.location])
 
   // App-wide push alert: notify the customer when a booking is auto-cancelled (no expert accepted),
   // even if they've left the Track screen. Polls every 30s; the first pass seeds silently so old
@@ -421,6 +426,7 @@ export default function App() {
               <Route path="/addresses/default" element={<DefaultAddress />} />
               <Route path="/cancellation-policy" element={<CancelPolicy />} />
               <Route path="/personal" element={<PersonalInfo />} />
+              <Route path="/permissions" element={<LocationPermission />} />
               <Route path="/terms" element={<Terms />} />
             </Route>
             <Route path="*" element={<Navigate to={user ? '/home' : '/login'} replace />} />
