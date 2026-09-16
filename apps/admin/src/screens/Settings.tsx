@@ -188,6 +188,16 @@ export default function SettingsScreen() {
           workers — it does not pay anyone automatically; payouts stay worker-requested and admin-approved.
         </p>
 
+        {/* Worker incentives — money this actually pays out, unlike the % rates below. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Worker Incentives</h4>
+        <div className="form-grid">
+          <Field label="Job start bonus (₹)"><input disabled={!editable} type="number" step="1" min={0} value={s.job_start_bonus ?? ''} onChange={(e) => set('job_start_bonus', e.target.value)} placeholder="15" /></Field>
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          Paid to the worker the moment they start a service (customer OTP verified), on every job and
+          straight into their wallet. Takes effect on the next job started — set it to 0 to switch it off.
+        </p>
+
         {/* Settlement rates — drive the per-booking Payment & Settlement breakdown. */}
         <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Settlement Rates</h4>
         <div className="form-grid">

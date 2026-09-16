@@ -76,13 +76,17 @@ export default function Track() {
   const posTop = b.pos ? `${18 + b.pos.lat * 55}%` : '20%'
 
   // live service timer
-  const DUR_MIN: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+  const DUR_MIN: Record<string, number> = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
   const targetMin = DUR_MIN[b.items[0]?.durationId] ?? 60
   const startedMs = b.started_at ? new Date(b.started_at).getTime() : Date.now()
   const completedMs = b.completed_at ? new Date(b.completed_at).getTime() : null
   // Completed → show the REAL time the worker spent (completed_at − started_at);
   // fall back to the booked time only if timestamps are missing.
-  const targetSec = targetMin * 60
+  // Approved extra time counts here too — this screen used to ignore it entirely, so an extended
+  // service still showed the original countdown and hit "time up" while the expert worked on.
+  const endMs = b.service_end_at ? new Date(b.service_end_at).getTime() : startedMs + targetMin * 60000
+  const targetSec = Math.max(60, Math.round((endMs - startedMs) / 1000))
+  const extraMin = Math.max(0, Math.round(targetSec / 60) - targetMin)
   const rawElapsedSec = b.status === 'completed'
     ? (b.started_at && completedMs ? Math.max(0, Math.round((completedMs - startedMs) / 1000)) : targetSec)
     : Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
@@ -120,7 +124,7 @@ export default function Track() {
             <div style={{ fontSize: 40, marginBottom: 8 }}>⏱️</div>
             <h3 style={{ margin: '0 0 6px', fontSize: 18, color: '#1e1b3a' }}>Service Time Completed</h3>
             <p style={{ margin: '0 0 18px', fontSize: 14, color: '#6b6690', lineHeight: 1.5 }}>
-              The booked {targetMin} min for your service is over. Your expert is wrapping up and will finish shortly.
+              The booked {targetMin} min{extraMin > 0 ? ` (+${extraMin} min extra)` : ''} for your service is over. Your expert is wrapping up and will finish shortly.
             </p>
             <button
               onClick={() => setTimeUpAck(true)}
@@ -264,7 +268,7 @@ export default function Track() {
           <div className="timer-card">
             <div className="tc-top">{b.status === 'completed' ? '✅ Service completed' : '🧹 Service in progress'}</div>
             <div className="tc-time">{fmt(elapsedSec)}</div>
-            <div className="tc-sub">{b.status === 'completed' ? 'total service time' : `elapsed · ${targetMin} min booked`}</div>
+            <div className="tc-sub">{b.status === 'completed' ? 'total service time' : `elapsed · ${targetMin} min booked${extraMin > 0 ? ` +${extraMin} extra` : ''}`}</div>
             {b.status !== 'completed' && <div className="tc-bar"><span style={{ width: `${pct}%` }} /></div>}
             {b.status !== 'completed' && <div className="tc-remain">{remainingSec > 0 ? `${fmt(remainingSec)} remaining` : 'Booked time reached — you can mark it complete'}</div>}
           </div>

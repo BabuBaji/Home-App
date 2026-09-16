@@ -1988,7 +1988,8 @@ const MOD_META: Record<string, { tint: string; Icon: any }> = {
 }
 // Full audit trail for a customer: customer/worker/system actions (bookings, wallet ledger, reviews,
 // coupons) + admin actions (audit log) + ops records (notes, tickets, membership). Each event is
-// attributed to who performed it. IP/device aren't captured for these, so they show as "—".
+// attributed to who performed it. Admin actions carry a real captured IP + parsed device; customer/
+// worker/system events happen off-panel and have none, so they show as "—".
 function buildAudit(bookings: any[], txns: any[], notes: any[], tickets: any[], ledger: any[], audit: any[], c: any): any[] {
   const cust = c.name || c.phone || 'Customer'
   const evs: any[] = []
@@ -2015,7 +2016,7 @@ function buildAudit(bookings: any[], txns: any[], notes: any[], tickets: any[], 
   for (const t of tickets) { const byAdmin = /admin/i.test(t.raised_by || ''); evs.push({ module: 'Support', action: 'Ticket Raised', actorType: byAdmin ? 'admin' : 'customer', actor: t.raised_by || cust, actorRole: byAdmin ? 'Admin' : 'Customer', bookingId: t.booking_id || undefined, time: t.created, description: t.message, details: [['Ticket', t.ref || `TKT${10000 + t.id}`], ['Subject', t.subject || t.category], ['Status', t.status || 'Open']] }) }
   for (const l of ledger) { const byAdmin = /admin/i.test(l.detail || ''); evs.push({ module: 'Membership', action: `Plan ${String(l.event).charAt(0).toUpperCase() + String(l.event).slice(1)}`, actorType: byAdmin ? 'admin' : 'system', actor: byAdmin ? 'Admin' : 'System', actorRole: byAdmin ? 'Admin' : 'Auto', time: l.created, details: [['Plan', (l.detail || '').split(' · ')[0] || ''], ['Amount', money(l.amount || 0)]] }) }
   const AMAP: Record<string, [string, string]> = { 'customer.edit': ['Profile', 'Profile Updated'], 'customer.wallet_adjust': ['Wallet', 'Wallet Adjusted'], 'customer.note_add': ['Notes', 'Note Added'], 'customer.membership_change': ['Membership', 'Plan Changed'], 'customer.create': ['Profile', 'Customer Created'], 'customer.address_add': ['Address', 'Address Added'], 'customer.address_edit': ['Address', 'Address Updated'], 'customer.address_archive': ['Address', 'Address Archived'], 'customer.address_restore': ['Address', 'Address Restored'], 'customer.address_default': ['Address', 'Default Address Set'] }
-  for (const a of audit) { const [module, action] = AMAP[a.action] || ['Profile', String(a.action).replace('customer.', '').replace(/_/g, ' ')]; evs.push({ module, action, actorType: 'admin', actor: a.admin || 'Admin', actorRole: 'Admin', time: a.created, description: `${action} by ${a.admin || 'an admin'}.`, details: [['Detail', a.target || '']] }) }
+  for (const a of audit) { const [module, action] = AMAP[a.action] || ['Profile', String(a.action).replace('customer.', '').replace(/_/g, ' ')]; evs.push({ module, action, actorType: 'admin', actor: a.admin || 'Admin', actorRole: 'Admin', time: a.created, ip: a.ip || null, device: a.device || null, description: `${action} by ${a.admin || 'an admin'}.`, details: [['Detail', a.target || '']] }) }
   return evs.filter((e) => e.time).sort((x, y) => Date.parse(y.time) - Date.parse(x.time))
 }
 
@@ -2088,7 +2089,7 @@ function ActivityTab({ bookings, txns, notes, tickets, ledger, audit, c, nav }: 
                       <td style={{ fontWeight: 600 }}>{e.action}</td>
                       <td style={{ whiteSpace: 'normal' }}><div className="row" style={{ gap: 7, alignItems: 'center' }}><span style={{ display: 'inline-flex', width: 26, height: 26, borderRadius: '50%', background: e.actorType === 'system' ? '#eef0f4' : '#eef0ff', color: e.actorType === 'system' ? '#667085' : '#5b51e8', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{e.actorType === 'system' ? 'SYS' : initials(e.actor)}</span><div style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, fontWeight: 600 }}>{e.actor}</div><div className="muted" style={{ fontSize: 10.5 }}>{e.actorRole}</div></div></div></td>
                       <td className="muted" style={{ whiteSpace: 'normal', fontSize: 11.5 }}>{e.details.slice(0, 2).map((d: any, j: number) => <div key={j}>{d[0]}: {d[1]}</div>)}</td>
-                      <td className="muted" style={{ fontSize: 12 }}>—</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{e.ip || '—'}</td>
                       <td><button className="iconbtn" style={{ width: 26, height: 26 }} onClick={(ev) => { ev.stopPropagation(); setSel(e) }}><MoreVertical size={15} /></button></td>
                     </tr>
                   )
@@ -2106,7 +2107,7 @@ function ActivityTab({ bookings, txns, notes, tickets, ledger, audit, c, nav }: 
               <button className="iconbtn" style={{ width: 30, height: 30 }} disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
             </div>
           </div>
-          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>IP address and device aren't captured for these events yet — shown as "—".</p>
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>IP address &amp; device are captured for admin actions. Customer, worker and system events happen off-panel, so they show "—".</p>
         </Card>
 
         {sel && (() => { const mm = MOD_META[sel.module] || { tint: '#98a2b3', Icon: Activity }; return (
@@ -2118,8 +2119,8 @@ function ActivityTab({ bookings, txns, notes, tickets, ledger, audit, c, nav }: 
                 <Row k="Module" v={sel.module} />
                 <Row k="Action" v={sel.action} />
                 <Row k="Performed By" v={<span style={{ textAlign: 'right' }}>{sel.actor}<div className="muted" style={{ fontSize: 11 }}>{sel.actorRole}</div></span>} />
-                <Row k="IP Address" v={<span className="muted">—</span>} />
-                <Row k="Device" v={<span className="muted">Not tracked</span>} />
+                <Row k="IP Address" v={sel.ip ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{sel.ip}</span> : <span className="muted">—</span>} />
+                <Row k="Device" v={sel.device ? <span>{sel.device}</span> : <span className="muted">Not tracked</span>} />
               </div>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Details</div>

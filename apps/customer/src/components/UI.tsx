@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { ChevronLeft, House, CalendarDays, History, AlertTriangle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string) => void>(() => {})
@@ -41,23 +42,24 @@ export function Header({ title, subtitle, right, back = true }: {
 
 /* ---------- Bottom nav ---------- */
 const NAV = [
-  { to: '/home', label: 'Home', Icon: House },
-  { to: '/bookings', label: 'Bookings', Icon: CalendarDays },
+  { to: '/home', key: 'nav.home', Icon: House },
+  { to: '/bookings', key: 'nav.bookings', Icon: CalendarDays },
 ]
 export function BottomNav() {
   const { pathname } = useLocation()
+  const { t } = useTranslation()
   return (
     <nav className="bottomnav">
       {NAV.map((n) => {
         const active = pathname.startsWith(n.to)
         return (
           <Link key={n.to} to={n.to} className={active ? 'active' : ''}>
-            <span className="ni"><n.Icon size={22} strokeWidth={active ? 2.4 : 2} /></span>{n.label}
+            <span className="ni"><n.Icon size={22} strokeWidth={active ? 2.4 : 2} /></span>{t(n.key)}
           </Link>
         )
       })}
       <Link to="/history" className={`bn-history ${pathname.startsWith('/history') ? 'active' : ''}`}>
-        <History size={20} strokeWidth={2.2} /><span>History</span>
+        <History size={20} strokeWidth={2.2} /><span>{t('nav.history')}</span>
       </Link>
     </nav>
   )

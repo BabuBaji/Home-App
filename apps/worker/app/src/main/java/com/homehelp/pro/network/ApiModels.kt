@@ -407,6 +407,17 @@ data class SelectShiftBody(val shiftId: Int)
 
 data class AttendanceBody(val lat: Double? = null, val lng: Double? = null)
 
+/** "Are you coming in tomorrow?" — prompt state + the worker's stored answer for the target date. */
+data class NextDayStatus(
+    val forDate: String = "",
+    val prompt: Boolean = false,
+    val responded: Boolean = false,
+    val coming: Boolean? = null,
+    val note: String = "",
+)
+
+data class NextDayBody(val coming: Boolean, val note: String? = null)
+
 data class StatusBody(val state: String)
 data class TicketItem(val id: Int = 0, val subject: String = "", val message: String = "", val status: String = "Open", val created: String = "")
 data class TicketBody(val subject: String, val message: String)
@@ -491,6 +502,47 @@ data class JobStateResponse(
     val extrasTotal: Int = 0,
 )
 
+/* ---------- service extensions: extra paid time, granted only by the customer ---------- */
+
+/** One purchasable block of extra time. [price] is what the customer pays, [payout] what we earn. */
+data class ExtensionBlock(val mins: Int = 0, val price: Int = 0, val payout: Int = 0)
+
+/** A reason the worker can give. [chargeable] false = the customer is not billed for this time. */
+data class ExtensionReason(val code: String = "", val label: String = "", val chargeable: Boolean = true)
+
+data class ExtensionDto(
+    val id: Int = 0,
+    val minutes: Int = 0,
+    val price: Int = 0,
+    val payout: Int = 0,
+    val reasonCode: String = "",
+    val reasonLabel: String = "",
+    val status: String = "",        // pending | approved | declined | cancelled
+)
+
+/** What this job may still be extended by — already filtered server-side by the caps. */
+data class ExtensionOptions(
+    val enabled: Boolean = false,
+    val blocks: List<ExtensionBlock> = emptyList(),
+    val reasons: List<ExtensionReason> = emptyList(),
+    val pending: ExtensionDto? = null,
+    val usedMinutes: Int = 0,
+    val remainingMinutes: Int = 0,
+    val requestsLeft: Int = 0,
+)
+
+data class ExtensionsResponse(
+    val ok: Boolean = true,
+    val extensions: List<ExtensionDto> = emptyList(),
+    val extensionMinutes: Int = 0,
+    // Where the clock now ends (ISO-8601, UTC). Carried here as well as on the job because this is
+    // what the app polls while the customer decides — the active job isn't refetched on approval.
+    val serviceEndAt: String? = null,
+)
+
+data class ExtensionRequestBody(val minutes: Int, val reasonCode: String, val reasonText: String = "")
+data class ExtensionRequestResult(val ok: Boolean = false, val error: String? = null, val extension: ExtensionDto? = null)
+
 data class ChecklistBody(val items: List<ChecklistTask>)
 data class PhotoBody(val phase: String, val slot: String, val photo: String)
 data class PhotoRemoveBody(val phase: String, val slot: String)
@@ -498,7 +550,49 @@ data class NotesBody(val phase: String, val text: String)
 data class SignatureBody(val signature: String, val rating: Int, val notes: String)
 data class ExtraBody(val name: String, val price: Int)
 data class ExtraRemoveBody(val id: Long)
+
+/**
+ * One add-on the worker can sell on the active job. [price] is what the booking's zone charges —
+ * the same figure the customer sees — so the app never has to carry a price list of its own.
+ */
+data class AddonDto(
+    val id: String = "",
+    val name: String = "",
+    val price: Int = 0,
+    val listPrice: Int = 0,
+)
+
+/** Reply of GET api/worker/jobs/addons. */
+data class AddonsResponse(val addons: List<AddonDto> = emptyList())
 data class PauseBody(val reason: String? = null)
+/** Reply of GET api/worker/jobs/current — which booking is on this worker, if any. */
+data class CurrentJobResponse(
+    val ok: Boolean = true,
+    val bookingId: Int? = null,
+    val ref: String = "",
+    val status: String = "",
+    val service: String = "",
+)
+
+/**
+ * Server's verdict on the offer currently on screen.
+ *
+ * [state] is `PENDING` while it can still be accepted, `EXPIRED` once the accept window ran out,
+ * `TAKEN` when another worker claimed the booking first, and `NONE` when there is no offer at all.
+ * Anything other than PENDING means the offer screen must come down.
+ *
+ * [remainingSec] is the authority for the countdown — the app used to start its own 2:00 timer on
+ * screen entry, which restarted on every revisit and kept running against a job already gone.
+ */
+data class OfferStatusResponse(
+    val ok: Boolean = true,
+    val state: String = "NONE",
+    val bookingId: Int? = null,
+    val remainingSec: Int = 0,
+    /** The offered booking. Present on PENDING, since offers are pushed rather than pulled. */
+    val job: Job? = null,
+)
+
 data class MessageBody(val text: String)
 
 data class JobMessage(

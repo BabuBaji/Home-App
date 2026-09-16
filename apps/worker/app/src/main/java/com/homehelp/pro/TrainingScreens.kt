@@ -20,7 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -124,7 +124,7 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
             Card(modifier = Modifier.clickable { reading = m }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconChip(
-                        if (m.completed) Icons.Filled.CheckCircle else Icons.Filled.MenuBook,
+                        if (m.completed) Icons.Filled.CheckCircle else Icons.AutoMirrored.Filled.MenuBook,
                         if (m.completed) GreenSuccess else Purple,
                         if (m.completed) GreenLight else PurpleLight,
                     )

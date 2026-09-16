@@ -11,6 +11,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.mutableLongStateOf
 import com.homehelp.pro.network.ChecklistBody
 import com.homehelp.pro.network.ChecklistTask
+import com.homehelp.pro.network.ExtensionDto
+import com.homehelp.pro.network.ExtensionOptions
+import com.homehelp.pro.network.ExtensionRequestBody
 import com.homehelp.pro.network.ExtraBody
 import com.homehelp.pro.network.ExtraRemoveBody
 import com.homehelp.pro.network.JobExtra
@@ -130,13 +133,20 @@ data class Job(
     val area: String,
     val distanceKm: Double,
     val earnings: Int,
-    val otp: String,
+    // NOTE: there is deliberately no `otp` field. The check-in code belongs to the customer and
+    // is never sent to the worker device — the worker must be told it verbally and the SERVER
+    // does the comparison (see verifyOtpAndStart). Gson ignores the key if an older backend
+    // still emits it.
     val lat: Double,
     val lng: Double,
     // Server timestamp (ISO-8601, UTC) when the service started. The live timer is
     // anchored to this so the worker app and customer app show the SAME elapsed time.
     val startedAt: String? = null,
     val completedAt: String? = null,
+    // Where the service clock ends (ISO-8601, UTC), owned by the backend. Extra time approved
+    // after the booked window has already run out is granted FROM the approval, so it cannot be
+    // derived from startedAt + booked + extension. Null until the job is extended.
+    val serviceEndAt: String? = null,
 )
 
 // Nullable String fields are defensive: this is deserialized from JSON by Gson, which bypasses
@@ -587,11 +597,25 @@ class AppViewModel : ViewModel() {
         }
         // Restore any job the worker is mid-way through, so relaunching the app (or coming
         // back to Home) keeps the active/in-progress job visible instead of losing it.
-        activeJob = b.activeJob
-        jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
+        /* A PENDING OFFER must survive this.
+         *
+         * Bootstrap reports the worker's ACTIVE booking, and an offer is not one — the booking is
+         * still 'confirmed' and unassigned until it's accepted. So bootstrap answers
+         * activeJob=null/NONE while an offer is live, and this assignment used to wipe the offer the
+         * offer-watch had just adopted. Every foreground refresh (~8s) therefore tore down the
+         * accept/reject screen and dropped the worker back on Home mid-offer. The watch owns the
+         * offer's lifetime; bootstrap stays out of it. */
+        if (jobStatus != JobStatus.REQUESTED) {
+            activeJob = b.activeJob
+            jobStatus = b.jobStatus?.let { s -> runCatching { JobStatus.valueOf(s) }.getOrNull() } ?: JobStatus.NONE
+        }
         // Re-hydrate the in-service working state (ticks/photos/extras/pause) for a job that was
         // already running when the app was killed — this is what makes it survive a restart.
         if (activeJob != null) loadJobState()
+        // Seeded demo figures must outlast this: the bootstrap kicked off by login lands
+        // asynchronously, after the deep-link handler has already seeded, and would otherwise
+        // zero the dashboard again. Re-applying here is idempotent and ordering-independent.
+        if (demoFigures) applyDemoFigures()
     }
 
     // ---- lifecycle transitions ----
@@ -709,6 +733,9 @@ class AppViewModel : ViewModel() {
      *  was completed/assigned server-side — shows up right away instead of after a full relaunch. */
     fun refresh() {
         if (!isLoggedIn) return
+        // Demo figures are seeded for design review and would be wiped by the ON_RESUME refresh
+        // the moment the app came back to the foreground. DEBUG-only — see [applyDemoFigures].
+        if (demoFigures) return
         sync { applyBootstrap(api.bootstrap()) }
     }
 
@@ -721,34 +748,124 @@ class AppViewModel : ViewModel() {
     /** Clear the session and return to the login screen. */
     fun logout() {
         Session.clear()
-        RetrofitClient.token = null
         isLoggedIn = false
         isOnline = false
         onlineSinceMs = 0L
         onlineAccumMs = 0L
+        availabilityState = "Offline"
+        /* Mark offline on the SERVER before dropping the token, or auto-assign keeps handing jobs
+         * to a worker who has logged out — `workers.available` would still read true forever.
+         * The token has to outlive the call by a moment, hence clearing it here rather than above;
+         * the UI has already returned to Login, so nothing is waiting on this. */
+        viewModelScope.launch {
+            runCatching {
+                kotlinx.coroutines.withTimeoutOrNull(4000) {
+                    api.setStatus(com.homehelp.pro.network.StatusBody("Offline"))
+                }
+            }
+            RetrofitClient.token = null
+        }
     }
 
     /** Load the worker's persisted daily goal (called once the session is ready). */
     fun loadDailyGoal() { dailyGoal = Session.dailyGoal }
+
+    /** True while Home is showing seeded demo figures instead of live backend data. */
+    var demoFigures by mutableStateOf(false)
+        private set
+
+    /**
+     * DEBUG ONLY — fill Home's figures with representative numbers so the dashboard can be
+     * reviewed with realistic content instead of a column of zeros.
+     *
+     * Nothing in the shipped app calls this: the only caller is MainActivity's debug deep-link
+     * handler, which is itself inside `if (BuildConfig.DEBUG)`. Setting [demoFigures] also parks
+     * [refresh] so the seeded numbers survive the app coming back to the foreground; the flag is
+     * never persisted, so a normal relaunch is back on live data.
+     */
+    fun applyDemoFigures() {
+        demoFigures = true
+        todayEarnings = 1240
+        weekEarnings = 7850
+        monthEarnings = 28400
+        walletBalance = 3250
+        holdBalance = 480
+        dailyGoal = 1500
+        todayJobs = 6
+        todayCompleted = 4
+        todayCancelled = 1
+        workerRating = 4.8
+        acceptancePct = 96
+        completionPct = 98
+        punctualityPct = 94
+        cancellationPct = 2
+        // No fabricated schedule. The Next Job card and the timeline must only ever show real
+        // customer bookings, so demo mode seeds figures only and leaves the job feed alone.
+    }
 
     /** True when a real customer booking is waiting — drives the "New Job Request" notification. */
     var hasIncomingJob by mutableStateOf(false)
         private set
     private var pollingStarted = false
 
-    fun goOnline(v: Boolean) {
+    /**
+     * Home's online switch.
+     *
+     * [pushState] tells the BACKEND about the change, and must stay true for every caller except
+     * [changeAvailabilityState] (which sends its own, richer state and would otherwise have this
+     * overwrite "Break"/"Busy" with a plain "Offline").
+     *
+     * This used to be local-only state. Auto-assign picks workers on `workers.available`, which is
+     * written by /api/worker/status — so a worker who flipped this switch off stayed `available` in
+     * the database and kept being assigned jobs, and kept being notified about them. The switch
+     * said offline; nothing else in the system agreed.
+     */
+    /** One-shot explanation for an action the app refused (e.g. going offline mid-job). */
+    var actionBlockedMessage by mutableStateOf<String?>(null)
+        private set
+    fun clearActionBlockedMessage() { actionBlockedMessage = null }
+
+    /** True while the worker is committed to a job — accepted through to in-service. */
+    val hasCommittedJob: Boolean
+        get() = activeJob != null && jobStatus in setOf(
+            JobStatus.ACCEPTED, JobStatus.ON_THE_WAY, JobStatus.ARRIVED, JobStatus.IN_PROGRESS,
+        )
+
+    fun goOnline(v: Boolean, pushState: Boolean = true) {
         if (v == isOnline) return
+        /* Going offline mid-job is refused. The customer is waiting on this worker and the job is
+         * already theirs; dropping availability underneath it would strand the booking and stop
+         * the live-position updates the customer's tracking screen reads. Finish or cancel first. */
+        if (!v && hasCommittedJob) {
+            actionBlockedMessage = "You're on a job — finish or cancel it before going offline."
+            return
+        }
         val now = System.currentTimeMillis()
         if (v) {
             onlineSinceMs = now
             startJobPolling()
+            startOfferWatch()   // offers are pushed — start listening the moment we go online
         } else {
             // Bank the just-finished online stretch into today's total.
             if (onlineSinceMs > 0) onlineAccumMs += now - onlineSinceMs
             onlineSinceMs = 0L
             hasIncomingJob = false
+            // Going offline gives back any offer still waiting on an answer. Leaving it held would
+            // keep an offer on screen for a worker who just said they aren't available, and would
+            // strand the booking on them until the window ran out instead of freeing it now.
+            if (jobStatus == JobStatus.REQUESTED) {
+                activeJob = null
+                jobStatus = JobStatus.NONE
+                offerRemainingSec = null
+                sync { api.rejectJob() }
+            }
         }
         isOnline = v
+        if (pushState) {
+            val state = if (v) "Available" else "Offline"
+            availabilityState = state
+            sync { runCatching { api.setStatus(com.homehelp.pro.network.StatusBody(state)) } }
+        }
     }
 
     // While online and idle, poll the backend for a real waiting booking. When one
@@ -785,6 +902,8 @@ class AppViewModel : ViewModel() {
                     activeJob = r.job
                     jobStatus = JobStatus.REQUESTED
                     hasIncomingJob = false
+                    offerRemainingSec = null   // the watch fills this from the server's clock
+                    startOfferWatch()
                     onResult(true)
                 } else {
                     hasIncomingJob = false
@@ -804,18 +923,117 @@ class AppViewModel : ViewModel() {
         private set
     val startWindowMinutes = 15
 
+    /* ---- Pending-offer watch -------------------------------------------------------------
+     * Seconds left on the offer, per the SERVER. Null while nothing is pending. The countdown
+     * used to be a local 2:00 started on screen entry, so it restarted whenever the worker
+     * revisited the screen and kept ticking on jobs that were already gone.
+     */
+    var offerRemainingSec by mutableStateOf<Int?>(null)
+        private set
+
+    /** Why the offer on screen disappeared, for a one-shot message. Cleared once shown. */
+    var offerLostReason by mutableStateOf<String?>(null)
+        private set
+
+    fun clearOfferLostReason() { offerLostReason = null }
+
+    private var offerWatchStarted = false
+
+    /** Drop the pending offer locally. [reason] non-null surfaces a message to the worker. */
+    private fun dropOffer(reason: String?) {
+        activeJob = null
+        jobStatus = JobStatus.NONE
+        jobAcceptedAtMs = 0L
+        offerRemainingSec = null
+        hasIncomingJob = false
+        offerLostReason = reason
+    }
+
+    /* Poll the offer's validity while one is pending.
+     *
+     * Covers the two ways an offer dies that the app previously never noticed: the accept window
+     * running out, and another worker claiming the booking first. Without this the worker sat on a
+     * full timer for a job that was already someone else's, and found out only from a 409 when they
+     * tapped Accept.
+     */
+    private fun startOfferWatch() {
+        if (offerWatchStarted) return
+        offerWatchStarted = true
+        viewModelScope.launch {
+            while (true) {
+                // Poll while an offer is on screen, AND while online and idle — offers are PUSHED
+                // by the booking service now, so the app has to notice one arriving rather than
+                // only tracking one it asked for.
+                val watching = jobStatus == JobStatus.REQUESTED ||
+                    (isLoggedIn && isOnline && activeJob == null && jobStatus == JobStatus.NONE)
+                if (watching) {
+                    try {
+                        val r = api.offerStatus()
+                        backendConnected = true
+                        when (r.state) {
+                            "PENDING" -> {
+                                offerRemainingSec = r.remainingSec
+                                // A brand-new offer: adopt it and raise the accept/reject screen.
+                                if (jobStatus != JobStatus.REQUESTED && r.job != null) {
+                                    activeJob = r.job
+                                    jobStatus = JobStatus.REQUESTED
+                                    hasIncomingJob = false
+                                    incomingOfferSignal++
+                                }
+                            }
+                            "TAKEN" -> if (jobStatus == JobStatus.REQUESTED) dropOffer("This job was accepted by another expert.")
+                            "EXPIRED" -> if (jobStatus == JobStatus.REQUESTED) dropOffer("The 2-minute window passed, so this job went to another expert.")
+                            "NONE" -> if (jobStatus == JobStatus.REQUESTED) dropOffer(null)
+                        }
+                    } catch (e: Exception) {
+                        // Offline: leave the offer alone. The server holds the real deadline and
+                        // will refuse a late accept, so nothing is lost by not guessing here.
+                        backendConnected = false
+                    }
+                }
+                delay(2000)
+            }
+        }
+    }
+
+    /**
+     * Bumped each time a NEW offer arrives. AppRoot watches it to open the offer screen and start
+     * the ringtone — a counter rather than a flag so two offers in a row both register.
+     */
+    var incomingOfferSignal by mutableStateOf(0)
+        private set
+
     fun acceptJob() {
         jobStatus = JobStatus.ACCEPTED
         jobAcceptedAtMs = System.currentTimeMillis()
+        offerRemainingSec = null
         clearJobState()          // never inherit the previous job's ticks/photos/extras
-        sync { api.acceptJob() }
-        loadJobState()           // seeds the checklist for this job's services
+        // NOT fire-and-forget: the server can refuse (another worker won the race, or the window
+        // closed). Swallowing that left the worker on a job screen for a job they did not have.
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.acceptJob()
+                backendConnected = true
+                if (r.ok) {
+                    r.activeJob?.let { activeJob = it }
+                    loadJobState()   // seeds the checklist for this job's services
+                } else {
+                    dropOffer(r.error ?: "This job is no longer available.")
+                }
+            } catch (e: Exception) {
+                val lost = (e as? retrofit2.HttpException)?.code() == 409
+                if (lost) dropOffer("This job was taken by another expert.")
+                else { backendConnected = false; loadJobState() }
+            }
+        }
     }
 
     fun rejectJob() {
         activeJob = null
         jobStatus = JobStatus.NONE
         jobAcceptedAtMs = 0L
+        offerRemainingSec = null
         sync { api.rejectJob() }
     }
 
@@ -835,26 +1053,35 @@ class AppViewModel : ViewModel() {
         sync { api.arrived() }
     }
 
-    /** OTP-gated start. Returns true if the OTP matches and service begins.
+    /** OTP-gated start. The code is checked by the SERVER — never on-device — because the worker
+     *  app is not told the customer's OTP; the only way through is for the customer to read it
+     *  out. That also means there is no offline path: a failed request leaves the job un-started
+     *  rather than optimistically starting it.
+     *
      *  We adopt the server's job snapshot from the response so the live timer anchors to
      *  the SERVER's started_at (the same value the customer app uses) — otherwise the two
-     *  timers drift by the request round-trip / local-clock difference. */
-    fun verifyOtpAndStart(input: String): Boolean {
-        val job = activeJob ?: return false
-        if (input != job.otp) return false
-        jobStatus = JobStatus.IN_PROGRESS
-        jobAcceptedAtMs = 0L                           // start window met — hide the countdown banner
-        serviceStartMs = System.currentTimeMillis()   // optimistic fallback until the server replies
-        serviceEndMs = 0L
+     *  timers drift by the request round-trip / local-clock difference.
+     *
+     *  [onResult] receives null on success, or a message to show the worker. */
+    fun verifyOtpAndStart(input: String, onResult: (String?) -> Unit) {
+        if (activeJob == null) { onResult("No active job."); return }
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
-                val r = api.verifyOtp(OtpBody(input))
-                r.activeJob?.let { activeJob = it }    // now carries the server started_at
+                val r = api.verifyOtp(OtpBody(input.trim()))
                 backendConnected = true
-            } catch (e: Exception) { backendConnected = false }
+                if (!r.ok) { onResult(r.error ?: "Incorrect OTP. Try again."); return@launch }
+                jobStatus = JobStatus.IN_PROGRESS
+                jobAcceptedAtMs = 0L                          // start window met — hide the countdown banner
+                serviceStartMs = System.currentTimeMillis()  // fallback until the server started_at lands
+                serviceEndMs = 0L
+                r.activeJob?.let { activeJob = it }           // now carries the server started_at
+                onResult(null)
+            } catch (e: Exception) {
+                backendConnected = false
+                onResult("Couldn't reach the server. Check your connection and try again.")
+            }
         }
-        return true
     }
 
     // ─── In-service job state: checklist · before/after photos · extras · pause ───────────
@@ -887,6 +1114,63 @@ class AppViewModel : ViewModel() {
         private set
     var extrasTotal by mutableIntStateOf(0)
         private set
+
+    // ─── Service extensions ───────────────────────────────────────────────────────────────
+    // Extra time is the CUSTOMER's to grant: the worker only ever raises a request. Nothing here
+    // lengthens the clock on its own — `extensionMinutes` grows only once the server says approved.
+    var extensionOptions by mutableStateOf<ExtensionOptions?>(null)
+        private set
+    var pendingExtension by mutableStateOf<ExtensionDto?>(null)
+        private set
+    var lastExtensionOutcome by mutableStateOf<ExtensionDto?>(null)   // approved/declined, to tell the worker
+        private set
+    var extensionMinutes by mutableIntStateOf(0)
+        private set
+    /** Server-owned end of the clock once time has been granted (ISO-8601, UTC); null = unextended. */
+    var serviceEndAtIso by mutableStateOf<String?>(null)
+        private set
+    var extensionEarnings by mutableIntStateOf(0)
+        private set
+
+    /** Load the menu of blocks/reasons still allowed for this job. */
+    fun loadExtensionOptions() = sync {
+        val o = api.extensionOptions()
+        extensionOptions = o
+        pendingExtension = o.pending
+    }
+
+    /** Ask the customer for more time. Returns null on success, else a message to show. */
+    fun requestExtension(minutes: Int, reasonCode: String, reasonText: String = "", onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val r = api.requestExtension(ExtensionRequestBody(minutes, reasonCode, reasonText))
+                backendConnected = true
+                if (r.ok) { pendingExtension = r.extension; onResult(null) } else onResult(r.error ?: "Could not request more time")
+            } catch (e: Exception) {
+                backendConnected = false
+                onResult(e.message ?: "Could not reach the server")
+            }
+        }
+    }
+
+    /**
+     * Poll while a request is outstanding. Approved time is additive, so the countdown and the
+     * earnings line both come straight from the server's tally rather than being accumulated here.
+     */
+    fun refreshExtensions() = sync {
+        val r = api.jobExtensions()
+        extensionMinutes = r.extensionMinutes
+        serviceEndAtIso = r.serviceEndAt ?: serviceEndAtIso
+        extensionEarnings = r.extensions.filter { it.status == "approved" }.sumOf { it.payout }
+        val prev = pendingExtension
+        pendingExtension = r.extensions.firstOrNull { it.status == "pending" }
+        // A request that is no longer pending has been decided — surface that once.
+        if (prev != null && pendingExtension == null) {
+            lastExtensionOutcome = r.extensions.firstOrNull { it.id == prev.id }
+        }
+    }
+
+    fun clearExtensionOutcome() { lastExtensionOutcome = null }
     var jobPaused by mutableStateOf(false)
         private set
     /** Total time the service has been paused, including a pause still in flight. */
@@ -971,6 +1255,18 @@ class AppViewModel : ViewModel() {
     }
     fun photoFor(phase: String, slot: String): JobPhoto? =
         (if (phase == "after") afterPhotos else beforePhotos).firstOrNull { it.slot == slot }
+    /**
+     * Add-ons sellable on the active job. Empty until [loadAddons] returns, and left empty when
+     * the call fails — the extras screen falls back to its free-text field rather than offering
+     * prices the catalogue hasn't confirmed.
+     */
+    val addons = mutableStateListOf<com.homehelp.pro.network.AddonDto>()
+    fun loadAddons() {
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.jobAddons() } }
+                .onSuccess { addons.clear(); addons.addAll(it.addons) }
+        }
+    }
     fun addExtra(name: String, price: Int) = mutateState { api.addExtra(ExtraBody(name, price)) }
     fun removeExtra(id: Long) = mutateState { api.removeExtra(ExtraRemoveBody(id)) }
     fun pauseJob(reason: String?) = mutateState { api.pauseJob(PauseBody(reason)) }
@@ -980,6 +1276,11 @@ class AppViewModel : ViewModel() {
     val messages = mutableStateListOf<JobMessage>()
     var chatSending by mutableStateOf(false)
         private set
+    // Unread customer messages — the count shown on the chat badge on the live-job screen. A message
+    // is "unread" until the worker opens the chat (loadMessages marks everything read).
+    var unreadMessages by mutableStateOf(0)
+        private set
+    private var lastReadMsgId = 0
 
     fun loadMessages() {
         if (activeJob == null) return
@@ -988,8 +1289,26 @@ class AppViewModel : ViewModel() {
                 withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
                 val r = api.jobMessages()
                 messages.clear(); messages.addAll(r.messages)
+                // Viewing the thread marks it read → clear the badge.
+                lastReadMsgId = r.messages.maxOfOrNull { it.id } ?: lastReadMsgId
+                unreadMessages = 0
                 backendConnected = true
             } catch (e: Exception) { backendConnected = false }
+        }
+    }
+
+    /** Badge poll for the live-job screen: refresh the thread and count customer messages the worker
+     *  hasn't opened the chat to read yet. Does NOT mark them read. */
+    fun refreshUnreadMessages() {
+        if (activeJob == null) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { RetrofitClient.refreshBaseUrl() }
+                val r = api.jobMessages()
+                messages.clear(); messages.addAll(r.messages)
+                unreadMessages = r.messages.count { !it.fromWorker && it.id > lastReadMsgId }
+                backendConnected = true
+            } catch (_: Exception) { /* keep last count */ }
         }
     }
 
@@ -1016,6 +1335,8 @@ class AppViewModel : ViewModel() {
         beforeNotes = ""; afterNotes = ""; signature = null; customerSigned = false
         customerRating = 0; customerNotes = ""
         extras = emptyList(); extrasTotal = 0; jobPaused = false; pausedMs = 0L
+        extensionOptions = null; pendingExtension = null; lastExtensionOutcome = null
+        extensionMinutes = 0; extensionEarnings = 0; serviceEndAtIso = null
         messages.clear(); beforePhoto = null
     }
 
@@ -1072,6 +1393,10 @@ class AppViewModel : ViewModel() {
 
     // ---- wallet module ----
     private fun applyWalletSummary(s: WalletSummaryDto) {
+        // This is the one place every wallet refresh path funnels through to write Home's
+        // figures, so it is where the DEBUG demo seed has to be defended: the wallet poll that
+        // follows going online lands here and would otherwise reset the dashboard to zeros.
+        if (demoFigures) return
         walletBalance = s.available
         pendingAmount = s.pending
         holdBalance = s.hold
@@ -1201,6 +1526,21 @@ class AppViewModel : ViewModel() {
     private fun applyWorker(w: WorkerDto) {
         workerName = w.name
         if (w.status.isNotBlank()) workerStatus = w.status
+        /* Restore the online flag from the SERVER, which is the thing that decides whether jobs
+         * are offered. isOnline lives only in memory, so every relaunch (or an Android process
+         * kill of a backgrounded app) came back reading "You are Offline" while the backend still
+         * had the worker available — the app looked offline and dropped its polling for no reason.
+         * Set directly rather than through goOnline(): this is us catching UP to the server, not a
+         * change to report back to it. */
+        val serverOnline = w.availabilityState == "Available"
+        if (serverOnline != isOnline) {
+            isOnline = serverOnline
+            if (serverOnline) {
+                if (onlineSinceMs == 0L) onlineSinceMs = System.currentTimeMillis()
+                startJobPolling()
+                startOfferWatch()
+            }
+        }
         onboardingSubmittedAt = w.onboarding?.submittedAt
         workerPhone = w.phone
         workerEmail = w.email
@@ -1668,9 +2008,37 @@ class AppViewModel : ViewModel() {
     fun checkOut(lat: Double?, lng: Double?, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             try { attendance = api.checkOut(com.homehelp.pro.network.AttendanceBody(lat, lng)); backendConnected = true } catch (_: Exception) {}
+            checkNextDayPrompt()   // finishing the shift is what triggers the "coming tomorrow?" ask
             onDone()
         }
     }
+
+    // ---- next-day availability ("Are you coming in tomorrow?") ----
+    var nextDayPrompt by mutableStateOf(false)
+        private set
+    var nextDayDate by mutableStateOf("")
+        private set
+    /** Ask the backend whether the prompt is due (shift finished + not yet answered for tomorrow). */
+    fun checkNextDayPrompt() {
+        if (!isLoggedIn) return
+        viewModelScope.launch {
+            try {
+                val s = api.getNextDay()
+                nextDayDate = s.forDate
+                nextDayPrompt = s.prompt
+                backendConnected = true
+            } catch (_: Exception) {}
+        }
+    }
+    /** Store the worker's answer for tomorrow and close the prompt. */
+    fun submitNextDay(coming: Boolean, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            try { api.postNextDay(com.homehelp.pro.network.NextDayBody(coming)); backendConnected = true } catch (_: Exception) {}
+            nextDayPrompt = false
+            onDone()
+        }
+    }
+    fun dismissNextDayPrompt() { nextDayPrompt = false }
 
     // ---- availability state (Available | Busy | Break | Offline | Leave) ----
     var availabilityState by mutableStateOf("Offline")
@@ -1678,7 +2046,9 @@ class AppViewModel : ViewModel() {
     fun changeAvailabilityState(state: String) {
         availabilityState = state
         val online = state == "Available"
-        if (online != isOnline) goOnline(online)
+        // pushState=false: this function sends the real state below. Letting goOnline push too
+        // would turn "Break" into "Offline" in a second, racing write.
+        if (online != isOnline) goOnline(online, pushState = false)
         sync { runCatching { api.setStatus(com.homehelp.pro.network.StatusBody(state)) } }
     }
 

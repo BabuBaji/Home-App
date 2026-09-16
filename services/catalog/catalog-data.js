@@ -32,6 +32,7 @@ export const SERVICE_IMAGES = {
 }
 
 const DUR = [
+  { id: '30m', label: '30 min', minutes: 30, add: -50 },
   { id: '60m', label: '60 min', minutes: 60, add: 0 },
   { id: '90m', label: '90 min', minutes: 90, add: 50 },
   { id: '2h', label: '2 hrs', minutes: 120, add: 100 },
@@ -43,7 +44,11 @@ const DUR = [
 
 export function durationsFor(base) {
   return DUR.map((d) => {
-    const price = base + d.add
+    // The ladder steps +/-Rs50 per 30 min off the 60-min base. On a cheap service (or a zone that
+    // sets a low base) that would drive the 30-min slot to near zero, so no duration is ever priced
+    // below half the 60-min base. Longer durations are always well above the floor, so it only
+    // ever bites on the 30-min entry.
+    const price = Math.max(base + d.add, Math.round(base / 2))
     const original = Math.ceil((price * 1.5) / 100) * 100 - 1
     return { id: d.id, label: d.label, minutes: d.minutes, price, original }
   })

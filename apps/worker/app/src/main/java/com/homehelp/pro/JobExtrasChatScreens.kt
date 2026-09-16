@@ -27,12 +27,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,13 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) {
         vm.loadMessages()
         while (true) { delay(4000); vm.loadMessages() }
+    }
+    // While this screen is up the background poller must not raise message alerts — the thread is
+    // already in front of the worker. Also clears any alert they tapped through to get here.
+    DisposableEffect(Unit) {
+        JobAlertService.chatVisible = true
+        JobAlertService.clearMessageAlert(ctx)
+        onDispose { JobAlertService.chatVisible = false }
     }
     // Keep the newest message in view as the thread grows.
     LaunchedEffect(vm.messages.size) {
@@ -140,7 +148,7 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
                     .background(if (canSend) Purple else Divider)
                     .clickable(enabled = canSend) { vm.sendMessage(draft); draft = "" },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp)) }
+            ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp)) }
         }
     }
 }
@@ -203,7 +211,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
     var name by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { vm.loadJobState() }
+    LaunchedEffect(Unit) { vm.loadJobState(); vm.loadAddons() }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(title = "Add Extra Service", onBack = { nav.popBackStack() })
@@ -217,26 +225,32 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
-            Card {
-                Text("Suggested extras", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(Space.m))
-                // Tap to prefill — typing a price on a phone mid-job is the slow path.
-                SUGGESTED_EXTRAS.chunked(2).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        row.forEach { (label, amount) ->
-                            Row(
-                                Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Primary50)
-                                    .clickable { name = label; price = amount.toString() }
-                                    .padding(horizontal = 10.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(label, color = TextDark, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
-                                Text("₹$amount", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            // Only rendered once the catalogue answers. An app-side price list here would quote
+            // the customer figures the catalogue disagrees with, and could only be corrected by
+            // shipping a new build — so when there's nothing to offer, the custom field below is
+            // the whole screen.
+            if (vm.addons.isNotEmpty()) {
+                Card {
+                    Text("Suggested extras", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.m))
+                    // Tap to prefill — typing a price on a phone mid-job is the slow path.
+                    vm.addons.chunked(2).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            row.forEach { a ->
+                                Row(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Primary50)
+                                        .clickable { name = a.name; price = a.price.toString() }
+                                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(a.name, color = TextDark, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                                    Text("₹${a.price}", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
                         }
-                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.height(Space.s))
                     }
-                    Spacer(Modifier.height(Space.s))
                 }
             }
 
@@ -304,12 +318,3 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
-/** Common paid add-ons, priced to match the catalog's typical add-on rates. */
-private val SUGGESTED_EXTRAS = listOf(
-    "Balcony Cleaning" to 150,
-    "Fridge Cleaning" to 200,
-    "Extra Bathroom" to 120,
-    "Ironing (10 clothes)" to 100,
-    "Cupboard Organising" to 180,
-    "Utensils Extra Load" to 80,
-)

@@ -55,6 +55,12 @@ interface ApiService {
     @POST("api/worker/shift")
     suspend fun selectShift(@Body body: SelectShiftBody): AttendanceDto
 
+    @GET("api/worker/shift/next-day")
+    suspend fun getNextDay(): NextDayStatus
+
+    @POST("api/worker/shift/next-day")
+    suspend fun postNextDay(@Body body: NextDayBody): NextDayStatus
+
     @POST("api/worker/geofence/report")
     suspend fun reportGeofence(@Body body: GeofenceReportBody): GeofenceStatus
 
@@ -154,6 +160,14 @@ interface ApiService {
     @GET("api/worker/jobs/available")
     suspend fun jobsAvailable(): Map<String, Any>
 
+    /** The job assigned to this worker right now (bookingId null when none). See /jobs/current. */
+    @GET("api/worker/jobs/current")
+    suspend fun currentJob(): CurrentJobResponse
+
+    /** Whether the pending offer is still live, and the seconds left on its accept window. */
+    @GET("api/worker/jobs/offer")
+    suspend fun offerStatus(): OfferStatusResponse
+
     @POST("api/worker/jobs/request")
     suspend fun requestJob(): RequestJobResponse
 
@@ -233,6 +247,19 @@ interface ApiService {
 
     @POST("api/worker/jobs/signature")
     suspend fun saveSignature(@Body body: SignatureBody): JobStateResponse
+
+    @GET("api/worker/jobs/extension-options")
+    suspend fun extensionOptions(): ExtensionOptions
+
+    @POST("api/worker/jobs/extension")
+    suspend fun requestExtension(@Body body: ExtensionRequestBody): ExtensionRequestResult
+
+    @GET("api/worker/jobs/extensions")
+    suspend fun jobExtensions(): ExtensionsResponse
+
+    /** Add-ons sellable on the active job, priced for its zone by the catalogue. */
+    @GET("api/worker/jobs/addons")
+    suspend fun jobAddons(): AddonsResponse
 
     @POST("api/worker/jobs/extras")
     suspend fun addExtra(@Body body: ExtraBody): JobStateResponse

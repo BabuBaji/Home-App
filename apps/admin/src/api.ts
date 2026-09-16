@@ -356,6 +356,16 @@ export const opList = <T = Record<string, unknown>>(path: string, zoneId?: numbe
 export const opCreate = (path: string, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}`, post('', body))
 export const opUpdate = (path: string, id: number, body: Record<string, unknown>) => req<Record<string, unknown>>(`/${path}/${id}`, patch(body))
 export const opDelete = (path: string, id: number) => req<{ ok: boolean }>(`/${path}/${id}`, { method: 'DELETE' })
+/* Time & Extension Rules — what extra time each service may sell once its booked duration ends */
+export interface ExtensionBlock { mins: number; price: number; payout: number }
+export interface ExtensionRule {
+  serviceId: string; serviceName: string; enabled: boolean; blocks: ExtensionBlock[]
+  maxTotalMin: number; maxRequests: number; minRemainingMin: number; approvalRequired: boolean
+}
+export const fetchExtensionRules = () => req<ExtensionRule[]>('/extension-rules')
+export const updateExtensionRule = (serviceId: string, body: Record<string, unknown>) =>
+  req<ExtensionRule>(`/extension-rules/${serviceId}`, patch(body))
+
 /* stores (dark-stores) with coverage/overlap guard */
 export interface Store { id: number; zone_id: number | null; name: string; manager: string; address: string; pincode: string; lat: number | null; lng: number | null; radius_km: number; status: string }
 export interface StoreNear { id: number; name: string; manager: string; lat: number; lng: number; radiusKm: number; status: string; distanceKm: number; overlapAreaKm2?: number }

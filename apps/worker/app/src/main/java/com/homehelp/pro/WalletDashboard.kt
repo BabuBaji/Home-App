@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
@@ -180,7 +180,7 @@ private fun EarningsOverviewCard(vm: AppViewModel) {
             Spacer(Modifier.height(2.dp))
             val up = pct >= 0
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.TrendingUp, contentDescription = null, tint = if (up) GreenSuccess else RedCancel, modifier = Modifier.size(14.dp))
+                Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = if (up) GreenSuccess else RedCancel, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
                 Text(
                     "${if (up) "+" else ""}$pct% vs last month",

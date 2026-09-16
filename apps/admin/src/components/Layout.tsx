@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes, GraduationCap,
-  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain, Crown, Images,
+  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain, Crown, Images, Clock,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, has } from '../store'
@@ -21,6 +21,7 @@ const NAV: NavGroup[] = [
     { to: '/workers', label: 'Workers (Pros)', Icon: HardHat, chev: true, perm: 'workers.view' },
     { to: '/bookings', label: 'Bookings', Icon: CalendarDays, chev: true, perm: 'bookings.view' },
     { to: '/services', label: 'Services', Icon: Sparkles, chev: true, perm: 'services.view' },
+    { to: '/extension-rules', label: 'Time & Extensions', Icon: Clock, perm: 'services.view' },
     { to: '/campaigns', label: 'Campaigns & Offers', Icon: Ticket, chev: true, perm: 'campaigns.view' },
     { to: '/membership', label: 'Membership', Icon: Crown, chev: true, perm: 'pricing.view' },
     { to: '/home-banners', label: 'Home Banners', Icon: Images, perm: 'campaigns.view' },

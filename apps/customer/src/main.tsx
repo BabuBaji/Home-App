@@ -5,6 +5,7 @@ import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { StoreProvider } from './store'
 import { initApiBase } from './api'
+import './i18n'   // sets the UI language from localStorage before the first render
 import { Capacitor } from '@capacitor/core'
 
 // Draw the app edge-to-edge behind a transparent status bar (true full screen). The

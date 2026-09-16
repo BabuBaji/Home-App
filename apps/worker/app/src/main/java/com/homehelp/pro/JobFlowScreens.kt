@@ -52,13 +52,13 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.Assignment
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
@@ -74,7 +74,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -166,26 +166,37 @@ fun StartDeadlineBanner(vm: AppViewModel) {
     }
 }
 
-// The nine steps of the job flow, as the 6_jobFLow reference draws them across the top.
-private val JOB_FLOW_STEPS = listOf(
-    "New Job\nOffer", "Navigate", "Arrived", "OTP\nVerification", "Before\nPhoto",
-    "Work in\nProgress", "After\nPhoto", "Customer\nRating", "Job\nCompleted",
-)
-
 @Composable
 fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
+    // Leave with the offer. The ViewModel's offer watch clears it when the accept window closes or
+    // another worker claims the booking — this must sit BEFORE the early return below, or the
+    // screen would keep showing a job that is no longer on offer.
+    LaunchedEffect(vm.activeJob, vm.jobStatus) {
+        if (vm.activeJob == null && vm.jobStatus == JobStatus.NONE) {
+            nav.popBackStack(Routes.HOME, inclusive = false)
+        }
+    }
+
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
-    var secs by remember { mutableIntStateOf(ACCEPT_WINDOW_SEC) }
+
+    /* The server owns the deadline (it is stamped when the offer is made), so the ring follows
+     * vm.offerRemainingSec and merely ticks locally between polls to stay smooth. Starting a fresh
+     * 2:00 here — as this screen used to — handed back the full window every time the worker
+     * navigated away and returned.
+     */
+    var secs by remember { mutableIntStateOf(vm.offerRemainingSec ?: ACCEPT_WINDOW_SEC) }
+    LaunchedEffect(vm.offerRemainingSec) { vm.offerRemainingSec?.let { secs = it } }
 
     LaunchedEffect(job.id) {
-        secs = ACCEPT_WINDOW_SEC
         // Only count down (and auto-reject) while the offer is still pending. If the worker has
         // already accepted — or re-entered this screen via Back — never reject the live job.
         while (secs > 0 && vm.jobStatus == JobStatus.REQUESTED) {
             delay(1000)
             secs--
         }
+        // Fallback for a phone that can't reach the backend: the poll can't tell us the offer is
+        // dead, so honour the deadline locally. The server enforces it independently.
         if (vm.jobStatus == JobStatus.REQUESTED) {
             vm.rejectJob()
             nav.popBackStack(Routes.HOME, inclusive = false)
@@ -210,7 +221,6 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
             )
             Spacer(Modifier.width(38.dp))
         }
-        JobFlowStepper(current = 1)
         HairlineDivider()
 
         Column(
@@ -249,7 +259,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                         }
                         OfferIconButton(Icons.Filled.Phone) { dialNumber(ctx, job.customerPhone) }
                         Spacer(Modifier.width(8.dp))
-                        OfferIconButton(Icons.Filled.Chat) { nav.navigate(Routes.JOB_CHAT) }
+                        OfferIconButton(Icons.AutoMirrored.Filled.Chat) { nav.navigate(Routes.JOB_CHAT) }
                     }
                     Spacer(Modifier.height(14.dp))
                     val building = job.address.split(",").dropLast(2).joinToString(",").trim()
@@ -286,7 +296,12 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.height(18.dp))
                     PrimaryButton("ACCEPT") {
                         vm.acceptJob()
-                        nav.navigate(Routes.JOB_DETAILS) { popUpTo(Routes.NEW_JOB) { inclusive = true } }
+                        /* Back to Home, which already shows the accepted job — the NEXT JOB hero,
+                         * or the "Job accepted · tap to resume" banner — with its Start Job action
+                         * resuming at whatever stage the job is at. Accept used to push straight
+                         * into JOB_DETAILS, which dropped the worker into a sub-screen and left
+                         * Home (and everything else on it) behind the moment they said yes. */
+                        nav.popBackStack(Routes.HOME, inclusive = false)
                     }
                     Spacer(Modifier.height(10.dp))
                     OutlineButton("REJECT", modifier = Modifier.fillMaxWidth()) {
@@ -302,7 +317,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
             ) {
                 Column(Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+                        Icon(Icons.AutoMirrored.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(Space.s))
                         Text("Job Details", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
@@ -385,7 +400,7 @@ private fun CustomerPhoto(url: String?, initials: String, size: Int) {
 
 /** Lavender customer+service strip with the real photo — shown on the Work-in-Progress screen. */
 @Composable
-private fun InProgressCustomerStrip(job: Job) {
+private fun InProgressCustomerStrip(job: Job, unread: Int, onChat: () -> Unit) {
     val ctx = LocalContext.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(12.dp),
@@ -399,6 +414,25 @@ private fun InProgressCustomerStrip(job: Job) {
                     Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 7.dp, vertical = 2.dp)) {
                         Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                // Chat with the customer — a tappable message button (with unread badge) beside the name.
+                Spacer(Modifier.width(Space.s))
+                Box {
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape).background(PurpleLight).clickable { onChat() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat with customer", tint = Purple, modifier = Modifier.size(19.dp))
+                    }
+                    if (unread > 0) {
+                        Box(
+                            Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp)
+                                .size(18.dp).clip(CircleShape).background(Color(0xFFE5484D)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(if (unread > 9) "9+" else "$unread", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -456,63 +490,6 @@ private fun JobDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, 
         Spacer(Modifier.width(Space.s))
         Text(value, color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1.2f))
     }
-}
-
-/** The 9-step progress rail — numbered circles + labels + dashed connectors, current step highlighted. */
-@Composable
-private fun JobFlowStepper(current: Int) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s, vertical = 10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        JOB_FLOW_STEPS.forEachIndexed { i, label ->
-            val step = i + 1
-            val done = step < current
-            val active = step == current
-            Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.fillMaxWidth().height(30.dp)) {
-                    if (i > 0) StepConnector(Modifier.align(Alignment.CenterStart).width(20.dp), coloured = step <= current)
-                    if (i < JOB_FLOW_STEPS.lastIndex) StepConnector(Modifier.align(Alignment.CenterEnd).width(20.dp), coloured = step < current)
-                    Box(
-                        Modifier.align(Alignment.Center).size(28.dp).clip(CircleShape)
-                            .background(if (done || active) Purple else Color.White)
-                            .border(if (done || active) 0.dp else 1.5.dp, if (done || active) Color.Transparent else Divider, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (done) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                        else Text("$step", color = if (active) Color.White else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    label, color = if (active) Purple else if (done) TextDark else TextMuted,
-                    fontSize = 9.5.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    textAlign = TextAlign.Center, lineHeight = 11.sp,
-                )
-                if (active) {
-                    Spacer(Modifier.height(3.dp))
-                    Box(Modifier.width(28.dp).height(2.dp).clip(RoundedCornerShape(Radius.pill)).background(Purple))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StepConnector(modifier: Modifier, coloured: Boolean) {
-    val color = if (coloured) Purple else Divider
-    Box(
-        modifier.height(2.dp).drawBehind {
-            if (coloured) {
-                drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height)
-            } else {
-                drawLine(
-                    color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f),
-                )
-            }
-        },
-    )
 }
 
 /** Bordered round call/chat button used on the offer card. */
@@ -598,11 +575,11 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionTitle("Job Details")
                 Spacer(Modifier.height(Space.xs))
                 LabeledRow("Services", job.services.joinToString(", "))
-                Divider(color = Divider)
+                HorizontalDivider(color = Divider)
                 LabeledRow("Date & Time", job.dateTime)
-                Divider(color = Divider)
+                HorizontalDivider(color = Divider)
                 LabeledRow("Duration", "${job.durationHours} Hours")
-                Divider(color = Divider)
+                HorizontalDivider(color = Divider)
                 LabeledRow("Address", job.area)
             }
             Card {
@@ -677,7 +654,6 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 2)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
@@ -756,7 +732,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                     Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
                     Spacer(Modifier.width(Space.l))
-                    Icon(Icons.Filled.Chat, contentDescription = "Chat", tint = Purple,
+                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })
                 }
                 Spacer(Modifier.height(Space.m))
@@ -774,7 +750,15 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
-                PrimaryButton("Reached Location") {
+                /* Distance-aware, but never a hard block: below 150 m this is the plain
+                 * "Reached Location" call to action; further out it still works but says how far
+                 * off the GPS thinks the worker is. Refusing outright would strand anyone whose
+                 * fix is poor indoors — and they are the ones standing at the door. */
+                val nearCustomer = distKm != null && distKm <= 0.15
+                PrimaryButton(
+                    if (nearCustomer || distKm == null) "Reached Location"
+                    else "Reached Location (%.1f km away)".format(distKm),
+                ) {
                     vm.markArrived(); nav.navigate(Routes.ARRIVED)
                 }
             }
@@ -816,7 +800,6 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 3)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -913,7 +896,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── Quick actions.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                ArrivedAction(Modifier.weight(1f), Icons.Filled.Chat, "Chat with Customer") { nav.navigate(Routes.JOB_CHAT) }
+                ArrivedAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, "Chat with Customer") { nav.navigate(Routes.JOB_CHAT) }
                 ArrivedAction(Modifier.weight(1f), Icons.Filled.Phone, "Customer Not Reachable") { dialNumber(ctx, job.customerPhone) }
                 ArrivedAction(Modifier.weight(1f), Icons.Filled.Schedule, "I'm Waiting") { toast(ctx, "Marked as waiting") }
             }
@@ -978,14 +961,57 @@ private fun ArrivedAction(modifier: Modifier, icon: androidx.compose.ui.graphics
  * `geo:`, (4) the directions URL in a browser. Each step degrades gracefully if the prior is absent.
  */
 // Open the phone dialer pre-filled with the customer's number (no CALL permission needed).
-private fun dialNumber(ctx: Context, phone: String?) {
+internal fun dialNumber(ctx: Context, phone: String?) {
     val p = phone?.trim().orEmpty()
     if (p.isEmpty()) { toast(ctx, "No phone number on file"); return }
     try { ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$p"))) }
     catch (_: Exception) { toast(ctx, "Could not open dialer") }
 }
 
-private fun launchNavigation(
+/**
+ * Navigate to a free-text address, for bookings that carry no usable coordinates.
+ *
+ * Instant bookings taken from a saved address don't always have lat/lng stamped on them, and
+ * [launchNavigation] needs a point. Handing Maps the address string still gets the worker moving,
+ * which beats a button that does nothing.
+ */
+/**
+ * Best-effort last known position, for screens that need a distance but don't run their own
+ * location loop. Returns null without permission or before any provider has a fix.
+ */
+internal fun workerLastLoc(ctx: Context): Pair<Double, Double>? = try {
+    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        null
+    } else {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.PASSIVE_PROVIDER)
+        loc?.let { it.latitude to it.longitude }
+    }
+} catch (_: Exception) { null }
+
+internal fun navigateToAddress(ctx: Context, address: String) {
+    val q = Uri.encode(address)
+    // Turn-by-turn first, same order of preference as launchNavigation.
+    try {
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$q&mode=d"))
+                .setPackage("com.google.android.apps.maps"),
+        )
+        return
+    } catch (_: Exception) { }
+    val dirUrl = "https://www.google.com/maps/dir/?api=1&destination=$q&travelmode=driving"
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dirUrl)).setPackage("com.google.android.apps.maps"))
+        return
+    } catch (_: Exception) { }
+    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$q"))); return } catch (_: Exception) { }
+    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dirUrl))) }
+    catch (_: Exception) { toast(ctx, "No maps or browser app available to navigate") }
+}
+
+internal fun launchNavigation(
     ctx: Context,
     destLat: Double,
     destLng: Double,
@@ -1030,7 +1056,10 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
     var otp by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
+    // Null = no error. The message comes from the server (wrong code) or from a failed request —
+    // the app can no longer tell the two apart on its own, since it never sees the real OTP.
+    var error by remember { mutableStateOf<String?>(null) }
+    var verifying by remember { mutableStateOf(false) }
     var showCancel by remember { mutableStateOf(false) }
     var resendSec by remember { mutableIntStateOf(28) }
     LaunchedEffect(job.id) { resendSec = 28; while (resendSec > 0) { delay(1000); resendSec-- } }
@@ -1057,11 +1086,19 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
         }
     }
 
-    fun verify() { if (vm.verifyOtpAndStart(otp)) nav.navigate(Routes.BEFORE_PHOTOS) else error = true }
+    fun verify() {
+        if (verifying) return
+        verifying = true
+        error = null
+        vm.verifyOtpAndStart(otp) { err ->
+            verifying = false
+            error = err
+            if (err == null) nav.navigate(Routes.BEFORE_PHOTOS)
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 4)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m),
@@ -1135,7 +1172,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 BasicTextField(
                     value = otp,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) { otp = it; error = false } },
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) { otp = it; error = null } },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     decorationBox = {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -1144,7 +1181,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                                 val active = i == otp.length
                                 Box(
                                     Modifier.size(62.dp).clip(RoundedCornerShape(14.dp)).background(Color.White)
-                                        .border(if (active || ch.isNotEmpty()) 2.dp else 1.5.dp, if (error) RedCancel else Purple.copy(alpha = if (active || ch.isNotEmpty()) 1f else 0.4f), RoundedCornerShape(14.dp)),
+                                        .border(if (active || ch.isNotEmpty()) 2.dp else 1.5.dp, if (error != null) RedCancel else Purple.copy(alpha = if (active || ch.isNotEmpty()) 1f else 0.4f), RoundedCornerShape(14.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) { Text(ch, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextDark) }
                             }
@@ -1152,8 +1189,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                     },
                 )
             }
-            if (error) Text("Incorrect OTP. Try again.", color = RedCancel, fontSize = 12.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-            Text("OTP sent to customer's registered mobile number", color = TextGray, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            error?.let { Text(it, color = RedCancel, fontSize = 12.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) }
+            Text("Ask the customer for the code sent to their registered mobile number", color = TextGray, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 if (resendSec > 0) {
                     Text("Resend OTP in ", color = TextGray, fontSize = 13.sp)
@@ -1163,7 +1200,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                         modifier = Modifier.clickable { resendSec = 28; toast(ctx, "OTP resent") })
                 }
             }
-            Text("Demo OTP: ${job.otp}", color = TextMuted, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            // No OTP hint is shown here by design — the worker must get the code from the
+            // customer verbally before it can be entered.
 
             // ── Didn't receive OTP?
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1203,16 +1241,19 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
             Column(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     OutlineButton("CANCEL JOB", modifier = Modifier.weight(1f)) { showCancel = true }
+                    val canVerify = otp.length == 4 && !verifying
                     Box(
                         Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(Radius.button))
-                            .background(if (otp.length == 4) Purple else Purple.copy(alpha = 0.4f))
-                            .clickable(enabled = otp.length == 4) { verify() },
+                            .background(if (canVerify) Purple else Purple.copy(alpha = 0.4f))
+                            .clickable(enabled = canVerify) { verify() },
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("VERIFY & CONTINUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(6.dp))
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Text(if (verifying) "VERIFYING…" else "VERIFY & CONTINUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            if (!verifying) {
+                                Spacer(Modifier.width(6.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
@@ -1240,7 +1281,7 @@ private fun lastKnownLatLng(ctx: Context): Pair<Double, Double>? {
 }
 
 // Great-circle distance in km between two lat/lng points (for live distance + ETA).
-private fun haversineKm(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
+internal fun haversineKm(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
     val r = 6371.0
     val sLat = Math.sin(Math.toRadians(bLat - aLat) / 2)
     val sLng = Math.sin(Math.toRadians(bLng - aLng) / 2)
@@ -1297,17 +1338,40 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     // Booked time is up once elapsed reaches the duration. Freeze the on-screen timer at the
     // booked length and raise a one-time "service time completed" popup (worker still ends
     // the service manually with the proof photo).
-    val targetSec = job.durationMinutes.coerceAtLeast(1) * 60
+    // The backend owns where the clock ends. Time approved after the booked window has already run
+    // out is granted FROM the approval, so it buys real working minutes rather than ones that have
+    // already elapsed — that cannot be expressed as booked + extension, hence serviceEndAt.
+    // Falls back to the old sum for jobs that were never extended.
+    val targetSec = remember(vm.serviceEndAtIso, job.serviceEndAt, job.durationMinutes, vm.extensionMinutes, startMs) {
+        // Prefer the polled value — it lands the moment the customer approves, whereas the job
+        // payload only refreshes when the job itself is reloaded.
+        val endMs = parseIsoMillis(vm.serviceEndAtIso ?: job.serviceEndAt)
+        if (endMs != null) (((endMs - startMs) / 1000L).toInt()).coerceAtLeast(60)
+        else (job.durationMinutes + vm.extensionMinutes).coerceAtLeast(1) * 60
+    }
     val timeUp = rawElapsed >= targetSec
     val elapsed = if (timeUp) targetSec else rawElapsed
     var timeUpDismissed by remember { mutableStateOf(false) }
+    var extSheet by remember { mutableStateOf(false) }
+    // A fresh grant of time re-arms the popup, so the worker is asked again when THAT time runs out.
+    LaunchedEffect(vm.extensionMinutes) { if (vm.extensionMinutes > 0) timeUpDismissed = false }
 
     // Ending the service hands off to step 7 (After Photos) → step 8 (Customer Sign) → complete.
     // The proof photo the customer sees is the first after-photo, attached server-side.
 
     LaunchedEffect(Unit) {
         vm.loadJobState()   // checklist / extras / pause state for this job
+        vm.refreshExtensions()
         while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
+    }
+    // Poll for new customer messages so the chat badge stays current without opening the thread.
+    LaunchedEffect(Unit) {
+        while (true) { vm.refreshUnreadMessages(); delay(6000) }
+    }
+    // While the customer is deciding, poll for their answer. Only while pending — an idle job
+    // shouldn't be talking to the server every few seconds.
+    LaunchedEffect(vm.pendingExtension?.id) {
+        while (vm.pendingExtension != null) { delay(5000); vm.refreshExtensions() }
     }
     var pauseDialog by remember { mutableStateOf(false) }
     if (pauseDialog) {
@@ -1334,7 +1398,6 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowNavBar(onBack = { nav.popBackStack() })
-        JobFlowStepper(current = 6)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -1386,8 +1449,28 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            // ── Customer (with photo).
-            InProgressCustomerStrip(job)
+            // ── Extra time granted on this job: booked vs total, so the base figure keeps its meaning.
+            if (vm.extensionMinutes > 0) {
+                FlowCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⏱", fontSize = 17.sp)
+                        Spacer(Modifier.width(Space.s))
+                        Column(Modifier.weight(1f)) {
+                            Text("Service Extended", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Original ${job.durationMinutes} min + ${vm.extensionMinutes} min extra = ${job.durationMinutes + vm.extensionMinutes} min",
+                                color = TextGray, fontSize = 12.sp,
+                            )
+                        }
+                        if (vm.extensionEarnings > 0) {
+                            Text("+₹${vm.extensionEarnings}", color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // ── Customer (with photo + chat button showing unread message count).
+            InProgressCustomerStrip(job, vm.unreadMessages) { nav.navigate(Routes.JOB_CHAT) }
 
             // ── Checklist.
             FlowCard {
@@ -1520,15 +1603,186 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         }
     }
 
-    // One-time "service time completed" popup when the booked duration elapses.
-    if (timeUp && !timeUpDismissed) {
+    // Booked time is up: ask whether the job is done, or whether more time is needed. The worker
+    // cannot simply carry on billing — extra time has to be asked for and granted by the customer.
+    if (timeUp && !timeUpDismissed && vm.pendingExtension == null) {
+        val booked = job.durationMinutes + vm.extensionMinutes
         AlertDialog(
             onDismissRequest = { timeUpDismissed = true },
-            confirmButton = { TextButton(onClick = { timeUpDismissed = true }) { Text("OK") } },
+            confirmButton = {
+                TextButton(onClick = { timeUpDismissed = true; nav.navigate(Routes.AFTER_PHOTOS) }) {
+                    Text("Yes, complete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { timeUpDismissed = true; extSheet = true; vm.loadExtensionOptions() }) {
+                    Text("Need more time")
+                }
+            },
             title = { Text("⏱  Service Time Completed", fontWeight = FontWeight.Bold) },
-            text = { Text("The booked ${job.durationMinutes} min for this service is over. Wrap up and tap “End Service” to capture the proof photo.", color = TextGray, fontSize = 14.sp) },
+            text = {
+                Text(
+                    "The $booked min booked for this service is over.\n\nIs the service complete? If you need longer, you can ask the customer to approve extra time.",
+                    color = TextGray, fontSize = 14.sp,
+                )
+            },
         )
     }
+
+    // Waiting on the customer — the clock is NOT extended yet, and we say so plainly.
+    val pendingExt = vm.pendingExtension
+    if (pendingExt != null) {
+        val p = pendingExt
+        if (extSheet) extSheet = false
+        AlertDialog(
+            onDismissRequest = { },
+            confirmButton = { TextButton(onClick = { vm.refreshExtensions() }) { Text("Refresh") } },
+            title = { Text("Extension approval pending", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Waiting for the customer to approve +${p.minutes} min" +
+                        (if (p.price > 0) " (₹${p.price})" else " (no charge)") +
+                        ".\n\nCarry on only once they approve — the extra time isn't active yet.",
+                    color = TextGray, fontSize = 14.sp,
+                )
+            },
+        )
+    }
+
+    // The customer answered.
+    val outcome = vm.lastExtensionOutcome
+    if (outcome != null) {
+        val o = outcome
+        AlertDialog(
+            onDismissRequest = { vm.clearExtensionOutcome() },
+            confirmButton = { TextButton(onClick = { vm.clearExtensionOutcome() }) { Text("OK") } },
+            title = { Text(if (o.status == "approved") "Extra time approved" else "Extension declined", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (o.status == "approved")
+                        "+${o.minutes} min added" + (if (o.payout > 0) " · you earn ₹${o.payout} extra" else "") + ". The timer has been updated."
+                    else
+                        "The customer declined the extra time. Finish what you can of the original scope, then complete the job and note anything left undone.",
+                    color = TextGray, fontSize = 14.sp,
+                )
+            },
+        )
+    }
+
+    if (extSheet) {
+        RequestExtensionSheet(vm, onDismiss = { extSheet = false })
+    }
+}
+
+/**
+ * Ask for more time: pick a block, say why, see exactly what the customer will be charged and what
+ * you earn, then send. Blocks arrive pre-filtered by the server's caps, so anything shown here is
+ * genuinely still allowed on this booking.
+ */
+@Composable
+private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val opts = vm.extensionOptions
+    var mins by remember { mutableIntStateOf(0) }
+    var reason by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    val block = opts?.blocks?.firstOrNull { it.mins == mins }
+    val chargeable = opts?.reasons?.firstOrNull { it.code == reason }?.chargeable ?: true
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text("Request more time", fontWeight = FontWeight.Bold) },
+        text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text(
+                "The customer decides — they'll see the extra cost and can approve or decline.",
+                color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(Space.l))
+
+            when {
+                opts == null -> Text("Loading options…", color = TextMuted, fontSize = 13.sp)
+                !opts.enabled -> Text(
+                    if (opts.requestsLeft <= 0) "This booking has already used all its allowed extensions. Contact Operations if more time is genuinely needed."
+                    else "Extra time isn't available for this service.",
+                    color = TextGray, fontSize = 13.sp, lineHeight = 18.sp,
+                )
+                else -> {
+                    Text("Additional time required", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        opts.blocks.forEach { b ->
+                            val on = b.mins == mins
+                            Column(
+                                Modifier.clip(RoundedCornerShape(14.dp))
+                                    .background(if (on) Purple else FieldFill)
+                                    .clickable { mins = b.mins }
+                                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text("+${b.mins} min", color = if (on) Color.White else TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("₹${b.price}", color = if (on) Color.White.copy(alpha = 0.9f) else TextGray, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(Space.l))
+
+                    Text("Why is more time required?", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(Space.s))
+                    opts.reasons.forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { reason = r.code }
+                                .padding(vertical = 9.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                Modifier.size(18.dp).clip(CircleShape)
+                                    .background(if (reason == r.code) Purple else FieldFill),
+                                contentAlignment = Alignment.Center,
+                            ) { if (reason == r.code) Box(Modifier.size(7.dp).clip(CircleShape).background(Color.White)) }
+                            Spacer(Modifier.width(Space.s))
+                            Text(r.label, color = TextDark, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            // Being straight with the worker: this reason means the customer isn't billed.
+                            if (!r.chargeable) Text("no charge", color = TextMuted, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (block != null && reason.isNotBlank()) {
+                        Spacer(Modifier.height(Space.m))
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(Space.m),
+                        ) {
+                            Text("+${block.mins} minutes", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                if (chargeable) "Customer charge: ₹${block.price}" else "Customer charge: ₹0 — absorbed, not billed",
+                                color = TextGray, fontSize = 12.5.sp,
+                            )
+                            Text(
+                                if (chargeable) "Your additional earning: ₹${block.payout}" else "Your additional earning: ₹0",
+                                color = TextGray, fontSize = 12.5.sp,
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(Space.l))
+                    PrimaryButton(
+                        if (sending) "Sending…" else "Send Request to Customer",
+                        enabled = !sending && block != null && reason.isNotBlank(),
+                    ) {
+                        sending = true
+                        vm.requestExtension(mins, reason) { err ->
+                            sending = false
+                            if (err == null) { toast(ctx, "Request sent — waiting for the customer"); onDismiss() }
+                            else toast(ctx, err)
+                        }
+                    }
+                }
+            }
+        }
+        },
+    )
 }
 
 /**
@@ -1561,7 +1815,7 @@ private fun PauseReasonDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                         Spacer(Modifier.width(Space.m))
                         Text(r, fontSize = 14.sp, color = TextDark)
                     }
-                    Divider(color = Divider)
+                    HorizontalDivider(color = Divider)
                 }
             }
         },
@@ -1593,7 +1847,6 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadJobState() }   // so the photo summary + counts are populated
     Column(Modifier.fillMaxSize().background(Color.White)) {
         JobWhiteBar("Job Completed", onBack = null)
-        JobFlowStepper(current = 9)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -1618,7 +1871,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
             FlowCard {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(76.dp).clip(CircleShape).background(Primary50), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(38.dp))
+                        Icon(Icons.AutoMirrored.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(38.dp))
                         Box(Modifier.align(Alignment.BottomEnd).offset(x = (-6).dp, y = (-6).dp).size(24.dp).clip(CircleShape).background(GreenSuccess), contentAlignment = Alignment.Center) {
                             Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                         }
@@ -1755,7 +2008,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, "Contact Support") { nav.navigate(Routes.WALLET_HELP) }
-                    CompletedFooterButton(Modifier.weight(1f), Icons.Filled.Assignment, "Download Invoice") {
+                    CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.Assignment, "Download Invoice") {
                         toast(ctx, if (downloadInvoice(ctx, job)) "Invoice saved to Downloads" else "Couldn't save the invoice")
                     }
                 }
@@ -2024,7 +2277,7 @@ private fun CancelDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
                         fontSize = 15.sp,
                         modifier = Modifier.fillMaxWidth().clickable { onConfirm(r) }.padding(vertical = Space.s),
                     )
-                    Divider(color = Divider)
+                    HorizontalDivider(color = Divider)
                 }
             }
         },

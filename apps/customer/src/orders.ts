@@ -28,7 +28,7 @@ export const STATUS_LABEL: Record<string, string> = {
 
 // Minutes per duration id — mirrors DUR in services/catalog/catalog-data.js. Bookings persist
 // durationId + durationLabel but not minutes, so the end time is resolved through this map.
-const DUR_MIN: Record<string, number> = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+const DUR_MIN: Record<string, number> = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
 
 /** Total booked minutes across the booking's items, or null when no item maps to a known duration. */
 export function bookingMinutes(b: Booking): number | null {

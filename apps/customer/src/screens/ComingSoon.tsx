@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { ArrowLeft, MapPin } from 'lucide-react'
 import { fetchLiveAreas } from '../api'
 
@@ -10,6 +11,7 @@ const EXPANSION = ['Mumbai', 'Bangalore', 'Delhi', 'Pune', 'Chennai']
 // screen listing the cities/areas we DO serve. Embedded in Home, and standalone from the map picker.
 export default function ComingSoon({ standalone }: { standalone?: boolean }) {
   const nav = useNavigate()
+  const { t } = useTranslation()
   const [byCity, setByCity] = useState<Record<string, string[]>>({})
   const [sel, setSel] = useState('')
 
@@ -33,10 +35,10 @@ export default function ComingSoon({ standalone }: { standalone?: boolean }) {
         <div className="cs-hero-glow" />
         <div className="cs-hero-emoji">🌇</div>
       </div>
-      <h1 className="cs-title">Not available in your area yet</h1>
-      <p className="cs-sub">Launching new areas super fast.<br />We'll be there very soon.</p>
+      <h1 className="cs-title">{t('comingSoon.title')}</h1>
+      <p className="cs-sub" style={{ whiteSpace: 'pre-line' }}>{t('comingSoon.blurb')}</p>
 
-      <h2 className="cs-live-h">We are live in</h2>
+      <h2 className="cs-live-h">{t('comingSoon.liveIn')}</h2>
       <div className="cs-card">
         <div className="cs-cities">
           {cities.map((c) => {
@@ -52,7 +54,7 @@ export default function ComingSoon({ standalone }: { standalone?: boolean }) {
         <div className="cs-areas-box">
           {selLive ? (
             <>
-              <div className="cs-areas-h">Serving {selAreas.length} area{selAreas.length !== 1 ? 's' : ''} in {sel}</div>
+              <div className="cs-areas-h">{t('comingSoon.servingArea', { count: selAreas.length, city: sel })}</div>
               <div className="cs-areas">{selAreas.map((a) => <span key={a} className="cs-area"><MapPin size={13} /> {a}</span>)}</div>
             </>
           ) : (

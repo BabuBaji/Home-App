@@ -16,20 +16,35 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Redeem
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -51,8 +66,45 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.homehelp.pro.network.MerchProduct
 
 private fun rupee(n: Int) = "₹" + "%,d".format(n)
+
+/** Clean white top bar (back · title · optional trailing action) + hairline — the professional
+ *  header used by the white-background screens, in place of the purple gradient [Header]. */
+@Composable
+private fun WhiteTopBar(title: String, trailing: (@Composable () -> Unit)? = null, onBack: () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(Color.White)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(38.dp).clip(CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+            }
+            Text(title, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f).padding(start = Space.xs))
+            if (trailing != null) trailing()
+        }
+        HairlineDivider()
+    }
+}
+
+/** Share the referral message straight to WhatsApp; falls back to the system share sheet if it
+ *  isn't installed (WhatsApp is how most Indian workers actually invite friends). */
+private fun shareWhatsApp(ctx: Context, text: String) {
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"; setPackage("com.whatsapp"); putExtra(Intent.EXTRA_TEXT, text)
+        })
+    } catch (_: Exception) { shareText(ctx, text) }
+}
+
+/** Open the SMS composer pre-filled with the referral message. */
+private fun shareSms(ctx: Context, text: String) {
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("smsto:")).apply { putExtra("sms_body", text) })
+    } catch (_: Exception) { shareText(ctx, text) }
+}
 
 private fun shareText(ctx: Context, text: String) {
     try {
@@ -189,58 +241,75 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { vm.loadReferral() }
     val r = vm.referral
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Refer & Earn", onBack = { nav.popBackStack() })
+    val bonus = r?.bonus ?: 1500
+    val joined = r?.referrals?.size ?: 0
+    val msg = r?.shareMessage ?: ""
+    val pink = Color(0xFFEC4899)
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        WhiteTopBar("Refer & Earn") { nav.popBackStack() }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            GradientBanner(padding = 22) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("🎁", fontSize = 34.sp)
-                    Spacer(Modifier.height(Space.s))
-                    Text("Refer a friend, both earn", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    Spacer(Modifier.height(Space.xs))
-                    Text("Earn ${rupee(r?.bonus ?: 1500)} for every friend who joins", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+            // ── Hero: white card with a coloured gift chip ──
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(60.dp).clip(CircleShape).background(pink.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                        Text("🎁", fontSize = 30.sp)
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text("Refer a friend, both earn", color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(3.dp))
+                        Text("Get ${rupee(bonus)} for every friend who joins and finishes their first shift.", color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp)
+                    }
                 }
             }
+
+            // ── Referral code + quick share ──
             Card {
-                Text("Your referral code", color = TextGray, fontSize = 12.sp)
+                Text("YOUR REFERRAL CODE", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Spacer(Modifier.height(Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
-                        Modifier.weight(1f).border(1.5.dp, Purple, RoundedCornerShape(Radius.field)).background(Primary50, RoundedCornerShape(Radius.field)).padding(vertical = 14.dp),
+                        Modifier.weight(1f).clip(RoundedCornerShape(Radius.field)).background(Primary50).border(1.5.dp, Purple, RoundedCornerShape(Radius.field)).padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text(r?.code ?: "—", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Purple) }
+                    ) { Text(r?.code ?: "—", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Purple, letterSpacing = 2.sp) }
                     Spacer(Modifier.width(Space.m))
                     Box(
-                        Modifier.size(48.dp).background(PurpleLight, RoundedCornerShape(Radius.field))
-                            .clickable { r?.code?.let { copyText(ctx, "referral", it) } },
+                        Modifier.size(50.dp).clip(RoundedCornerShape(Radius.field)).background(PurpleLight)
+                            .clickable { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } },
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.ContentCopy, "Copy", tint = Purple, modifier = Modifier.size(22.dp)) }
                 }
                 Spacer(Modifier.height(Space.m))
-                PrimaryButton("Share invite") { r?.let { shareText(ctx, it.shareMessage) } }
-            }
-
-            // Lifetime earnings — reference "money banner + breakdown" connected surface.
-            ElevatedGroup {
-                MoneyBanner("Lifetime referral earnings", r?.lifetimeEarnings ?: 0)
-                Column(Modifier.background(CardBg).padding(Space.l)) {
-                    BreakdownRow("Reward per referral", rupee(r?.bonus ?: 1500), valueColor = GreenSuccess)
-                    BreakdownRow("Friends joined", "${r?.referrals?.size ?: 0}", valueColor = Purple)
+                Text("Share via", color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(Space.s))
+                Row(Modifier.fillMaxWidth()) {
+                    ShareChip(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, "WhatsApp", Color(0xFF25D366)) { shareWhatsApp(ctx, msg) }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.Sms, "SMS", Color(0xFF3B82F6)) { shareSms(ctx, msg) }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.ContentCopy, "Copy", Purple) { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.Share, "More", TextGray) { shareText(ctx, msg) }
                 }
             }
 
+            // ── Stats: friends joined · reward each · total earned ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Group, "$joined", "Joined", Purple, PurpleLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Redeem, rupee(bonus), "Per Friend", pink, pink.copy(alpha = 0.12f))
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, rupee(r?.lifetimeEarnings ?: 0), "Earned", GreenSuccess, GreenLight)
+            }
+
+            // ── How it works ──
             Card {
                 SectionTitle("How it works")
                 Spacer(Modifier.height(Space.xs))
                 StepRow(1, "Share your code", "Send your code to friends who want to become a HomeHelp Pro.")
                 StepRow(2, "They join & work", "They sign up with your code and complete their first shift.")
-                StepRow(3, "You both earn", "₹${r?.bonus ?: 1500} is credited to each of your wallets.")
+                StepRow(3, "You both earn", "${rupee(bonus)} is credited to each of your wallets.")
             }
 
-            // Referral history — activity rows for friends who have already joined.
+            // ── Referral history ──
             val history = r?.referrals ?: emptyList()
             if (history.isNotEmpty()) {
                 SectionTitle("Your referrals")
@@ -260,6 +329,21 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
         }
+    }
+}
+
+/** One circular quick-share action (icon chip + label) for the referral card. */
+@Composable
+private fun ShareChip(modifier: Modifier, icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).clickable { onClick() }.padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(46.dp).clip(CircleShape).background(tint.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = TextDark, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -378,64 +462,104 @@ fun ClaimInsuranceScreen(vm: AppViewModel, nav: NavHostController) {
 fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadRewards() }
     val r = vm.rewards
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Rewards & Penalties", onBack = { nav.popBackStack() })
+    var period by remember { mutableStateOf("This Month") }
+    val thisYM = remember { java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.getDefault()).format(java.util.Date()) }
+
+    // Period-aware figures: "This Month" filters the ledgers by date; "All Time" uses the server totals.
+    val monthly = period == "This Month"
+    val coins = (r?.coinItems ?: emptyList()).let { if (monthly) it.filter { i -> i.date.startsWith(thisYM) } else it }
+    val cards = (r?.cardItems ?: emptyList()).let { if (monthly) it.filter { i -> i.date.startsWith(thisYM) } else it }
+    val coinVal = if (monthly) coins.sumOf { it.amount } else (r?.coinValue ?: 0)
+    val cardVal = if (monthly) cards.sumOf { it.amount } else (r?.cardValue ?: 0)
+    val goldCount = if (monthly) coins.size else (r?.goldCoins ?: 0)
+    val redCount = if (monthly) cards.size else (r?.redCards ?: 0)
+    val net = coinVal - cardVal
+    val bonusPct = coinVal.toFloat() / (coinVal + cardVal).coerceAtLeast(1)
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        WhiteTopBar("Rewards & Penalties") { nav.popBackStack() }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            // Reference "Gold Coins / Red Cards" stat tiles.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.MonetizationOn, "${r?.goldCoins ?: 0}", "Gold Coins", Gold, GoldLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Warning, "${r?.redCards ?: 0}", "Red Cards", RedCancel, RedLight)
+            // ── Period toggle ──
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.button)).background(FieldFill).padding(4.dp)) {
+                listOf("This Month", "All Time").forEach { p ->
+                    val on = p == period
+                    Box(
+                        Modifier.weight(1f).clip(RoundedCornerShape(Radius.button - 2.dp)).background(if (on) Color.White else Color.Transparent).clickable { period = p }.padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(p, color = if (on) Purple else TextGray, fontSize = 13.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium) }
+                }
             }
 
-            // Gold Coins ledger.
+            // ── Net rewards hero + bonus/penalty balance bar ──
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Net Rewards", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text((if (net >= 0) "+ " else "− ") + rupee(kotlin.math.abs(net)), color = if (net >= 0) GreenSuccess else RedCancel, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text("${rupee(coinVal)} earned · ${rupee(cardVal)} in penalties", color = TextGray, fontSize = 12.sp)
+                    }
+                    Box(Modifier.size(54.dp).clip(CircleShape).background(GoldLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.MonetizationOn, contentDescription = null, tint = Gold, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Spacer(Modifier.height(Space.m))
+                Box(Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(Radius.pill)).background(RedLight)) {
+                    Box(Modifier.fillMaxWidth(bonusPct).height(9.dp).clip(RoundedCornerShape(Radius.pill)).background(GreenSuccess))
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Bonuses ${rupee(coinVal)}", color = GreenSuccess, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text("Penalties ${rupee(cardVal)}", color = RedCancel, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // ── Count tiles ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.MonetizationOn, "$goldCount", "Gold Coins", Gold, GoldLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Warning, "$redCount", "Red Cards", RedCancel, RedLight)
+            }
+
+            // ── Tips (earn more · avoid penalties) ──
+            Card {
+                Text("Ways to earn more & avoid penalties", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(Space.s))
+                TipRow(GreenSuccess, "Start each job within 15 minutes for a ₹15 on-time bonus.")
+                TipRow(GreenSuccess, "Keep a great rating to unlock the monthly Sitara Bonus.")
+                TipRow(RedCancel, "Check in on time — a late shift check-in costs ₹50.")
+                TipRow(RedCancel, "Avoid cancelling accepted jobs to prevent Red Cards.")
+            }
+
+            // ── Gold Coins ledger ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("Gold Coins — bonuses")
-                Text("+ ${rupee(r?.coinValue ?: 0)}", color = GreenSuccess, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("+ ${rupee(coinVal)}", color = GreenSuccess, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
-            val coinItems = r?.coinItems ?: emptyList()
-            if (coinItems.isEmpty()) {
-                Card { EmptyState("🪙", "No bonuses yet", "Start jobs on time to earn Gold Coins!") }
+            if (coins.isEmpty()) {
+                Card { EmptyState("🪙", "No bonuses ${if (monthly) "this month" else "yet"}", "Start jobs on time to earn Gold Coins!") }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    coinItems.forEach { it ->
-                        StatusListRow(
-                            icon = Icons.Filled.MonetizationOn,
-                            iconTint = GreenSuccess,
-                            iconBg = GreenLight,
-                            title = it.label,
-                            subtitle = it.date,
-                            subtitleColor = TextMuted,
-                            value = "+ ${rupee(it.amount)}",
-                            valueColor = GreenSuccess,
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    coins.forEach { c ->
+                        StatusListRow(Icons.Filled.MonetizationOn, GreenSuccess, GreenLight, c.label, c.date, TextMuted, "+ ${rupee(c.amount)}", GreenSuccess)
                     }
                 }
             }
 
-            // Red Cards ledger.
+            // ── Red Cards ledger ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("Red Cards — penalties")
-                Text("− ${rupee(r?.cardValue ?: 0)}", color = RedCancel, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("− ${rupee(cardVal)}", color = RedCancel, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
-            val cardItems = r?.cardItems ?: emptyList()
-            if (cardItems.isEmpty()) {
-                Card { EmptyState("✅", "No penalties", "Great work — keep it up!") }
+            if (cards.isEmpty()) {
+                Card { EmptyState("✅", "No penalties ${if (monthly) "this month" else ""}", "Great work — keep it up!") }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    cardItems.forEach { it ->
-                        StatusListRow(
-                            icon = Icons.Filled.Warning,
-                            iconTint = RedCancel,
-                            iconBg = RedLight,
-                            title = it.label,
-                            subtitle = it.date,
-                            subtitleColor = TextMuted,
-                            value = "− ${rupee(it.amount)}",
-                            valueColor = RedCancel,
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    cards.forEach { c ->
+                        StatusListRow(Icons.Filled.Warning, RedCancel, RedLight, c.label, c.date, TextMuted, "− ${rupee(c.amount)}", RedCancel)
                     }
                 }
             }
@@ -444,45 +568,137 @@ fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+/** A single coloured-dot tip line in the Rewards "ways to earn / avoid penalties" card. */
+@Composable
+private fun TipRow(dot: Color, text: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.padding(top = 5.dp).size(7.dp).clip(CircleShape).background(dot))
+        Spacer(Modifier.width(Space.m))
+        Text(text, color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+    }
+}
+
 /* ============================ MERCH STORE ============================ */
 @Composable
 fun MerchStoreScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { vm.loadMerch() }
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Merch Store", onBack = { nav.popBackStack() })
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            GradientBanner(padding = 18) {
-                Text("Official HomeHelp gear", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Spacer(Modifier.height(Space.xs))
-                Text("Cost is deducted from your next payout", color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp)
+    // Local cart: productId -> quantity. Checkout places one order per unit.
+    val cart = remember { mutableStateMapOf<String, Int>() }
+    val cartCount = cart.values.sum()
+    val cartTotal = vm.merch.sumOf { (cart[it.id] ?: 0) * it.price }
+
+    Column(Modifier.fillMaxSize().background(Color.White)) {
+        WhiteTopBar("Merch Store", trailing = {
+            Box(Modifier.clip(CircleShape).padding(4.dp)) {
+                Icon(Icons.Filled.ShoppingCart, contentDescription = "Cart", tint = TextDark, modifier = Modifier.size(23.dp))
+                if (cartCount > 0) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(16.dp).clip(CircleShape).background(Purple),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("${cartCount.coerceAtMost(9)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+                }
             }
-            if (vm.merch.isEmpty()) {
-                EmptyState("🛍️", "Loading store…", "Fetching the latest HomeHelp gear for you.")
-            }
-            vm.merch.forEach { p ->
-                Card {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Rounded product image area (Snabbit-shop style tile).
-                        IconChip(p.emoji, Primary50, size = 64, glyph = 30)
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(p.name, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
-                            Text(p.desc, color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
-                            Spacer(Modifier.height(Space.xs))
-                            Text(rupee(p.price), color = Purple, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }) { nav.popBackStack() }
+
+        Box(Modifier.weight(1f)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                // ── Hero banner (white with purple accent) ──
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(PurpleLight), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Storefront, contentDescription = null, tint = Purple, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text("Official HomeHelp Gear", color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        Text("Order now · cost is adjusted from your next payout.", color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+                    }
+                }
+
+                if (vm.merch.isEmpty()) {
+                    EmptyState("🛍️", "Loading store…", "Fetching the latest HomeHelp gear for you.")
+                } else {
+                    // ── 2-column product grid ──
+                    vm.merch.chunked(2).forEach { rowItems ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                            rowItems.forEach { p ->
+                                MerchTile(
+                                    Modifier.weight(1f), p, cart[p.id] ?: 0,
+                                    onAdd = { cart[p.id] = (cart[p.id] ?: 0) + 1 },
+                                    onDec = { val q = (cart[p.id] ?: 0) - 1; if (q <= 0) cart.remove(p.id) else cart[p.id] = q },
+                                )
+                            }
+                            if (rowItems.size == 1) Spacer(Modifier.weight(1f))
                         }
-                        Spacer(Modifier.width(Space.s))
-                        PrimaryButton("Order", modifier = Modifier.width(96.dp)) {
-                            vm.orderMerch(p.id) { msg -> toast(ctx, msg) }
+                    }
+                }
+                Spacer(Modifier.height(if (cartCount > 0) 80.dp else Space.s))
+            }
+
+            // ── Floating cart bar ──
+            if (cartCount > 0) {
+                Surface(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                    color = Color.White, shadowElevation = 14.dp,
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("$cartCount item${if (cartCount > 1) "s" else ""} in cart", color = TextGray, fontSize = 12.sp)
+                            Text(rupee(cartTotal), color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                        }
+                        PrimaryButton("Place Order", modifier = Modifier.width(160.dp)) {
+                            val count = cartCount
+                            cart.forEach { (id, qty) -> repeat(qty) { vm.orderMerch(id) {} } }
+                            toast(ctx, "Order placed! $count item${if (count > 1) "s" else ""} — deducted from your next payout")
+                            cart.clear()
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** One product tile in the merch grid — image, name, price and an Add / quantity-stepper control. */
+@Composable
+private fun MerchTile(modifier: Modifier, p: MerchProduct, qty: Int, onAdd: () -> Unit, onDec: () -> Unit) {
+    Card(modifier = modifier) {
+        Box(Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(14.dp)).background(Primary50), contentAlignment = Alignment.Center) {
+            Text(p.emoji, fontSize = 40.sp)
+        }
+        Spacer(Modifier.height(Space.s))
+        Text(p.name, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Text(p.desc, color = TextGray, fontSize = 11.sp, lineHeight = 14.sp, minLines = 2, maxLines = 2)
+        Spacer(Modifier.height(Space.s))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(rupee(p.price), color = Purple, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            if (qty == 0) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(Purple).clickable { onAdd() }.padding(horizontal = 14.dp, vertical = 7.dp),
+                ) { Text("Add", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold) }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StepBtn(Icons.Filled.Remove, onDec)
+                    Text("$qty", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+                    StepBtn(Icons.Filled.Add, onAdd)
+                }
+            }
+        }
+    }
+}
+
+/** Small circular +/- button for the merch quantity stepper. */
+@Composable
+private fun StepBtn(icon: ImageVector, onClick: () -> Unit) {
+    Box(Modifier.size(28.dp).clip(CircleShape).background(PurpleLight).clickable { onClick() }, contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
     }
 }
 

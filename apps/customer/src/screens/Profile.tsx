@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { Header, BottomNav, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { fetchMe, fetchBookings, fetchCoupons } from '../api'
@@ -7,6 +8,7 @@ import type { Address, Coupon } from '../types'
 
 export default function Profile() {
   const nav = useNavigate()
+  const { t } = useTranslation()
   const toast = useToast()
   const { user, signOut } = useStore()
   const [addresses, setAddresses] = useState<Address[]>([])
@@ -57,31 +59,31 @@ export default function Profile() {
         </div>
 
         {/* notifications */}
-        <h3 className="section-title">Notifications</h3>
+        <h3 className="section-title">{t('account.notifications')}</h3>
         <div className="card pad">
-          {([['offers', 'Offers & promotions'], ['booking', 'Booking updates'], ['whatsapp', 'WhatsApp alerts']] as const).map(([k, label]) => (
+          {([['offers', t('account.offersPromotions')], ['booking', t('account.bookingUpdates')], ['whatsapp', t('account.whatsappAlerts')]] as const).map(([k, label]) => (
             <div className="notif-row" key={k}><span className="grow">{label}</span>
               <button className={`switch ${notif[k] ? 'on' : ''}`} onClick={() => toggle(k)}><span /></button></div>
           ))}
         </div>
 
         {/* account */}
-        <h3 className="section-title">Account</h3>
+        <h3 className="section-title">{t('account.title')}</h3>
         <div className="acc-list">
-          <div className="acc-item" onClick={() => nav('/refer')}><span className="ai">🎁</span><span className="at">Refer &amp; Earn</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => nav('/notifications')}><span className="ai">🔔</span><span className="at">Notifications</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => nav('/support')}><span className="ai">🎧</span><span className="at">Help & Support</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => nav('/cancellation-policy')}><span className="ai">↩️</span><span className="at">Cancellation & Refund Policy</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => nav('/personal')}><span className="ai">👤</span><span className="at">Personal Information</span><span className="chev">›</span></div>
-          <div className="acc-item" onClick={() => nav('/terms')}><span className="ai">📄</span><span className="at">Terms & Conditions</span><span className="chev">›</span></div>
-          <div className="acc-item danger" onClick={logout}><span className="ai">⏻</span><span className="at">Logout</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/refer')}><span className="ai">🎁</span><span className="at">{t('account.referEarn')}</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/notifications')}><span className="ai">🔔</span><span className="at">{t('account.notifications')}</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/support')}><span className="ai">🎧</span><span className="at">{t('account.helpSupport')}</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/cancellation-policy')}><span className="ai">↩️</span><span className="at">{t('account.cancellationPolicy')}</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/personal')}><span className="ai">👤</span><span className="at">{t('account.personalInformation')}</span><span className="chev">›</span></div>
+          <div className="acc-item" onClick={() => nav('/terms')}><span className="ai">📄</span><span className="at">{t('account.terms')}</span><span className="chev">›</span></div>
+          <div className="acc-item danger" onClick={logout}><span className="ai">⏻</span><span className="at">{t('common.logout')}</span><span className="chev">›</span></div>
         </div>
 
         <div className="stat-grid">
-          <div><div className="sn">{stats.total}</div><div className="sl">Bookings</div></div>
-          <div><div className="sn">{stats.completed}</div><div className="sl">Completed</div></div>
-          <div><div className="sn">{user?.rating ?? 5}</div><div className="sl">Rating</div></div>
-          <div><div className="sn">₹{stats.saved}</div><div className="sl">Saved</div></div>
+          <div><div className="sn">{stats.total}</div><div className="sl">{t('account.statBookings')}</div></div>
+          <div><div className="sn">{stats.completed}</div><div className="sl">{t('account.statCompleted')}</div></div>
+          <div><div className="sn">{user?.rating ?? 5}</div><div className="sl">{t('account.statRating')}</div></div>
+          <div><div className="sn">₹{stats.saved}</div><div className="sl">{t('account.statSaved')}</div></div>
         </div>
       </div>
       <BottomNav />

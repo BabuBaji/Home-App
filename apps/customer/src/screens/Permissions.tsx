@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { MapPin, Bell, Info, Check } from 'lucide-react'
 import { getCurrentPosition, reverseGeocodeFull, GeoError, type RevGeo } from '../geo'
 import { ensureNotifPermission } from '../notify'
-import { updateMe } from '../api'
+import { updateMe, fetchAddresses } from '../api'
 import { useStore } from '../store'
 import { useToast } from '../components/UI'
 
@@ -32,6 +32,23 @@ export default function Permissions() {
     setUser(u)
   }
 
+  /* Where to go once the location is written. saveLocation only records the locality LINE — the
+     backend's default address comes out with house/flat, floor and the home profile empty, and
+     nothing else in the sign-in flow ever asks for them. So a first-time user is handed on to
+     AddressDetails (prefilled from that default address, which it updates rather than duplicates).
+     Anyone whose address already carries those fields skips it and lands on home as before. */
+  async function goNext() {
+    try {
+      const addrs = await fetchAddresses()
+      const def = addrs.find((a) => a.is_default) || addrs[0]
+      if (def && !def.house && !def.apartment) {
+        nav('/address-details', { replace: true, state: { edit: def } })
+        return
+      }
+    } catch { /* address lookup failed — never block sign-in on it */ }
+    nav('/home', { replace: true })
+  }
+
   async function allow() {
     setBusy(true)
     try {
@@ -49,12 +66,12 @@ export default function Permissions() {
     }
     try { await ensureNotifPermission() } catch { /* denied — continue */ }
     setBusy(false)
-    nav('/home', { replace: true })
+    await goNext()
   }
 
   async function notNow() {
     try { await saveLocation(selectedCity) } catch { /* ignore */ }
-    nav('/home', { replace: true })
+    await goNext()
   }
 
   return (

@@ -28,6 +28,21 @@ export async function initApiBase(): Promise<void> {
   } catch { /* keep the baked fallback */ }
 }
 
+// A booking is worth surfacing as "Continue Booking" only while it's genuinely live. These are the
+// in-flight statuses; once completed/cancelled it drops out.
+export const CONTINUABLE_STATUSES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+
+// True only for a live booking that hasn't gone stale. An instant job completes within hours and a
+// scheduled job within its day, so an active-status booking whose slot (or, for instant, its creation
+// time) is more than a day in the past is an abandoned/never-closed record — not something to continue.
+// Future-scheduled bookings (slot ahead of now) always pass, so upcoming jobs still show.
+export function isContinuable(b: Booking, now: number = Date.now()): boolean {
+  if (!CONTINUABLE_STATUSES.includes(b.status)) return false
+  const ref = typeof b.scheduled_at === 'number' ? b.scheduled_at : Date.parse(b.created)
+  if (!Number.isFinite(ref)) return true            // no usable timestamp -> don't hide it
+  return now - ref <= 24 * 60 * 60 * 1000           // drop once >1 day past the slot/creation time
+}
+
 let token = localStorage.getItem('hh_token') || ''
 export function setToken(t: string) { token = t; localStorage.setItem('hh_token', t) }
 export function clearToken() { token = ''; localStorage.removeItem('hh_token') }
@@ -112,6 +127,22 @@ export const fetchQuote = (items: { id: string; durationId: string }[], coupon?:
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
 export const updateMe = (patch: Partial<User>) => req<{ user: User }>('/api/me', { method: 'PATCH', body: JSON.stringify(patch) })
+
+/* Profile photo. Multipart, so it can't go through `req` — that forces a JSON content-type, and
+ * the boundary has to be set by the browser. Shares the same token + expired-session handling. */
+export async function uploadAvatar(blob: Blob, filename = 'avatar.jpg'): Promise<{ user: User }> {
+  const fd = new FormData()
+  fd.append('file', blob, filename)
+  const res = await fetch(API_BASE + '/api/me/avatar', {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}) },   // no Content-Type: fetch adds the boundary
+    body: fd,
+  })
+  if (res.status === 401 && token) { clearToken(); clearUser(); onUnauthorized?.(); throw new Error('Your session expired — please sign in again.') }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Upload failed (${res.status})`) }
+  return res.json()
+}
+export const removeAvatar = () => req<{ user: User }>('/api/me/avatar', { method: 'DELETE' })
 export const deleteAccount = () => req<{ ok: boolean }>('/api/me', { method: 'DELETE' })
 
 /* profile · notifications */
@@ -202,6 +233,16 @@ export const walletTopup = (paymentId: string, amount: number) =>
 export const applyReferral = (code: string) =>
   req<{ ok: boolean; referrer: string; reward: number }>('/api/referral/apply', { method: 'POST', body: JSON.stringify({ code }) })
 
+/* job chat — the same job_messages rows the worker app reads/writes, so a message sent here
+ * shows up on the worker's job screen. `sender` is 'customer' or 'worker'. */
+export interface JobMessage { id: number; sender: 'customer' | 'worker' | string; body: string; created: string }
+export const fetchJobMessages = (bookingId: number) =>
+  req<{ ok: boolean; messages: JobMessage[] }>(`/api/bookings/${bookingId}/messages`).then((r) => r.messages || [])
+export const sendJobMessage = (bookingId: number, text: string) =>
+  req<{ ok: boolean; message: JobMessage }>(`/api/bookings/${bookingId}/messages`, {
+    method: 'POST', body: JSON.stringify({ text }),
+  }).then((r) => r.message)
+
 /* support */
 export const fetchTickets = () => req<Ticket[]>('/api/tickets')
 export const createTicket = (category: string, message: string, extra?: { subcategory?: string; subject?: string }) =>
@@ -266,14 +307,21 @@ let lastPos: { lat: number; lng: number; ts: number } | null = (() => {
 })()
 export function getCachedPosition() { return lastPos }
 const POS_FRESH_MS = 30 * 60 * 1000 // treat a fix as current for 30 min
-export async function captureLocationOnOpen(): Promise<void> {
+/**
+ * Capture the GPS fix for bookings/maps.
+ *
+ * `persistToProfile` is opt-in and deliberately NOT set on every app open. The server
+ * reverse-geocodes a raw "lat,lng" and writes it over the customer's saved location AND their
+ * default address (see ensureDefaultAddressFromLocation in the auth service) — so doing it on
+ * launch silently replaced an address the customer had chosen, and re-applied whatever pincode
+ * the geocoder happened to return. The address now only changes when they actually change it.
+ */
+export async function captureLocationOnOpen(persistToProfile = false): Promise<void> {
   try {
     const pos = await getCurrentPosition()
     lastPos = { ...pos, ts: Date.now() }
     try { localStorage.setItem('hh_geo', JSON.stringify(lastPos)) } catch { /* ignore */ }
-    // Store on the user's profile (best-effort) so worker/admin see the live location. The backend
-    // reverse-geocodes raw "lat,lng" into a human-readable address before saving (see auth service).
-    if (token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
+    if (persistToProfile && token) { try { await updateMe({ location: `${pos.lat},${pos.lng}` } as Partial<User>) } catch { /* ignore */ } }
   } catch { /* permission denied / no fix — keep any previous fix */ }
 }
 
@@ -301,6 +349,31 @@ export const fetchServiceWorkers = (service: string, lat?: number, lng?: number)
     `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
+
+/* service extensions — extra paid time the expert asks for and the customer grants */
+export interface BookingExtension {
+  id: number; bookingId: number; requestedBy: 'worker' | 'customer'
+  minutes: number; price: number; payout: number
+  reasonCode: string; reasonLabel: string; reasonText: string
+  status: 'pending' | 'approved' | 'declined' | 'cancelled'
+  created: string; decided: string | null
+  paymentMethod?: string // 'razorpay' | 'wallet' | '' — how the customer paid for this extension
+}
+export interface ExtensionState {
+  pending: BookingExtension | null
+  extensions: BookingExtension[]
+  extensionMinutes: number
+  extensionTotal: number
+}
+export const fetchExtensions = (id: number) => req<ExtensionState>(`/api/bookings/${id}/extensions`)
+// paymentId — a verified Razorpay payment id for the extension charge; the booking service settles
+// it through the payment gateway. Omit it (price 0, or the legacy wallet path) to charge the wallet.
+export const approveExtension = (id: number, extId: number, opts?: { paymentId?: string }) =>
+  req<{ ok: boolean; extension: BookingExtension; extensionMinutes: number; extensionTotal: number }>(
+    `/api/bookings/${id}/extensions/${extId}/approve`,
+    { method: 'POST', body: JSON.stringify({ paymentId: opts?.paymentId || undefined }) })
+export const declineExtension = (id: number, extId: number) =>
+  req<{ ok: boolean; extension: BookingExtension }>(`/api/bookings/${id}/extensions/${extId}/decline`, { method: 'POST' })
 export const verifyServiceOtp = (id: number, otp: string) => req<Booking>(`/api/bookings/${id}/verify-otp`, { method: 'POST', body: JSON.stringify({ otp }) })
 export const completeBooking = (id: number) => req<Booking>(`/api/bookings/${id}/complete`, { method: 'POST' })
 export const rescheduleBookingApi = (id: number, date: string, time: string) => req<Booking>(`/api/bookings/${id}/reschedule`, { method: 'POST', body: JSON.stringify({ date, time }) })

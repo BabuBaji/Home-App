@@ -4,6 +4,7 @@ import { Header, FooterCTA, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { createBookingApi, fetchQuote, fetchPaymentConfig, createOrder, verifyPayment } from '../api'
 import { RazorpayNative } from '../razorpayNative'
+import { PayIcon, PayCluster } from '../components/PayIcon'
 import { Capacitor } from '@capacitor/core'
 
 // Load Razorpay's web checkout script once, on demand (browser fallback only).
@@ -135,13 +136,13 @@ export default function Payment() {
     } catch (e) { toast((e as Error).message); setBusy(false) }
   }
 
-  const Row = ({ id, name, sub, icon, badge }: { id: string; name: string; sub: string; icon?: string; badge?: string }) => {
+  const Row = ({ id, name, sub }: { id: string; name: string; sub: string; icon?: string; badge?: string }) => {
     const active = payment === id
     return (
       <div className={`opt ${active ? 'active' : ''}`} onClick={() => setPayment(id)}>
-        {badge
-          ? <span style={{ width: 34, height: 34, borderRadius: 8, background: '#0b8f3f', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 11 }}>{badge}</span>
-          : <span className="oicon pay">{icon}</span>}
+        {id === 'upi'
+          ? <span className="oicon pay brand cluster"><PayCluster /></span>
+          : <span className="oicon pay brand"><PayIcon id={id} /></span>}
         <div className="obody"><h3 className="sm2">{name}</h3><p>{sub}</p></div>
         <span className="radio">{active ? '✓' : ''}</span>
       </div>

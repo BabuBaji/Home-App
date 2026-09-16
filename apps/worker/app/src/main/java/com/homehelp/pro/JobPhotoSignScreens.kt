@@ -90,69 +90,11 @@ import java.io.ByteArrayOutputStream
 // rating survive the app being killed mid-job.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The nine steps of the job flow, as the mockups draw them. */
-private val FLOW_STEPS = listOf(
-    "New Job\nOffer", "Navigate", "Arrived", "OTP\nVerification", "Before\nPhoto",
-    "Work in\nProgress", "After\nPhoto", "Customer\nRating", "Job\nCompleted",
-)
-
-/** Step rail: done steps carry a tick, the current one is filled, later ones stay outlined. */
-@Composable
-private fun JobFlowStepper(current: Int) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s, vertical = 10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        FLOW_STEPS.forEachIndexed { i, label ->
-            val step = i + 1
-            val done = step < current
-            val active = step == current
-            Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.fillMaxWidth().height(30.dp)) {
-                    if (i > 0) StepConnector(Modifier.align(Alignment.CenterStart).width(20.dp), coloured = step <= current)
-                    if (i < FLOW_STEPS.lastIndex) StepConnector(Modifier.align(Alignment.CenterEnd).width(20.dp), coloured = step < current)
-                    Box(
-                        Modifier.align(Alignment.Center).size(28.dp).clip(RoundedCornerShape(Radius.pill))
-                            .background(if (done || active) Purple else Color.White)
-                            .border(if (done || active) 0.dp else 1.5.dp, if (done || active) Color.Transparent else Divider, RoundedCornerShape(Radius.pill)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (done) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                        else Text("$step", color = if (active) Color.White else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    label, color = if (active) Purple else if (done) TextDark else TextMuted,
-                    fontSize = 9.5.sp, lineHeight = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                )
-                if (active) {
-                    Spacer(Modifier.height(3.dp))
-                    Box(Modifier.width(28.dp).height(2.dp).clip(RoundedCornerShape(Radius.pill)).background(Purple))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StepConnector(modifier: Modifier, coloured: Boolean) {
-    val color = if (coloured) Purple else Divider
-    Box(
-        modifier.height(2.dp).drawBehind {
-            if (coloured) {
-                drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height)
-            } else {
-                drawLine(
-                    color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = size.height,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f),
-                )
-            }
-        },
-    )
-}
+/**
+ * How many of the service's photo slots the worker MUST fill before moving on. The rest stay on
+ * screen and are still worth taking — they just don't block the job when an angle isn't gettable.
+ */
+private const val MIN_PHOTOS = 1
 
 /** Clean white top navbar for the step-by-step flow — back + centred indigo title (matches the mockup). */
 @Composable
@@ -421,7 +363,6 @@ private fun PhotoStepScreen(
     vm: AppViewModel,
     nav: NavHostController,
     phase: String,
-    step: Int,
     title: String,
     subtitle: String,
     tip: String,
@@ -469,7 +410,6 @@ private fun PhotoStepScreen(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            JobFlowStepper(step)
 
             // ── Hero (own card).
             PhotoCard { FlowHero(Icons.Filled.CameraAlt, title, subtitle, tip) }
@@ -567,21 +507,23 @@ private fun PhotoStepScreen(
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(Space.l)) {
-                val allDone = vm.photoSlots.isNotEmpty() && vm.photosDone(phase) == vm.photoSlots.size
+                // One shot is the floor; the remaining slots are encouraged but optional, so a
+                // worker is never blocked from proceeding by an angle they can't get.
+                val canContinue = vm.photosDone(phase) >= MIN_PHOTOS
                 if (phase == "after") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                         OutlineButton("← BACK", modifier = Modifier.weight(1f)) { nav.popBackStack() }
                         Box(Modifier.weight(1.7f)) {
-                            PrimaryButton(ctaLabel, enabled = allDone) { vm.saveJobNotes(phase, notes); onContinue() }
+                            PrimaryButton(ctaLabel, enabled = canContinue) { vm.saveJobNotes(phase, notes); onContinue() }
                         }
                     }
                 } else {
-                    PrimaryButton(ctaLabel, enabled = allDone) { vm.saveJobNotes(phase, notes); onContinue() }
+                    PrimaryButton(ctaLabel, enabled = canContinue) { vm.saveJobNotes(phase, notes); onContinue() }
                 }
-                if (!allDone) {
+                if (!canContinue) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Capture all ${vm.photoSlots.size} required photos to continue.",
+                        "Capture at least 1 photo to continue.",
                         color = TextMuted, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                     )
                 }
@@ -593,20 +535,24 @@ private fun PhotoStepScreen(
 /** STEP 5 — Before Photos (module 16). */
 @Composable
 fun BeforePhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScreen(
-    vm = vm, nav = nav, phase = "before", step = 5,
+    vm = vm, nav = nav, phase = "before",
     title = "Before Photos",
     subtitle = "Take clear photos of the area/items before starting the service.",
     tip = "Good photos help avoid disputes and improve customer satisfaction.",
     notesPlaceholder = "Any special instructions or observations before starting…",
     footerNote = "Please capture all required photos before starting the service. You can't edit photos after starting.",
     ctaLabel = "Continue to Work in Progress",
-    onContinue = { nav.navigate(Routes.IN_PROGRESS) { popUpTo(Routes.BEFORE_PHOTOS) { inclusive = true } } },
+    /* Clear the whole pre-service chain, not just this screen. Popping only BEFORE_PHOTOS left the
+     * OTP screen sitting underneath, so Back out of a running service landed the worker on "enter
+     * the customer's code" for a job they had already started. Back now goes to Home, which shows
+     * the service in progress. */
+    onContinue = { nav.navigate(Routes.IN_PROGRESS) { popUpTo(Routes.HOME) { inclusive = false } } },
 )
 
 /** STEP 7 — After Photos (module 17). */
 @Composable
 fun AfterPhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScreen(
-    vm = vm, nav = nav, phase = "after", step = 7,
+    vm = vm, nav = nav, phase = "after",
     title = "After Photos",
     subtitle = "Great! Work in progress completed. Please capture after photos of the area.",
     tip = "Clear after photos help build trust and improve customer satisfaction.",
@@ -622,7 +568,6 @@ fun AfterPhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScree
  */
 @Composable
 fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
-    val ctx = LocalContext.current
     val job = vm.activeJob
     var rating by remember { mutableIntStateOf(0) }
     var notes by remember { mutableStateOf("") }
@@ -639,7 +584,6 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            JobFlowStepper(8)
             // ── Hero (own card).
             PhotoCard {
                 FlowHero(

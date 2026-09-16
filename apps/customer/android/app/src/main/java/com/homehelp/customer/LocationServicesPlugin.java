@@ -92,6 +92,33 @@ public class LocationServicesPlugin extends Plugin {
         resolveEnabled(call, isEnabled());
     }
 
+    /**
+     * Open this app's entry in Android Settings, where location permission can be granted.
+     * Needed because Android stops showing the runtime prompt after two refusals, leaving
+     * Settings as the only way back. ACTION_VIEW on a "package:" URI does NOT work here —
+     * it has to be ACTION_APPLICATION_DETAILS_SETTINGS.
+     */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", getContext().getPackageName(), null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            // Last resort: the device's location settings screen.
+            try {
+                Intent fallback = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(fallback);
+                call.resolve();
+            } catch (Exception ex) {
+                call.reject("Could not open settings");
+            }
+        }
+    }
+
     /** Invoked from MainActivity once the system enable-location dialog returns. */
     public void handleEnableResult() {
         if (pendingCall != null) {

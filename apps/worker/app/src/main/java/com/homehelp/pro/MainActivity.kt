@@ -1,5 +1,6 @@
 package com.homehelp.pro
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -44,18 +45,37 @@ object DebugNav {
     var amount: Int = 0
     var phone: String? = null
     var otp: String? = null
+    /** `--ez debug_demo true` seeds Home with representative figures for design review. */
+    var demo: Boolean = false
     var consumed: Boolean = false
 }
 
+/** A destination requested from OUTSIDE the composition — e.g. tapping a notification. Held as
+ *  Compose state so AppRoot navigates as soon as it's set, whether the app was cold-started by the
+ *  tap (onCreate) or already running (onNewIntent). Consumed once, then cleared. */
+object NavIntent {
+    val route = androidx.compose.runtime.mutableStateOf<String?>(null)
+    fun fromIntent(intent: Intent?) { intent?.getStringExtra("nav_route")?.let { route.value = it } }
+}
+
 class MainActivity : ComponentActivity() {
+    override fun onNewIntent(intent: Intent) {
+        // App already running (notifications use SINGLE_TOP) → the tap arrives here, not onCreate.
+        super.onNewIntent(intent)
+        setIntent(intent)
+        NavIntent.fromIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NavIntent.fromIntent(intent) // cold-started by a notification tap
         if (BuildConfig.DEBUG) {
             DebugNav.route = intent?.getStringExtra("debug_route")
             DebugNav.login = intent?.getBooleanExtra("debug_login", false) == true
             DebugNav.amount = intent?.getIntExtra("debug_amount", 0) ?: 0
             DebugNav.phone = intent?.getStringExtra("debug_phone")
             DebugNav.otp = intent?.getStringExtra("debug_otp")
+            DebugNav.demo = intent?.getBooleanExtra("debug_demo", false) == true
             DebugNav.consumed = false
             // When driving the app headlessly via `am start` (touch injection blocked by the OS),
             // turn the screen on and keep it lit so automated screenshots aren't black frames.
@@ -191,6 +211,16 @@ fun AppRoot() {
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
 
+    // Deep-link from a notification tap (e.g. a customer message → open the chat). Runs whenever
+    // NavIntent.route is set; navigates once the worker is signed in, then clears it.
+    androidx.compose.runtime.LaunchedEffect(NavIntent.route.value) {
+        val target = NavIntent.route.value ?: return@LaunchedEffect
+        if (Session.isLoggedIn) {
+            NavIntent.route.value = null
+            nav.navigate(target)
+        }
+    }
+
     // DEBUG ONLY — drive to a deep screen from `am start --es debug_route <route> [--ez debug_login true]`
     // for headless UI verification when touch injection is blocked. No-op in release / without the extra.
     if (BuildConfig.DEBUG) {
@@ -201,14 +231,50 @@ fun AppRoot() {
                 if (DebugNav.amount > 0) WithdrawDraft.amount = DebugNav.amount
                 if (DebugNav.login && !vm.isLoggedIn) {
                     vm.debugLogin(DebugNav.phone ?: "9800000000", DebugNav.otp ?: "1234") { ok ->
-                        if (ok) nav.navigate(target)
+                        if (ok) {
+                            // Seed AFTER login: the bootstrap that login triggers would
+                            // otherwise land on top of the demo figures and zero them again.
+                            if (DebugNav.demo) vm.applyDemoFigures()
+                            nav.navigate(target)
+                        }
                     }
                 } else {
+                    if (DebugNav.demo) vm.applyDemoFigures()
                     nav.navigate(target)
                 }
             }
         }
     }
+    /* The online alert service follows the ONLINE STATE, not one screen.
+     * It used to be started only from HomeScreen's LaunchedEffect, so going online from anywhere
+     * else — the availability selector, the quick actions, the premium card — left it stopped, and
+     * navigating off Home disposed the effect that was supposed to manage it. A worker sitting on
+     * the live-job screen therefore got no background alerts at all: no new-job heads-up, and no
+     * customer-message ping. AppRoot hosts the NavHost, so this effect stays composed for the whole
+     * session and sees every transition of vm.isOnline. */
+    val alertCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    androidx.compose.runtime.LaunchedEffect(vm.isOnline) {
+        if (vm.isOnline) JobAlertService.start(alertCtx) else JobAlertService.stop(alertCtx)
+    }
+
+    /* A pushed job offer takes over the screen and rings until it is answered.
+     *
+     * Offers now arrive on their own (the booking service hands them out), so the app has to raise
+     * the accept/reject screen itself — a worker cannot be expected to be sitting on Home watching
+     * for a card to appear when the offer only lives for two minutes. */
+    androidx.compose.runtime.LaunchedEffect(vm.incomingOfferSignal) {
+        if (vm.incomingOfferSignal > 0) {
+            OfferRingtone.start(alertCtx)
+            nav.navigate(Routes.NEW_JOB)
+        }
+    }
+    // Silence follows the offer leaving REQUESTED, whichever way it went — accepted, rejected,
+    // expired, or taken by someone else. One place to stop it, so no path can leave it ringing.
+    androidx.compose.runtime.LaunchedEffect(vm.jobStatus) {
+        if (vm.jobStatus != JobStatus.REQUESTED) OfferRingtone.stop()
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { OfferRingtone.stop() } }
+
     // Re-pull backend data every time the app comes to the foreground, so a completed job /
     // updated earnings appear immediately instead of only after a full relaunch.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -217,6 +283,7 @@ fun AppRoot() {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 vm.refresh()
+                vm.checkNextDayPrompt()   // surface "coming tomorrow?" if the shift is done
                 val (batt, net) = readDeviceState(hbCtx)
                 val loc = lastKnownLoc(hbCtx)
                 vm.sendHeartbeat(batt, net, loc?.first, loc?.second)
@@ -363,6 +430,51 @@ fun AppRoot() {
             },
             title = { Text("⚠  Left your assigned area", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
             text = { Text(msg) },
+        )
+    }
+
+    // An action the app refused, and why — currently only "you can't go offline mid-job".
+    vm.actionBlockedMessage?.let { msg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.clearActionBlockedMessage() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.clearActionBlockedMessage() }) { Text("OK", color = Purple) }
+            },
+            title = { Text("Still on a job", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(msg) },
+        )
+    }
+
+    /* Why the job that was on screen just vanished. Without this the offer simply disappeared and
+     * the worker had no way to tell "someone else was faster" from "the app lost my job". */
+    vm.offerLostReason?.let { msg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.clearOfferLostReason() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.clearOfferLostReason() }) { Text("OK", color = Purple) }
+            },
+            title = { Text("Job no longer available", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(msg) },
+        )
+    }
+
+    // After a shift is done, ask whether the worker is coming in tomorrow; the answer is stored
+    // for admin's next-day roster. Shown app-wide (never over the login screen).
+    if (vm.nextDayPrompt && route != Routes.LOGIN) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.dismissNextDayPrompt() },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.submitNextDay(true) }) {
+                    Text("Yes, I'll be there", color = Purple, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.submitNextDay(false) }) {
+                    Text("Not tomorrow", color = androidx.compose.ui.graphics.Color.Gray)
+                }
+            },
+            title = { Text("Coming in tomorrow?", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text("Great work finishing today's shift! 🎉  Please let us know if you'll be coming in for your shift tomorrow so we can plan the roster.") },
         )
     }
     }

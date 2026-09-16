@@ -224,7 +224,10 @@ export default function Book() {
         <div className="paybar">
           <div className="pay-using">
             <span className="muted sm">Pay using</span>
-            <span className="pay-name" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{payment === 'wallet' ? '👛' : <PhonePeMini />} {payLabel}</span>
+            {/* layout lives in .pay-name (index.css): an inline style here used to override the
+                stylesheet's display:block, which collapsed the label and method onto one line and
+                ran the brand mark into the "Pay using" text. */}
+            <span className="pay-name">{payment === 'wallet' ? <span className="pay-name-ic">👛</span> : <PhonePeMini />}<span className="pay-name-t">{payLabel}</span></span>
           </div>
           <button className="btn pay-now" onClick={startPay} disabled={placing || closedNow || (!instant && (!selDate || slot === null))}>
             {closedNow ? <span>Schedule →</span> : <><b>₹{total}</b><span>{placing ? 'Booking…' : 'Pay Now'} →</span></>}

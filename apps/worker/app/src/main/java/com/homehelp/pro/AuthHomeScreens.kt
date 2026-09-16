@@ -3,6 +3,7 @@ package com.homehelp.pro
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -10,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,7 +43,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.outlined.Notifications
@@ -56,7 +58,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Tune
@@ -80,6 +82,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,10 +98,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -299,12 +304,30 @@ private fun TrustItem(emoji: String, label: String) {
     }
 }
 
+/**
+ * Best-effort last known position for a Home check-in / check-out, mirroring what the
+ * attendance screen captures. Returns nulls when permission is missing or no fix is cached —
+ * the attendance API accepts null coordinates, so check-in still succeeds without GPS.
+ */
+private fun homeLastLoc(ctx: Context): Pair<Double?, Double?> = try {
+    if (androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx, android.Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+        loc?.latitude to loc?.longitude
+    } else null to null
+} catch (_: Exception) { null to null }
+
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val openDrawer = LocalDrawerOpen.current
     val appCtx = LocalContext.current.applicationContext
 
     val sosCtx = LocalContext.current
+    val homeCtx = LocalContext.current
 
     // Pull the wallet ledger so the Home "Last 7 Days" chart + balance chip have live data.
     LaunchedEffect(Unit) { vm.refreshWallet() }
@@ -316,16 +339,16 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     // Ask for notification permission (Android 13+) so background job alerts can show.
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    // Start/stop the background "online" alert service as the worker toggles online.
+    /* Only the PERMISSION prompt lives here — it needs an Activity-scoped launcher, and Home is
+     * where a worker first goes online. Starting/stopping the service itself moved to AppRoot, which
+     * outlives navigation; doing it here too meant it never ran when the worker went online from any
+     * other screen. Asked for on every online transition seen while Home is up; once granted or
+     * permanently denied the launcher is a no-op. */
     LaunchedEffect(vm.isOnline) {
-        if (vm.isOnline) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            JobAlertService.start(appCtx)
-        } else {
-            JobAlertService.stop(appCtx)
+        if (vm.isOnline &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -347,157 +370,159 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val greeting = when { greetHour < 12 -> "Good morning"; greetHour < 17 -> "Good afternoon"; else -> "Good evening" }
     val firstName = vm.workerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "Partner" }
 
-    val homeInitials = remember(vm.workerName) {
-        vm.workerName.trim().split(Regex("\\s+")).mapNotNull { it.firstOrNull()?.toString() }
-            .take(2).joinToString("").uppercase().ifBlank { "P" }
-    }
-
-    // ─── Today's incentive, summed from the real wallet ledger. Null (renders "—") until
-    //     the ledger has actually loaded, so an unloaded ledger never reads as "₹0". ───
-    val todayIso = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) }
-    val todayIncentive: Int? = remember(vm.walletHistory.toList()) {
-        if (vm.walletHistory.isEmpty()) null
-        else vm.walletHistory
-            .filter { it.isCredit && it.date == todayIso && it.type.contains("Incentive", ignoreCase = true) }
-            .sumOf { it.amount }
-    }
-
-    // Bonus progress = working days achieved / days needed for the top (Gold) Sitara tier.
-    val bonusProgress: Float? = vm.shaktiBonus?.let { s ->
-        val goldDays = s.tiers.lastOrNull()?.days ?: 0
-        if (goldDays <= 0) null else (s.workingDays.toFloat() / goldDays).coerceIn(0f, 1f)
-    }
+    // Today's incentive was derived here for the progress card. That figure left Home when the
+    // card was cut to the two job counts, so the wallet-ledger scan it needed went with it.
 
     // Next scheduled job — the real `schedule` feed carries service/time/location.
-    val nextJob = vm.schedule.firstOrNull { it.status == "Upcoming" }
+    // Any live or upcoming job, not just "Upcoming". The backend reports a job the worker has
+    // already accepted as "In progress", so an exact-match on "Upcoming" hid the Next Job card
+    // for exactly the job the worker most needs to act on.
+    //
+    // Strictly the real feed. This used to fall back to a hard-coded SampleSchedule whenever the
+    // API returned nothing, which put invented bookings ("Deep Cleaning · Mrs. Priya Sharma") on
+    // Home for every worker with an empty day — including workers who were OFFLINE, since the
+    // fallback answered to no state at all. A worker cannot tell an invented job from a real one
+    // and would set out for it, so an empty feed must render an empty Home.
+    val scheduleItems = vm.schedule
+
+    /* The job the worker is actually on, rendered as a schedule row so the NEXT JOB hero can show
+     * it. `schedule` comes from the bootstrap feed, which has not been refetched at the moment a
+     * job is accepted — so straight after Accept the hero had nothing to draw and Home fell back
+     * to the thin "tap to resume" strip. Building the row from activeJob puts the real card up
+     * immediately, and the feed simply agrees with it once it next loads.
+     */
+    val liveJobItem = vm.activeJob?.let { j ->
+        if (vm.jobStatus == JobStatus.NONE || vm.jobStatus == JobStatus.REQUESTED) null
+        else com.homehelp.pro.network.ScheduleItem(
+            // dateTime arrives as "8/8/2026, 9:49:16 AM" — the hero wants just the clock part.
+            time = j.dateTime.substringAfter(", ", j.dateTime).trim(),
+            service = j.services.firstOrNull().orEmpty(),
+            location = j.area.ifBlank { j.address },
+            durationMins = j.durationMinutes,
+            customerName = j.customerName,
+            status = when (vm.jobStatus) {
+                JobStatus.ACCEPTED -> "Accepted"
+                JobStatus.ON_THE_WAY -> "On the way"
+                JobStatus.ARRIVED -> "Arrived"
+                JobStatus.IN_PROGRESS -> "In progress"
+                else -> "Upcoming"
+            },
+            distanceKm = j.distanceKm.takeIf { d -> d > 0 },
+            ref = j.id,
+        )
+    }
+
+    /* ---- Arrival detection ----
+     * Distance from the worker to the customer, refreshed while a job is live. Tapping Navigate
+     * hands the worker to Maps; when they come back this is what lets Home offer "Reached
+     * Location" instead of making them dig into the job screens to find it.
+     */
+    var myLoc by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    LaunchedEffect(vm.activeJob?.id, vm.jobStatus) {
+        while (vm.activeJob != null && vm.jobStatus != JobStatus.NONE) {
+            myLoc = workerLastLoc(homeCtx)
+            delay(10_000)
+        }
+    }
+    val toCustomerKm = run {
+        val j = vm.activeJob
+        val me = myLoc
+        if (j == null || me == null || (j.lat == 0.0 && j.lng == 0.0)) null
+        else haversineKm(me.first, me.second, j.lat, j.lng)
+    }
+    // 150 m: comfortably inside a building footprint without letting someone mark arrival from the
+    // next street. GPS in dense areas is rarely better than this.
+    val atCustomer = toCustomerKm != null && toCustomerKm <= 0.15
+
+    /* Live service clock for the card's top-right corner. Anchored to the SERVER's started_at, the
+     * same source the in-service screen and the customer app use, so all three agree rather than
+     * each counting from when they happened to open. Paused time is excluded. */
+    var clockNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(vm.jobStatus) {
+        while (vm.jobStatus == JobStatus.IN_PROGRESS) { clockNow = System.currentTimeMillis(); delay(1000) }
+    }
+    /* Freezes at the booked length, exactly as the in-service screen does — the clock is what the
+     * worker is paid against, so letting Home run past the booked time (32:03 on a 30-minute job)
+     * both contradicted that screen and read as "the service is overrunning" when what had really
+     * happened is that the booked time finished and nobody pressed End Service yet.
+     */
+    var serviceTimeUp by remember { mutableStateOf(false) }
+    val serviceElapsedText = if (vm.jobStatus != JobStatus.IN_PROGRESS) null else {
+        val startMs = parseIsoMillisPublic(vm.activeJob?.startedAt)
+            ?: vm.serviceStartMs.takeIf { it > 0L }
+        if (startMs == null) null else {
+            val job = vm.activeJob
+            // Same rule as InProgressScreen: the backend's end time wins (extensions are granted
+            // FROM approval), else booked + whatever extra was approved.
+            val endMs = parseIsoMillisPublic(vm.serviceEndAtIso ?: job?.serviceEndAt)
+            val targetSec = if (endMs != null) ((endMs - startMs) / 1000L).coerceAtLeast(60L)
+            else ((job?.durationMinutes ?: 60) + vm.extensionMinutes).coerceAtLeast(1).toLong() * 60L
+            val raw = ((clockNow - startMs - vm.pausedMsAt(clockNow)) / 1000L).coerceAtLeast(0L)
+            serviceTimeUp = raw >= targetSec
+            val s = if (serviceTimeUp) targetSec else raw
+            if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
+            else "%d:%02d".format(s / 60, s % 60)
+        }
+    }
+
+    /* The live job outranks anything in the feed — it is the one the worker has committed to.
+     *
+     * Only genuinely OPEN feed rows qualify. There used to be a bare `?: scheduleItems.first()`
+     * fallback, and because today's schedule includes finished bookings, a worker who had completed
+     * their only job of the day got that job back as "NEXT JOB" — a card for work already done,
+     * with Navigate and Start Job live on it. No open row now means no card.
+     */
+    val nextJob = liveJobItem ?: scheduleItems.firstOrNull {
+        it.status.equals("Upcoming", true) || it.status.equals("In progress", true) ||
+            it.status.equals("Accepted", true) || it.status.equals("Confirmed", true)
+    }
     val nextJobWindow = remember(nextJob?.time, nextJob?.durationMins) { jobTimeWindow(nextJob?.time, nextJob?.durationMins) }
 
-    // Home is a fit-to-screen dashboard, not a scroller: every section stays visible at once,
-    // shrinking together on shorter phones (see FitToScreen).
-    FitToScreen(Modifier.fillMaxSize().background(ScreenBg)) {
-        // Design frame (390×844): the mock's "16px" gap is measured on its 864px-wide export —
-        // 2.22× the frame — so it is an 8dp gap there. This stack is ~1.37× the frame's height
-        // before FitToScreen shrinks it to the viewport, so 11dp here lands on the mock's 8dp
-        // once scaled. Measured, not guessed: see the design-vs-device numbers in the PR notes.
+    // Home scrolls, and deliberately so. Measured on a 1080×2408 @440dpi device: this layout's
+    // natural height is ~1500dp against ~820dp of usable screen, so the old FitToScreen wrapper
+    // was rendering the whole page at 0.545 scale — 108dp tiles came out 162px instead of 297px,
+    // and 19sp figures read as 10sp. No amount of trimming closes a 680dp gap; dropping the
+    // schedule, banner and ticker together still only reached ~0.76. Scrolling is what lets the
+    // type and cards render at the size they are designed at.
+    // Home scrolls. The sections below are compact enough that almost all of the page is
+    // visible at once, but nothing is scaled to force a fit: type renders at the size it is
+    // designed at, and the last card is reached by scrolling. An earlier revision shrank the
+    // whole page to fit exactly one screen — that is deliberately NOT done here.
+    Column(
+        Modifier.fillMaxSize().background(ScreenBg).verticalScroll(rememberScrollState()),
+    ) {
         Column(
-            Modifier.padding(horizontal = Space.l).padding(top = 8.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            // The bottom nav floats OVER this content rather than sitting below it, so the last
+            // card needs the pill's height (~86dp) plus its bottom margin as clearance.
+            // Only 24dp at the bottom. FloatingBottomNav sits in the Scaffold's bottomBar slot,
+            // so the NavHost is ALREADY inset by the pill's full height — reserving it again
+            // here (it was 180dp) just added dead scroll. This covers the centre FAB, which
+            // overhangs the bar's top edge and is not part of the measured bottomBar.
+            Modifier.padding(horizontal = Space.m).padding(top = 2.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // ─── Top bar: drawer · notifications · support (per the 1_home design) ───
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .clickable { openDrawer() },
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(24.dp)) }
-                Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .clickable { nav.navigate(Routes.P_NOTIFICATIONS) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // Outlined (hollow/white-filled) bell, matching the reference.
-                    Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(24.dp))
-                    if (vm.unreadNotifications > 0) {
-                        // Red count circle riding the bell's top-right, as in the reference.
-                        Box(
-                            Modifier.align(Alignment.Center)
-                                .offset(x = 9.dp, y = (-9).dp)
-                                .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
-                                .clip(RoundedCornerShape(Radius.pill))
-                                .background(RedCancel)
-                                .border(1.5.dp, ScreenBg, RoundedCornerShape(Radius.pill))
-                                .padding(horizontal = 4.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                if (vm.unreadNotifications > 99) "99+" else "${vm.unreadNotifications}",
-                                color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                            )
-                        }
-                    }
-                }
-                Box(
-                    Modifier.size(34.dp).clip(RoundedCornerShape(Radius.pill))
-                        .clickable { nav.navigate(Routes.P_HELP) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        painterResource(R.drawable.ic_chat_bubble_ref),
-                        contentDescription = "Support",
-                        tint = TextDark,
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-            }
-
-            WorkerProfileHeader(
+            // ─── Header ─── drawer handle, greeting and rating on the left; bell and avatar on
+            // the right, as the reference draws them.
+            HomeHeaderRow(
                 greeting = greeting,
                 firstName = firstName,
-                online = vm.isOnline,
                 rating = vm.workerRating,
-                onToggleOnline = { vm.goOnline(!vm.isOnline) },
-                onProfileClick = { nav.navigateApp(Routes.PROFILE) },
+                unread = vm.unreadNotifications,
+                online = vm.isOnline,
+                onMenu = { openDrawer() },
+                onNotifications = { nav.navigate(Routes.P_NOTIFICATIONS) },
+                onProfile = { nav.navigateApp(Routes.PROFILE) },
+                onRating = { nav.navigate(Routes.PERFORMANCE) },
             )
 
-            EarningsOverviewCard(
-                today = vm.todayEarnings,
-                week = vm.weekEarnings,
-                month = vm.monthEarnings,
-                walletBalance = vm.walletBalance,
-                pendingSettlement = vm.holdBalance,
-                todayTarget = vm.dailyGoal,
-                bonusProgress = bonusProgress,
-                onToday = { nav.navigateApp(Routes.EARNINGS) },
-                onWeek = { nav.navigateApp(Routes.EARNINGS) },
-                onMonth = { nav.navigateApp(Routes.EARNINGS) },
-                // Keeps the daily-goal editor reachable — it used to live on the old
-                // "Today's Earnings" card that this overview replaces.
-                onEditTarget = { showGoalDialog = true },
-            )
+            // ─── Availability ─── the primary online control. goOnline() is the same call the
+            // nav FAB makes, so the switch and the FAB stay in step.
+            OnlineToggleCard(online = vm.isOnline, onToggle = { vm.goOnline(it) })
 
-            TodaysProgressCard(
-                completed = vm.todayCompleted,
-                total = vm.todayJobs,
-                earnings = vm.todayEarnings,
-                cancelled = vm.todayCancelled,
-                incentive = todayIncentive,
-            )
-
-            if (nextJob != null) {
-                NextJobCard(
-                    service = nextJob.service,
-                    timeWindow = nextJobWindow,
-                    location = nextJob.location,
-                    distanceKm = nextJob.distanceKm,
-                    etaMins = nextJob.etaMins,
-                    onViewAll = { nav.navigateApp(Routes.BOOKINGS) },
-                    onNavigate = { nav.navigate(Routes.SCHEDULE) },
-                )
-            }
-
-            PerformanceOverviewCard(
-                acceptanceRate = vm.acceptancePct,
-                completionRate = vm.completionPct,
-                punctuality = vm.punctualityPct,
-                cancellationRate = vm.cancellationPct,
-            )
-
-            QuickActionsCard(
-                onAttendance = { nav.navigate(Routes.ATTENDANCE) },
-                onWallet = { nav.navigateApp(Routes.WALLET) },
-                onShifts = { nav.navigate(Routes.P_AVAILABILITY) },
-                onSupport = { nav.navigate(Routes.P_HELP) },
-                onSos = { vm.sendSos(null, null) { msg -> toast(sosCtx, msg) } },
-            )
-
-            AnnouncementsCard(onViewAll = { nav.navigate(Routes.P_NOTIFICATIONS) })
-
-            // Active job — keep the in-progress service reachable from Home so the worker
-            // can jump back to the timer / OTP / end-service screen after navigating away.
+            // ─── Live job ─── highest-priority state on the screen, so it leads. It used to
+            // render below the refer banner, under everything else.
             vm.activeJob?.let { job ->
-                val resumeRoute = when (vm.jobStatus) {
+                val route = when (vm.jobStatus) {
                     JobStatus.REQUESTED -> Routes.NEW_JOB
                     JobStatus.ACCEPTED -> Routes.JOB_DETAILS
                     JobStatus.ON_THE_WAY -> Routes.ON_THE_WAY
@@ -505,103 +530,357 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
                     else -> null
                 }
-                val label = when (vm.jobStatus) {
-                    JobStatus.REQUESTED -> "New job request"
-                    JobStatus.ACCEPTED -> "Job accepted"
-                    JobStatus.ON_THE_WAY -> "On the way to customer"
-                    JobStatus.ARRIVED -> "Arrived — start the service"
-                    JobStatus.IN_PROGRESS -> "Service in progress"
-                    else -> "Active job"
-                }
-                if (resumeRoute != null) {
-                    // Full-bleed green "resume active job" hero — the highest-priority CTA on Home.
-                    Box(
-                        Modifier.fillMaxWidth().background(GreenSuccess, RoundedCornerShape(Radius.card))
-                            .clickable { nav.navigate(resumeRoute) }
-                            .padding(Space.l),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(44.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
-                                contentAlignment = Alignment.Center,
-                            ) { Text("🛠", fontSize = 20.sp) }
-                            Spacer(Modifier.width(Space.m))
-                            Column(Modifier.weight(1f)) {
-                                Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("${job.services.joinToString(", ")} · tap to resume", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
-                            }
-                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                        }
-                    }
+                // Suppressed while the NEXT JOB hero is on screen: with a live job the hero is
+                // showing that same booking, and its "Start Job" resumes it at exactly the stage
+                // this banner would have navigated to. Two cards for one job cost ~75dp and made
+                // the page overflow. With no hero (empty schedule) the banner is the only route
+                // back into a live job, so it still renders.
+                if (route != null && nextJob == null) {
+                    ActiveJobBanner(
+                        label = when (vm.jobStatus) {
+                            JobStatus.REQUESTED -> "New job request"
+                            JobStatus.ACCEPTED -> "Job accepted"
+                            JobStatus.ON_THE_WAY -> "On the way to customer"
+                            JobStatus.ARRIVED -> "Arrived — start the service"
+                            JobStatus.IN_PROGRESS -> "Service in progress"
+                            else -> "Active job"
+                        },
+                        subtitle = "${job.services.joinToString(", ")} · tap to resume",
+                        onResume = { nav.navigate(route) },
+                    )
                 }
             }
 
-
-            // ─── Live online-session card (only while online) ───
-            if (vm.isOnline) {
-                Card {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        PulseDot(GreenSuccess, 9.dp)
-                        Spacer(Modifier.width(Space.s))
-                        Column(Modifier.weight(1f)) {
-                            Text("You're Online", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
-                            Text("Receiving job requests nearby", fontSize = 12.sp, color = TextGray)
+            // ─── Next job ─── only when a REAL customer booking exists. Nothing is fabricated:
+            // no booking in the feed means no card, which is what makes this the app's
+            // "a customer has requested you" surface. It leads the page for the same reason.
+            if (nextJob != null) {
+                NextJobHeroCard(
+                    job = nextJob,
+                    timeWindow = nextJobWindow,
+                    /* Navigate and Call do the real thing now. They used to open the Schedule and
+                     * the Bookings list — a worker tapping "Call" on the card in front of a
+                     * customer's building got a list of jobs, not a phone call. */
+                    onNavigate = {
+                        val j = vm.activeJob
+                        // Setting off IS the "on the way" signal — the customer's tracking screen
+                        // should say so the moment the worker starts driving, not only if they
+                        // happen to open the job screen and press a button there.
+                        if (j != null && vm.jobStatus == JobStatus.ACCEPTED) vm.startOnTheWay()
+                        val lat = j?.lat ?: 0.0
+                        val lng = j?.lng ?: 0.0
+                        val label = nextJob.service.ifBlank { nextJob.customerName.ifBlank { "Customer" } }
+                        if (lat != 0.0 || lng != 0.0) {
+                            // No origin passed: google.navigation: starts from the device's own
+                            // location, and Home has no GPS fix of its own to hand over.
+                            launchNavigation(homeCtx, lat, lng, label)
+                        } else {
+                            // No coordinates stamped on the booking — go by address text.
+                            val addr = (j?.address?.ifBlank { null } ?: nextJob.location).trim()
+                            if (addr.isBlank() || addr == "—") toast(homeCtx, "No address on this job yet")
+                            else navigateToAddress(homeCtx, addr)
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Online today", fontSize = 11.sp, color = TextGray)
-                            Text(fmtOnline(vm.onlineTodayMs(nowMs)), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = GreenSuccess)
+                    },
+                    onCall = { dialNumber(homeCtx, vm.activeJob?.customerPhone) },
+                    // Start Job used to just open the Jobs list, which is why tapping it
+                    // appeared to do nothing. It now drives the real lifecycle: resume the
+                    // live job at whatever stage it is at, or pull the next real booking.
+                    onStart = {
+                        val live = when (vm.jobStatus) {
+                            JobStatus.REQUESTED -> Routes.NEW_JOB
+                            JobStatus.ACCEPTED -> Routes.JOB_DETAILS
+                            JobStatus.ON_THE_WAY -> Routes.ON_THE_WAY
+                            JobStatus.ARRIVED -> Routes.ARRIVED
+                            JobStatus.IN_PROGRESS -> Routes.IN_PROGRESS
+                            else -> null
                         }
-                    }
-                }
+                        when {
+                            // At the door on the way over: confirm arrival straight from the card
+                            // and go on to the OTP screen, which is the next thing they need.
+                            vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> {
+                                vm.markArrived()
+                                nav.navigate(Routes.ARRIVED)
+                            }
+                            vm.activeJob != null && live != null -> nav.navigate(live)
+                            else -> vm.requestJob { found ->
+                                if (found) nav.navigate(Routes.NEW_JOB)
+                                else toast(homeCtx, "No job ready to start yet")
+                            }
+                        }
+                    },
+                    /* Only flips once the worker is actually there. Showing "Reached Location"
+                     * from across the city would invite marking arrival early, which is what the
+                     * customer's ETA and the start-window bonus are both measured against. */
+                    startLabel = when {
+                        vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> "Reached Location"
+                        vm.jobStatus == JobStatus.ON_THE_WAY -> "On The Way"
+                        vm.jobStatus == JobStatus.ARRIVED -> "Start Service"
+                        // Points at the one action left once the booked time is done.
+                        vm.jobStatus == JobStatus.IN_PROGRESS && serviceTimeUp -> "End Service"
+                        vm.jobStatus == JobStatus.IN_PROGRESS -> "Continue"
+                        else -> "Start Job"
+                    },
+                    startIcon = when {
+                        vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> Icons.Filled.CheckCircle
+                        vm.jobStatus == JobStatus.ARRIVED -> Icons.Filled.PlayArrow
+                        else -> Icons.Filled.PlayArrow
+                    },
+                    // Navigate/Call are pointless once the worker is inside doing the work — they
+                    // already drove there and the customer is in the room.
+                    actionsEnabled = vm.jobStatus != JobStatus.IN_PROGRESS,
+                    timerText = serviceElapsedText,
+                    timerLabel = if (serviceTimeUp) "Time up" else "Elapsed",
+                    badge = when (vm.jobStatus) {
+                        // The booked time finishing is NOT the service ending — the worker still
+                        // has to end it with the proof photo. Say which of the two has happened.
+                        JobStatus.IN_PROGRESS -> if (serviceTimeUp) "TIME COMPLETE" else "IN PROGRESS"
+                        JobStatus.ON_THE_WAY -> "ON THE WAY"
+                        JobStatus.ARRIVED -> "ARRIVED"
+                        JobStatus.ACCEPTED -> "ACCEPTED"
+                        else -> "NEXT JOB"
+                    },
+                )
             }
 
+            // ─── Quick actions ─── Attendance · My Shift · Emergency. Emergency is a lone-worker
+            // safety control, so it keeps a one-tap home here rather than sitting two taps deep
+            // behind Support.
+            QuickActionStrip(
+                onAttendance = { nav.navigate(Routes.ATTENDANCE) },
+                onShifts = { nav.navigate(Routes.MY_SHIFTS) },
+                onEmergency = { vm.sendSos(null, null) { msg -> toast(sosCtx, msg) } },
+            )
 
-            if (vm.isOnline && vm.activeJob == null) {
-                val ctx = LocalContext.current
-                if (vm.hasIncomingJob) {
-                    // A real customer has booked — show the New Job Request notification.
-                    Box(
-                        Modifier.fillMaxWidth().background(BrandGradient, RoundedCornerShape(Radius.card))
-                            .clickable {
-                                vm.requestJob { found ->
-                                    if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "That job was just taken")
-                                }
-                            }
-                            .padding(Space.l),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(44.dp).background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill)),
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Filled.Notifications, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
-                            Spacer(Modifier.width(Space.m))
-                            Column(Modifier.weight(1f)) {
-                                Text("New Job Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                                Text("A customer needs your service — tap to view", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
-                            }
-                            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                        }
-                    }
-                } else {
-                    // Online and idle — waiting for a real booking (no fake/demo jobs).
-                    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(Radius.card)).padding(Space.l)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(9.dp).background(GreenSuccess, RoundedCornerShape(Radius.pill)))
-                            Spacer(Modifier.width(Space.m))
-                            Column(Modifier.weight(1f)) {
-                                Text("Waiting for job requests…", color = TextDark, fontWeight = FontWeight.SemiBold)
-                                Text("You'll be notified when a customer books", color = TextGray, fontSize = 12.sp)
-                            }
-                        }
-                    }
-                    OutlineButton("🔄  Check for Jobs", modifier = Modifier.fillMaxWidth()) {
+            // ─── Today ─── jobs done against today's total, money earned, the target and the
+            // progress toward it. Tapping the target cell opens the goal editor, which is the
+            // only route to it.
+            TodayPanel(
+                completed = vm.todayCompleted,
+                // Falls back to the schedule's length when the API reports no jobs for today, so
+                // the count agrees with the rows NEXT UP is actually showing.
+                totalJobs = if (vm.todayJobs > 0) vm.todayJobs else scheduleItems.size,
+                earned = vm.todayEarnings,
+                target = vm.dailyGoal,
+                onViewAll = { nav.navigateApp(Routes.EARNINGS) },
+                onEditTarget = { showGoalDialog = true },
+            )
+
+            // ─── Upcoming services ─── the jobs queued AFTER the hero's. Dropping the hero job
+            // keeps the two sections from showing the same booking twice. Shown only when there
+            // is something queued; with nothing coming up, RECENT SERVICES below leads instead.
+            // Matched on ref as well as identity: the hero's row may be the synthesized live job
+            // rather than an object from this list, and the feed's copy of that same booking must
+            // not then show up again under UPCOMING.
+            // Open rows only — a completed or cancelled booking is not "upcoming", and today's
+            // schedule feed carries both.
+            val upcoming = scheduleItems
+                .filter { it !== nextJob && (nextJob?.ref == null || it.ref != nextJob.ref) }
+                .filter { !it.status.equals("Completed", true) && !it.status.equals("Cancelled", true) }
+                .take(3)
+            if (upcoming.isNotEmpty()) {
+                NextUpPanel(
+                    items = upcoming,
+                    onViewSchedule = { nav.navigate(Routes.SCHEDULE) },
+                    onItem = { nav.navigateApp(Routes.BOOKINGS) },
+                )
+            }
+
+            // ─── Recent services / welcome ──────────────────────────────────────────────────
+            // Everything below TODAY used to vanish for a worker with no schedule, leaving a slab
+            // of empty white under the bonus banner. One of these two always renders: the last
+            // three completed services, or a welcome for someone who hasn't finished one yet.
+            val recentServices = vm.bookings.filter { it.status == "Completed" }
+            if (recentServices.isNotEmpty()) {
+                RecentServicesPanel(
+                    items = recentServices.take(3),   // feed is newest-first (bookings are id DESC)
+                    onViewAll = { nav.navigateApp(Routes.BOOKINGS) },
+                    onItem = { nav.navigateApp(Routes.BOOKINGS) },
+                )
+            } else {
+                WelcomeCard(name = firstName, greeting = greeting, online = vm.isOnline)
+            }
+
+            // ─── Incoming request ───────────────────────────────────────────────────────────
+            // ONLY the incoming-job strip renders here now. The idle "You're Online / Waiting
+            // for job requests" variant was removed: the availability card at the top of the
+            // page already says exactly that, and the reference has no second copy of it.
+            if (vm.isOnline && vm.hasIncomingJob) {
+                val jobCtx = LocalContext.current
+                OnlineStatusStrip(
+                    background = BrandGradient,
+                    onLight = false,
+                    title = "New Job Request",
+                    subtitle = "A customer needs your service — tap to view",
+                    trailing = null,
+                    onClick = {
                         vm.requestJob { found ->
-                            if (found) nav.navigate(Routes.NEW_JOB) else toast(ctx, "No new job requests right now")
+                            if (found) nav.navigate(Routes.NEW_JOB) else toast(jobCtx, "That job was just taken")
                         }
-                    }
+                    },
+                )
+            }
+
+            // ─── Bonus banner ─── closes the page. When the backend reports a Sitara tier the
+            // banner quotes ITS reward and target; with no tier reported it falls back to the
+            // generic weekend copy rather than naming a bonus the worker cannot actually earn.
+            val nextBonusTier = vm.shaktiBonus?.tiers?.firstOrNull { it.days > (vm.shaktiBonus?.workingDays ?: 0) }
+            BonusBanner(
+                title = "Weekend Bonus!",
+                subtitle = nextBonusTier
+                    ?.let { "Earn ₹${it.amount} extra after ${it.days} working days" }
+                    ?: "Extra incentive on weekend jobs — tap for details",
+                onDetails = { nav.navigate(Routes.SHAKTI) },
+            )
+
+            // The active-job banner moved to the TOP of this column — a job in progress is the
+            // most important thing on the screen and used to render here, below everything.
+            // The live-session card, the "Waiting for job requests…" box and the "Check for Jobs"
+            // button folded into the status slot above.
+        }
+    }
+}
+
+/**
+ * Home's header row, per the reference: the drawer handle as a floating white circle on the
+ * left, and the notification bell (with its unread count) plus the avatar on the right.
+ *
+ * SOS is NOT here — the reference puts it in the quick-action strip, where it still sits one
+ * tap from Home.
+ */
+@Composable
+private fun HomeHeaderRow(
+    greeting: String,
+    firstName: String,
+    rating: Double,
+    unread: Int,
+    online: Boolean,
+    onMenu: () -> Unit,
+    onNotifications: () -> Unit,
+    onProfile: () -> Unit,
+    onRating: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        CircleButton(onClick = onMenu) {
+            Icon(Icons.Filled.Menu, contentDescription = "Open menu", tint = TextDark, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        // Greeting sits beside the drawer handle, with the rating chip hanging under the name.
+        Column(Modifier.weight(1f)) {
+            Text("$greeting,", fontSize = 13.sp, color = TextGray, maxLines = 1)
+            Text(
+                "$firstName 👋",
+                fontSize = 21.sp, fontWeight = FontWeight.Bold, color = TextDark,
+                letterSpacing = (-0.5).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            RatingPill(rating = rating, onClick = onRating)
+        }
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+            CircleButton(onClick = onNotifications) {
+                Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(22.dp))
+            }
+            if (unread > 0) {
+                Box(
+                    Modifier.align(Alignment.TopEnd)
+                        .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                        .clip(RoundedCornerShape(Radius.pill))
+                        .background(RedCancel)
+                        .border(2.dp, ScreenBg, RoundedCornerShape(Radius.pill))
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (unread > 99) "99+" else "$unread",
+                        color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         }
+        Spacer(Modifier.width(2.dp))
+        // Avatar, ringed in brand violet with a presence dot on its corner.
+        Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
+            Image(
+                painterResource(R.drawable.dummy_avatar),
+                contentDescription = "Profile",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(46.dp)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .border(2.dp, Purple.copy(alpha = 0.5f), RoundedCornerShape(Radius.pill))
+                    .clickable(onClick = onProfile),
+            )
+            Box(
+                Modifier.align(Alignment.BottomEnd).size(12.dp)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(if (online) GreenSuccess else TextMuted)
+                    .border(2.dp, ScreenBg, RoundedCornerShape(Radius.pill)),
+            )
+        }
+    }
+}
+
+/** A floating white circle button — the header's drawer and bell affordance. */
+@Composable
+private fun CircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        Modifier.size(42.dp)
+            .shadow(4.dp, RoundedCornerShape(Radius.pill), spotColor = Color(0x1A101828))
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(CardBg)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = { content() },
+    )
+}
+
+/**
+ * The one-line strip in Home's status slot: announcements when offline, online/idle state or an
+ * incoming job request when online. Fixed single-line height in every variant, so switching
+ * between them never changes Home's natural height (and so never re-triggers FitToScreen's
+ * shrink). [background] paints a gradient variant; null uses the light tint.
+ */
+@Composable
+private fun OnlineStatusStrip(
+    background: Brush?,
+    onLight: Boolean,
+    title: String,
+    subtitle: String,
+    trailing: String?,
+    onClick: () -> Unit,
+) {
+    val base = Modifier.fillMaxWidth().height(StatusSlotHeight).clip(RoundedCornerShape(Radius.button))
+    val painted = if (background != null) base.background(background) else base.background(PurpleLight)
+    Row(
+        painted.clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PulseDot(if (onLight) GreenSuccess else Color.White, 9.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                color = if (onLight) TextDark else Color.White,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            )
+            Text(
+                subtitle,
+                color = if (onLight) TextGray else Color.White.copy(alpha = 0.9f),
+                fontSize = 11.5.sp, maxLines = 1,
+            )
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                trailing,
+                color = if (onLight) GreenSuccess else Color.White,
+                fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+            )
+        }
+        Icon(
+            Icons.Filled.ChevronRight, contentDescription = null,
+            tint = if (onLight) Purple else Color.White, modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -811,9 +1090,9 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerRow(Icons.Filled.Person, "My Profile", Purple) { go(Routes.PROFILE) }
             DrawerRow(Icons.Filled.Description, "Documents", Color(0xFF0EA5E9)) { go(Routes.P_DOCUMENTS) }
             DrawerRow(Icons.Filled.WorkspacePremium, "Skills & Services", Color(0xFF7C3AED)) { go(Routes.P_SKILLS) }
-            DrawerRow(Icons.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
+            DrawerRow(Icons.AutoMirrored.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
             DrawerRow(Icons.Filled.Inventory2, "My Equipment", Color(0xFF0891B2)) { go(Routes.P_EQUIPMENT) }
-            DrawerRow(Icons.Filled.AccountBalance, "Bank Details", Color(0xFF14B8A6)) { go(Routes.P_BANK) }
+            DrawerRow(Icons.Filled.AccountBalance, "Bank Accounts", Color(0xFF14B8A6)) { go(Routes.BANK_ACCOUNTS) }
             DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
             DrawerRow(Icons.Filled.Notifications, "Notifications", PurpleMid) { go(Routes.P_NOTIFICATIONS) }
 
@@ -822,7 +1101,7 @@ fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
             DrawerRow(Icons.Filled.Info, "About Us", TextGray) { go(Routes.P_ABOUT) }
 
             Spacer(Modifier.height(8.dp)); HairlineDivider(Modifier.padding(horizontal = 20.dp)); Spacer(Modifier.height(8.dp))
-            DrawerRow(Icons.Filled.Logout, "Logout", RedCancel) {
+            DrawerRow(Icons.AutoMirrored.Filled.Logout, "Logout", RedCancel) {
                 close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
             }
 

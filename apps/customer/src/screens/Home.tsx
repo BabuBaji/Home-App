@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, User, Wallet as WalletIcon, Headset, Crown } from 'lucide-react'
 import { BottomNav, useToast } from '../components/UI'
+import AddressSheet from '../components/AddressSheet'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
-import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, type HomeBanner } from '../api'
+import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
+import { unreadCount } from '../notifRead'
 import type { Service, Booking, Address } from '../types'
 
 // Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
@@ -20,7 +22,6 @@ type Slide = HomeBanner & { greetingName?: string }
 
 // Module 2 · #7 — Home Dashboard. UI redesigned to the mock; all booking data/flow
 // (services, bookings, serviceable guard, service navigation) is preserved.
-const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 
 function greeting() {
   const h = new Date().getHours()
@@ -38,12 +39,17 @@ export default function Home() {
   const [walletBal, setWalletBal] = useState<number | null>(null)
   const [banners, setBanners] = useState<HomeBanner[]>([])
   const [active, setActive] = useState(0)
+  const [paused, setPaused] = useState(false)   // manual interaction pauses the auto-rotate
+  const [dir, setDir] = useState(1)             // 1 = forward, -1 = back (drives the slide-in)
+  const swipe = useRef<{ x: number; y: number } | null>(null)
+  const resume = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [scrolled, setScrolled] = useState(false)   // past the hero → collapse the header to white
+  const [addrSheet, setAddrSheet] = useState(false) // saved-address picker, opened from the header
 
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
-    fetchNotifications().then((n) => setNotifCount(n.length)).catch(() => {})
+    fetchNotifications().then((n) => setNotifCount(unreadCount(n))).catch(() => {})
     fetchWallet().then((w) => setWalletBal(typeof w?.available === 'number' ? w.available : null)).catch(() => {})
   }, [])
   useEffect(() => {
@@ -53,11 +59,25 @@ export default function Home() {
   }, [pincode])
 
   const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
+  // Header address: the saved label ("Home"/"Work") reads as the title, with a SHORT "flat, city"
+  // summary under it - the full street line is in the address sheet a tap away. Falls back to the
+  // city alone when no address is saved yet, so a new user still sees something tappable.
+  const addrTitle = addr?.label || cityLabel
+  const addrShort = useMemo(() => {
+    if (!addr) return ''
+    const flat = (addr.house || (addr.line || '').split(',')[0] || '').trim()
+    const place = (addr.city || '').trim()
+    // de-duped: a one-line address like "Hyderabad" would otherwise read "Hyderabad, Hyderabad"
+    return [flat, place].filter(Boolean).filter((v, i, a) => a.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i).join(', ')
+  }, [addr])
   const firstName = (user?.name || 'there').split(' ')[0]
-  const svcList = useMemo(() => services.filter((s) => s.available), [services])
-  // Only an in-progress booking counts as "Continue Booking" — once it's completed or cancelled it
-  // drops out (no fall-back to the most recent booking regardless of status).
-  const cont = useMemo(() => bookings.find((b) => ACTIVE.includes(b.status)) || null, [bookings])
+  // Show every service, but order the ones offered in this zone first; the rest are rendered as
+  // "Coming Soon" (not bookable) so the customer sees what will arrive rather than a blank gap.
+  const svcList = useMemo(() => [...services].sort((a, b) => Number(b.available) - Number(a.available)), [services])
+  // Only a genuinely live booking counts as "Continue Booking": an active status that hasn't gone
+  // stale (see isContinuable — a job whose slot is >1 day past is abandoned, not continuable). Once
+  // it's completed/cancelled or stale it drops out; future-scheduled bookings still show.
+  const cont = useMemo(() => bookings.find((b) => isContinuable(b)) || null, [bookings])
 
   // The greeting is always the first slide; live banners rotate in after it.
   const slides: Slide[] = useMemo(() => [
@@ -70,10 +90,37 @@ export default function Home() {
   // Keep the active index in range, and auto-rotate through the slides.
   useEffect(() => { if (active >= slides.length) setActive(0) }, [slides.length, active])
   useEffect(() => {
-    if (slides.length < 2) return
-    const id = setInterval(() => setActive((i) => (i + 1) % slides.length), 5000)
+    if (slides.length < 2 || paused) return
+    const id = setInterval(() => { setDir(1); setActive((i) => (i + 1) % slides.length) }, 5000)
     return () => clearInterval(id)
-  }, [slides.length])
+  }, [slides.length, paused])
+  useEffect(() => () => { if (resume.current) clearTimeout(resume.current) }, [])
+
+  // Any manual move pauses the carousel, then hands control back after a breather — so a swipe
+  // isn't yanked away a moment later, but the hero still rotates if the screen is left alone.
+  function holdAuto() {
+    setPaused(true)
+    if (resume.current) clearTimeout(resume.current)
+    resume.current = setTimeout(() => setPaused(false), 8000)
+  }
+  function go(step: number) {
+    if (slides.length < 2) return
+    setDir(step)
+    setActive((i) => (i + step + slides.length) % slides.length)
+    holdAuto()
+  }
+  // Horizontal drags move the carousel; anything more vertical than horizontal is left alone so
+  // the page keeps scrolling normally (the hero also sets touch-action: pan-y).
+  function onSwipeStart(e: React.PointerEvent) { swipe.current = { x: e.clientX, y: e.clientY } }
+  function onSwipeEnd(e: React.PointerEvent) {
+    const s0 = swipe.current
+    swipe.current = null
+    if (!s0) return
+    const dx = e.clientX - s0.x
+    const dy = e.clientY - s0.y
+    if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return   // a tap, or a vertical scroll
+    go(dx < 0 ? 1 : -1)
+  }
 
   // Status-bar icons: white over the dark hero at the top; dark once the header collapses to white
   // on scroll. (Capacitor Style.Dark = white icons, Style.Light = dark icons.)
@@ -111,8 +158,10 @@ export default function Home() {
     <div className="screen has-nav m2 rain-sky">
       {/* top bar — matches the hero at the top, collapses to solid white on scroll */}
       <div className={`hd-top${scrolled ? ' solid' : ''}`}>
-        <button className="hd-loc" onClick={() => nav('/locations')}>
-          <MapPin size={16} /> <b>{cityLabel}</b> <ChevronDown size={15} />
+        <div className="hd-top-main">
+        <button className="hd-loc" onClick={() => setAddrSheet(true)}>
+          <MapPin size={16} className="hd-loc-pin" />
+          <span className="hd-loc-title"><b>{addrTitle}</b><ChevronDown size={15} /></span>
         </button>
         <div className="hd-top-r">
           {/* wallet with the live available balance shown inline, like the notification count */}
@@ -128,12 +177,21 @@ export default function Home() {
             {firstName && firstName !== 'there' ? firstName[0].toUpperCase() : <User size={19} />}
           </button>
         </div>
+        </div>
+        {/* short "flat, city" line under the label - the full address is in the sheet */}
+        {addrShort && (
+          <button className="hd-loc-full" onClick={() => setAddrSheet(true)}>{addrShort}</button>
+        )}
       </div>
 
       <div className="content hd-content" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 60)}>
         {serviceable === false ? <ComingSoon /> : (<>
           {/* dynamic hero carousel — greeting + festival/promo banners + live offers + weather surge */}
-          <div className={`hd-hero rainy${cur.key === 'greeting' || cur.kind === 'weather' ? '' : ' hd-hero-promo'}${cur.image ? ' hd-hero-photo' : ''}`} style={{ background: THEME[cur.theme] || THEME.purple }}>
+          <div
+            className={`hd-hero rainy${cur.key === 'greeting' || cur.kind === 'weather' ? '' : ' hd-hero-promo'}${cur.image ? ' hd-hero-photo' : ''}`}
+            style={{ background: THEME[cur.theme] || THEME.purple }}
+            onPointerDown={onSwipeStart} onPointerUp={onSwipeEnd} onPointerCancel={() => { swipe.current = null }}
+          >
             {cur.image && (
               <div className="hd-hero-bg" aria-hidden="true">
                 <img src={mediaUrl(cur.image)} alt="" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
@@ -146,7 +204,7 @@ export default function Home() {
                 ))}
               </div>
             )}
-            <div className="hd-hero-txt">
+            <div className={`hd-hero-txt ${dir > 0 ? 'in-next' : 'in-prev'}`} key={cur.key}>
               {cur.key === 'greeting' ? (<>
                 <div className="hd-hi">{greeting()} 👋</div>
                 <div className="hd-name">{firstName}</div>
@@ -171,16 +229,19 @@ export default function Home() {
             {slides.length > 1 && (
               <div className="hd-dots">
                 {slides.map((s, i) => (
-                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => setActive(i)} aria-label={`Slide ${i + 1}`} />
+                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => { setDir(i > active ? 1 : -1); setActive(i); holdAuto() }} aria-label={`Slide ${i + 1}`} />
                 ))}
               </div>
             )}
           </div>
 
-          {/* continue booking — shown here (in place of Quick Actions), only if one is in progress */}
+          {/* continue booking — shown here (in place of Quick Actions), only if one is in progress.
+              The card is one live booking, so it goes straight to that job's tracking screen rather
+              than via the list — `cont` is continuable by definition, which is the same branch the
+              list's Continue button takes. */}
           {cont && (<>
             <div className="hd-sec-head"><h3>Continue Booking</h3></div>
-            <button className="hd-cont" onClick={() => nav('/continue-booking')}>
+            <button className="hd-cont" onClick={() => nav(`/track/${cont.id}`)}>
               <span className="hd-cont-img">
                 <img src={`/services/${cont.items[0]?.id}.jpg`} alt=""
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
@@ -189,7 +250,7 @@ export default function Home() {
                 <b>{cont.items[0]?.name || 'Booking'}{cont.items.length > 1 ? ` +${cont.items.length - 1}` : ''}</b>
                 <small>{bkWhen(cont)}</small>
               </span>
-              <span className="hd-cont-btn">View</span>
+              <span className="hd-cont-btn">Track</span>
             </button>
           </>)}
 
@@ -197,13 +258,15 @@ export default function Home() {
           <div className="hd-sec-head"><h3>All Services</h3></div>
           <div className="hd-pop hd-pop-all">
             {svcList.map((s) => (
-              <button key={s.id} className="hd-pop-card" onClick={() => openService(s)}>
+              <button key={s.id} className={`hd-pop-card${s.available ? '' : ' soon'}`}
+                onClick={() => s.available ? openService(s) : toast(`${s.name} is coming soon to your area 🚧`)}>
                 <span className="hd-pop-img">
                   <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                  {!s.available && <span className="hd-pop-soon">Coming Soon</span>}
                 </span>
                 <span className="hd-pop-name">{s.name}</span>
-                <span className="hd-pop-price">From ₹{s.price}</span>
+                <span className="hd-pop-price">{s.available ? `From ₹${s.price}` : 'Not available yet'}</span>
               </button>
             ))}
             {svcList.length === 0 && <p className="muted" style={{ padding: 12 }}>Loading services…</p>}
@@ -211,6 +274,7 @@ export default function Home() {
 
         </>)}
       </div>
+      <AddressSheet open={addrSheet} onClose={() => setAddrSheet(false)} onSelect={setAddr} />
       <BottomNav />
     </div>
   )

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams, Outlet } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings } from './api'
-import { ensureNotifPermission, fireLocalNotification } from './notify'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions, fetchBooking, fetchJobMessages } from './api'
+import { ensureNotifPermission, fireLocalNotification, speak, speakOnce, onNotificationTap } from './notify'
+import { serviceEndMs, serviceNames } from './screens/job/useJob'
 import { runTopBackHandler } from './backStack'
 
 import Login from './screens/Login'
@@ -31,7 +32,6 @@ import AddressSelect from './screens/AddressSelect'
 import Schedule from './screens/Schedule'
 import Summary from './screens/Summary'
 import Payment from './screens/Payment'
-import Track from './screens/Track'
 import BookingTracking from './screens/BookingTracking'
 import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
@@ -92,6 +92,9 @@ import SavedAddresses from './screens/SavedAddresses'
 import DefaultAddress from './screens/DefaultAddress'
 import CancelPolicy from './screens/CancelPolicy'
 import PersonalInfo from './screens/PersonalInfo'
+// Settings screen for location access. Distinct from screens/Permissions, which is the
+// one-time onboarding step at /onboarding/permission.
+import LocationPermission from './screens/profile/LocationPermission'
 import Terms from './screens/Terms'
 // Module 6 — Live Job Tracking
 import JobTracking from './screens/job/JobTracking'
@@ -102,6 +105,7 @@ import Chat from './screens/job/Chat'
 import CallWorker from './screens/job/CallWorker'
 import ShareOtp from './screens/job/ShareOtp'
 import ServiceStarted from './screens/job/ServiceStarted'
+import ExtendService from './screens/job/ExtendService'
 import LiveProgress from './screens/job/LiveProgress'
 import ServiceCompleted from './screens/job/ServiceCompleted'
 // Module 7 — Rating
@@ -131,9 +135,11 @@ export default function App() {
     return () => { clearTimeout(t); clearTimeout(cap) }
   }, [])
 
-  // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
-  // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
-  useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+  // Capture the customer's GPS as soon as the app opens with a signed-in user (and right after
+  // they log in) so bookings/maps have a fix ready. The fix is cached LOCALLY only — it is written
+  // to the profile just once, for a user who has no location yet, because persisting it on every
+  // open overwrote the address (and pincode) the customer had deliberately chosen.
+  useEffect(() => { if (user) captureLocationOnOpen(!user.location) }, [user?.id, user?.location])
 
   // App-wide push alert: notify the customer when a booking is auto-cancelled (no expert accepted),
   // even if they've left the Track screen. Polls every 30s; the first pass seeds silently so old
@@ -165,12 +171,130 @@ export default function App() {
     return () => { stopped = true; clearInterval(iv) }
   }, [user?.id])
 
+  // The expert has asked for more time. This is time-critical — they're standing in the customer's
+  // home waiting on an answer — so it polls faster than the cancel watcher and alerts once per
+  // request. Approving is a payment, so we only ever notify: the decision stays on the screen.
+  useEffect(() => {
+    if (!user) return
+    const KEY = 'hh_ext_seen'
+    const seen = new Set<number>(JSON.parse(localStorage.getItem(KEY) || '[]'))
+    let stopped = false
+    const tick = async () => {
+      try {
+        const live = (await fetchBookings()).filter((b) => b.status === 'in_progress')
+        for (const b of live) {
+          const { pending } = await fetchExtensions(b.id)
+          if (!pending || seen.has(pending.id)) continue
+          seen.add(pending.id)
+          localStorage.setItem(KEY, JSON.stringify([...seen]))
+          const who = b.pro?.name || b.pro_name || 'Your expert'
+          fireLocalNotification(
+            `${who} needs ${pending.minutes} more minutes`,
+            pending.price > 0
+              ? `The current service may need more time — ₹${pending.price}. Tap to approve or decline.`
+              : 'The current service may need more time. Tap to review.',
+          )
+        }
+      } catch { /* offline — retry next tick */ }
+    }
+    tick()
+    const iv = setInterval(() => { if (!stopped) tick() }, 15000)
+    return () => { stopped = true; clearInterval(iv) }
+  }, [user?.id])
+
+  // Job-milestone alerts, fired once per booking even if the customer has left the Track screen:
+  //  • worker ARRIVED  → remind them to share the start OTP (so the expert can begin).
+  //  • service COMPLETED → notification + a spoken "your service time has completed" announcement.
+  // Same seed-silently-on-first-pass pattern as the watchers above, so bookings that were already
+  // past these points when the app opened don't re-alert. Milestones are keyed per booking+stage so
+  // each fires at most once. Purely additive — the on-screen tracking flow is untouched.
+  useEffect(() => {
+    if (!user) return
+    const KEY = 'hh_job_milestones_seen'
+    const seen = new Set<string>(JSON.parse(localStorage.getItem(KEY) || '[]'))
+    let first = localStorage.getItem(KEY) === null
+    let stopped = false
+    const mark = (k: string) => { seen.add(k); localStorage.setItem(KEY, JSON.stringify([...seen])) }
+    const tick = async () => {
+      try {
+        const bs = await fetchBookings()
+        for (const b of bs) {
+          // Service is running and within ~5 minutes of its scheduled end → a spoken heads-up so the
+          // customer can decide to extend before the expert wraps up. Keyed by the total duration so
+          // that approving an extension re-arms a fresh warning before the NEW end time.
+          if (b.status === 'in_progress' && b.started_at) {
+            const endMs = serviceEndMs(b)
+            const msLeft = endMs - Date.now()
+            const total = Math.round((endMs - new Date(b.started_at).getTime()) / 60000)
+            const svc = serviceNames(b)
+            // 5 minutes before the end. Not gated on `first`: an imminent end is always worth
+            // announcing, even if the app was just opened inside the window. The persisted key still
+            // limits it to once per job.
+            const k = `soon:${b.id}:${total}`
+            if (endMs && msLeft > 0 && msLeft <= 5 * 60000 && !seen.has(k)) {
+              mark(k)
+              fireLocalNotification('Service ending soon', `Your ${svc} service will finish in about 5 minutes.`)
+              speak(`Your ${svc} service will be completed in about 5 minutes. If you need more time, you can request an extension.`)
+            }
+            // Time's up: the booked (+extended) duration has elapsed but the worker hasn't ended the
+            // job yet, so status is still in_progress (the timer sits at 99%). Announce it once, only
+            // around the moment it crosses zero (within ~2 min) so a long-overrun or a late app-open
+            // doesn't replay a stale alert.
+            const kUp = `up:${b.id}:${total}`
+            if (endMs && msLeft <= 0 && msLeft > -120000 && !seen.has(kUp)) {
+              mark(kUp)
+              fireLocalNotification('Service time is up', `Your ${svc} service time has ended.`)
+              speak(`Your ${svc} service time is up. If the work is done, your expert will complete the service. If you need more time, you can request an extension.`)
+            }
+          }
+          if (b.status === 'arrived') {
+            const k = `arr:${b.id}`
+            if (!seen.has(k)) {
+              mark(k)
+              if (!first) {
+                const who = b.pro?.name || b.pro_name || 'Your expert'
+                let otp = b.service_otp ? String(b.service_otp) : ''
+                if (!otp) { try { otp = String((await fetchBooking(b.id)).service_otp || '') } catch { /* keep '' */ } }
+                fireLocalNotification(
+                  `${who} has arrived`,
+                  otp ? `Share your start OTP ${otp} to begin the service.` : 'Your expert has reached your location.',
+                )
+                speak(otp ? `Your expert has arrived. Your start O T P is ${otp.split('').join(' ')}.` : 'Your expert has arrived at your location.')
+              }
+            }
+          }
+          if (b.status === 'completed') {
+            const k = `done:${b.id}`
+            if (!seen.has(k)) {
+              mark(k)
+              if (!first) {
+                fireLocalNotification('Service completed', 'Your service is complete. Tap to rate or extend.')
+                // Announce completion aloud the moment it happens — the same voice the customer would
+                // hear on the ServiceCompleted screen, so they get it even while on the tracking
+                // screen. speakOnce dedupes with that screen, so it plays exactly once per booking.
+                if (speakOnce(b.id)) {
+                  const name = user?.name?.split(' ')[0] || 'there'
+                  speak(`Hi ${name}, your ${serviceNames(b)} service has completed. Do you want to extend any service? If yes, open the app and tap yes.`)
+                }
+              }
+            }
+          }
+        }
+        first = false
+      } catch { /* offline — retry next tick */ }
+    }
+    tick()
+    const iv = setInterval(() => { if (!stopped) tick() }, 20000)
+    return () => { stopped = true; clearInterval(iv) }
+  }, [user?.id])
+
   const showSplash = !minTime || !booted
 
   return (
     <ToastHost>
       <div className="device">
         <BackButtonHandler />
+        {user && <ChatNotifier key={user.id} />}
         <Splash visible={showSplash} />
         {(
           <Routes>
@@ -201,7 +325,9 @@ export default function App() {
               <Route path="/summary" element={<Summary />} />
               <Route path="/payment" element={<Payment />} />
               <Route path="/tracking/:id" element={<BookingTracking />} />
-              <Route path="/track/:id" element={<Track />} />
+              {/* Old "Track Your Expert" screen is superseded by the redesigned /job/:id flow — send
+                  every track entry point (Continue Booking, notifications, post-cancel/reschedule) there. */}
+              <Route path="/track/:id" element={<TrackRedirect />} />
               <Route path="/reschedule/:id" element={<Reschedule />} />
               <Route path="/cancel/:id" element={<Cancel />} />
               {/* Module 6 — Live Job Tracking */}
@@ -213,6 +339,7 @@ export default function App() {
               <Route path="/job/:id/call" element={<CallWorker />} />
               <Route path="/job/:id/otp" element={<ShareOtp />} />
               <Route path="/job/:id/started" element={<ServiceStarted />} />
+              <Route path="/job/:id/extend" element={<ExtendService />} />
               <Route path="/job/:id/progress" element={<LiveProgress />} />
               <Route path="/job/:id/completed" element={<ServiceCompleted />} />
               {/* Module 7 — Rating */}
@@ -299,6 +426,7 @@ export default function App() {
               <Route path="/addresses/default" element={<DefaultAddress />} />
               <Route path="/cancellation-policy" element={<CancelPolicy />} />
               <Route path="/personal" element={<PersonalInfo />} />
+              <Route path="/permissions" element={<LocationPermission />} />
               <Route path="/terms" element={<Terms />} />
             </Route>
             <Route path="*" element={<Navigate to={user ? '/home' : '/login'} replace />} />
@@ -335,10 +463,72 @@ function BackButtonHandler() {
   return null
 }
 
+// Chat alerts: notify the customer when the worker sends a message, even off the chat screen, and
+// open the conversation when the notification is tapped. The worker app already alerts on the
+// customer's messages (its JobAlertService), so this closes the loop for the other direction.
+// Polls the SAME job_messages the Chat screen reads; purely additive — nothing here touches the
+// booking, chat, or notification flows that already exist.
+const CHAT_ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+function ChatNotifier() {
+  const nav = useNavigate()
+  const loc = useLocation()
+  const locRef = useRef(loc.pathname)
+  locRef.current = loc.pathname
+
+  // Tap a chat notification → open that job's chat.
+  useEffect(() => {
+    onNotificationTap((extra) => {
+      const route = typeof extra?.route === 'string' ? extra.route : ''
+      if (route) nav(route)
+    })
+  }, [])
+
+  // Poll active jobs for new inbound (worker) messages; alert once per new message, seeding silently
+  // on the first pass so a backlog doesn't all fire at once. Suppressed while that chat is on screen
+  // (the Chat screen's own poll already shows it there), matching the worker app's behaviour.
+  useEffect(() => {
+    let stopped = false
+    const KEY = 'hh_chat_seen'
+    const seen: Record<string, number> = JSON.parse(localStorage.getItem(KEY) || '{}')
+    let first = localStorage.getItem(KEY) === null
+    const tick = async () => {
+      try {
+        const bs = (await fetchBookings()).filter((b) => CHAT_ACTIVE.includes(b.status))
+        for (const b of bs) {
+          const msgs = await fetchJobMessages(b.id)
+          const inbound = msgs.filter((m) => m.sender === 'worker')
+          if (!inbound.length) continue
+          const last = inbound[inbound.length - 1]
+          if (last.id <= (seen[b.id] || 0)) continue
+          seen[b.id] = last.id
+          localStorage.setItem(KEY, JSON.stringify(seen))
+          const onThisChat = locRef.current === `/job/${b.id}/chat`
+          if (!first && !onThisChat) {
+            const who = b.pro?.name || b.pro_name || 'Your expert'
+            fireLocalNotification(`New message from ${who}`, last.body, undefined, { route: `/job/${b.id}/chat` })
+          }
+        }
+        first = false
+      } catch { /* offline — retry next tick */ }
+    }
+    tick()
+    const iv = setInterval(() => { if (!stopped) tick() }, 10000)
+    return () => { stopped = true; clearInterval(iv) }
+  }, [])
+  return null
+}
+
 function Guard({ authed }: { authed: boolean }) {
   const loc = useLocation()
   if (!authed) return <Navigate to="/login" replace state={{ from: loc }} />
   return <Outlet />
+}
+
+// The old "Track Your Expert" screen (Track.tsx) is replaced by the redesigned /job/:id flow.
+// Redirect the legacy /track/:id route so every entry point shows the new Booking Details UI.
+function TrackRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/job/${id}`} replace />
 }
 
 // Gate for the main app: an authenticated user must have picked a city (location)

@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ShieldCheck, Bell } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
-import { useJob, proName } from './useJob'
+import { useJob, useAutoAdvance, proName } from './useJob'
 
 // Module 6 · #48 — Share OTP. The code is the real booking.service_otp the worker enters to start
 // the job. If it hasn't been released yet (future scheduled booking), we say so instead of faking one.
@@ -10,6 +10,10 @@ export default function ShareOtp() {
   const nav = useNavigate()
   const toast = useToast()
   const { b } = useJob(id)
+
+  // The worker entered the OTP and the backend flipped the booking to in_progress — the code on
+  // this screen is spent, so move the customer on to the live service timer.
+  useAutoAdvance(b, 'in_progress', (bid) => `/job/${bid}/progress`)
 
   if (!b) return <div className="screen jt"><Loading /></div>
 

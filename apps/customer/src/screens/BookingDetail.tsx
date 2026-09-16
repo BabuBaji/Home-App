@@ -136,6 +136,24 @@ export default function BookingDetail() {
           ))}
         </div>
 
+        {/* extended service — extra paid time the customer granted, itemised with amount + method */}
+        {Array.isArray(b.extensions) && b.extensions.some((x) => x.status === 'approved') && (
+          <div className="ord-block">
+            <div className="ord-block-h">Extended Service</div>
+            {b.extensions.filter((x) => x.status === 'approved').map((x) => (
+              <div key={x.id} className="bd-svc">
+                <span className="bd-svc-main">
+                  <span className="bd-svc-name">+{x.minutes} min extra time</span>
+                  <span className="bd-svc-dur">
+                    {x.reasonLabel}{x.paymentMethod ? ` · ${x.paymentMethod.toUpperCase()}` : ''} · {dt(x.decided || x.created)}
+                  </span>
+                </span>
+                <span className="bd-svc-amt">{x.price > 0 ? money(x.price) : 'No charge'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* expert */}
         {b.pro_name && (
           <div className="ord-block">
@@ -172,6 +190,13 @@ export default function BookingDetail() {
           {b.discount > 0 && <Row k={`Discount${b.coupon ? ` (${b.coupon})` : ''}`} v={<span className="green">− {money(b.discount)}</span>} />}
           <div className="ord-sep" />
           <Row k={<b>Total {b.payment_status === 'paid' ? 'Paid' : 'Payable'}</b>} v={<b>{money(b.total)}</b>} />
+          {(b.extension_total ?? 0) > 0 && (
+            <>
+              <Row k={`Extra time (${b.extension_minutes || 0} min)`} v={money(b.extension_total)} />
+              <div className="ord-sep" />
+              <Row k={<b>Total incl. extensions</b>} v={<b>{money(b.total + (b.extension_total || 0))}</b>} />
+            </>
+          )}
           <Row k="Method" v={`${(b.payment || '').toUpperCase()} · ${b.payment_status}`} />
           {b.status === 'completed' && <Row k="Transaction ID" v={txnRef(b)} />}
           {b.status === 'cancelled' && (b.refund ?? 0) > 0 && <Row k="Refunded" v={<span className="green">{money(b.refund)} to wallet</span>} />}

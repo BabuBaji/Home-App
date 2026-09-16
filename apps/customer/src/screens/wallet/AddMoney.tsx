@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
 import PaymentSheet from '../../components/PaymentSheet'
+import { PayIcon } from '../../components/PayIcon'
 import { fetchPaymentMethods, fetchWallet, walletTopup } from '../../api'
 import { useStore } from '../../store'
 import { money } from '../../wallet'
@@ -92,7 +93,7 @@ export default function AddMoney() {
         <div className="am-methods">
           {flat.map((o) => (
             <button key={o.id} className={`am-m ${method === o.id ? 'sel' : ''}`} onClick={() => setMethod(o.id)}>
-              <span className="am-m-ico">{o.icon}</span>
+              <span className="am-m-ico brand"><PayIcon id={o.id} fallback={o.icon} /></span>
               <span className="am-m-main">
                 <span className="am-m-name">{o.name}</span>
                 {o.sub && <span className="am-m-sub">{o.sub}</span>}

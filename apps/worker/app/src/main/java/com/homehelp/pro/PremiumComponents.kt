@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.navigation.NavHostController
 import com.homehelp.pro.network.ShaktiBonusDto
 import com.homehelp.pro.network.ShaktiTier
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -624,27 +626,31 @@ fun StarValue(rating: Double, fontSize: Int = 22) {
 }
 
 /**
- * Premium floating bottom navigation — a soft-shadowed white pill bar (Home · Bookings ·
- * Wallet · Profile) with a raised center FAB that toggles the worker's online status
- * (green + pulse when online). Additive navigation only: every tab maps to an existing
- * route via navigateApp(); it changes no business logic.
+ * Bottom navigation — the reference's floating white pill (Home · Jobs · Wallet · Profile)
+ * with a raised centre button that toggles the worker's online status: violet with "Go Online"
+ * when offline, green with "Go Offline" and a pulse halo when live.
+ *
+ * The pill floats OVER the page rather than sitting below it, which is why HomeScreen reserves
+ * ~180dp of bottom padding — without it the last card slides underneath.
+ *
+ * Additive navigation only: every tab maps to an existing route via navigateApp().
  */
 @Composable
 fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel) {
     val online = vm.isOnline
     Box(
-        Modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, bottom = Space.m),
+        Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, bottom = Space.s),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        Box(Modifier.fillMaxWidth().height(76.dp)) {
+        Box(Modifier.fillMaxWidth().height(74.dp)) {
             // The floating bar
             Row(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(62.dp)
-                    .shadow(22.dp, RoundedCornerShape(30.dp), spotColor = Purple.copy(alpha = 0.28f), ambientColor = Color(0x14101828))
-                    .clip(RoundedCornerShape(30.dp))
+                    .height(58.dp)
+                    .shadow(20.dp, RoundedCornerShape(26.dp), spotColor = Purple.copy(alpha = 0.22f), ambientColor = Color(0x14101828))
+                    .clip(RoundedCornerShape(26.dp))
                     .background(CardBg),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -652,38 +658,37 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
                 // "Jobs", per the design — the tab shows the worker's jobs, and "Bookings" is
                 // the customer's word for the same thing.
                 NavBarItem(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
-                Spacer(Modifier.weight(1f)) // center gap for the FAB
+                Spacer(Modifier.weight(1.1f)) // centre gap for the FAB
                 NavBarItem(Icons.Filled.AccountBalanceWallet, "Wallet", current == Routes.WALLET) { nav.navigateApp(Routes.WALLET) }
                 NavBarItem(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
             }
-            // Raised center FAB — online/offline toggle
+            // Raised centre FAB — the online/offline toggle, with its label inside the circle.
             Box(Modifier.align(Alignment.TopCenter), contentAlignment = Alignment.Center) {
                 if (online) {
-                    // soft pulse halo
+                    // Soft pulse halo, so "live" is readable at a glance.
                     val t = rememberInfiniteTransition(label = "fabPulse")
-                    val s by t.animateFloat(1f, 1.35f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "fabScale")
-                    Box(Modifier.size(56.dp * s).clip(RoundedCornerShape(Radius.pill)).background(GreenSuccess.copy(alpha = 0.18f)))
+                    val s by t.animateFloat(1f, 1.32f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "fabScale")
+                    Box(Modifier.size(52.dp * s).clip(CircleShape).background(GreenSuccess.copy(alpha = 0.18f)))
                 }
                 Box(
                     Modifier
-                        .size(68.dp)
-                        .shadow(16.dp, RoundedCornerShape(Radius.pill), spotColor = if (online) GreenSuccess else Violet, ambientColor = if (online) GreenSuccess else Violet)
-                        .clip(RoundedCornerShape(Radius.pill))
+                        .size(62.dp)
+                        .shadow(14.dp, CircleShape, spotColor = if (online) GreenSuccess else Violet, ambientColor = if (online) GreenSuccess else Violet)
+                        .clip(CircleShape)
                         .background(if (online) Brush.linearGradient(listOf(GreenSuccess, Color(0xFF16A34A))) else BrandGradient)
                         .clickable { vm.goOnline(!online) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Power icon over its label, both inside the circle (as in the reference).
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Filled.PowerSettingsNew,
                             contentDescription = if (online) "Go offline" else "Go online",
-                            tint = Color.White, modifier = Modifier.size(23.dp),
+                            tint = Color.White, modifier = Modifier.size(21.dp),
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(1.dp))
                         Text(
                             if (online) "Go Offline" else "Go Online",
-                            color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold,
                             maxLines = 1, letterSpacing = (-0.2).sp,
                         )
                     }
@@ -697,11 +702,11 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
 private fun RowScope.NavBarItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
     val color = if (selected) Purple else TextMuted
     Column(
-        Modifier.weight(1f).clip(RoundedCornerShape(Radius.field)).clickable { onClick() }.padding(vertical = 8.dp),
+        Modifier.weight(1f).clip(RoundedCornerShape(Radius.field)).clickable { onClick() }.padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(21.dp))
         Spacer(Modifier.height(3.dp))
-        Text(tr(label), fontSize = 10.sp, color = color, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
+        Text(tr(label), fontSize = 10.sp, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
     }
 }

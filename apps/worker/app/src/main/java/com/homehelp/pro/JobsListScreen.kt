@@ -42,7 +42,7 @@ import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Chair
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material.icons.filled.CleaningServices
@@ -339,7 +339,7 @@ private fun ActiveJobCard(vm: AppViewModel, job: Job, onContinue: () -> Unit) {
             JobStat(Modifier.weight(1f), Icons.Filled.Timer, "Time Elapsed", if (running) hhmmss(elapsedSec) else "—", Purple)
             StatDivider()
             JobStat(
-                Modifier.weight(1f), Icons.Filled.FormatListBulleted, "Tasks",
+                Modifier.weight(1f), Icons.AutoMirrored.Filled.FormatListBulleted, "Tasks",
                 if (vm.checklist.isEmpty()) "—" else "${vm.checklistDone} / ${vm.checklist.size}", Purple,
             )
             StatDivider()

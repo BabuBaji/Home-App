@@ -220,8 +220,8 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                 }
                 InfoNote("For your security, withdrawals are enabled only after an admin verifies your bank account.")
-                PrimaryButton(if (vm.bankStatus == "Not Added") "Add Bank Account" else "View Bank & KYC") {
-                    nav.navigate(Routes.P_BANK)
+                PrimaryButton(if (vm.bankStatus == "Not Added") "Add Bank Account" else "Manage Bank Accounts") {
+                    nav.navigate(Routes.BANK_ACCOUNTS)
                 }
             }
         }

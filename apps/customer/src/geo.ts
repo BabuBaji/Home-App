@@ -1,6 +1,7 @@
 import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { API_BASE } from './api'
+import { locationAllowed } from './locationPref'
 
 export interface Place { label: string; sub?: string; lat: number; lng: number; placeId?: string; pincode?: string }
 
@@ -16,8 +17,15 @@ export class GeoError extends Error {
 interface LocationServicesPlugin {
   check(): Promise<{ enabled: boolean }>
   requestEnable(): Promise<{ enabled: boolean }>
+  openAppSettings(): Promise<void>
 }
 const LocationServices = registerPlugin<LocationServicesPlugin>('LocationServices')
+
+/** Send the customer to this app's page in Android Settings to grant location access. */
+export async function openAppLocationSettings(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  try { await LocationServices.openAppSettings() } catch { /* nothing else we can do */ }
+}
 
 /** Ask for app location permission. Returns true if granted.
  *  checkPermissions() can reject when location services are off, so stay tolerant. */
@@ -56,6 +64,10 @@ export async function ensureLocationEnabled(): Promise<boolean> {
  * Proactively requests permission and asks the OS to turn on location.
  */
 export async function getCurrentPosition(): Promise<{ lat: number; lng: number }> {
+  // The customer's own switch (Privacy › Location Permission) comes first: with it off we never
+  // touch the device, whatever the OS permission says. Every caller already handles this error by
+  // falling back to a saved/default location.
+  if (!locationAllowed()) throw new GeoError('disabled', 'Location is turned off in the app')
   if (Capacitor.isNativePlatform()) {
     // Turn on the system location toggle FIRST (pops the in-app dialog); doing this
     // before checkPermissions avoids its "location services not enabled" rejection.
@@ -80,6 +92,19 @@ export async function getCurrentPosition(): Promise<{ lat: number; lng: number }
       { enableHighAccuracy: true, timeout: 15000 },
     )
   })
+}
+
+/**
+ * A GPS fix that gives up after `ms`. Android's Geolocation `timeout` option is not reliably
+ * honoured — the promise can hang indefinitely — so callers that must not stall (the map
+ * pickers) cap the wait themselves and fall back to a default centre.
+ */
+export function getCurrentPositionWithin(ms: number): Promise<{ lat: number; lng: number }> {
+  return Promise.race([
+    getCurrentPosition(),
+    new Promise<{ lat: number; lng: number }>((_, reject) =>
+      setTimeout(() => reject(new GeoError('unavailable', 'Location timed out')), ms)),
+  ])
 }
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org'

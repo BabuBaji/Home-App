@@ -1,0 +1,65 @@
+{
+  "nav": { "home": "హోమ్", "bookings": "బుకింగ్‌లు", "history": "చరిత్ర", "profile": "ప్రొఫైల్" },
+  "common": {
+    "save": "సేవ్ చేయి", "saving": "సేవ్ అవుతోంది…", "cancel": "రద్దు చేయి", "back": "వెనుకకు", "edit": "సవరించు",
+    "done": "పూర్తయింది", "retry": "మళ్లీ ప్రయత్నించు", "loading": "లోడ్ అవుతోంది…", "logout": "లాగ్ అవుట్"
+  },
+  "profile": {
+    "title": "నా ప్రొఫైల్",
+    "yourName": "మీ పేరు",
+    "editProfile": "ప్రొఫైల్ సవరించు",
+    "quickActions": "త్వరిత చర్యలు",
+    "addresses": "చిరునామాలు",
+    "paymentMethods": "చెల్లింపు పద్ధతులు",
+    "familyMembers": "కుటుంబ సభ్యులు",
+    "notificationSettings": "నోటిఫికేషన్ సెట్టింగ్‌లు",
+    "language": "భాష",
+    "privacy": "గోప్యత",
+    "helpSupport": "సహాయం & మద్దతు",
+    "aboutUs": "మా గురించి",
+    "saved": "{{count}} సేవ్ చేయబడ్డాయి",
+    "members_one": "{{count}} సభ్యుడు",
+    "members_other": "{{count}} సభ్యులు"
+  },
+  "language": {
+    "title": "భాష",
+    "choose": "మీకు నచ్చిన భాషను ఎంచుకోండి",
+    "saved": "భాషా ప్రాధాన్యత సేవ్ చేయబడింది"
+  },
+  "account": {
+    "title": "ఖాతా",
+    "notifications": "నోటిఫికేషన్లు",
+    "referEarn": "రెఫర్ చేసి సంపాదించండి",
+    "helpSupport": "సహాయం & మద్దతు",
+    "cancellationPolicy": "రద్దు & రీఫండ్ విధానం",
+    "personalInformation": "వ్యక్తిగత సమాచారం",
+    "terms": "నిబంధనలు & షరతులు",
+    "offersPromotions": "ఆఫర్లు & ప్రచారాలు",
+    "bookingUpdates": "బుకింగ్ అప్‌డేట్‌లు",
+    "whatsappAlerts": "WhatsApp హెచ్చరికలు",
+    "statBookings": "బుకింగ్‌లు",
+    "statCompleted": "పూర్తయినవి",
+    "statRating": "రేటింగ్",
+    "statSaved": "ఆదా"
+  },
+  "location": {
+    "confirmTitle": "మీ స్థానాన్ని నిర్ధారించండి",
+    "searchPlaceholder": "ప్రాంతం, సెక్టార్, ఏరియా వెతకండి",
+    "loadingMap": "మ్యాప్ లోడ్ అవుతోంది…",
+    "goToCurrent": "ప్రస్తుత స్థానానికి వెళ్లండి",
+    "moveMap": "మ్యాప్‌ను మీ ప్రదేశానికి జరపండి",
+    "panHint": "పిన్ ఉంచడానికి మ్యాప్‌ను జరపండి",
+    "confirm": "స్థానాన్ని నిర్ధారించండి",
+    "checking": "తనిఖీ అవుతోంది…",
+    "setAsLocation": "దీన్ని మీ స్థానంగా ఎంచుకోండి",
+    "useThisLocation": "ఈ స్థానాన్ని ఉపయోగించండి",
+    "changeLocation": "స్థానం మార్చండి"
+  },
+  "comingSoon": {
+    "title": "మీ ప్రాంతంలో ఇంకా అందుబాటులో లేదు",
+    "blurb": "కొత్త ప్రాంతాలకు వేగంగా విస్తరిస్తున్నాం.\nత్వరలోనే మీ దగ్గరకు వస్తాం.",
+    "liveIn": "మేము ఇక్కడ అందుబాటులో ఉన్నాం",
+    "servingArea_one": "{{city}}లో {{count}} ప్రాంతంలో సేవలు",
+    "servingArea_other": "{{city}}లో {{count}} ప్రాంతాల్లో సేవలు"
+  }
+}

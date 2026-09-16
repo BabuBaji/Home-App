@@ -111,14 +111,14 @@ fun MyShiftsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 "Shift History" -> ShiftHint("Your completed shifts will appear here.")
                 "Shift Swap" -> ShiftSwapTab(vm, ctx)
-                else -> ScheduleTab(vm, nav, ctx)
+                else -> ScheduleTab(vm, nav, ctx) { tab = it }
             }
         }
     }
 }
 
 @Composable
-private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.content.Context) {
+private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.content.Context, onSelectTab: (String) -> Unit) {
     val shift = vm.shifts.firstOrNull { it.id == vm.selectedShiftId } ?: vm.shifts.firstOrNull()
     var showCalendar by remember { mutableStateOf(false) }
 
@@ -239,10 +239,10 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
     // ── Quick actions.
     Text("Quick Actions", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-        ShiftAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.CompareArrows, Purple, "Request Shift Swap") { toast(ctx, "Open the Shift Swap tab to request a swap") }
+        ShiftAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.CompareArrows, Purple, "Request Shift Swap") { onSelectTab("Shift Swap") }
         ShiftAction(Modifier.weight(1f), Icons.Filled.EventAvailable, GreenSuccess, "Set Availability") { nav.navigate(Routes.P_AVAILABILITY) }
         ShiftAction(Modifier.weight(1f), Icons.Filled.Schedule, Amber, "Request Time Off") { nav.navigate(Routes.LEAVE) }
-        ShiftAction(Modifier.weight(1f), Icons.Filled.Description, Color(0xFF3B82F6), "Shift History") { toast(ctx, "No past shifts yet") }
+        ShiftAction(Modifier.weight(1f), Icons.Filled.Description, Color(0xFF3B82F6), "Shift History") { onSelectTab("Shift History") }
     }
     Spacer(Modifier.height(Space.s))
 }
