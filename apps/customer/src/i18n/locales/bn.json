@@ -1,0 +1,65 @@
+{
+  "nav": { "home": "হোম", "bookings": "বুকিং", "history": "ইতিহাস", "profile": "প্রোফাইল" },
+  "common": {
+    "save": "সংরক্ষণ করুন", "saving": "সংরক্ষণ হচ্ছে…", "cancel": "বাতিল করুন", "back": "পিছনে", "edit": "সম্পাদনা",
+    "done": "সম্পন্ন", "retry": "আবার চেষ্টা করুন", "loading": "লোড হচ্ছে…", "logout": "লগ আউট"
+  },
+  "profile": {
+    "title": "আমার প্রোফাইল",
+    "yourName": "আপনার নাম",
+    "editProfile": "প্রোফাইল সম্পাদনা",
+    "quickActions": "দ্রুত কাজ",
+    "addresses": "ঠিকানা",
+    "paymentMethods": "পেমেন্ট পদ্ধতি",
+    "familyMembers": "পরিবারের সদস্য",
+    "notificationSettings": "বিজ্ঞপ্তি সেটিংস",
+    "language": "ভাষা",
+    "privacy": "গোপনীয়তা",
+    "helpSupport": "সহায়তা ও সাপোর্ট",
+    "aboutUs": "আমাদের সম্পর্কে",
+    "saved": "{{count}} সংরক্ষিত",
+    "members_one": "{{count}} সদস্য",
+    "members_other": "{{count}} সদস্য"
+  },
+  "language": {
+    "title": "ভাষা",
+    "choose": "আপনার পছন্দের ভাষা বেছে নিন",
+    "saved": "ভাষা পছন্দ সংরক্ষিত হয়েছে"
+  },
+  "account": {
+    "title": "অ্যাকাউন্ট",
+    "notifications": "বিজ্ঞপ্তি",
+    "referEarn": "রেফার করুন ও আয় করুন",
+    "helpSupport": "সহায়তা ও সাপোর্ট",
+    "cancellationPolicy": "বাতিল ও ফেরত নীতি",
+    "personalInformation": "ব্যক্তিগত তথ্য",
+    "terms": "শর্তাবলী",
+    "offersPromotions": "অফার ও প্রচার",
+    "bookingUpdates": "বুকিং আপডেট",
+    "whatsappAlerts": "WhatsApp সতর্কতা",
+    "statBookings": "বুকিং",
+    "statCompleted": "সম্পন্ন",
+    "statRating": "রেটিং",
+    "statSaved": "সাশ্রয়"
+  },
+  "location": {
+    "confirmTitle": "আপনার অবস্থান নিশ্চিত করুন",
+    "searchPlaceholder": "এলাকা, সেক্টর, অঞ্চল খুঁজুন",
+    "loadingMap": "মানচিত্র লোড হচ্ছে…",
+    "goToCurrent": "বর্তমান অবস্থানে যান",
+    "moveMap": "মানচিত্র আপনার জায়গায় সরান",
+    "panHint": "পিন বসাতে মানচিত্র সরান",
+    "confirm": "অবস্থান নিশ্চিত করুন",
+    "checking": "যাচাই হচ্ছে…",
+    "setAsLocation": "এটি আপনার অবস্থান হিসেবে সেট করুন",
+    "useThisLocation": "এই অবস্থান ব্যবহার করুন",
+    "changeLocation": "অবস্থান পরিবর্তন করুন"
+  },
+  "comingSoon": {
+    "title": "আপনার এলাকায় এখনও উপলব্ধ নয়",
+    "blurb": "আমরা দ্রুত নতুন এলাকায় পৌঁছাচ্ছি।\nখুব শীঘ্রই আপনার কাছে আসব।",
+    "liveIn": "আমরা এখানে সেবা দিচ্ছি",
+    "servingArea_one": "{{city}}-এ {{count}} এলাকায় সেবা",
+    "servingArea_other": "{{city}}-এ {{count}} এলাকায় সেবা"
+  }
+}

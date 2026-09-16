@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CartItem, User } from './types'
-import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours, setUnauthorizedHandler } from './api'
+import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours, setUnauthorizedHandler, fetchLanguage } from './api'
+import { applyLanguage } from './i18n'
 import { checkServiceable } from './geo'
 import type { ZoneHours } from './components/Calendar'
 
@@ -55,6 +56,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const a = addresses.find((x) => x.is_default) || addresses[0]
       if (a?.pincode) setPincode(a.pincode)
     }).catch(() => {})
+    // The language lives with the account, so a sign-in on a new device restores the
+    // customer's chosen language rather than defaulting this device to English.
+    fetchLanguage().then((r) => applyLanguage(r.language)).catch(() => {})
   }, [user])
 
   // Whenever the pincode changes, check if we actually serve that zone (drives the "coming soon" gate)

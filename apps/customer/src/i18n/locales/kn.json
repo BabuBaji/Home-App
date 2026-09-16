@@ -1,0 +1,65 @@
+{
+  "nav": { "home": "ಮುಖಪುಟ", "bookings": "ಬುಕಿಂಗ್‌ಗಳು", "history": "ಇತಿಹಾಸ", "profile": "ಪ್ರೊಫೈಲ್" },
+  "common": {
+    "save": "ಉಳಿಸಿ", "saving": "ಉಳಿಸಲಾಗುತ್ತಿದೆ…", "cancel": "ರದ್ದುಮಾಡಿ", "back": "ಹಿಂದೆ", "edit": "ಸಂಪಾದಿಸಿ",
+    "done": "ಮುಗಿದಿದೆ", "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ", "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…", "logout": "ಲಾಗ್ ಔಟ್"
+  },
+  "profile": {
+    "title": "ನನ್ನ ಪ್ರೊಫೈಲ್",
+    "yourName": "ನಿಮ್ಮ ಹೆಸರು",
+    "editProfile": "ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",
+    "quickActions": "ತ್ವರಿತ ಕ್ರಿಯೆಗಳು",
+    "addresses": "ವಿಳಾಸಗಳು",
+    "paymentMethods": "ಪಾವತಿ ವಿಧಾನಗಳು",
+    "familyMembers": "ಕುಟುಂಬ ಸದಸ್ಯರು",
+    "notificationSettings": "ಅಧಿಸೂಚನೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳು",
+    "language": "ಭಾಷೆ",
+    "privacy": "ಗೌಪ್ಯತೆ",
+    "helpSupport": "ಸಹಾಯ & ಬೆಂಬಲ",
+    "aboutUs": "ನಮ್ಮ ಬಗ್ಗೆ",
+    "saved": "{{count}} ಉಳಿಸಲಾಗಿದೆ",
+    "members_one": "{{count}} ಸದಸ್ಯ",
+    "members_other": "{{count}} ಸದಸ್ಯರು"
+  },
+  "language": {
+    "title": "ಭಾಷೆ",
+    "choose": "ನಿಮ್ಮ ಆದ್ಯತೆಯ ಭಾಷೆಯನ್ನು ಆರಿಸಿ",
+    "saved": "ಭಾಷಾ ಆದ್ಯತೆ ಉಳಿಸಲಾಗಿದೆ"
+  },
+  "account": {
+    "title": "ಖಾತೆ",
+    "notifications": "ಅಧಿಸೂಚನೆಗಳು",
+    "referEarn": "ಶಿಫಾರಸು ಮಾಡಿ ಗಳಿಸಿ",
+    "helpSupport": "ಸಹಾಯ & ಬೆಂಬಲ",
+    "cancellationPolicy": "ರದ್ದತಿ & ಮರುಪಾವತಿ ನೀತಿ",
+    "personalInformation": "ವೈಯಕ್ತಿಕ ಮಾಹಿತಿ",
+    "terms": "ನಿಯಮಗಳು & ಷರತ್ತುಗಳು",
+    "offersPromotions": "ಕೊಡುಗೆಗಳು & ಪ್ರಚಾರಗಳು",
+    "bookingUpdates": "ಬುಕಿಂಗ್ ನವೀಕರಣಗಳು",
+    "whatsappAlerts": "WhatsApp ಎಚ್ಚರಿಕೆಗಳು",
+    "statBookings": "ಬುಕಿಂಗ್‌ಗಳು",
+    "statCompleted": "ಪೂರ್ಣಗೊಂಡಿದೆ",
+    "statRating": "ರೇಟಿಂಗ್",
+    "statSaved": "ಉಳಿತಾಯ"
+  },
+  "location": {
+    "confirmTitle": "ನಿಮ್ಮ ಸ್ಥಳವನ್ನು ದೃಢೀಕರಿಸಿ",
+    "searchPlaceholder": "ಪ್ರದೇಶ, ಸೆಕ್ಟರ್, ಏರಿಯಾ ಹುಡುಕಿ",
+    "loadingMap": "ನಕ್ಷೆ ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+    "goToCurrent": "ಪ್ರಸ್ತುತ ಸ್ಥಳಕ್ಕೆ ಹೋಗಿ",
+    "moveMap": "ನಕ್ಷೆಯನ್ನು ನಿಮ್ಮ ಸ್ಥಳಕ್ಕೆ ಸರಿಸಿ",
+    "panHint": "ಪಿನ್ ಇರಿಸಲು ನಕ್ಷೆಯನ್ನು ಸರಿಸಿ",
+    "confirm": "ಸ್ಥಳವನ್ನು ದೃಢೀಕರಿಸಿ",
+    "checking": "ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ…",
+    "setAsLocation": "ಇದನ್ನು ನಿಮ್ಮ ಸ್ಥಳವಾಗಿ ಹೊಂದಿಸಿ",
+    "useThisLocation": "ಈ ಸ್ಥಳವನ್ನು ಬಳಸಿ",
+    "changeLocation": "ಸ್ಥಳ ಬದಲಾಯಿಸಿ"
+  },
+  "comingSoon": {
+    "title": "ನಿಮ್ಮ ಪ್ರದೇಶದಲ್ಲಿ ಇನ್ನೂ ಲಭ್ಯವಿಲ್ಲ",
+    "blurb": "ಹೊಸ ಪ್ರದೇಶಗಳಿಗೆ ವೇಗವಾಗಿ ವಿಸ್ತರಿಸುತ್ತಿದ್ದೇವೆ.\nಶೀಘ್ರದಲ್ಲೇ ನಿಮ್ಮ ಬಳಿ ಬರುತ್ತೇವೆ.",
+    "liveIn": "ನಾವು ಇಲ್ಲಿ ಸೇವೆ ನೀಡುತ್ತಿದ್ದೇವೆ",
+    "servingArea_one": "{{city}} ನಲ್ಲಿ {{count}} ಪ್ರದೇಶದಲ್ಲಿ ಸೇವೆ",
+    "servingArea_other": "{{city}} ನಲ್ಲಿ {{count}} ಪ್ರದೇಶಗಳಲ್ಲಿ ಸೇವೆ"
+  }
+}

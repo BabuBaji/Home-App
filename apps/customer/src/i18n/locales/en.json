@@ -1,0 +1,65 @@
+{
+  "nav": { "home": "Home", "bookings": "Bookings", "history": "History", "profile": "Profile" },
+  "common": {
+    "save": "Save", "saving": "Saving…", "cancel": "Cancel", "back": "Back", "edit": "Edit",
+    "done": "Done", "retry": "Retry", "loading": "Loading…", "logout": "Logout"
+  },
+  "profile": {
+    "title": "My Profile",
+    "yourName": "Your name",
+    "editProfile": "Edit profile",
+    "quickActions": "Quick Actions",
+    "addresses": "Addresses",
+    "paymentMethods": "Payment Methods",
+    "familyMembers": "Family Members",
+    "notificationSettings": "Notification Settings",
+    "language": "Language",
+    "privacy": "Privacy",
+    "helpSupport": "Help & Support",
+    "aboutUs": "About Us",
+    "saved": "{{count}} Saved",
+    "members_one": "{{count}} Member",
+    "members_other": "{{count}} Members"
+  },
+  "language": {
+    "title": "Language",
+    "choose": "Choose your preferred language",
+    "saved": "Language preference saved"
+  },
+  "account": {
+    "title": "Account",
+    "notifications": "Notifications",
+    "referEarn": "Refer & Earn",
+    "helpSupport": "Help & Support",
+    "cancellationPolicy": "Cancellation & Refund Policy",
+    "personalInformation": "Personal Information",
+    "terms": "Terms & Conditions",
+    "offersPromotions": "Offers & promotions",
+    "bookingUpdates": "Booking updates",
+    "whatsappAlerts": "WhatsApp alerts",
+    "statBookings": "Bookings",
+    "statCompleted": "Completed",
+    "statRating": "Rating",
+    "statSaved": "Saved"
+  },
+  "location": {
+    "confirmTitle": "Confirm your location",
+    "searchPlaceholder": "Search locality, sector, area",
+    "loadingMap": "Loading map…",
+    "goToCurrent": "Go to current location",
+    "moveMap": "Move the map to your spot",
+    "panHint": "Pan the map to place the pin",
+    "confirm": "Confirm location",
+    "checking": "Checking…",
+    "setAsLocation": "Set this as your location",
+    "useThisLocation": "Use This Location",
+    "changeLocation": "Change location"
+  },
+  "comingSoon": {
+    "title": "Not available in your area yet",
+    "blurb": "Launching new areas super fast.\nWe'll be there very soon.",
+    "liveIn": "We are live in",
+    "servingArea_one": "Serving {{count}} area in {{city}}",
+    "servingArea_other": "Serving {{count}} areas in {{city}}"
+  }
+}

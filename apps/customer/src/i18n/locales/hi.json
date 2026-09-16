@@ -1,0 +1,65 @@
+{
+  "nav": { "home": "होम", "bookings": "बुकिंग", "history": "इतिहास", "profile": "प्रोफ़ाइल" },
+  "common": {
+    "save": "सेव करें", "saving": "सेव हो रहा है…", "cancel": "रद्द करें", "back": "वापस", "edit": "संपादित करें",
+    "done": "हो गया", "retry": "फिर कोशिश करें", "loading": "लोड हो रहा है…", "logout": "लॉग आउट"
+  },
+  "profile": {
+    "title": "मेरी प्रोफ़ाइल",
+    "yourName": "आपका नाम",
+    "editProfile": "प्रोफ़ाइल संपादित करें",
+    "quickActions": "त्वरित क्रियाएँ",
+    "addresses": "पते",
+    "paymentMethods": "भुगतान के तरीके",
+    "familyMembers": "परिवार के सदस्य",
+    "notificationSettings": "सूचना सेटिंग्स",
+    "language": "भाषा",
+    "privacy": "गोपनीयता",
+    "helpSupport": "सहायता और समर्थन",
+    "aboutUs": "हमारे बारे में",
+    "saved": "{{count}} सहेजे गए",
+    "members_one": "{{count}} सदस्य",
+    "members_other": "{{count}} सदस्य"
+  },
+  "language": {
+    "title": "भाषा",
+    "choose": "अपनी पसंदीदा भाषा चुनें",
+    "saved": "भाषा प्राथमिकता सहेजी गई"
+  },
+  "account": {
+    "title": "खाता",
+    "notifications": "सूचनाएँ",
+    "referEarn": "रेफ़र करें और कमाएँ",
+    "helpSupport": "सहायता और समर्थन",
+    "cancellationPolicy": "रद्दीकरण और रिफ़ंड नीति",
+    "personalInformation": "व्यक्तिगत जानकारी",
+    "terms": "नियम और शर्तें",
+    "offersPromotions": "ऑफ़र और प्रचार",
+    "bookingUpdates": "बुकिंग अपडेट",
+    "whatsappAlerts": "WhatsApp अलर्ट",
+    "statBookings": "बुकिंग",
+    "statCompleted": "पूर्ण",
+    "statRating": "रेटिंग",
+    "statSaved": "बचत"
+  },
+  "location": {
+    "confirmTitle": "अपना स्थान पुष्ट करें",
+    "searchPlaceholder": "इलाका, सेक्टर, क्षेत्र खोजें",
+    "loadingMap": "मानचित्र लोड हो रहा है…",
+    "goToCurrent": "वर्तमान स्थान पर जाएँ",
+    "moveMap": "मानचित्र को अपनी जगह पर ले जाएँ",
+    "panHint": "पिन लगाने के लिए मानचित्र खिसकाएँ",
+    "confirm": "स्थान की पुष्टि करें",
+    "checking": "जाँच हो रही है…",
+    "setAsLocation": "इसे अपना स्थान बनाएँ",
+    "useThisLocation": "यही स्थान चुनें",
+    "changeLocation": "स्थान बदलें"
+  },
+  "comingSoon": {
+    "title": "आपके क्षेत्र में अभी उपलब्ध नहीं",
+    "blurb": "हम नए क्षेत्रों में तेज़ी से पहुँच रहे हैं।\nहम बहुत जल्द वहाँ होंगे।",
+    "liveIn": "हम यहाँ उपलब्ध हैं",
+    "servingArea_one": "{{city}} में {{count}} क्षेत्र में सेवा",
+    "servingArea_other": "{{city}} में {{count}} क्षेत्रों में सेवा"
+  }
+}
