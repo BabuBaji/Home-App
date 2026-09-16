@@ -4,6 +4,7 @@ import { ArrowLeft, Bell, CalendarCheck, Tag, Coins } from 'lucide-react'
 import { Loading } from '../components/UI'
 import { fetchNotifications } from '../api'
 import type { AppNotification } from '../types'
+import { readIds, markRead } from '../notifRead'
 
 // Module 2 · #14 — Notifications. UI redesigned to the mock; data via fetchNotifications.
 // "Mark all as read" is a local visual state (no backend notion of read yet).
@@ -26,10 +27,15 @@ function ago(t: string | null) {
 export default function Notifications() {
   const nav = useNavigate()
   const [items, setItems] = useState<AppNotification[] | null>(null)
-  const [read, setRead] = useState<Set<string>>(new Set())
+  // Seeded from the device's stored read-set so returning here doesn't resurrect old "new" dots.
+  const [read, setRead] = useState<Set<string>>(() => readIds())
 
   function load() { fetchNotifications().then(setItems).catch(() => setItems([])) }
   useEffect(() => { load() }, [])
+
+  // Opening this screen counts as reading the feed: persist it so the bell badge clears. The
+  // on-screen dots keep using the set captured at mount, so this visit still shows what was new.
+  useEffect(() => { if (items?.length) markRead(items.map((n) => n.id)) }, [items])
 
   if (!items) return <div className="screen m2"><div className="ps-top"><button className="au-back" onClick={() => nav(-1)}><ArrowLeft size={22} /></button><b>Notifications</b><span style={{ width: 42 }} /></div><Loading /></div>
 
@@ -38,7 +44,7 @@ export default function Notifications() {
       <div className="ps-top">
         <button className="au-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
         <b>Notifications</b>
-        <button className="nt2-mark" onClick={() => setRead(new Set(items.map((n) => n.id)))}>Mark all as read</button>
+        <button className="nt2-mark" onClick={() => setRead(markRead(items.map((n) => n.id)))}>Mark all as read</button>
       </div>
 
       <div className="content">

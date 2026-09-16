@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, User, Wallet as WalletIcon, Headset, Crown } from 'lucide-react'
 import { BottomNav, useToast } from '../components/UI'
@@ -6,6 +6,7 @@ import AddressSheet from '../components/AddressSheet'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
 import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
+import { unreadCount } from '../notifRead'
 import type { Service, Booking, Address } from '../types'
 
 // Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
@@ -38,13 +39,17 @@ export default function Home() {
   const [walletBal, setWalletBal] = useState<number | null>(null)
   const [banners, setBanners] = useState<HomeBanner[]>([])
   const [active, setActive] = useState(0)
+  const [paused, setPaused] = useState(false)   // manual interaction pauses the auto-rotate
+  const [dir, setDir] = useState(1)             // 1 = forward, -1 = back (drives the slide-in)
+  const swipe = useRef<{ x: number; y: number } | null>(null)
+  const resume = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [scrolled, setScrolled] = useState(false)   // past the hero → collapse the header to white
   const [addrSheet, setAddrSheet] = useState(false) // saved-address picker, opened from the header
 
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
-    fetchNotifications().then((n) => setNotifCount(n.length)).catch(() => {})
+    fetchNotifications().then((n) => setNotifCount(unreadCount(n))).catch(() => {})
     fetchWallet().then((w) => setWalletBal(typeof w?.available === 'number' ? w.available : null)).catch(() => {})
   }, [])
   useEffect(() => {
@@ -85,10 +90,37 @@ export default function Home() {
   // Keep the active index in range, and auto-rotate through the slides.
   useEffect(() => { if (active >= slides.length) setActive(0) }, [slides.length, active])
   useEffect(() => {
-    if (slides.length < 2) return
-    const id = setInterval(() => setActive((i) => (i + 1) % slides.length), 5000)
+    if (slides.length < 2 || paused) return
+    const id = setInterval(() => { setDir(1); setActive((i) => (i + 1) % slides.length) }, 5000)
     return () => clearInterval(id)
-  }, [slides.length])
+  }, [slides.length, paused])
+  useEffect(() => () => { if (resume.current) clearTimeout(resume.current) }, [])
+
+  // Any manual move pauses the carousel, then hands control back after a breather — so a swipe
+  // isn't yanked away a moment later, but the hero still rotates if the screen is left alone.
+  function holdAuto() {
+    setPaused(true)
+    if (resume.current) clearTimeout(resume.current)
+    resume.current = setTimeout(() => setPaused(false), 8000)
+  }
+  function go(step: number) {
+    if (slides.length < 2) return
+    setDir(step)
+    setActive((i) => (i + step + slides.length) % slides.length)
+    holdAuto()
+  }
+  // Horizontal drags move the carousel; anything more vertical than horizontal is left alone so
+  // the page keeps scrolling normally (the hero also sets touch-action: pan-y).
+  function onSwipeStart(e: React.PointerEvent) { swipe.current = { x: e.clientX, y: e.clientY } }
+  function onSwipeEnd(e: React.PointerEvent) {
+    const s0 = swipe.current
+    swipe.current = null
+    if (!s0) return
+    const dx = e.clientX - s0.x
+    const dy = e.clientY - s0.y
+    if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return   // a tap, or a vertical scroll
+    go(dx < 0 ? 1 : -1)
+  }
 
   // Status-bar icons: white over the dark hero at the top; dark once the header collapses to white
   // on scroll. (Capacitor Style.Dark = white icons, Style.Light = dark icons.)
@@ -155,7 +187,11 @@ export default function Home() {
       <div className="content hd-content" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 60)}>
         {serviceable === false ? <ComingSoon /> : (<>
           {/* dynamic hero carousel — greeting + festival/promo banners + live offers + weather surge */}
-          <div className={`hd-hero rainy${cur.key === 'greeting' || cur.kind === 'weather' ? '' : ' hd-hero-promo'}${cur.image ? ' hd-hero-photo' : ''}`} style={{ background: THEME[cur.theme] || THEME.purple }}>
+          <div
+            className={`hd-hero rainy${cur.key === 'greeting' || cur.kind === 'weather' ? '' : ' hd-hero-promo'}${cur.image ? ' hd-hero-photo' : ''}`}
+            style={{ background: THEME[cur.theme] || THEME.purple }}
+            onPointerDown={onSwipeStart} onPointerUp={onSwipeEnd} onPointerCancel={() => { swipe.current = null }}
+          >
             {cur.image && (
               <div className="hd-hero-bg" aria-hidden="true">
                 <img src={mediaUrl(cur.image)} alt="" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
@@ -168,7 +204,7 @@ export default function Home() {
                 ))}
               </div>
             )}
-            <div className="hd-hero-txt">
+            <div className={`hd-hero-txt ${dir > 0 ? 'in-next' : 'in-prev'}`} key={cur.key}>
               {cur.key === 'greeting' ? (<>
                 <div className="hd-hi">{greeting()} 👋</div>
                 <div className="hd-name">{firstName}</div>
@@ -193,7 +229,7 @@ export default function Home() {
             {slides.length > 1 && (
               <div className="hd-dots">
                 {slides.map((s, i) => (
-                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => setActive(i)} aria-label={`Slide ${i + 1}`} />
+                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => { setDir(i > active ? 1 : -1); setActive(i); holdAuto() }} aria-label={`Slide ${i + 1}`} />
                 ))}
               </div>
             )}
