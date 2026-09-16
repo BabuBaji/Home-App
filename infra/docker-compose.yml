@@ -116,10 +116,21 @@ services:
       CATALOG_URL: http://catalog:4001
       ADMIN_URL: http://admin:4010
       DEV_OTP: ${DEV_OTP}
+      # Customer profile photos go to the public media bucket (POST /api/me/avatar).
+      # Same values as catalog/worker: S3_ENDPOINT is where this service writes,
+      # S3_PUBLIC_ENDPOINT is the host the stored URL must point at for a client to fetch it.
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9010}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-homehelp}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-change-me-minio}
+      S3_BUCKET: ${S3_BUCKET:-homehelp-kyc}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-homehelp-media}
     ports: ["4002:4002"]
     depends_on:
       auth-db: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
 
   catalog:
     build: { context: .., dockerfile: services/catalog/Dockerfile }

@@ -14,6 +14,10 @@ import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, publishEvent, smsConfigured, sendOtpSms, getSetting } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+import multer from 'multer'
+// Imported directly, not via the shared index: these carry the AWS SDK, which only the
+// services that actually upload install.
+import { ensurePublicBucket, storageConfigured, sniffType, storageKey, putPublicObject, publicUrl } from '@homehelp/shared/storage.js'
 
 assertJwtSecret('auth') // refuse to boot without a signing secret rather than issue forgeable sessions
 
@@ -209,6 +213,8 @@ async function init() {
     `CREATE INDEX IF NOT EXISTS ix_custnote_user ON customer_notes(user_id)`,
   ])
   console.log('[auth] Postgres ready (users, addresses, transactions, auth_identities)')
+  // Avatars live in the public media bucket; a failure here only disables photo upload.
+  await ensurePublicBucket().catch((e) => console.error('[auth] public storage init failed:', e.message))
 }
 
 const REFERRAL_REWARD = 150
@@ -523,6 +529,31 @@ app.patch('/api/me', auth, async (req, res) => {
     'UPDATE users SET name=$1, email=$2, phone=$3, country=$4, city=$5, location=$6 WHERE id=$7 RETURNING *',
     [b.name ?? u.name, b.email ?? u.email, b.phone ?? u.phone, b.country ?? u.country, b.city ?? u.city, norm.value, u.id])
   if (b.location || b.city) await ensureDefaultAddressFromLocation(u.id, upd.rows[0].city, upd.rows[0].location, norm.pincode)
+  res.json({ user: publicUser(upd.rows[0]) })
+})
+
+/* ---------- profile photo ----------
+ * Mirrors POST /api/worker/profile/photo: the image is stored in the PUBLIC media bucket and the
+ * resulting URL saved on users.avatar, so every screen that already renders `avatar` picks it up.
+ * The type is sniffed from the bytes rather than trusted from the client's Content-Type. */
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } })
+
+app.post('/api/me/avatar', auth, avatarUpload.single('file'), async (req, res) => {
+  if (!storageConfigured()) return res.status(503).json({ error: 'Photo storage is not configured' })
+  if (!req.file?.buffer?.length) return res.status(400).json({ error: 'Attach a photo' })
+  const kind = sniffType(req.file.buffer)
+  if (!kind || kind.mime === 'application/pdf') return res.status(415).json({ error: 'Profile photo must be a JPG, PNG or WebP image' })
+  const key = storageKey(`customers/${req.user.id}/avatar`, kind.ext)
+  try { await putPublicObject(key, req.file.buffer, kind.mime) }
+  catch (e) { console.error('[auth] avatar upload failed:', e.message); return res.status(502).json({ error: 'Could not store the photo. Please try again.' }) }
+  const upd = await pool.query('UPDATE users SET avatar=$1 WHERE id=$2 RETURNING *', [publicUrl(key), req.user.id])
+  res.json({ user: publicUser(upd.rows[0]) })
+})
+
+// Remove the photo and fall back to the generated placeholder. The object is left in the bucket:
+// it is small, and an old URL may still be cached in a client that hasn't refreshed.
+app.delete('/api/me/avatar', auth, async (req, res) => {
+  const upd = await pool.query('UPDATE users SET avatar=NULL WHERE id=$1 RETURNING *', [req.user.id])
   res.json({ user: publicUser(upd.rows[0]) })
 })
 
