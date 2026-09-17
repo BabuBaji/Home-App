@@ -1,0 +1,14 @@
+# Run the admin service in IntelliJ instead of Docker. Layer this over the main file:
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.debug.yml up -d --no-deps admin
+# The `admin` container becomes a relay: the gateway and the other services still call
+# http://admin:4010, and it forwards to the copy running on this PC (IntelliJ, port 4010).
+# Back to normal: docker compose -f infra/docker-compose.yml up -d --build --no-deps admin
+services:
+  admin:
+    image: alpine/socat
+    build: !reset null
+    command: ["TCP-LISTEN:4010,fork,reuseaddr", "TCP:host.docker.internal:4010"]
+    environment: !reset {}
+    # Host port 4010 belongs to the IntelliJ process now.
+    ports: !reset []
+    extra_hosts: ["host.docker.internal:host-gateway"]
