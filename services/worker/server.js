@@ -1208,9 +1208,9 @@ const DOC_TYPES = [
   { name: 'Aadhaar Front', required: true, hint: 'Photo side showing your name and number' },
   { name: 'Aadhaar Back', required: true, hint: 'Address side' },
   { name: 'PAN Card', required: true, hint: 'Clear photo of the front' },
-  { name: 'Police Verification', required: true, hint: 'Certificate from your local station' },
+  { name: 'Police Verification', required: false, hint: 'Certificate from your local station' },
   { name: 'Address Proof', required: true, hint: 'Rent agreement, utility bill or ration card' },
-  { name: 'Medical Certificate', required: true, hint: 'Fitness certificate from a doctor' },
+  { name: 'Medical Certificate', required: false, hint: 'Fitness certificate from a doctor' },
   { name: 'Driving License', required: false, hint: 'Only if you drive to jobs' },
   { name: 'Passport', required: false, hint: 'Optional' },
   // Optional supporting documents an admin may hold on file. Additive — they never gate go-live
@@ -1229,6 +1229,7 @@ const DOC_TYPES = [
   { name: 'Reference Letter', required: false, hint: 'Character or previous-employment reference' },
 ]
 const DOC_NAMES = new Set(DOC_TYPES.map((d) => d.name))
+const DOC_REQUIRED = new Set(DOC_TYPES.filter((d) => d.required).map((d) => d.name))
 
 /* Uploads (KYC documents + profile photos). Declared HERE, above the first route that uses it —
  * `const` is hoisted into a temporal dead zone, so defining it further down crashed the service
@@ -4039,16 +4040,18 @@ async function backgroundState(workerId) {
     ['medical', 'Medical', ['Medical Certificate']],
     ['address', 'Address', ['Address Proof']],
   ].map(([key, label, names]) => {
-    const ok = names.every((n) => docVerified(docs, n))
+    const verified = names.every((n) => docVerified(docs, n))
     const missing = names.filter((n) => !docs.some((d) => d.name === n))
     const rejected = names.filter((n) => docs.some((d) => d.name === n && d.status === 'Rejected'))
+    // An optional document (Police, Medical) is shown as it stands but never holds the worker up.
+    const optional = names.every((n) => !DOC_REQUIRED.has(n))
     return {
-      key, label, source: 'document', ok,
-      status: ok ? 'clear' : 'pending',
-      detail: ok ? `${names.join(' + ')} verified`
+      key, label, source: 'document', ok: verified || optional, optional,
+      status: verified ? 'clear' : 'pending',
+      detail: (verified ? `${names.join(' + ')} verified`
         : rejected.length ? `${rejected.join(', ')} was rejected — the worker must re-upload`
           : missing.length ? `${missing.join(', ')} not uploaded yet`
-            : `${names.join(' + ')} uploaded, awaiting review`,
+            : `${names.join(' + ')} uploaded, awaiting review`) + (optional && !verified ? ' (optional)' : ''),
     }
   })
 
@@ -4136,8 +4139,11 @@ async function goLiveChecklist(workerId) {
     item('aadhaar_verified', 'Aadhaar Verified', yn(docVerified(docs, 'Aadhaar Front') && docVerified(docs, 'Aadhaar Back')),
       'Both sides must be uploaded and verified'),
     item('pan_verified', 'PAN Verified', yn(docVerified(docs, 'PAN Card')), ''),
-    item('police_verified', 'Police Verified', yn(docVerified(docs, 'Police Verification')), ''),
-    item('medical_verified', 'Medical Verified', yn(docVerified(docs, 'Medical Certificate')), ''),
+    // Optional documents: shown as done once verified, otherwise not enforced rather than blocking.
+    ...[['police_verified', 'Police Verified', 'Police Verification'], ['medical_verified', 'Medical Verified', 'Medical Certificate']]
+      .map(([key, label, doc]) => docVerified(docs, doc) ? item(key, label, 'ok', '')
+        : DOC_REQUIRED.has(doc) ? item(key, label, 'no', '')
+          : item(key, label, 'na', 'Optional — not required to go live')),
     /* Phase 8. Not in the spec's written 15 — added deliberately, because a criminal check that
      * gates nothing is a record that changes nothing. Only the two human-performed checks count
      * here: Aadhaar/PAN/Police/Medical already have their own lines above, and Address has no line
