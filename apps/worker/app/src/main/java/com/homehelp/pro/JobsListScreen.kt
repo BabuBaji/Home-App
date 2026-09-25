@@ -154,25 +154,12 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
         (service ?: "").contains(query, true) || (address ?: "").contains(query, true) ||
         (customerName ?: "").contains(query, true)
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // Title row — "Jobs" with search, per the design.
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Jobs", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp, modifier = Modifier.weight(1f))
-            Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(Radius.pill))
-                    .clickable { searching = !searching; if (!searching) query = "" },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    if (searching) Icons.Filled.Close else Icons.Filled.Search,
-                    contentDescription = if (searching) "Close search" else "Search jobs",
-                    tint = TextDark, modifier = Modifier.size(27.dp),
-                )
-            }
+    TabScaffold("Jobs", actions = {
+        TabAction(if (searching) Icons.Filled.Close else Icons.Filled.Search, if (searching) "Close search" else "Search jobs") {
+            searching = !searching; if (!searching) query = ""
         }
+    }) { pad ->
+    Column(Modifier.fillMaxSize().padding(pad)) {
         if (searching) {
             OutlinedTextField(
                 value = query,
@@ -190,20 +177,15 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
                 ),
             )
         }
-        Box(Modifier.padding(horizontal = Space.l)) {
-            SegmentedTabs(listOf(TAB_ACTIVE, TAB_UPCOMING, TAB_HISTORY), tab, counts = counts) { tab = it }
-        }
+        UnderlineTabs(listOf(TAB_ACTIVE, TAB_UPCOMING, TAB_HISTORY), tab, counts = counts) { tab = it }
 
         // Active is the overview the reference draws: active job + upcoming + history, all visible
         // at once. Upcoming/History are true lists, so those scroll.
-        val fit: @Composable (@Composable () -> Unit) -> Unit = { body ->
-            if (tab == TAB_ACTIVE) FitToScreen(Modifier.weight(1f).fillMaxWidth()) { body() }
-            else Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { body() }
-        }
-        fit {
+        // Every tab scrolls at full size — nothing is shrunk to fit the screen.
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         Column(
-            Modifier.padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.s),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.l),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             when (tab) {
                 TAB_ACTIVE -> {
@@ -238,6 +220,7 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
         }
+    }
     }
 }
 

@@ -48,6 +48,8 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -582,3 +584,102 @@ fun Modifier.bounceClick(onClick: () -> Unit): Modifier = composed {
 // optional with defaults); these are presentational widgets with no business
 // logic, API, navigation, or state.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Native tab screen: a Material 3 large title that collapses into a compact bar as the content
+ * scrolls, with optional trailing [actions]. [content] receives the padding to apply and must be
+ * vertically scrollable (verticalScroll / LazyColumn) so the title can react to it.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun TabScaffold(
+    title: String,
+    subtitle: String? = null,
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+    content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
+) {
+    val behavior = androidx.compose.material3.TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    androidx.compose.material3.Scaffold(
+        modifier = Modifier.fillMaxSize()
+            .then(Modifier.nestedScroll(behavior.nestedScrollConnection)),
+        containerColor = ScreenBg,
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        topBar = {
+            androidx.compose.material3.LargeTopAppBar(
+                title = {
+                    Column {
+                        Text(tr(title), fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp, maxLines = 1)
+                        if (!subtitle.isNullOrBlank() && behavior.state.collapsedFraction < 0.5f) {
+                            Text(tr(subtitle), color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Normal, maxLines = 1)
+                        }
+                    }
+                },
+                actions = { actions(); Spacer(Modifier.width(Space.s)) },
+                scrollBehavior = behavior,
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+                colors = androidx.compose.material3.TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = ScreenBg,
+                    scrolledContainerColor = CardBg,
+                    titleContentColor = TextDark,
+                ),
+            )
+        },
+        content = content,
+    )
+}
+
+/** Round icon action for [TabScaffold] titles, with an optional red count badge. */
+@Composable
+fun TabAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, badge: Int = 0, onClick: () -> Unit) {
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = label, tint = TextDark, modifier = Modifier.size(24.dp)) }
+        if (badge > 0) {
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = 4.dp)
+                    .size(18.dp).clip(RoundedCornerShape(Radius.pill)).background(RedCancel),
+                contentAlignment = Alignment.Center,
+            ) { Text(if (badge > 9) "9+" else "$badge", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+/** Native Android tabs: full-width row with a violet underline on the selected tab. */
+@Composable
+fun UnderlineTabs(
+    options: List<String>,
+    selected: String,
+    counts: Map<String, Int>? = null,
+    onSelect: (String) -> Unit,
+) {
+    val index = options.indexOf(selected).coerceAtLeast(0)
+    androidx.compose.material3.TabRow(
+        selectedTabIndex = index,
+        containerColor = ScreenBg,
+        contentColor = Purple,
+        divider = { HairlineDivider() },
+        indicator = { positions ->
+            androidx.compose.material3.TabRowDefaults.SecondaryIndicator(
+                Modifier.tabIndicatorOffset(positions[index]),
+                height = 3.dp, color = Purple,
+            )
+        },
+    ) {
+        options.forEachIndexed { i, opt ->
+            val label = counts?.get(opt)?.let { "${tr(opt)} ($it)" } ?: tr(opt)
+            androidx.compose.material3.Tab(
+                selected = i == index,
+                onClick = { onSelect(opt) },
+                text = {
+                    Text(
+                        label, fontSize = 15.sp,
+                        fontWeight = if (i == index) FontWeight.Bold else FontWeight.Medium,
+                        color = if (i == index) Purple else TextGray, maxLines = 1,
+                    )
+                },
+            )
+        }
+    }
+}

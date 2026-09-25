@@ -83,7 +83,7 @@ private fun money(v: Int): String =
 // Every measurement below is therefore deliberately tight; raising any of them pushes the
 // bonus banner off the bottom. The reference screen is built to the same density.
 private val PanelRadius = 18.dp
-private val PanelPad = 11.dp
+private val PanelPad = 16.dp
 
 // The reference's hero violet, and the deeper violet its primary action uses.
 private val JobHeroGradient = HeroGradient
@@ -118,8 +118,8 @@ private fun Panel(
 private fun PanelHeader(title: String, action: String, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            title, color = TextDark, fontSize = 13.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp, modifier = Modifier.weight(1f),
+            title.lowercase().replaceFirstChar { it.uppercase() }, color = TextDark, fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f),
         )
         Row(
             Modifier.clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onAction)
@@ -445,26 +445,27 @@ fun TodayPanel(
     // ₹1,000" promises. The prompt underneath counts jobs, which is the lever the worker pulls.
     val pct = if (target > 0) (earned.toFloat() / target).coerceIn(0f, 1f) else 0f
     val jobsLeft = (totalJobs - completed).coerceAtLeast(0)
-    Panel(padH = 0.dp, padV = 7.dp) {
+    Panel(padH = 0.dp, padV = 14.dp) {
         Box(Modifier.padding(horizontal = PanelPad)) {
-            PanelHeader("TODAY", "View all", onViewAll)
+            PanelHeader("TODAY", "See all", onViewAll)
         }
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            TodayCell(Modifier.weight(1f), Icons.Filled.Work, Purple, Primary50, "Jobs Completed", "$completed / $totalJobs")
-            CellDivider()
-            TodayCell(Modifier.weight(1f), Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Earned", money(earned))
-            CellDivider()
+        Spacer(Modifier.height(10.dp))
+        // Two big figures per row — readable at a glance on the move.
+        Row(Modifier.fillMaxWidth().padding(horizontal = PanelPad), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TodayCell(Modifier.weight(1f), Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Earned today", money(earned))
+            TodayCell(Modifier.weight(1f), Icons.Filled.Work, Purple, Primary50, "Jobs done", "$completed / $totalJobs")
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = PanelPad), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TodayCell(
-                Modifier.weight(1f).clickable(onClick = onEditTarget),
-                Icons.Filled.TrackChanges, OrangeAccent, OrangeLight, "Today's Target", money(target),
+                Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).clickable(onClick = onEditTarget),
+                Icons.Filled.TrackChanges, OrangeAccent, OrangeLight, "Daily target", money(target),
             )
-            CellDivider()
             TodayCell(Modifier.weight(1f), Icons.Filled.DonutLarge, Purple, Primary50, "Progress", "${(pct * 100).toInt()}%")
         }
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(14.dp))
         Box(
-            Modifier.padding(horizontal = PanelPad).fillMaxWidth().height(6.dp)
+            Modifier.padding(horizontal = PanelPad).fillMaxWidth().height(10.dp)
                 .clip(RoundedCornerShape(Radius.pill)).background(PurpleLight),
         ) {
             // A sliver is always drawn so the track reads as a progress bar at 0%, exactly as
@@ -481,8 +482,8 @@ fun TodayPanel(
                 jobsLeft > 0 -> "Complete $jobsLeft more job${if (jobsLeft == 1) "" else "s"} to reach your target"
                 else -> "No jobs scheduled yet — go online to get requests"
             },
-            color = TextGray, fontSize = 11.5.sp, textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = PanelPad),
+            color = TextGray, fontSize = 14.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = PanelPad).padding(top = 4.dp, bottom = 4.dp),
         )
     }
 }
@@ -496,31 +497,15 @@ private fun TodayCell(
     label: String,
     value: String,
 ) {
-    // 24dp plate, 3dp gutters and an 8sp caption. Four cells across a 393dp screen give ~98dp
-    // each; at 32dp/8dp/9.5sp the captions clipped to "Jobs Com…" and "Today's Ta…". The
-    // reference sets these captions far smaller than their figures for exactly this reason.
-    Row(
-        modifier.fillMaxHeight().padding(horizontal = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(ScreenBg).padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Box(
-            Modifier.size(24.dp).clip(CircleShape).background(tintBg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+        Box(Modifier.size(34.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
         }
-        Spacer(Modifier.width(4.dp))
-        Column {
-            Text(
-                label, color = TextGray, fontSize = 8.sp, lineHeight = 10.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Spacer(Modifier.height(8.dp))
+        Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -538,8 +523,9 @@ private fun CellDivider() {
  */
 @Composable
 fun NextUpPanel(items: List<ScheduleItem>, onViewSchedule: () -> Unit, onItem: (ScheduleItem) -> Unit) {
-    Panel(padV = 6.dp) {
-        PanelHeader("UPCOMING SERVICES", "View All", onViewSchedule)
+    Panel(padV = 14.dp) {
+        PanelHeader("Upcoming jobs", "See all", onViewSchedule)
+        Spacer(Modifier.height(6.dp))
         items.forEachIndexed { i, item ->
             NextUpRow(item) { onItem(item) }
             if (i != items.lastIndex) {
@@ -635,30 +621,30 @@ fun WelcomeCard(name: String, greeting: String, online: Boolean) {
 @Composable
 private fun NextUpRow(item: ScheduleItem, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Time as a two-line lavender plate ("1:00" over "PM"), as the reference draws it.
         val (clock, meridiem) = splitTime(item.time)
         Column(
-            Modifier.width(46.dp).clip(RoundedCornerShape(10.dp)).background(Primary50)
-                .padding(vertical = 4.dp),
+            Modifier.width(58.dp).clip(RoundedCornerShape(12.dp)).background(Primary50)
+                .padding(vertical = 7.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(clock, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(clock, color = Purple, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
             if (meridiem.isNotBlank()) {
-                Text(meridiem, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(meridiem, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                item.service.ifBlank { "Service" }, color = TextDark, fontSize = 14.sp,
+                item.service.ifBlank { "Service" }, color = TextDark, fontSize = 16.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    item.customerName.ifBlank { item.location }, color = TextGray, fontSize = 11.5.sp,
+                    item.customerName.ifBlank { item.location }, color = TextGray, fontSize = 13.5.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 if (item.distanceKm != null) {
@@ -666,22 +652,12 @@ private fun NextUpRow(item: ScheduleItem, onClick: () -> Unit) {
                     Icon(Icons.Filled.LocationOn, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
                     Text(
                         String.format("%.1f km away", item.distanceKm),
-                        color = TextMuted, fontSize = 11.sp, maxLines = 1,
+                        color = TextMuted, fontSize = 13.sp, maxLines = 1,
                     )
                 }
             }
         }
-        Spacer(Modifier.width(6.dp))
-        Box(
-            Modifier.clip(RoundedCornerShape(Radius.pill)).background(Primary50)
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-        ) {
-            Text(
-                item.status.ifBlank { "Upcoming" }, color = Purple,
-                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-            )
-        }
-        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(22.dp))
     }
 }
 

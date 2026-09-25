@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -638,45 +639,31 @@ fun StarValue(rating: Double, fontSize: Int = 22) {
  */
 @Composable
 fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel) {
-    // Four clear destinations. Wallet lives inside Earnings, so it lights the Earnings tab.
-    Column(Modifier.fillMaxWidth().background(CardBg)) {
-        HairlineDivider()
-        Row(
-            Modifier.fillMaxWidth().height(68.dp).padding(horizontal = Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NavBarItem(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
-            NavBarItem(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
-            NavBarItem(
-                Icons.Filled.AccountBalanceWallet, "Earnings",
-                current == Routes.EARNINGS || current == Routes.WALLET,
-            ) { nav.navigateApp(Routes.EARNINGS) }
-            NavBarItem(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
+    // The standard Android navigation bar: four destinations, pill indicator on the active one.
+    // Wallet lives inside Earnings, so it lights the Earnings tab.
+    androidx.compose.material3.NavigationBar(containerColor = CardBg, tonalElevation = 0.dp) {
+        NavTab(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
+        NavTab(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
+        NavTab(Icons.Filled.AccountBalanceWallet, "Earnings", current == Routes.EARNINGS || current == Routes.WALLET) {
+            nav.navigateApp(Routes.EARNINGS)
         }
+        NavTab(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
     }
 }
 
 @Composable
-private fun RowScope.NavBarItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    val color = if (selected) Purple else TextGray
-    Column(
-        Modifier
-            .weight(1f)
-            .clip(RoundedCornerShape(Radius.field))
-            .clickable { onClick() }
-            .padding(vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier
-                .width(56.dp).height(30.dp)
-                .clip(RoundedCornerShape(Radius.pill))
-                .then(if (selected) Modifier.background(PurpleLight) else Modifier),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(23.dp))
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(tr(label), fontSize = 12.sp, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
-    }
+private fun RowScope.NavTab(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+    NavigationBarItem(
+        selected = selected,
+        onClick = { if (!selected) onClick() },
+        icon = { Icon(icon, contentDescription = label) },
+        label = { Text(tr(label), fontSize = 12.5.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) },
+        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+            selectedIconColor = Purple,
+            selectedTextColor = Purple,
+            indicatorColor = PurpleLight,
+            unselectedIconColor = TextGray,
+            unselectedTextColor = TextGray,
+        ),
+    )
 }

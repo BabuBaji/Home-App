@@ -131,25 +131,11 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
     val incentivesMonth = hist.filter { it.isCredit && it.date.startsWith(thisYM) && (it.type.contains("incentive", true) || it.type.contains("bonus", true) || it.type.contains("reward", true)) }.sumOf { it.amount }
     val pct = if (lastMonthCredits > 0) ((monthTotal - lastMonthCredits) * 100 / lastMonthCredits) else null
 
-    Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // ── Tab title: menu · "Earnings" · bell(badge) ──
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Earnings", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp, modifier = Modifier.weight(1f))
-            Box {
-                TopBarAction(Icons.Filled.Notifications, "Alerts") { nav.navigate(Routes.P_NOTIFICATIONS) }
-                if (vm.unreadNotifications > 0) {
-                    Box(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(15.dp).clip(CircleShape).background(RedCancel), contentAlignment = Alignment.Center) {
-                        Text("${vm.unreadNotifications.coerceAtMost(9)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
+    TabScaffold("Earnings", subtitle = monthName, actions = {
+        TabAction(Icons.Filled.Notifications, "Alerts", badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
+    }) { pad ->
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.l),
+            Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
             // ── Monthly hero: total · vs-last-month · Jobs / Avg-Day / Incentives ──
@@ -739,40 +725,11 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
     val progressFrac = if (nextTier != null) (progressCur.toFloat() / progressMax).coerceIn(0f, 1f) else 1f
     val kycVerified = vm.workerStatus.equals("active", true) || vm.bankApproved
 
-    Column(Modifier.fillMaxSize().background(ScreenBg).verticalScroll(rememberScrollState())) {
-        // ── Header: title + strapline on the left, bell and settings as floating white circles
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.m).padding(top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Profile", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
-                Text("Manage your account and performance", color = TextGray, fontSize = 12.5.sp, maxLines = 1)
-            }
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                ProfileCircleButton({ nav.navigate(Routes.P_NOTIFICATIONS) }) {
-                    Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(21.dp))
-                }
-                if (vm.unreadNotifications > 0) {
-                    Box(
-                        Modifier.align(Alignment.TopEnd).defaultMinSize(minWidth = 19.dp, minHeight = 19.dp)
-                            .clip(CircleShape).background(RedCancel).border(2.dp, ScreenBg, CircleShape)
-                            .padding(horizontal = 4.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (vm.unreadNotifications > 99) "99+" else "${vm.unreadNotifications}",
-                            color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.width(6.dp))
-            ProfileCircleButton({ nav.navigate(Routes.SETTINGS) }) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = TextDark, modifier = Modifier.size(21.dp))
-            }
-        }
-
+    TabScaffold("Profile", actions = {
+        TabAction(Icons.Filled.Notifications, "Notifications", badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
+        TabAction(Icons.Filled.Settings, "Settings") { nav.navigate(Routes.SETTINGS) }
+    }) { pad ->
+    Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState())) {
         // ═══════════════ Content ═══════════════
         Column(
             Modifier.fillMaxWidth().padding(horizontal = Space.m).padding(top = 2.dp, bottom = 24.dp),
@@ -922,11 +879,11 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, "Jobs Completed", "${vm.jobsCompleted}", "Total")
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, "Acceptance Rate", vm.acceptancePct?.let { "$it%" } ?: "—", "This Month")
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, "Completion Rate", vm.completionPct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, "Jobs done", "${vm.jobsCompleted}", "Total")
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, "Accepted", vm.acceptancePct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, "Completed", vm.completionPct?.let { "$it%" } ?: "—", "This Month")
                 ProfileStatCard(
-                    Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "Customer Rating",
+                    Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "Rating",
                     if (vm.workerRating > 0) String.format("%.1f", vm.workerRating) else "—", "Out of 5",
                 )
             }
@@ -1004,6 +961,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             Spacer(Modifier.height(2.dp))
         }
     }
+    }
 }
 
 @Composable
@@ -1048,32 +1006,24 @@ private fun ProfileStatCard(
 ) {
     Column(
         modifier.fillMaxHeight()
-            .shadow(3.dp, RoundedCornerShape(16.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
             .clip(RoundedCornerShape(16.dp))
             .background(CardBg)
-            .padding(horizontal = 4.dp, vertical = 11.dp),
+            .padding(horizontal = 4.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.size(36.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
         }
         Spacer(Modifier.height(8.dp))
-        Text(
-            label, color = TextGray, fontSize = 9.5.sp, lineHeight = 12.sp,
-            fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2,
-        )
-        Spacer(Modifier.weight(1f))
-        Spacer(Modifier.height(5.dp))
-        Text(value, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Spacer(Modifier.height(2.dp))
-        Text(footnote, color = TextMuted, fontSize = 9.sp, textAlign = TextAlign.Center, maxLines = 1)
+        Text(value, color = TextDark, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Text(label, color = TextGray, fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
     }
 }
 
 /** Inset hairline between menu rows — inset so it starts under the text, not the icon. */
 @Composable
 private fun ProfileRowDivider() {
-    Box(Modifier.fillMaxWidth().padding(start = 58.dp, end = 14.dp).height(1.dp).background(Divider))
+    Box(Modifier.fillMaxWidth().padding(start = 72.dp).height(1.dp).background(Divider))
 }
 
 /** A titled white card holding a group of [ProfileMenuRow]s. */
@@ -1088,7 +1038,6 @@ private fun ProfileMenuGroup(title: String, rows: @Composable () -> Unit) {
             Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(CardBg)
-                .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
                 .padding(vertical = 4.dp),
         ) { rows() }
     }
@@ -1106,14 +1055,16 @@ private fun ProfileMenuRow(
     onClick: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 14.dp, vertical = 11.dp),
+        Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { onClick() }.padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(14.dp))
+        Box(Modifier.size(40.dp).clip(CircleShape).background(tint.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 if (verified) {
                     Spacer(Modifier.width(Space.s))
                     StatusPill("Verified", GreenLight, GreenSuccess)
@@ -1121,7 +1072,7 @@ private fun ProfileMenuRow(
             }
             if (subtitle != null) {
                 Spacer(Modifier.height(1.dp))
-                Text(subtitle, color = TextGray, fontSize = 11.5.sp, lineHeight = 14.sp)
+                Text(subtitle, color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
             }
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
