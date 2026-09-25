@@ -307,27 +307,16 @@ fun AppRoot() {
         }
     }
 
-    // App-wide side drawer, reachable via the ☰ menu on every screen's header.
-    val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val drawerReady = route != null && route != Routes.LOGIN
-
-    androidx.compose.material3.ModalNavigationDrawer(
-        drawerState = drawerState,
-        gesturesEnabled = drawerReady,
-        drawerContent = { if (drawerReady) HomeDrawer(vm, nav) { scope.launch { drawerState.close() } } },
-    ) {
+    // No side drawer: every destination is one of the four tabs or listed on Profile.
+    androidx.compose.foundation.layout.Box {
     val headerInitials = vm.workerName.trim().split(Regex("\\s+"))
         .mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase()
     androidx.compose.runtime.CompositionLocalProvider(
-        LocalDrawerOpen provides { scope.launch { drawerState.open() } },
         LocalNav provides nav,
         LocalWalletBalance provides vm.walletBalance,
         LocalWorkerInitials provides headerInitials,
     ) {
-    // Premium floating bottom navigation (Home · Bookings · online-toggle FAB · Wallet ·
-    // Profile), shown only on the five top-level tab routes. The ☰ drawer, Home
-    // Quick-Actions grid and header chips remain fully available.
+    // Four-tab bottom bar (Home · Jobs · Earnings · Profile), shown only on top-level routes.
     Scaffold(
         containerColor = ScreenBg,
         bottomBar = { if (route in TAB_ROUTES) FloatingBottomNav(nav, route, vm) },

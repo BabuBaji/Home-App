@@ -31,6 +31,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Redeem
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -105,7 +112,6 @@ import androidx.navigation.NavHostController
 fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
     // Pull the latest wallet snapshot so today/week/month totals + ledger are populated.
     LaunchedEffect(Unit) { vm.refreshWallet() }
-    val openDrawer = LocalDrawerOpen.current
 
     // ── Monthly figures derived from the wallet ledger (this month vs last, jobs, avg, incentives) ──
     val hist = vm.walletHistory
@@ -131,8 +137,6 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TopBarAction(Icons.Filled.Menu, "Menu") { openDrawer() }
-            Spacer(Modifier.width(Space.m))
             Text("Earnings", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp, modifier = Modifier.weight(1f))
             Box {
                 TopBarAction(Icons.Filled.Notifications, "Alerts") { nav.navigate(Routes.P_NOTIFICATIONS) }
@@ -201,6 +205,7 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                 LabeledRow("Next payout", vm.nextPayout)
             }
             PrimaryButton("Withdraw to Bank") { nav.navigate(Routes.WITHDRAW) }
+            OutlineButton("Open Wallet & Transactions", modifier = Modifier.fillMaxWidth()) { nav.navigateApp(Routes.WALLET) }
 
             // ── Recent Earnings — live calendar; tap a day to see that day's services + income ──
             SectionTitle("Recent Earnings")
@@ -926,27 +931,56 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 )
             }
 
-            // ── Earnings insights — same prominent carousel as the Earnings tab.
-            EarningsInsightsCarousel(nav)
-
-            // ── Menu list. The reference shows four rows; My Shifts, Performance and Wallet are
-            // dropped from here rather than deleted — all three are one tap away from the bottom
-            // nav (Wallet) and the level card (Performance), and My Shifts sits on Home's
-            // quick-action strip. Nothing became unreachable.
-            Column(
-                Modifier.fillMaxWidth()
-                    .shadow(3.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(CardBg)
-                    .padding(vertical = 4.dp),
-            ) {
-                ProfileMenuRow(Icons.Filled.Person, Purple, "Personal Information", "View and update your personal details") { nav.navigate(Routes.P_PERSONAL) }
+            // ── Everything else, grouped. This replaces the old ☰ side menu: one place to find
+            // any screen, in the order a worker needs them.
+            ProfileMenuGroup("Work") {
+                ProfileMenuRow(Icons.Filled.CalendarMonth, Purple, "My Shifts", "Your shift plan and schedule") { nav.navigate(Routes.MY_SHIFTS) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.VerifiedUser, GreenSuccess, "KYC Verification", null, verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
+                ProfileMenuRow(Icons.Filled.Schedule, GreenSuccess, "Attendance", "Check in and check out") { nav.navigate(Routes.ATTENDANCE) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, ProfBlue, "Bank Details", "Manage your bank accounts") { nav.navigate(Routes.BANK_ACCOUNTS) }
+                ProfileMenuRow(Icons.Filled.EventBusy, ProfBlue, "Leaves", "Request and track leave") { nav.navigate(Routes.LEAVE) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, Amber, "Help & Support", "Get help and view FAQs") { nav.navigate(Routes.P_HELP) }
+                ProfileMenuRow(Icons.Filled.Tune, Amber, "Availability", "Days and hours you can work") { nav.navigate(Routes.P_AVAILABILITY) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Star, Gold, "Performance & Ratings", "Your rating and ranking") { nav.navigate(Routes.PERFORMANCE) }
+            }
+            ProfileMenuGroup("Money") {
+                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, Purple, "Wallet", "Balance, withdraw and history") { nav.navigateApp(Routes.WALLET) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.AccountBalance, ProfBlue, "Bank Accounts", "Where your payouts go") { nav.navigate(Routes.BANK_ACCOUNTS) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Receipt, GreenSuccess, "Payslip", "Monthly pay statement") { nav.navigate(Routes.PAYSLIP) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Savings, Amber, "Early Payout", "Get part of your pay early") { nav.navigate(Routes.SALARY_ADVANCE) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Description, GreenSuccess, "Rate Card", "What you earn per job") { nav.navigate(Routes.RATE_CARD) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.EmojiEvents, Gold, "Rewards & Bonuses", "Rewards, penalties and Sitara bonus") { nav.navigate(Routes.REWARDS) }
+            }
+            ProfileMenuGroup("Account") {
+                ProfileMenuRow(Icons.Filled.Person, Purple, "Personal Information", "Name, phone and address") { nav.navigate(Routes.P_PERSONAL) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.VerifiedUser, GreenSuccess, "KYC Documents", null, verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.WorkspacePremium, Purple, "Skills & Services", "Services you offer") { nav.navigate(Routes.P_SKILLS) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.AutoMirrored.Filled.MenuBook, ProfBlue, "Training", "Modules and assessment") { nav.navigate(Routes.P_TRAINING) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Inventory2, TextGray, "My Equipment", "Kit issued to you") { nav.navigate(Routes.P_EQUIPMENT) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Settings, TextGray, "Settings", "Language, notifications, preferences") { nav.navigate(Routes.SETTINGS) }
+            }
+            ProfileMenuGroup("Perks") {
+                ProfileMenuRow(Icons.Filled.Redeem, Color(0xFFEC4899), "Refer & Earn", "Invite friends, earn bonus") { nav.navigate(Routes.REFER) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Shield, ProfBlue, "Insurance", "Your cover and claims") { nav.navigate(Routes.INSURANCE) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Storefront, Purple, "Merch Store", "Uniforms and supplies") { nav.navigate(Routes.MERCH) }
+            }
+            ProfileMenuGroup("Support") {
+                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, Amber, "Help & Support", "FAQs and contact us") { nav.navigate(Routes.P_HELP) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Info, TextGray, "About", null) { nav.navigate(Routes.P_ABOUT) }
             }
 
             // ── Logout
@@ -1040,6 +1074,24 @@ private fun ProfileStatCard(
 @Composable
 private fun ProfileRowDivider() {
     Box(Modifier.fillMaxWidth().padding(start = 58.dp, end = 14.dp).height(1.dp).background(Divider))
+}
+
+/** A titled white card holding a group of [ProfileMenuRow]s. */
+@Composable
+private fun ProfileMenuGroup(title: String, rows: @Composable () -> Unit) {
+    Column {
+        Text(
+            title.uppercase(), color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(start = 6.dp, bottom = 6.dp, top = 4.dp),
+        )
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(CardBg)
+                .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
+                .padding(vertical = 4.dp),
+        ) { rows() }
+    }
 }
 
 /** Menu row: circular tinted icon + title (with optional Verified pill) + subtitle + chevron.

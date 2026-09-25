@@ -336,7 +336,7 @@ fun NextJobHeroCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White.copy(alpha = 0.16f), Color.White, onNavigate, actionsEnabled)
                 HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White.copy(alpha = 0.16f), Color.White, onCall, actionsEnabled)
-                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, StartJobViolet, Ink, onStart)
+                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, StartJobViolet, Purple, onStart)
             }
         }
     }

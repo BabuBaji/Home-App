@@ -68,13 +68,14 @@ fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Compos
         modifier = modifier
             .fillMaxWidth()
             .shadow(
-                elevation = 10.dp,
+                elevation = 3.dp,
                 shape = RoundedCornerShape(Radius.card),
-                spotColor = Purple.copy(alpha = 0.16f),
+                spotColor = Color(0x14101828),
                 ambientColor = Color(0x0A101828),
             ),
         shape = RoundedCornerShape(Radius.card),
         color = CardBg,
+        border = BorderStroke(1.dp, CardBorder),
     ) {
         Column(Modifier.padding(padding.value)) { content() }
     }
@@ -110,8 +111,6 @@ fun GradientBanner(
 // type (see FitToScreen).
 enum class Dp16(val value: Dp) { XS(8.dp), S(12.dp), M(16.dp) }
 
-// Opens the app-wide side drawer (provided by AppRoot). Default no-op so previews don't crash.
-val LocalDrawerOpen = staticCompositionLocalOf<() -> Unit> { {} }
 // The app's NavController (provided by AppRoot) so shared chrome can navigate (wallet/profile).
 val LocalNav = staticCompositionLocalOf<NavHostController?> { null }
 // Live wallet balance + worker initials, provided by AppRoot, so the shared Header's top-right
@@ -130,7 +129,6 @@ fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable (
         AppTopBar(title, onBack = onBack, trailing = trailing)
         return
     }
-    val openDrawer = LocalDrawerOpen.current
     val nav = LocalNav.current
     Box(
         Modifier
@@ -149,14 +147,13 @@ fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable (
                 .padding(top = 14.dp, bottom = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeaderIcon(Icons.Filled.Menu, "Menu", tint = Color.White) { openDrawer() }
             Text(
                 tr(title),
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
                 letterSpacing = (-0.4).sp,
-                modifier = Modifier.weight(1f).padding(start = Space.xs),
+                modifier = Modifier.weight(1f),
             )
             if (trailing != null) { trailing(); Spacer(Modifier.width(Space.s)) }
             WalletChip(LocalWalletBalance.current, onDark = true) { nav?.navigateApp(Routes.WALLET) }

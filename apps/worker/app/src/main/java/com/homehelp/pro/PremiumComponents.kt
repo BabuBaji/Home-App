@@ -638,85 +638,45 @@ fun StarValue(rating: Double, fontSize: Int = 22) {
  */
 @Composable
 fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel) {
-    val online = vm.isOnline
-    Box(
-        Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, bottom = Space.s),
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        Box(Modifier.fillMaxWidth().height(74.dp)) {
-            // The floating bar
-            Row(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(62.dp)
-                    .shadow(22.dp, RoundedCornerShape(24.dp), spotColor = Ink.copy(alpha = 0.55f), ambientColor = Color(0x22101828))
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(InkGradient)
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                NavBarItem(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
-                // "Jobs", per the design — the tab shows the worker's jobs, and "Bookings" is
-                // the customer's word for the same thing.
-                NavBarItem(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
-                Spacer(Modifier.weight(1.1f)) // centre gap for the FAB
-                NavBarItem(Icons.Filled.AccountBalanceWallet, "Wallet", current == Routes.WALLET) { nav.navigateApp(Routes.WALLET) }
-                NavBarItem(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
-            }
-            // Raised centre FAB — the online/offline toggle, with its label inside the circle.
-            Box(Modifier.align(Alignment.TopCenter), contentAlignment = Alignment.Center) {
-                if (online) {
-                    // Soft pulse halo, so "live" is readable at a glance.
-                    val t = rememberInfiniteTransition(label = "fabPulse")
-                    val s by t.animateFloat(1f, 1.32f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "fabScale")
-                    Box(Modifier.size(52.dp * s).clip(CircleShape).background(GreenSuccess.copy(alpha = 0.18f)))
-                }
-                Box(
-                    Modifier
-                        .size(66.dp)
-                        .border(4.dp, ScreenBg, CircleShape)
-                        .padding(4.dp)
-                        .shadow(14.dp, CircleShape, spotColor = if (online) GreenSuccess else Violet, ambientColor = if (online) GreenSuccess else Violet)
-                        .clip(CircleShape)
-                        .background(if (online) Brush.linearGradient(listOf(GreenSuccess, Color(0xFF16A34A))) else BrandGradient)
-                        .clickable { vm.goOnline(!online) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.PowerSettingsNew,
-                            contentDescription = if (online) "Go offline" else "Go online",
-                            tint = Color.White, modifier = Modifier.size(21.dp),
-                        )
-                        Spacer(Modifier.height(1.dp))
-                        Text(
-                            if (online) "Go Offline" else "Go Online",
-                            color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold,
-                            maxLines = 1, letterSpacing = (-0.2).sp,
-                        )
-                    }
-                }
-            }
+    // Four clear destinations. Wallet lives inside Earnings, so it lights the Earnings tab.
+    Column(Modifier.fillMaxWidth().background(CardBg)) {
+        HairlineDivider()
+        Row(
+            Modifier.fillMaxWidth().height(68.dp).padding(horizontal = Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NavBarItem(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
+            NavBarItem(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
+            NavBarItem(
+                Icons.Filled.AccountBalanceWallet, "Earnings",
+                current == Routes.EARNINGS || current == Routes.WALLET,
+            ) { nav.navigateApp(Routes.EARNINGS) }
+            NavBarItem(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
         }
     }
 }
 
 @Composable
 private fun RowScope.NavBarItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    val color = if (selected) Color.White else Color.White.copy(alpha = 0.55f)
+    val color = if (selected) Purple else TextGray
     Column(
         Modifier
             .weight(1f)
-            .padding(horizontal = 3.dp)
             .clip(RoundedCornerShape(Radius.field))
-            .then(if (selected) Modifier.background(Color.White.copy(alpha = 0.12f)) else Modifier)
             .clickable { onClick() }
-            .padding(vertical = 7.dp),
+            .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(3.dp))
-        Text(tr(label), fontSize = 10.5.sp, color = color, fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold)
+        Box(
+            Modifier
+                .width(56.dp).height(30.dp)
+                .clip(RoundedCornerShape(Radius.pill))
+                .then(if (selected) Modifier.background(PurpleLight) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(23.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(tr(label), fontSize = 12.sp, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
     }
 }

@@ -339,7 +339,6 @@ private fun homeLastLoc(ctx: Context): Pair<Double?, Double?> = try {
 
 @Composable
 fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
-    val openDrawer = LocalDrawerOpen.current
     val appCtx = LocalContext.current.applicationContext
 
     val sosCtx = LocalContext.current
@@ -525,7 +524,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 rating = vm.workerRating,
                 unread = vm.unreadNotifications,
                 online = vm.isOnline,
-                onMenu = { openDrawer() },
+                initials = vm.workerName.trim().split(Regex("\\s+")).mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase().ifBlank { "P" },
                 onNotifications = { nav.navigate(Routes.P_NOTIFICATIONS) },
                 onProfile = { nav.navigateApp(Routes.PROFILE) },
                 onRating = { nav.navigate(Routes.PERFORMANCE) },
@@ -770,22 +769,18 @@ private fun HomeHeaderRow(
     rating: Double,
     unread: Int,
     online: Boolean,
-    onMenu: () -> Unit,
+    initials: String,
     onNotifications: () -> Unit,
     onProfile: () -> Unit,
     onRating: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        CircleButton(onClick = onMenu) {
-            Icon(Icons.Filled.Menu, contentDescription = "Open menu", tint = TextDark, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.width(10.dp))
-        // Greeting sits beside the drawer handle, with the rating chip hanging under the name.
+        // Greeting, with the rating chip hanging under the name.
         Column(Modifier.weight(1f)) {
             Text("$greeting,", fontSize = 13.sp, color = TextGray, maxLines = 1)
             Text(
                 "$firstName 👋",
-                fontSize = 21.sp, fontWeight = FontWeight.Bold, color = TextDark,
+                fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = TextDark,
                 letterSpacing = (-0.5).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(4.dp))
@@ -817,15 +812,14 @@ private fun HomeHeaderRow(
         Spacer(Modifier.width(2.dp))
         // Avatar, ringed in brand violet with a presence dot on its corner.
         Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
-            Image(
-                painterResource(R.drawable.dummy_avatar),
-                contentDescription = "Profile",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(46.dp)
+            Box(
+                Modifier.size(46.dp)
                     .clip(RoundedCornerShape(Radius.pill))
+                    .background(PurpleLight)
                     .border(2.dp, Purple.copy(alpha = 0.5f), RoundedCornerShape(Radius.pill))
                     .clickable(onClick = onProfile),
-            )
+                contentAlignment = Alignment.Center,
+            ) { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
             Box(
                 Modifier.align(Alignment.BottomEnd).size(12.dp)
                     .clip(RoundedCornerShape(Radius.pill))
@@ -1009,147 +1003,6 @@ private fun SevenDayEarningsCard(days: List<Triple<String, Int, Boolean>>) {
         Spacer(Modifier.height(Space.l))
         AnimatedLineChart(days, lineColor = GreenSuccess, fillColor = GreenSuccess)
     }
-}
-
-// Slide-out menu opened by the Home top-bar hamburger — premium partner drawer:
-// a gradient identity header (avatar + tier + rating), a highlighted "ratings" card, and
-// colour-coded rows for every module. Each row closes the drawer first, then navigates.
-@Composable
-fun HomeDrawer(vm: AppViewModel, nav: NavHostController, close: () -> Unit) {
-    fun go(route: String) { close(); nav.navigateApp(route) }
-    val initials = vm.workerName.trim().split(Regex("\\s+"))
-        .mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase().ifBlank { "P" }
-    val role = vm.jobPreferences.entries.firstOrNull { it.value }?.key ?: "Home Services Pro"
-
-    ModalDrawerSheet(drawerContainerColor = Color.White, modifier = Modifier.fillMaxWidth(0.87f)) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            // ---- gradient identity header (brand violet/indigo) ----
-            Box(Modifier.fillMaxWidth().background(BrandGradient).padding(Space.xl)) {
-                // Decorative star medallion (top-right), like the reference.
-                Box(
-                    Modifier.align(Alignment.TopEnd).offset(x = 34.dp, y = (-26).dp).size(130.dp)
-                        .background(Color.White.copy(alpha = 0.13f), RoundedCornerShape(50)),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Star, null, tint = Color.White.copy(alpha = 0.28f), modifier = Modifier.size(70.dp)) }
-
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(contentAlignment = Alignment.BottomCenter) {
-                            Avatar(initials, size = 66, bg = Color.White, fg = Purple)
-                            Surface(
-                                shape = RoundedCornerShape(50), color = TextDark,
-                                modifier = Modifier.offset(y = 9.dp),
-                            ) {
-                                Text(
-                                    vm.tier.label.uppercase(), color = Color.White, fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                vm.workerName.ifBlank { "HomeHelp Pro" }.uppercase(),
-                                color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 2,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text("${vm.tier.emoji}  $role", color = Color.White.copy(alpha = 0.95f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("⭐", fontSize = 13.sp)
-                        Spacer(Modifier.width(6.dp))
-                        Text("${vm.workerRating} rating · ${vm.jobsCompleted} jobs done", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-
-            // ---- highlighted "Check your ratings" ----
-            Surface(
-                Modifier.fillMaxWidth().padding(Space.l).clickable { go(Routes.PERFORMANCE) },
-                shape = RoundedCornerShape(Radius.button), color = GoldLight,
-            ) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(38.dp).background(Gold, RoundedCornerShape(Radius.pill)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Star, null, tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Text("Check your ratings", Modifier.weight(1f), color = Color(0xFFB7791F), fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text("›", color = Color(0xFFB7791F), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            // ---- modules (colour-coded) ----
-            DrawerSection("Earnings")
-            DrawerRow(Icons.Filled.CurrencyRupee, "Monthly Earnings", GreenSuccess) { go(Routes.EARNINGS) }
-            DrawerRow(Icons.Filled.AccountBalanceWallet, "My Wallet", Purple) { go(Routes.WALLET) }
-            DrawerRow(Icons.Filled.Description, "Rate Card", Color(0xFF16A34A)) { go(Routes.RATE_CARD) }
-            DrawerRow(Icons.Filled.Savings, "Early Payout", Amber) { go(Routes.SALARY_ADVANCE) }
-            DrawerRow(Icons.Filled.History, "Transaction History", Color(0xFFEC4899)) { go(Routes.TRANSACTIONS) }
-            DrawerRow(Icons.Filled.Star, "Rewards & Penalties", Gold) { go(Routes.REWARDS) }
-            DrawerRow(Icons.Filled.EmojiEvents, "Sitara Bonus", Color(0xFFCD7F32)) { go(Routes.SHAKTI) }
-            DrawerRow(Icons.Filled.Description, "Payslip", Color(0xFF7C6DF7)) { go(Routes.PAYSLIP) }
-
-            DrawerSection("Perks")
-            DrawerRow(Icons.Filled.Redeem, "Refer & Earn", Color(0xFFEC4899)) { go(Routes.REFER) }
-            DrawerRow(Icons.Filled.Storefront, "Merch Store", Color(0xFF7C6DF7)) { go(Routes.MERCH) }
-            DrawerRow(Icons.Filled.Shield, "Claim Insurance", Color(0xFF0EA5E9)) { go(Routes.INSURANCE) }
-
-            DrawerSection("Work")
-            DrawerRow(Icons.Filled.Schedule, "Attendance", GreenSuccess) { go(Routes.ATTENDANCE) }
-            DrawerRow(Icons.Filled.CalendarMonth, "Leaves", Color(0xFF3B82F6)) { go(Routes.LEAVE) }
-            DrawerRow(Icons.Filled.Tune, "Availability", Amber) { go(Routes.P_AVAILABILITY) }
-
-            DrawerSection("Account")
-            DrawerRow(Icons.Filled.Person, "My Profile", Purple) { go(Routes.PROFILE) }
-            DrawerRow(Icons.Filled.Description, "Documents", Color(0xFF0EA5E9)) { go(Routes.P_DOCUMENTS) }
-            DrawerRow(Icons.Filled.WorkspacePremium, "Skills & Services", Color(0xFF7C3AED)) { go(Routes.P_SKILLS) }
-            DrawerRow(Icons.AutoMirrored.Filled.MenuBook, "Training", Color(0xFF0EA5E9)) { go(Routes.P_TRAINING) }
-            DrawerRow(Icons.Filled.Inventory2, "My Equipment", Color(0xFF0891B2)) { go(Routes.P_EQUIPMENT) }
-            DrawerRow(Icons.Filled.AccountBalance, "Bank Accounts", Color(0xFF14B8A6)) { go(Routes.BANK_ACCOUNTS) }
-            DrawerRow(Icons.Filled.Tune, "Preferences", TextGray) { go(Routes.P_PREFERENCES) }
-            DrawerRow(Icons.Filled.Notifications, "Notifications", PurpleMid) { go(Routes.P_NOTIFICATIONS) }
-
-            DrawerSection("Support")
-            DrawerRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support", Purple) { go(Routes.P_HELP) }
-            DrawerRow(Icons.Filled.Info, "About Us", TextGray) { go(Routes.P_ABOUT) }
-
-            Spacer(Modifier.height(8.dp)); HairlineDivider(Modifier.padding(horizontal = 20.dp)); Spacer(Modifier.height(8.dp))
-            DrawerRow(Icons.AutoMirrored.Filled.Logout, "Logout", RedCancel) {
-                close(); vm.logout(); nav.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } }
-            }
-
-            Spacer(Modifier.height(18.dp))
-            Text("App version 1.0.0", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 20.dp, bottom = 22.dp))
-        }
-    }
-}
-
-// One drawer row: a tinted circular icon + label (matches the reference's colour-coded list).
-@Composable
-private fun DrawerRow(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = Space.l, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(40.dp).background(tint.copy(alpha = 0.13f), RoundedCornerShape(Radius.pill)), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.width(Space.l))
-        Text(tr(label), Modifier.weight(1f), color = if (tint == RedCancel) RedCancel else TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
-    }
-}
-
-// Small grey section label between drawer groups.
-@Composable
-private fun DrawerSection(title: String) {
-    Text(
-        tr(title).uppercase(), color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
-        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 2.dp),
-    )
 }
 
 @Composable

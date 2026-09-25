@@ -60,7 +60,7 @@ val Ink = Color(0xFF17123D)
 val InkSoft = Color(0xFF261F5C)
 
 // ---- Neutrals (bold canvas: faint lavender background, pure-white surfaces) ----
-val ScreenBg = Color(0xFFF4F3FA)      // app background — faint lavender so white cards pop
+val ScreenBg = Color(0xFFF6F6FA)      // app background — near-white so white cards read cleanly
 val CardBg = Color(0xFFFFFFFF)        // surface — pure white
 // Secondary/tertiary ink sits one slate step darker than stock: Home fits itself to the
 // viewport by scaling down (see FitToScreen), so labels render well under their nominal size
@@ -83,8 +83,8 @@ val EarningsGradient = Brush.linearGradient(
     listOf(Color(0xFF632BDA), Color(0xFF5525C6), Color(0xFF4F21BC)),
 )
 val BrandGradientH = Brush.horizontalGradient(listOf(Purple, Violet))
-// Deep, layered hero gradient (ink → indigo → violet) for the bold headers.
-val HeroGradient = Brush.linearGradient(listOf(Ink, Color(0xFF3B23B8), Violet))
+// Hero gradient for the one highlighted card per screen (next job, month total, login).
+val HeroGradient = Brush.linearGradient(listOf(Color(0xFF4F2FE0), Purple, Violet))
 // Dark ink surface for bold cards — reads as premium against the lavender canvas.
 val InkGradient = Brush.linearGradient(listOf(Ink, InkSoft))
 val VioletGradient = Brush.linearGradient(listOf(PurpleMid, Violet))
