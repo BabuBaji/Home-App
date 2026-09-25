@@ -226,32 +226,21 @@ fun NextJobHeroCard(
     /** Navigate + Call are dead once the worker is at the customer and working. */
     actionsEnabled: Boolean = true,
 ) {
-    Box(
-        Modifier.fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(22.dp), spotColor = Violet.copy(alpha = 0.6f))
-            .clip(RoundedCornerShape(22.dp))
-            .background(JobHeroGradient),
-    ) {
-        // Faint tool watermark, as the reference draws behind the hero text.
-        Icon(
-            Icons.Filled.CleaningServices,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.13f),
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 26.dp, top = 26.dp).size(120.dp),
-        )
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+    // Flat section — no coloured box. Violet is kept for the label and the main action.
+    Column(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(vertical = 14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Box(
                     Modifier.clip(RoundedCornerShape(Radius.pill))
-                        .background(Color.White.copy(alpha = 0.20f))
-                        .padding(horizontal = 9.dp, vertical = 3.dp),
+                        .background(Primary50)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
                 ) {
                     /* Says what the job IS doing, not always "NEXT JOB" — a service already
                      * running is not the next one, and the worker coming back to Home needs to
                      * see at a glance that it is still going. */
                     Text(
-                        badge, color = Color.White,
-                        fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                        badge, color = Purple,
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -261,7 +250,7 @@ fun NextJobHeroCard(
                 // (no invented countdown).
                 if (timerText != null) {
                     Column(
-                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White)
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Primary50)
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -273,7 +262,7 @@ fun NextJobHeroCard(
                     }
                 } else if (job.etaMins != null && job.etaMins > 0) {
                     Column(
-                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White)
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Primary50)
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -289,12 +278,12 @@ fun NextJobHeroCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(46.dp).clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.22f))
+                        .background(Primary50)
                         .padding(3.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
-                        Modifier.fillMaxWidth().fillMaxHeight().clip(CircleShape).background(Color.White),
+                        Modifier.fillMaxWidth().fillMaxHeight().clip(CircleShape).background(PurpleLight),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Filled.Home, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
@@ -304,12 +293,12 @@ fun NextJobHeroCard(
                 Column(Modifier.weight(1f)) {
                     Text(
                         job.service.ifBlank { "Service" },
-                        color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp,
+                        color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         job.customerName.ifBlank { "Customer" },
-                        color = Color.White.copy(alpha = 0.93f), fontSize = 13.sp,
+                        color = TextGray, fontSize = 14.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(5.dp))
@@ -320,7 +309,7 @@ fun NextJobHeroCard(
                         )
                         Box(
                             Modifier.padding(horizontal = 10.dp)
-                                .width(1.dp).height(13.dp).background(Color.White.copy(alpha = 0.45f)),
+                                .width(1.dp).height(13.dp).background(Divider),
                         )
                         // Start time only, as the reference shows. The full window is a tooltip's
                         // worth of detail that pushed this line to two rows on narrower phones.
@@ -328,23 +317,24 @@ fun NextJobHeroCard(
                     }
                 }
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White.copy(alpha = 0.16f), Color.White, onNavigate, actionsEnabled)
-                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White.copy(alpha = 0.16f), Color.White, onCall, actionsEnabled)
-                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, StartJobViolet, Purple, onStart)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Primary50, Purple, onNavigate, actionsEnabled)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Primary50, Purple, onCall, actionsEnabled)
+                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, Purple, Color.White, onStart)
             }
         }
+        HairlineDivider()
     }
 }
 
 @Composable
 private fun HeroMeta(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.92f), modifier = Modifier.size(14.dp))
+        Icon(icon, contentDescription = null, tint = TextGray, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(4.dp))
         Text(
-            text, color = Color.White.copy(alpha = 0.92f), fontSize = 12.5.sp,
+            text, color = TextGray, fontSize = 13.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
     }
@@ -364,7 +354,7 @@ private fun HeroAction(
     // the card's three-button shape steady instead of reflowing mid-job.
     val a = if (enabled) 1f else 0.45f
     Row(
-        modifier.height(40.dp).clip(RoundedCornerShape(12.dp))
+        modifier.height(46.dp).clip(RoundedCornerShape(12.dp))
             .background(bg.copy(alpha = bg.alpha * a))
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,

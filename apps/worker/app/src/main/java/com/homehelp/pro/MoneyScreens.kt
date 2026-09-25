@@ -139,12 +139,12 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
             // ── Monthly hero: total · vs-last-month · Jobs / Avg-Day / Incentives ──
-            GradientBanner(gradient = HeroGradient, radius = 24) {
+            Column(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("This Month · $monthName", color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("Earned this month", color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${inr(monthTotal)}", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp)
+                        Text("₹${inr(monthTotal)}", color = TextDark, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp)
                         if (pct != null) {
                             Spacer(Modifier.height(6.dp))
                             val up = pct >= 0
@@ -153,25 +153,22 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                                     Text("${if (up) "↑" else "↓"} ${kotlin.math.abs(pct)}%", color = if (up) GreenSuccess else RedCancel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.width(6.dp))
-                                Text("vs last month", color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                                Text("vs last month", color = TextGray, fontSize = 13.sp)
                             }
                         }
                     }
-                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.AccountBalanceWallet, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
-                    }
+
                 }
                 Spacer(Modifier.height(Space.l))
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.12f)).padding(vertical = Space.m),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Color.White, "$monthJobs", "Jobs", onDark = true)
-                    Box(Modifier.width(1.dp).height(38.dp).background(Color.White.copy(alpha = 0.2f)))
-                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color.White, "₹${inr(avgPerDay)}", "Avg/Day", onDark = true)
-                    Box(Modifier.width(1.dp).height(38.dp).background(Color.White.copy(alpha = 0.2f)))
-                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Gold, "₹${inr(incentivesMonth)}", "Incentives", onDark = true)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, "$monthJobs", "Jobs")
+                    Box(Modifier.width(1.dp).height(38.dp).background(Divider))
+                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color(0xFF3B82F6), "₹${inr(avgPerDay)}", "Avg/Day")
+                    Box(Modifier.width(1.dp).height(38.dp).background(Divider))
+                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Amber, "₹${inr(incentivesMonth)}", "Incentives")
                 }
+                Spacer(Modifier.height(Space.l))
+                HairlineDivider()
             }
 
             // ── Today / This Week ──
@@ -820,11 +817,8 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             // ── Level — the violet gradient card
             Column(
                 Modifier.fillMaxWidth()
-                    .shadow(8.dp, RoundedCornerShape(20.dp), spotColor = Purple.copy(alpha = 0.35f))
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFF6D4AF0), Color(0xFF5B32E8))))
                     .clickable { nav.navigate(Routes.PERFORMANCE) }
-                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                    .padding(vertical = 10.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -835,33 +829,33 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(11.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Level ", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text("Level ", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                             Text(tier.label, color = Gold, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                         }
                         Text(
                             if (nextTier != null) "Keep going to reach ${nextTier.label} level" else "You're at the top tier",
-                            color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Spacer(Modifier.width(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("View Benefits", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Text("Benefits", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Radius.pill)).background(Color.White.copy(alpha = 0.25f))) {
-                    Box(Modifier.fillMaxWidth(progressFrac).fillMaxHeight().clip(RoundedCornerShape(Radius.pill)).background(Color.White))
+                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Radius.pill)).background(PurpleLight)) {
+                    Box(Modifier.fillMaxWidth(progressFrac).fillMaxHeight().clip(RoundedCornerShape(Radius.pill)).background(Purple))
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         if (nextTier != null) "Progress to ${nextTier.label}" else "Highest tier reached",
-                        color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp,
+                        color = TextGray, fontSize = 13.sp,
                     )
                     Text(
                         if (nextTier != null) "$progressCur / $progressMax jobs" else "$progressCur jobs",
-                        color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     )
                 }
             }

@@ -99,59 +99,55 @@ fun WalletDashboardScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit, onWithdraw: () -> Unit, onHistory: () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(EarningsGradient).padding(14.dp),
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Available Balance", color = Color.White.copy(alpha = 0.9f), fontSize = 13.5.sp)
+                    Text("Available balance", color = TextGray, fontSize = 14.sp)
                     Spacer(Modifier.width(6.dp))
                     Icon(
                         if (hidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
                         contentDescription = if (hidden) "Show balance" else "Hide balance",
-                        tint = Color.White.copy(alpha = 0.9f),
+                        tint = TextGray,
                         modifier = Modifier.size(16.dp).clickable(onClick = onToggle),
                     )
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (hidden) "₹ ••••" else money(vm.walletBalance),
-                    color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp,
+                    color = TextDark, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp,
                 )
             }
-            Icon(Icons.Filled.AccountBalanceWallet, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
             HeroFigure(Modifier.weight(1f), "Earnings this month", money(vm.monthEarnings))
-            Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(30.dp).background(Color.White.copy(alpha = 0.25f)))
+            Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(30.dp).background(Divider))
             HeroFigure(Modifier.weight(1f), "Pending Settlement", money(vm.holdBalance))
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             // Withdraw — primary (white pill)
             Row(
-                Modifier.weight(1f).clip(RoundedCornerShape(Radius.pill)).background(Color.White)
-                    .clickable(onClick = onWithdraw).padding(vertical = 10.dp),
+                Modifier.weight(1f).clip(RoundedCornerShape(Radius.button)).background(Purple)
+                    .clickable(onClick = onWithdraw).padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.ArrowUpward, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("Withdraw Money", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Filled.ArrowUpward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Withdraw", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
             // Transaction History — secondary (translucent, outlined) beside Withdraw, per the design
             Row(
-                Modifier.weight(1f).clip(RoundedCornerShape(Radius.pill))
-                    .background(Color.White.copy(alpha = 0.16f))
-                    .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(Radius.pill))
-                    .clickable(onClick = onHistory).padding(vertical = 10.dp),
+                Modifier.weight(1f).clip(RoundedCornerShape(Radius.button))
+                    .background(Primary50)
+                    .clickable(onClick = onHistory).padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("Transaction History", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(2.dp))
-                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("History", color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -160,9 +156,9 @@ private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit,
 @Composable
 private fun HeroFigure(modifier: Modifier, label: String, value: String) {
     Column(modifier) {
-        Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1)
+        Text(label, color = TextGray, fontSize = 13.sp, maxLines = 1)
         Spacer(Modifier.height(2.dp))
-        Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(value, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 

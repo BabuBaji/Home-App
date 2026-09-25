@@ -834,7 +834,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(6.dp))
                 Text("Please confirm your arrival and proceed to OTP verification to start the job.", color = TextDark, fontSize = 13.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(Space.m))
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PurpleLight).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(Space.m))
                     Column {
@@ -856,7 +856,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
             PrimaryButton("CONTINUE TO OTP VERIFICATION") { nav.navigate(Routes.START_SERVICE) }
 
             // ── Safety.
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(GoldLight).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Shield, contentDescription = null, tint = Amber, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(Space.m))
                 Column {
@@ -893,13 +893,14 @@ private fun ArrivalStat(modifier: Modifier, icon: androidx.compose.ui.graphics.v
 @Composable
 private fun ArrivedAction(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     Column(
-        modifier.clip(RoundedCornerShape(12.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 6.dp),
+        modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 8.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+        Box(Modifier.size(48.dp).clip(CircleShape).background(Primary50), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
+        }
         Spacer(Modifier.height(6.dp))
-        Text(label, color = TextDark, fontSize = 11.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 13.sp)
+        Text(label, color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 13.sp)
     }
 }
 
@@ -2095,16 +2096,16 @@ private fun CompletedFooterButton(modifier: Modifier, icon: androidx.compose.ui.
 
 @Composable
 private fun StatusBanner(bg: Color, fg: Color, title: String, subtitle: String) {
-    Box(Modifier.fillMaxWidth().background(bg, RoundedCornerShape(Radius.card)).padding(Space.l)) {
+    Box(Modifier.fillMaxWidth().padding(vertical = Space.s)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(40.dp).clip(RoundedCornerShape(Radius.field)).background(Color.White.copy(alpha = 0.6f)),
+                Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill)).background(bg),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = fg, modifier = Modifier.size(24.dp)) }
             Spacer(Modifier.width(Space.m))
             Column {
                 Text(title, fontWeight = FontWeight.Bold, color = fg)
-                Text(subtitle, fontSize = 12.sp, color = TextGray)
+                Text(subtitle, fontSize = 13.sp, color = TextGray)
             }
         }
     }
@@ -2168,10 +2169,10 @@ fun SafetyHeader(title: String, vm: AppViewModel, nav: NavHostController, onBack
 
 @Composable
 fun SafetyCard() {
-    Box(Modifier.fillMaxWidth().background(PurpleLight, RoundedCornerShape(Radius.card)).padding(Space.m)) {
+    Box(Modifier.fillMaxWidth().padding(vertical = Space.s)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(Radius.pill)).background(Color.White.copy(alpha = 0.6f)),
+                Modifier.size(38.dp).clip(RoundedCornerShape(Radius.pill)).background(PurpleLight),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(Space.m))
