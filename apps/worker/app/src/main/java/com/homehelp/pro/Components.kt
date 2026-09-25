@@ -63,23 +63,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 
-/** White rounded card — floats on a soft violet-tinted shadow (22dp radius). */
+/**
+ * A flat content section — no box, no shadow. Content sits on the page and a hairline below
+ * separates it from the next section, the way native list screens are laid out.
+ */
 @Composable
 fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Composable () -> Unit) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 3.dp,
-                shape = RoundedCornerShape(Radius.card),
-                spotColor = Color(0x14101828),
-                ambientColor = Color(0x0A101828),
-            ),
-        shape = RoundedCornerShape(Radius.card),
-        color = CardBg,
-        border = BorderStroke(1.dp, CardBorder),
-    ) {
-        Column(Modifier.padding(padding.value)) { content() }
+    Column(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(vertical = padding.value)) { content() }
+        HairlineDivider()
     }
 }
 

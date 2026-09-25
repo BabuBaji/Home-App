@@ -181,7 +181,11 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
             }
 
             // ── Analytics & insights carousel ──
-            EarningsInsightsCarousel(nav)
+            Column {
+                ProfileMenuRow(Icons.Filled.DonutLarge, Purple, "Earnings Breakdown", "Where your money comes from") { nav.navigate(Routes.EARNINGS_BREAKDOWN) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.BarChart, GreenSuccess, "Earnings Analytics", "Daily, weekly and monthly trends") { nav.navigate(Routes.EARNINGS_ANALYTICS) }
+            }
 
             // ── Payout summary ──
             SectionTitle("Payout")
@@ -736,17 +740,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // ── Identity — avatar with camera badge, name + verified tick, contact lines, Edit
-            Box(
-                Modifier.fillMaxWidth()
-                    .shadow(3.dp, RoundedCornerShape(20.dp), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(CardBg),
-            ) {
-                // Faint lavender bloom in the top-right corner, as the reference draws it.
-                Box(
-                    Modifier.align(Alignment.TopEnd).offset(x = 28.dp, y = (-26).dp)
-                        .size(120.dp).clip(CircleShape).background(Primary50),
-                )
+            Box(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         Box(

@@ -83,7 +83,7 @@ private fun money(v: Int): String =
 // Every measurement below is therefore deliberately tight; raising any of them pushes the
 // bonus banner off the bottom. The reference screen is built to the same density.
 private val PanelRadius = 18.dp
-private val PanelPad = 16.dp
+private val PanelPad = 0.dp
 
 // The reference's hero violet, and the deeper violet its primary action uses.
 private val JobHeroGradient = HeroGradient
@@ -102,15 +102,11 @@ private fun Panel(
     padV: Dp = PanelPad,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .shadow(3.dp, RoundedCornerShape(PanelRadius), spotColor = Color(0x14101828), ambientColor = Color(0x0A101828))
-            .clip(RoundedCornerShape(PanelRadius))
-            .background(CardBg)
-            .padding(horizontal = padH, vertical = padV),
-        content = content,
-    )
+    // Flat section: content on the page, hairline underneath — no box.
+    Column(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(vertical = padV), content = content)
+        HairlineDivider()
+    }
 }
 
 /** Section caption + "View all ›", the header each panel carries. */

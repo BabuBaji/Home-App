@@ -872,10 +872,10 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
 /** Bordered white card used across the Arrived screen. */
 @Composable
 private fun FlowCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(Radius.card), color = Color.White, shadowElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Divider), modifier = Modifier.fillMaxWidth(),
-    ) { Column(Modifier.padding(14.dp), content = content) }
+    Column(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(vertical = 14.dp), content = content)
+        HairlineDivider()
+    }
 }
 
 @Composable

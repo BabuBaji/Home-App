@@ -60,7 +60,7 @@ val Ink = Color(0xFF17123D)
 val InkSoft = Color(0xFF261F5C)
 
 // ---- Neutrals (bold canvas: faint lavender background, pure-white surfaces) ----
-val ScreenBg = Color(0xFFF6F6FA)      // app background — near-white so white cards read cleanly
+val ScreenBg = Color(0xFFFFFFFF)      // app background — plain white; sections are separated by space and hairlines, not boxes
 val CardBg = Color(0xFFFFFFFF)        // surface — pure white
 // Secondary/tertiary ink sits one slate step darker than stock: Home fits itself to the
 // viewport by scaling down (see FitToScreen), so labels render well under their nominal size
