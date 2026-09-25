@@ -120,19 +120,9 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
     val pageRows = filtered.drop(safePage * PAGE_SIZE).take(PAGE_SIZE)
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        // ── Header ──
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
-            }
-            Text("Transactions", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { recentFirst = !recentFirst }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.FilterList, contentDescription = "Filter", tint = Purple, modifier = Modifier.size(21.dp))
-            }
-        }
+        AppTopBar("Transactions", onBack = { nav.popBackStack() }, trailing = {
+            TopBarAction(Icons.Filled.FilterList, "Filter") { recentFirst = !recentFirst }
+        })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(bottom = Space.l),
@@ -392,16 +382,7 @@ fun TransactionDetailScreen(vm: AppViewModel, nav: NavHostController) {
     val cat = categoryOf(e)
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
-            }
-            Text("Transaction Details", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(38.dp))
-        }
+        AppTopBar("Transaction Details", onBack = { nav.popBackStack() })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),

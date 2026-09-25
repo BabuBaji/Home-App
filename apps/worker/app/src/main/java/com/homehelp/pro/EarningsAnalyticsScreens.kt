@@ -68,20 +68,7 @@ private val IncentiveLilac = Color(0xFF9B8CFA)
 /** Clean white top bar — back + centred indigo title + info, as every analytics mock draws it. */
 @Composable
 private fun AnalyticsBar(title: String, onBack: () -> Unit, onInfo: () -> Unit = {}) {
-    Column(Modifier.fillMaxWidth().background(Color.White)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).border(1.dp, Divider, CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(20.dp))
-            }
-            Text(title, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(32.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape).clickable { onInfo() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
-            }
-        }
-    }
+    AppTopBar(title, onBack = onBack, trailing = { TopBarAction(Icons.Filled.Info, "Info", onClick = onInfo) })
 }
 
 /** Pill dropdown chip ("This Month ▾") used by the breakdown & trend screens. */

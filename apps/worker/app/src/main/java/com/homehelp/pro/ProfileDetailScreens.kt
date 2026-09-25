@@ -177,19 +177,7 @@ internal fun DetailScaffold(title: String, nav: NavHostController, content: @Com
 @Composable
 internal fun WhiteDetailScaffold(title: String, nav: NavHostController, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Column(Modifier.fillMaxWidth().background(Color.White)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
-                }
-                Text(title, color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-                Box(Modifier.size(38.dp))
-            }
-            HairlineDivider()
-        }
+        AppTopBar(title, onBack = { nav.popBackStack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -441,18 +429,7 @@ fun PersonalInfoScreen(vm: AppViewModel, nav: NavHostController) {
     val initials = vm.workerName.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "?" }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        // Clean white top bar — back + title + hairline.
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(Space.xs))
-            Text("Personal Information", color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
-        }
-        HairlineDivider()
+        AppTopBar("Personal Information", onBack = { nav.popBackStack() })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),

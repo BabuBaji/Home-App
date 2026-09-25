@@ -75,7 +75,7 @@ fun WalletDashboardScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Wallet", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("Wallet", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         }
 
         FitToScreen(Modifier.weight(1f).fillMaxWidth()) {

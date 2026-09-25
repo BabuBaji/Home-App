@@ -55,8 +55,12 @@ val BlueAccentLight = Color(0xFFE8F0FE) // wallet tint
 val RedCancel = Color(0xFFEF4444)     // error / destructive
 val RedLight = Color(0xFFFDECEC)      // error tint
 
-// ---- Neutrals (enterprise canvas: soft slate background, pure-white surfaces) ----
-val ScreenBg = Color(0xFFF8FAFC)      // app background — soft slate so white cards float
+// ---- Ink — the deep indigo-black of the bold surfaces (bottom nav, hero cards) ----
+val Ink = Color(0xFF17123D)
+val InkSoft = Color(0xFF261F5C)
+
+// ---- Neutrals (bold canvas: faint lavender background, pure-white surfaces) ----
+val ScreenBg = Color(0xFFF4F3FA)      // app background — faint lavender so white cards pop
 val CardBg = Color(0xFFFFFFFF)        // surface — pure white
 // Secondary/tertiary ink sits one slate step darker than stock: Home fits itself to the
 // viewport by scaling down (see FitToScreen), so labels render well under their nominal size
@@ -79,8 +83,10 @@ val EarningsGradient = Brush.linearGradient(
     listOf(Color(0xFF632BDA), Color(0xFF5525C6), Color(0xFF4F21BC)),
 )
 val BrandGradientH = Brush.horizontalGradient(listOf(Purple, Violet))
-// Deeper, layered hero gradient (dark indigo → indigo → violet) for premium depth.
-val HeroGradient = Brush.linearGradient(listOf(IndigoNight, Purple, Violet))
+// Deep, layered hero gradient (ink → indigo → violet) for the bold headers.
+val HeroGradient = Brush.linearGradient(listOf(Ink, Color(0xFF3B23B8), Violet))
+// Dark ink surface for bold cards — reads as premium against the lavender canvas.
+val InkGradient = Brush.linearGradient(listOf(Ink, InkSoft))
 val VioletGradient = Brush.linearGradient(listOf(PurpleMid, Violet))
 val CoralGradient = Brush.linearGradient(listOf(Color(0xFFFF9472), Coral))
 
@@ -102,9 +108,9 @@ object Space {
 // Radii tokens — cards 18, buttons 14 (enterprise spec).
 // ─────────────────────────────────────────────────────────────────────────────
 object Radius {
-    val field: Dp = 12.dp
-    val button: Dp = 18.dp
-    val card: Dp = 24.dp
+    val field: Dp = 14.dp
+    val button: Dp = 16.dp
+    val card: Dp = 22.dp
     val sheet: Dp = 24.dp
     val pill: Dp = 50.dp
 }
@@ -119,11 +125,11 @@ object Radius {
 // hierarchy look inconsistent rather than deliberate.
 val AppTypography = Typography(
     // Screen title — 32 Bold
-    headlineMedium = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp, color = TextDark),
-    headlineSmall = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, color = TextDark),
-    // Section title — 22 SemiBold
-    titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp, color = TextDark),
-    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = TextDark),
+    headlineMedium = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp, color = TextDark),
+    headlineSmall = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp, color = TextDark),
+    // Section title — 22 Bold
+    titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = TextDark),
+    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextDark),
     titleSmall = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextDark),
     // Body — 15
     bodyLarge = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Normal, lineHeight = 24.sp, color = TextDark),

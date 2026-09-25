@@ -78,18 +78,9 @@ fun MyShiftsScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadShifts(); vm.loadAvailability() }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
-            }
-            Text("My Shifts", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(Modifier.size(32.dp).clip(CircleShape).border(1.5.dp, Purple, CircleShape).clickable { nav.navigate(Routes.P_AVAILABILITY) }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Add, contentDescription = "Add", tint = Purple, modifier = Modifier.size(18.dp))
-            }
-        }
+        AppTopBar("My Shifts", onBack = { nav.popBackStack() }, trailing = {
+            TopBarAction(Icons.Filled.Add, "Add") { nav.navigate(Routes.P_AVAILABILITY) }
+        })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),

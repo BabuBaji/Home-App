@@ -125,17 +125,17 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
     val incentivesMonth = hist.filter { it.isCredit && it.date.startsWith(thisYM) && (it.type.contains("incentive", true) || it.type.contains("bonus", true) || it.type.contains("reward", true)) }.sumOf { it.amount }
     val pct = if (lastMonthCredits > 0) ((monthTotal - lastMonthCredits) * 100 / lastMonthCredits) else null
 
-    Column(Modifier.fillMaxSize().background(Color.White)) {
-        // ── White professional header: menu · title · bell(badge) ──
+    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+        // ── Tab title: menu · "Earnings" · bell(badge) ──
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = 10.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = TextDark, modifier = Modifier.size(24.dp).clip(CircleShape).clickable { openDrawer() })
+            TopBarAction(Icons.Filled.Menu, "Menu") { openDrawer() }
             Spacer(Modifier.width(Space.m))
-            Text("Monthly Earnings", color = TextDark, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, modifier = Modifier.weight(1f))
-            Box(Modifier.clip(CircleShape).clickable { nav.navigate(Routes.P_NOTIFICATIONS) }.padding(2.dp)) {
-                Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = TextDark, modifier = Modifier.size(23.dp))
+            Text("Earnings", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp, modifier = Modifier.weight(1f))
+            Box {
+                TopBarAction(Icons.Filled.Notifications, "Alerts") { nav.navigate(Routes.P_NOTIFICATIONS) }
                 if (vm.unreadNotifications > 0) {
                     Box(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(15.dp).clip(CircleShape).background(RedCancel), contentAlignment = Alignment.Center) {
                         Text("${vm.unreadNotifications.coerceAtMost(9)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -143,19 +143,18 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
         }
-        HairlineDivider()
 
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.l),
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
             // ── Monthly hero: total · vs-last-month · Jobs / Avg-Day / Incentives ──
-            Card {
+            GradientBanner(gradient = HeroGradient, radius = 24) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("This Month · $monthName", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("This Month · $monthName", color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${inr(monthTotal)}", color = TextDark, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+                        Text("₹${inr(monthTotal)}", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp)
                         if (pct != null) {
                             Spacer(Modifier.height(6.dp))
                             val up = pct >= 0
@@ -164,23 +163,24 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                                     Text("${if (up) "↑" else "↓"} ${kotlin.math.abs(pct)}%", color = if (up) GreenSuccess else RedCancel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.width(6.dp))
-                                Text("vs last month", color = TextGray, fontSize = 12.sp)
+                                Text("vs last month", color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
                             }
                         }
                     }
-                    Box(Modifier.size(56.dp).clip(CircleShape).background(GreenLight), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.AccountBalanceWallet, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(28.dp))
+                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.AccountBalanceWallet, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
                     }
                 }
-                Spacer(Modifier.height(Space.m))
-                HairlineDivider()
-                Spacer(Modifier.height(Space.m))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, "$monthJobs", "Jobs")
-                    Box(Modifier.width(1.dp).height(38.dp).background(Divider))
-                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color(0xFF3B82F6), "₹${inr(avgPerDay)}", "Avg/Day")
-                    Box(Modifier.width(1.dp).height(38.dp).background(Divider))
-                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Amber, "₹${inr(incentivesMonth)}", "Incentives")
+                Spacer(Modifier.height(Space.l))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.12f)).padding(vertical = Space.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Color.White, "$monthJobs", "Jobs", onDark = true)
+                    Box(Modifier.width(1.dp).height(38.dp).background(Color.White.copy(alpha = 0.2f)))
+                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color.White, "₹${inr(avgPerDay)}", "Avg/Day", onDark = true)
+                    Box(Modifier.width(1.dp).height(38.dp).background(Color.White.copy(alpha = 0.2f)))
+                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Gold, "₹${inr(incentivesMonth)}", "Incentives", onDark = true)
                 }
             }
 
@@ -212,15 +212,15 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
 
 /** One stat column in the monthly-earnings hero strip. */
 @Composable
-private fun EarnStat(modifier: Modifier, icon: ImageVector, tint: Color, value: String, label: String) {
+private fun EarnStat(modifier: Modifier, icon: ImageVector, tint: Color, value: String, label: String, onDark: Boolean = false) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(tint.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(tint.copy(alpha = if (onDark) 0.16f else 0.12f)), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
         }
         Spacer(Modifier.height(6.dp))
-        Text(value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(value, color = if (onDark) Color.White else TextDark, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         Spacer(Modifier.height(1.dp))
-        Text(label, color = TextGray, fontSize = 11.sp)
+        Text(label, color = if (onDark) Color.White.copy(alpha = 0.72f) else TextGray, fontSize = 11.sp)
     }
 }
 
@@ -741,7 +741,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Profile", color = TextDark, fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp)
+                Text("Profile", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
                 Text("Manage your account and performance", color = TextGray, fontSize = 12.5.sp, maxLines = 1)
             }
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {

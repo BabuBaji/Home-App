@@ -74,19 +74,7 @@ private fun rupee(n: Int) = "₹" + "%,d".format(n)
  *  header used by the white-background screens, in place of the purple gradient [Header]. */
 @Composable
 private fun WhiteTopBar(title: String, trailing: (@Composable () -> Unit)? = null, onBack: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
-            }
-            Text(title, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f).padding(start = Space.xs))
-            if (trailing != null) trailing()
-        }
-        HairlineDivider()
-    }
+    AppTopBar(title, onBack = onBack, trailing = trailing)
 }
 
 /** Share the referral message straight to WhatsApp; falls back to the system share sheet if it

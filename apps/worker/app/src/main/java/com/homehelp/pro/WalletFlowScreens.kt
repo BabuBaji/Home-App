@@ -94,26 +94,8 @@ private fun rs(v: Int): String =
  */
 @Composable
 private fun WalletTopBar(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
-    Column(Modifier.fillMaxWidth().background(Color.White).statusBarsPaddingCompat()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (onBack != null) {
-                Box(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp)) }
-            } else {
-                Spacer(Modifier.width(Space.s))
-            }
-            Text(
-                title, color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.2).sp, modifier = Modifier.weight(1f).padding(start = 4.dp),
-            )
-            trailing?.invoke()
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
+    Column(Modifier.fillMaxWidth().background(CardBg).statusBarsPaddingCompat()) {
+        AppTopBar(title, onBack = onBack, trailing = trailing)
     }
 }
 

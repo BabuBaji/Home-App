@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -60,21 +61,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 
-/** White rounded card — soft enterprise shadow + ultra-light outline (18dp radius). */
+/** White rounded card — floats on a soft violet-tinted shadow (22dp radius). */
 @Composable
 fun Card(modifier: Modifier = Modifier, padding: Dp16 = Dp16.M, content: @Composable () -> Unit) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .shadow(
-                elevation = 2.dp,
+                elevation = 10.dp,
                 shape = RoundedCornerShape(Radius.card),
-                spotColor = Color(0x0D101828),
+                spotColor = Purple.copy(alpha = 0.16f),
                 ambientColor = Color(0x0A101828),
             ),
         shape = RoundedCornerShape(Radius.card),
         color = CardBg,
-        border = BorderStroke(1.dp, CardBorder),
     ) {
         Column(Modifier.padding(padding.value)) { content() }
     }
@@ -126,13 +126,17 @@ val LocalWorkerInitials = compositionLocalOf { "" }
  */
 @Composable
 fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
+    if (onBack != null) {
+        AppTopBar(title, onBack = onBack, trailing = trailing)
+        return
+    }
     val openDrawer = LocalDrawerOpen.current
     val nav = LocalNav.current
     Box(
         Modifier
             .fillMaxWidth()
-            .shadow(10.dp, RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp), spotColor = Purple.copy(alpha = 0.30f), ambientColor = Purple.copy(alpha = 0.14f))
-            .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+            .shadow(14.dp, RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp), spotColor = Purple.copy(alpha = 0.35f), ambientColor = Purple.copy(alpha = 0.14f))
+            .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
             .background(HeroGradient),
     ) {
         // subtle glow orb for depth
@@ -142,20 +146,16 @@ fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable (
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Space.l)
-                .padding(top = 12.dp, bottom = 14.dp),
+                .padding(top = 14.dp, bottom = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeaderIcon(Icons.Filled.Menu, "Menu", tint = Color.White) { openDrawer() }
-            if (onBack != null) {
-                Spacer(Modifier.width(Space.xs))
-                HeaderIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) { onBack() }
-            }
             Text(
                 tr(title),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
-                letterSpacing = (-0.2).sp,
+                letterSpacing = (-0.4).sp,
                 modifier = Modifier.weight(1f).padding(start = Space.xs),
             )
             if (trailing != null) { trailing(); Spacer(Modifier.width(Space.s)) }
@@ -163,6 +163,78 @@ fun Header(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable (
             Spacer(Modifier.width(Space.s))
             ProfileChip(LocalWorkerInitials.current, onDark = true) { nav?.navigateApp(Routes.PROFILE) }
         }
+    }
+}
+
+/**
+ * The one top bar for every detail screen: a tinted rounded back button, a bold left-aligned
+ * title (with an optional subtitle) and an optional trailing slot. Replaces the six slightly
+ * different white bars the screens used to draw for themselves.
+ */
+@Composable
+fun AppTopBar(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    subtitle: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(CardBg)
+            .padding(horizontal = Space.l)
+            .padding(top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onBack != null) {
+            BackButton(onBack)
+            Spacer(Modifier.width(Space.m))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                tr(title), color = TextDark, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.4).sp, maxLines = 1,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(tr(subtitle), color = TextGray, fontSize = 12.5.sp, maxLines = 1)
+            }
+        }
+        if (trailing != null) { Spacer(Modifier.width(Space.s)); trailing() }
+    }
+}
+
+/** 42dp rounded-square back button tinted with the brand wash. */
+@Composable
+fun BackButton(onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(Radius.field))
+            .background(Primary50)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(21.dp))
+    }
+}
+
+/** Trailing top-bar action — same tinted rounded square as [BackButton]. */
+@Composable
+fun TopBarAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(Radius.field))
+            .background(Primary50)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = Purple, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -267,8 +339,8 @@ fun PrimaryButton(
     Box(
         modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .then(if (active) Modifier.shadow(14.dp, RoundedCornerShape(Radius.button), spotColor = Purple, ambientColor = Purple) else Modifier)
+            .height(56.dp)
+            .then(if (active) Modifier.shadow(16.dp, RoundedCornerShape(Radius.button), spotColor = Violet, ambientColor = Purple) else Modifier)
             .clip(RoundedCornerShape(Radius.button))
             .background(fill)
             .clickable(enabled = active, onClick = onClick)
@@ -278,7 +350,7 @@ fun PrimaryButton(
         if (loading) {
             CircularProgressIndicator(color = Color.White, strokeWidth = 2.4.dp, modifier = Modifier.size(22.dp))
         } else {
-            Text(tr(text), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr(text), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.2.sp)
         }
     }
 }
@@ -286,13 +358,13 @@ fun PrimaryButton(
 @Composable
 fun OutlineButton(text: String, modifier: Modifier = Modifier, color: Color = Purple, onClick: () -> Unit) {
     Surface(
-        modifier = modifier.height(54.dp).clip(RoundedCornerShape(Radius.button)).clickable { onClick() },
+        modifier = modifier.height(56.dp).clip(RoundedCornerShape(Radius.button)).clickable { onClick() },
         shape = RoundedCornerShape(Radius.button),
-        color = CardBg,
-        border = BorderStroke(1.5.dp, color),
+        color = color.copy(alpha = 0.06f).compositeOver(CardBg),
+        border = BorderStroke(1.5.dp, color.copy(alpha = 0.55f)),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(tr(text), color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr(text), color = color, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
         }
     }
 }
@@ -309,25 +381,25 @@ fun SegmentedTabs(
     counts: Map<String, Int>? = null,
     onSelect: (String) -> Unit,
 ) {
-    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.field), color = FieldFill) {
+    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.field), color = PurpleLight.copy(alpha = 0.6f)) {
         Row(Modifier.padding(Space.xs), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             options.forEach { opt ->
                 val isSel = opt == selected
                 val label = counts?.get(opt)?.let { "${tr(opt)} ($it)" } ?: tr(opt)
-                Surface(
-                    modifier = Modifier.weight(1f).height(38.dp).clickable { onSelect(opt) },
-                    shape = RoundedCornerShape(9.dp),
-                    color = if (isSel) CardBg else Color.Transparent,
-                    shadowElevation = if (isSel) 2.dp else 0.dp,
+                Box(
+                    modifier = Modifier.weight(1f).height(40.dp)
+                        .then(if (isSel) Modifier.shadow(8.dp, RoundedCornerShape(11.dp), spotColor = Violet, ambientColor = Purple) else Modifier)
+                        .clip(RoundedCornerShape(11.dp))
+                        .then(if (isSel) Modifier.background(BrandGradient) else Modifier)
+                        .clickable { onSelect(opt) },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            label,
-                            color = if (isSel) Purple else TextGray,
-                            fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Medium,
-                            fontSize = 13.sp,
-                        )
-                    }
+                    Text(
+                        label,
+                        color = if (isSel) Color.White else TextGray,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                    )
                 }
             }
         }
@@ -446,8 +518,8 @@ fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
 
 @Composable
 fun StatusPill(text: String, bg: Color, fg: Color) {
-    Surface(shape = RoundedCornerShape(Radius.field), color = bg) {
-        Text(tr(text), color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = Space.m, vertical = 5.dp))
+    Surface(shape = RoundedCornerShape(Radius.pill), color = bg) {
+        Text(tr(text), color = fg, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = Space.m, vertical = 5.dp))
     }
 }
 
@@ -480,7 +552,7 @@ fun Avatar(initials: String, size: Int = 44, bg: Color = PurpleLight, fg: Color 
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(tr(text), fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = TextDark, letterSpacing = (-0.2).sp, modifier = Modifier.padding(vertical = Space.xs))
+    Text(tr(text), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = TextDark, letterSpacing = (-0.4).sp, modifier = Modifier.padding(vertical = Space.xs))
 }
 
 fun toast(context: Context, message: String) {

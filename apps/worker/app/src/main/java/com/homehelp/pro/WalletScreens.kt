@@ -612,25 +612,14 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadPayslip() }
     val p = vm.payslip
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        // White header: back · title · download.
-        Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = Space.s).padding(top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { nav.popBackStack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(22.dp))
+        AppTopBar("Payslip", onBack = { nav.popBackStack() }, trailing = {
+            TopBarAction(Icons.Filled.Download, "Download", enabled = p != null) {
+                p?.let {
+                    val path = savePayslip(ctx, it.workerName, it.month, buildPayslipText(it))
+                    toast(ctx, if (path != null) "Saved to $path" else "Could not save payslip")
+                }
             }
-            Text("Payslip", color = Purple, fontSize = 19.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Box(
-                Modifier.size(38.dp).clip(CircleShape).clickable(enabled = p != null) {
-                    p?.let {
-                        val path = savePayslip(ctx, it.workerName, it.month, buildPayslipText(it))
-                        toast(ctx, if (path != null) "Saved to $path" else "Could not save payslip")
-                    }
-                },
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Download, contentDescription = "Download", tint = Purple, modifier = Modifier.size(20.dp)) }
-        }
+        })
 
         Column(Modifier.verticalScroll(rememberScrollState()).padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             if (p == null) {

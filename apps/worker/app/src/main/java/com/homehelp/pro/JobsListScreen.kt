@@ -160,7 +160,7 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Jobs", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Jobs", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp, modifier = Modifier.weight(1f))
             Box(
                 Modifier.size(38.dp).clip(RoundedCornerShape(Radius.pill))
                     .clickable { searching = !searching; if (!searching) query = "" },

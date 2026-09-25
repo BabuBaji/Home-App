@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -648,10 +649,11 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(58.dp)
-                    .shadow(20.dp, RoundedCornerShape(26.dp), spotColor = Purple.copy(alpha = 0.22f), ambientColor = Color(0x14101828))
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(CardBg),
+                    .height(62.dp)
+                    .shadow(22.dp, RoundedCornerShape(24.dp), spotColor = Ink.copy(alpha = 0.55f), ambientColor = Color(0x22101828))
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(InkGradient)
+                    .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 NavBarItem(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
@@ -672,7 +674,9 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
                 }
                 Box(
                     Modifier
-                        .size(62.dp)
+                        .size(66.dp)
+                        .border(4.dp, ScreenBg, CircleShape)
+                        .padding(4.dp)
                         .shadow(14.dp, CircleShape, spotColor = if (online) GreenSuccess else Violet, ambientColor = if (online) GreenSuccess else Violet)
                         .clip(CircleShape)
                         .background(if (online) Brush.linearGradient(listOf(GreenSuccess, Color(0xFF16A34A))) else BrandGradient)
@@ -700,13 +704,19 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
 
 @Composable
 private fun RowScope.NavBarItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    val color = if (selected) Purple else TextMuted
+    val color = if (selected) Color.White else Color.White.copy(alpha = 0.55f)
     Column(
-        Modifier.weight(1f).clip(RoundedCornerShape(Radius.field)).clickable { onClick() }.padding(vertical = 6.dp),
+        Modifier
+            .weight(1f)
+            .padding(horizontal = 3.dp)
+            .clip(RoundedCornerShape(Radius.field))
+            .then(if (selected) Modifier.background(Color.White.copy(alpha = 0.12f)) else Modifier)
+            .clickable { onClick() }
+            .padding(vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(21.dp))
+        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(3.dp))
-        Text(tr(label), fontSize = 10.sp, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+        Text(tr(label), fontSize = 10.5.sp, color = color, fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold)
     }
 }

@@ -499,7 +499,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             // here (it was 180dp) just added dead scroll. This covers the centre FAB, which
             // overhangs the bar's top edge and is not part of the measured bottomBar.
             Modifier.padding(horizontal = Space.m).padding(top = 2.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // ─── Header ─── drawer handle, greeting and rating on the left; bell and avatar on
             // the right, as the reference draws them.

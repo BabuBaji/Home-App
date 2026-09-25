@@ -86,9 +86,9 @@ private val PanelRadius = 18.dp
 private val PanelPad = 11.dp
 
 // The reference's hero violet, and the deeper violet its primary action uses.
-private val JobHeroGradient = Brush.linearGradient(listOf(Color(0xFF7B5CF6), Color(0xFF5B32E8)))
+private val JobHeroGradient = HeroGradient
 private val BonusGradient = Brush.linearGradient(listOf(Color(0xFF7B5CF6), Color(0xFF6C47F5)))
-private val StartJobViolet = Color(0xFF4A22C9)
+private val StartJobViolet = Color.White
 
 // Accent used by the "Today's Target" tile.
 private val OrangeAccent = Color(0xFFF97316)
@@ -232,7 +232,7 @@ fun NextJobHeroCard(
 ) {
     Box(
         Modifier.fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(22.dp), spotColor = Purple.copy(alpha = 0.4f))
+            .shadow(18.dp, RoundedCornerShape(22.dp), spotColor = Violet.copy(alpha = 0.6f))
             .clip(RoundedCornerShape(22.dp))
             .background(JobHeroGradient),
     ) {
@@ -243,7 +243,7 @@ fun NextJobHeroCard(
             tint = Color.White.copy(alpha = 0.13f),
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 26.dp, top = 26.dp).size(120.dp),
         )
-        Column(Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Box(
                     Modifier.clip(RoundedCornerShape(Radius.pill))
@@ -308,7 +308,7 @@ fun NextJobHeroCard(
                 Column(Modifier.weight(1f)) {
                     Text(
                         job.service.ifBlank { "Service" },
-                        color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                        color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
@@ -334,9 +334,9 @@ fun NextJobHeroCard(
             }
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White, Purple, onNavigate, actionsEnabled)
-                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White, Purple, onCall, actionsEnabled)
-                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, StartJobViolet, Color.White, onStart)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Color.White.copy(alpha = 0.16f), Color.White, onNavigate, actionsEnabled)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Color.White.copy(alpha = 0.16f), Color.White, onCall, actionsEnabled)
+                HeroAction(Modifier.weight(1.15f), startIcon, startLabel, StartJobViolet, Ink, onStart)
             }
         }
     }
@@ -368,14 +368,14 @@ private fun HeroAction(
     // the card's three-button shape steady instead of reflowing mid-job.
     val a = if (enabled) 1f else 0.45f
     Row(
-        modifier.height(34.dp).clip(RoundedCornerShape(11.dp))
+        modifier.height(40.dp).clip(RoundedCornerShape(12.dp))
             .background(bg.copy(alpha = bg.alpha * a))
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = fg.copy(alpha = a), modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, color = fg.copy(alpha = a), fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(label, color = fg.copy(alpha = a), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
     }
 }
 

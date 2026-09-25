@@ -98,23 +98,8 @@ private const val MIN_PHOTOS = 1
 
 /** Clean white top navbar for the step-by-step flow — back + centred indigo title (matches the mockup). */
 @Composable
-private fun FlowTopBar(onBack: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(RoundedCornerShape(Radius.pill)).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = PurpleDark, modifier = Modifier.size(22.dp))
-            }
-            Text(
-                "JOB FLOW (STEP BY STEP)", color = PurpleDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(38.dp))
-        }
-        HairlineDivider()
-    }
+private fun FlowTopBar(title: String, onBack: () -> Unit) {
+    AppTopBar(title, onBack = onBack)
 }
 
 /** Hero: brand icon chip, title + subtitle, and the design's tip box. */
@@ -401,7 +386,7 @@ private fun PhotoStepScreen(
     }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowTopBar { nav.popBackStack() }
+        FlowTopBar(title) { nav.popBackStack() }
         if (job == null) {
             EmptyState("📷", "No active job", "Photos attach to a job you're working on.")
             return@Column
@@ -575,7 +560,7 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadJobState() }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowTopBar { nav.popBackStack() }
+        FlowTopBar("Customer Sign & Rating") { nav.popBackStack() }
         if (job == null) {
             EmptyState("⭐", "No active job", "Rating attaches to a job you're working on.")
             return@Column

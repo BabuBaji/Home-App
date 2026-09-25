@@ -207,21 +207,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
     val expectedAtSite = "%02d:%02d".format(job.durationMinutes / 60, job.durationMinutes % 60)
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        // Header — back + centred "JOB FLOW (STEP BY STEP)".
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { vm.rejectJob(); nav.popBackStack(Routes.HOME, inclusive = false) }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = PurpleDark, modifier = Modifier.size(22.dp))
-            }
-            Text(
-                "JOB FLOW (STEP BY STEP)", color = PurpleDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(38.dp))
-        }
-        HairlineDivider()
+        AppTopBar("New Job Request", onBack = { vm.rejectJob(); nav.popBackStack(Routes.HOME, inclusive = false) })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -504,24 +490,7 @@ private fun OfferIconButton(icon: androidx.compose.ui.graphics.vector.ImageVecto
 /** Clean white top bar for the job-flow screens (back + title + optional trailing + hairline). */
 @Composable
 private fun JobWhiteBar(title: String, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
-    Column(Modifier.fillMaxWidth().background(Color.White)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (onBack != null) {
-                Box(Modifier.size(38.dp).clip(CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDark, modifier = Modifier.size(22.dp))
-                }
-                Spacer(Modifier.width(Space.xs))
-            } else {
-                Spacer(Modifier.width(Space.s))
-            }
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark, letterSpacing = (-0.2).sp, modifier = Modifier.weight(1f))
-            trailing?.invoke()
-        }
-        HairlineDivider()
-    }
+    AppTopBar(title, onBack = onBack, trailing = trailing)
 }
 
 @Composable
@@ -653,8 +622,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
     } ?: "—"
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar(onBack = { nav.popBackStack() })
-        HairlineDivider()
+        FlowNavBar("On The Way", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -768,25 +736,8 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
 
 /** White "JOB FLOW (STEP BY STEP)" navbar (back + centred indigo title + info) used across the flow. */
 @Composable
-private fun FlowNavBar(onBack: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.s).padding(top = 8.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(38.dp).clip(CircleShape).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = PurpleDark, modifier = Modifier.size(22.dp))
-            }
-            Text(
-                "JOB FLOW (STEP BY STEP)", color = PurpleDark, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
-            )
-            Box(Modifier.size(38.dp).clip(CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
-            }
-        }
-        HairlineDivider()
-    }
+private fun FlowNavBar(title: String, onBack: () -> Unit) {
+    AppTopBar(title, onBack = onBack, subtitle = "Job flow")
 }
 
 /* ── ARRIVED (step 3) ──────────────────────────────────────────────────────────────────── */
@@ -799,8 +750,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
     val arrivalClock = remember { java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US).format(java.util.Date()) }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar(onBack = { nav.popBackStack() })
-        HairlineDivider()
+        FlowNavBar("Arrived", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -1098,8 +1048,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar(onBack = { nav.popBackStack() })
-        HairlineDivider()
+        FlowNavBar("Start Service", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -1397,8 +1346,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val elapsedFrac = if (targetSec > 0) (elapsed.toFloat() / targetSec).coerceIn(0f, 1f) else 0f
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar(onBack = { nav.popBackStack() })
-        HairlineDivider()
+        FlowNavBar("Service In Progress", onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -2177,10 +2125,10 @@ fun SafetyHeader(title: String, vm: AppViewModel, nav: NavHostController, onBack
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextDark, modifier = Modifier.size(24.dp).clickable { onBack() })
-                Spacer(Modifier.width(Space.s))
+                BackButton(onBack)
+                Spacer(Modifier.width(Space.m))
             }
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+            Text(title, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp, color = TextDark, modifier = Modifier.weight(1f))
             Surface(shape = RoundedCornerShape(Radius.pill), color = PurpleLight, modifier = Modifier.clickable { nav.navigate(Routes.P_HELP) }) {
                 Row(Modifier.padding(horizontal = 13.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Phone, null, tint = Purple, modifier = Modifier.size(15.dp))
