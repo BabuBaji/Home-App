@@ -335,7 +335,7 @@ fun PrimaryButton(
     onClick: () -> Unit,
 ) {
     val active = enabled && !loading
-    val fill = if (enabled) BrandGradient else Brush.linearGradient(listOf(Color(0xFFCBD5E1), Color(0xFFCBD5E1)))
+    val fill = if (enabled) BrandGradient else Brush.linearGradient(listOf(PurpleLight, PurpleLight))
     Box(
         modifier
             .fillMaxWidth()
@@ -350,7 +350,7 @@ fun PrimaryButton(
         if (loading) {
             CircularProgressIndicator(color = Color.White, strokeWidth = 2.4.dp, modifier = Modifier.size(22.dp))
         } else {
-            Text(tr(text), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.2.sp)
+            Text(tr(text), color = if (enabled) Color.White else Purple.copy(alpha = 0.45f), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.2.sp)
         }
     }
 }

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -131,37 +132,52 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
             .background(ScreenBg)
             .verticalScroll(rememberScrollState()),
     ) {
-        // ---- Light brand header — same language as the Home profile header: white surface,
-        //      brand-gradient logo tile, dark wordmark (no dark gradient hero). ----
+        // ---- Bold brand hero: ink→violet gradient, white logo tile and wordmark. ----
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(bottomStart = 36.dp, bottomEnd = 36.dp))
+                .background(HeroGradient),
+        ) {
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 60.dp, y = (-50).dp).size(200.dp)
+                .background(Color.White.copy(alpha = 0.08f), CircleShape))
+            Box(Modifier.align(Alignment.BottomStart).offset(x = (-50).dp, y = 40.dp).size(150.dp)
+                .background(Color.White.copy(alpha = 0.06f), CircleShape))
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Space.xxl).padding(top = 64.dp, bottom = 76.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.size(80.dp)
+                        .shadow(18.dp, RoundedCornerShape(24.dp), spotColor = Ink)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Home, contentDescription = null, tint = Purple, modifier = Modifier.size(42.dp))
+                }
+                Spacer(Modifier.height(18.dp))
+                Row {
+                    Text("HomeHelp", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, letterSpacing = (-0.8).sp)
+                    Text(" Pro", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFC4B5FD), letterSpacing = (-0.8).sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("Your daily workforce companion", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+            }
+        }
+
+        // Form card overlaps the hero's lower edge.
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(bottomStart = 34.dp, bottomEnd = 34.dp))
+                .padding(horizontal = Space.l)
+                .offset(y = (-44).dp)
+                .shadow(18.dp, RoundedCornerShape(26.dp), spotColor = Purple.copy(alpha = 0.22f))
+                .clip(RoundedCornerShape(26.dp))
                 .background(CardBg)
-                .padding(horizontal = Space.xxl)
-                .padding(top = 72.dp, bottom = 40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(Space.xxl),
         ) {
-            Box(
-                Modifier.size(76.dp)
-                    .shadow(14.dp, RoundedCornerShape(22.dp), spotColor = Purple.copy(alpha = 0.45f))
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(BrandGradient),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
-            }
-            Spacer(Modifier.height(18.dp))
-            Row {
-                Text("HomeHelp", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextDark, letterSpacing = (-0.4).sp)
-                Text(" Pro", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Purple, letterSpacing = (-0.4).sp)
-            }
-            Spacer(Modifier.height(7.dp))
-            Text("Your daily workforce companion", color = TextGray, fontSize = 14.sp)
-        }
-
-        Column(Modifier.fillMaxWidth().padding(Space.xxl)) {
-            Text("Welcome back 👋", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextDark)
+            Text("Welcome back 👋", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = TextDark, letterSpacing = (-0.6).sp)
             Spacer(Modifier.height(4.dp))
             Text("Sign in to continue to your dashboard", fontSize = 15.sp, color = TextGray)
             Spacer(Modifier.height(28.dp))
