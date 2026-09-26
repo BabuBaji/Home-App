@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
-  Funnel, Download, Eye, MoreVertical, Calendar, Star, MessageSquare, Clock,
-  IndianRupee, AlertTriangle, ChevronRight, CheckCircle2,
+  Download, Eye, MoreVertical, Calendar, Star, MessageSquare, Clock,
+  IndianRupee, AlertTriangle, CheckCircle2, XCircle, X,
 } from 'lucide-react'
 import { fetchComplaints, updateComplaint } from '../api'
 import type { Complaint } from '../types'
-import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, SumBars, shortDate, Modal, Field, useToast } from '../components/UI'
-import { Donut } from '../components/Charts'
+import { Card, Badge, SearchBox, Pagination, Loading, ErrorState, shortDate, Modal, Field, useToast, FilterTabs } from '../components/UI'
 
 type Cat = { label: string; icon: typeof Star; color: string }
 const CATS: Record<string, Cat> = {
@@ -23,14 +22,23 @@ const catFor = (name: string): Cat => CATS[name] || { label: name || 'Other', ic
 
 const titleCase = (s: string) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
+type Queue = 'open' | 'in_progress' | 'resolved' | 'closed' | 'all'
+const queueOf = (s: string): Exclude<Queue, 'all'> => {
+  const n = (s || '').toLowerCase().replace(/\s+/g, '_')
+  return n === 'resolved' || n === 'closed' || n === 'in_progress' ? n : 'open'
+}
+const PRIORITY_ORDER = ['high', 'medium', 'low']
+
 export default function Complaints() {
   const [rows, setRows] = useState<Complaint[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState('all')
+  const [queue, setQueue] = useState<Queue>('open')
   const [category, setCategory] = useState('all')
+  const [priority, setPriority] = useState('all')
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
+  const [sel, setSel] = useState<Set<number>>(new Set())
   const [view, setView] = useState<Complaint | null>(null)
   const [menuFor, setMenuFor] = useState<number | null>(null)
   const [editStatus, setEditStatus] = useState('open')
@@ -38,32 +46,38 @@ export default function Complaints() {
   const [saving, setSaving] = useState(false)
   const toast = useToast()
 
-  const load = (st = status) => { setErr(''); fetchComplaints(st, 'all').then(setRows).catch((e: Error) => setErr(e.message)) }
-  useEffect(() => { load() }, [])
-  if (err) return <ErrorState msg={err} onRetry={() => load()} />
+  const load = () => { setErr(''); fetchComplaints('all', 'all').then(setRows).catch((e: Error) => setErr(e.message)) }
+  useEffect(load, [])
+  useEffect(() => { setPage(1); setSel(new Set()) }, [queue, category, priority, q])
+  if (err) return <ErrorState msg={err} onRetry={load} />
   if (!rows) return <Loading />
 
-  const cnt = (st: string) => rows.filter((c) => c.status === st).length
-  const open = cnt('open'), inProgress = cnt('in_progress'), resolved = cnt('resolved'), closed = cnt('closed')
-
-  const categories = Array.from(new Set(rows.map((c) => c.category).filter(Boolean)))
+  const count = (k: Queue) => (k === 'all' ? rows.length : rows.filter((c) => queueOf(c.status) === k).length)
+  const categories = Array.from(new Set(rows.map((c) => c.category).filter(Boolean))).sort()
+  const priorities = PRIORITY_ORDER.filter((p) => rows.some((c) => (c.priority || '').toLowerCase() === p))
 
   const ql = q.trim().toLowerCase()
   const filtered = rows
+    .filter((c) => queue === 'all' || queueOf(c.status) === queue)
     .filter((c) => category === 'all' || c.category === category)
-    .filter((c) =>
-      !ql || (c.ref || '').toLowerCase().includes(ql) || (c.customer || '').toLowerCase().includes(ql) || (c.against || '').toLowerCase().includes(ql) || (c.booking_ref || '').toLowerCase().includes(ql))
+    .filter((c) => priority === 'all' || (c.priority || '').toLowerCase() === priority)
+    .filter((c) => !ql || [c.ref, c.customer, c.against, c.booking_ref, c.message].some((v) => (v || '').toLowerCase().includes(ql)))
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const allOnPage = pageRows.length > 0 && pageRows.every((c) => sel.has(c.id))
+  const toggleAll = () => setSel((s) => { const n = new Set(s); pageRows.forEach((c) => (allOnPage ? n.delete(c.id) : n.add(c.id))); return n })
+  const toggle = (id: number) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const STATUS_OPTS = ['open', 'in_progress', 'resolved', 'closed']
   const PRIORITY_OPTS = ['low', 'medium', 'high']
   const matchIn = (opts: string[], s: string, fb: string) => opts.find((o) => o === (s || '').toLowerCase()) || fb
   const openView = (c: Complaint) => { setView(c); setEditStatus(matchIn(STATUS_OPTS, c.status, 'open')); setEditPriority(matchIn(PRIORITY_OPTS, c.priority, 'medium')); setMenuFor(null) }
 
-  const onStatusChange = (v: string) => { setStatus(v); setPage(1); load(v) }
-
-  const quickResolve = (id: number) =>
-    updateComplaint(id, { status: 'resolved' }).then(() => { toast('Complaint resolved'); setMenuFor(null); load() }).catch((e: Error) => toast(e.message, 'err'))
+  const quick = (id: number, status: string, msg: string) =>
+    updateComplaint(id, { status }).then(() => { toast(msg); setMenuFor(null); load() }).catch((e: Error) => toast(e.message, 'err'))
+  const bulk = (status: string, msg: string) =>
+    Promise.all([...sel].map((id) => updateComplaint(id, { status })))
+      .then(() => { toast(`${sel.size} ${sel.size === 1 ? 'complaint' : 'complaints'} ${msg}`); setSel(new Set()); load() })
+      .catch((e: Error) => toast(e.message, 'err'))
 
   const saveComplaint = () => {
     if (!view) return
@@ -74,11 +88,11 @@ export default function Complaints() {
       .finally(() => setSaving(false))
   }
 
-  const exportCsv = () => {
-    const cols = ['Complaint ID', 'Booking ID', 'Customer', 'Against', 'Category', 'Priority', 'Status', 'Date']
+  const exportCsv = (list: Complaint[]) => {
+    const cols = ['Complaint ID', 'Booking ID', 'Customer', 'Against', 'Category', 'Priority', 'Status', 'Date', 'Message']
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const lines = [cols.join(',')].concat(
-      filtered.map((c) => [c.ref, c.booking_ref || '', c.customer, c.against || '', c.category || '', titleCase(c.priority), titleCase(c.status), shortDate(c.created)].map(esc).join(','))
+      list.map((c) => [c.ref, c.booking_ref || '', c.customer, c.against || '', c.category || '', titleCase(c.priority), titleCase(c.status), shortDate(c.created), c.message].map(esc).join(','))
     )
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -86,122 +100,109 @@ export default function Complaints() {
     URL.revokeObjectURL(url)
   }
 
-  const total = rows.length || 1
-  const DONUT = [
-    { label: 'Open', value: open, color: '#f59e0b' },
-    { label: 'In Progress', value: inProgress, color: '#2e90fa' },
-    { label: 'Resolved', value: resolved, color: '#16a34a' },
-    { label: 'Closed', value: closed, color: '#98a2b3' },
-  ]
-  const STATUS_LEGEND = DONUT.map((s) => ({ ...s, pct: ((s.value / total) * 100).toFixed(1) + '%' }))
-
-  const catCounts: Record<string, number> = {}
-  rows.forEach((c) => { const k = c.category || 'Other'; catCounts[k] = (catCounts[k] || 0) + 1 })
-  const CAT_COLORS = ['#5b51e8', '#f59e0b', '#2e90fa', '#16a34a', '#7c6df7', '#98a2b3']
-  const CATEGORY_BARS = Object.entries(catCounts).sort((a, b) => b[1] - a[1]).slice(0, 6)
-    .map(([label, n], i) => ({ label, value: `${n} (${((n / total) * 100).toFixed(1)}%)`, pct: n, color: CAT_COLORS[i % CAT_COLORS.length] }))
+  const menuBtn = { width: '100%', justifyContent: 'flex-start', border: 'none' } as const
 
   return (
     <div className="grid" style={{ gap: 16 }}>
+      <Card>
+        <div className="card-head lg">
+          <h3>Complaints<span className="count">{rows.length.toLocaleString('en-IN')}</span></h3>
+          <div className="head-actions">
+            <button className="btn line" onClick={() => exportCsv(filtered)}><Download size={15} /> Export</button>
+          </div>
+        </div>
 
-      <div className="cols">
-        <Card>
+        <FilterTabs value={queue} onChange={setQueue} tabs={[
+          { key: 'open', label: 'Open', count: count('open'), alert: true },
+          { key: 'in_progress', label: 'In progress', count: count('in_progress') },
+          { key: 'resolved', label: 'Resolved', count: count('resolved') },
+          { key: 'closed', label: 'Closed', count: count('closed') },
+          { key: 'all', label: 'All', count: count('all') },
+        ]} />
+
+        {sel.size > 0 ? (
+          <div className="bulkbar">
+            <span>{sel.size} selected</span>
+            <div className="tb-spacer" />
+            <button className="btn line" onClick={() => bulk('resolved', 'resolved')}><CheckCircle2 size={14} /> Resolve</button>
+            <button className="btn line" onClick={() => bulk('closed', 'closed')}><XCircle size={14} /> Close</button>
+            <button className="btn line" onClick={() => exportCsv(filtered.filter((c) => sel.has(c.id)))}><Download size={14} /> Export selected</button>
+            <button className="btn line" onClick={() => setSel(new Set())}><X size={14} /> Clear</button>
+          </div>
+        ) : (
           <div className="toolbar">
-            <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by Complaint ID, Customer, Worker or Booking ID..." />
-            <select className="select flt" value={status} onChange={(e) => onStatusChange(e.target.value)}>
-              <option value="all">All Status</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
-            </select>
-            <select className="select flt" value={category} onChange={(e) => { setCategory(e.target.value); setPage(1) }}>
-              <option value="all">All Categories</option>
+            <SearchBox value={q} onChange={setQ} placeholder="Search complaint ID, customer, expert or booking" />
+            <select className="select flt" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="all">All categories</option>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <button className="btn line"><Calendar size={16} /> Select Date Range</button>
-            <div className="tb-spacer" />
-            <button className="btn line"><Funnel size={16} /> Filters</button>
-            <button className="btn line" onClick={exportCsv}><Download size={16} /> Export</button>
+            {priorities.length > 1 && (
+              <select className="select flt" value={priority} onChange={(e) => setPriority(e.target.value)}>
+                <option value="all">All priorities</option>
+                {priorities.map((p) => <option key={p} value={p}>{titleCase(p)}</option>)}
+              </select>
+            )}
           </div>
+        )}
 
-          <div className="tablewrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>COMPLAINT ID</th><th>BOOKING ID</th><th>CUSTOMER</th><th>AGAINST</th>
-                  <th>CATEGORY</th><th>PRIORITY</th><th>STATUS</th><th>DATE</th><th>ACTIONS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((r) => {
-                  const cat = catFor(r.category)
-                  const CatIcon = cat.icon
-                  return (
-                    <tr key={r.id}>
-                      <td className="muted">{r.ref}</td>
-                      <td className="muted">{r.booking_ref || '—'}</td>
-                      <td>
-                        <div className="cell-user">
-                          <Avatar name={r.customer} size={34} />
-                          <div><strong style={{ fontSize: 13 }}>{r.customer}</strong></div>
-                        </div>
-                      </td>
-                      <td>
-                        {r.against ? (
-                          <div className="cell-user">
-                            <Avatar name={r.against} size={30} />
-                            <div><strong style={{ fontSize: 13 }}>{r.against}</strong><small className="muted" style={{ display: 'block' }}>Worker</small></div>
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ width: 36 }}><input type="checkbox" checked={allOnPage} onChange={toggleAll} /></th>
+                <th>Complaint</th><th>Customer</th><th>Against</th><th>Category</th><th>Priority</th><th>Status</th><th>Date</th>
+                <th className="sticky-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((r) => {
+                const cat = catFor(r.category)
+                const CatIcon = cat.icon
+                return (
+                  <tr key={r.id}>
+                    <td><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                    <td style={{ maxWidth: 320 }}>
+                      <button className="cell-link" onClick={() => openView(r)}>
+                        <strong className="clamp1">{r.message || cat.label}</strong>
+                        <small className="muted">{r.ref}{r.booking_ref ? ` · Booking ${r.booking_ref}` : ''}</small>
+                      </button>
+                    </td>
+                    <td className="nowrap">{r.customer}</td>
+                    <td className="nowrap">{r.against || <span className="muted">—</span>}</td>
+                    <td>
+                      <span className="row nowrap" style={{ gap: 6, alignItems: 'center' }}>
+                        <CatIcon size={14} style={{ color: 'var(--muted)' }} />
+                        {cat.label}
+                      </span>
+                    </td>
+                    <td><Badge>{titleCase(r.priority)}</Badge></td>
+                    <td><Badge>{titleCase(r.status)}</Badge></td>
+                    <td className="muted nowrap">{shortDate(r.created)}</td>
+                    <td className="sticky-end">
+                      <div className="actions" style={{ position: 'relative' }}>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => openView(r)}><Eye size={16} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}><MoreVertical size={16} /></button>
+                        {menuFor === r.id && (
+                          <div className="menu" style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, background: '#fff', border: '1px solid #e6e6ef', borderRadius: 8, boxShadow: '0 8px 24px rgba(20,20,40,.12)', padding: 4, minWidth: 140 }}>
+                            <button className="btn line" style={menuBtn} onClick={() => quick(r.id, 'resolved', 'Complaint resolved')}>Resolve</button>
+                            <button className="btn line" style={menuBtn} onClick={() => quick(r.id, 'closed', 'Complaint closed')}>Close</button>
                           </div>
-                        ) : <span className="muted">—</span>}
-                      </td>
-                      <td>
-                        <span className="row" style={{ gap: 6, alignItems: 'center' }}>
-                          <CatIcon size={15} style={{ color: cat.color }} />
-                          {cat.label}
-                        </span>
-                      </td>
-                      <td><Badge>{titleCase(r.priority)}</Badge></td>
-                      <td><Badge>{titleCase(r.status)}</Badge></td>
-                      <td><strong style={{ fontSize: 13 }}>{shortDate(r.created)}</strong></td>
-                      <td>
-                        <div className="actions" style={{ position: 'relative' }}>
-                          <button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => openView(r)}><Eye size={16} /></button>
-                          <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}><MoreVertical size={16} /></button>
-                          {menuFor === r.id && (
-                            <div className="menu" style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, background: '#fff', border: '1px solid #e6e6ef', borderRadius: 8, boxShadow: '0 8px 24px rgba(20,20,40,.12)', padding: 4, minWidth: 140 }}>
-                              <button className="btn line" style={{ width: '100%', justifyContent: 'flex-start', border: 'none' }} onClick={() => quickResolve(r.id)}>Resolve</button>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="complaints" onPage={setPage} />
-        </Card>
-
-        <div className="col-rail">
-          <Card title="Complaints by Status">
-            <Donut size={150} data={DONUT} legend={false} />
-            <div className="minilist" style={{ marginTop: 12 }}>
-              {STATUS_LEGEND.map((s) => (
-                <div key={s.label} className="sumrow">
-                  <span className="lbl"><i className="bdot" style={{ background: s.color, marginRight: 8 }} />{s.label}</span>
-                  <span className="val">{s.value} ({s.pct})</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card title="Complaints by Category">
-            {CATEGORY_BARS.length ? <SumBars rows={CATEGORY_BARS} /> : <p className="muted">No complaints yet.</p>}
-          </Card>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+              {!pageRows.length && (
+                <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: '36px 0' }}>
+                  {!rows.length ? 'No complaints yet.' : queue === 'open' && !ql && category === 'all' && priority === 'all' ? 'No open complaints — the queue is clear.' : 'No complaints match these filters.'}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      </div>
+        <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="complaints" onPage={setPage} onSize={(s) => { setPageSize(s); setPage(1) }} />
+      </Card>
 
       {view && (
         <Modal

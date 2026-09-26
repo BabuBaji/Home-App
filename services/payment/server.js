@@ -601,7 +601,9 @@ app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'walle
   const rows = (await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
   const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
-  const paid = rows.filter((r) => r.status === 'PAID')
+  // VERIFIED (captured) and CLAIMED (captured and attached to a booking / top-up) are collected money too.
+  const isPaid = (r) => ['PAID', 'VERIFIED', 'CLAIMED'].includes(r.status)
+  const paid = rows.filter(isPaid)
   const summary = {
     revenue: paid.reduce((s, r) => s + (r.amount || 0), 0),
     successful: paid.length,
@@ -615,7 +617,7 @@ app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'walle
     const m = r.mode || 'other'
     const e = methodMap[m] || (methodMap[m] = { method: m, n: 0, amount: 0 })
     e.n += 1
-    if (r.status === 'PAID') e.amount += (r.amount || 0)
+    if (isPaid(r)) e.amount += (r.amount || 0)
   }
   const transactions = rows.map((r) => ({
     id: r.id,
@@ -623,6 +625,7 @@ app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'walle
     status: r.status,
     title: r.status === 'FAILED' ? `${r.mode || 'Online'} payment failed${r.failure_reason ? ' — ' + r.failure_reason : ''}` : `${r.mode || 'Online'} payment`,
     paymentId: r.payment_id || null,
+    method: r.mode || null,
     refunded: r.refunded_amount || 0,
     amount: r.amount || 0,
     created: r.created,

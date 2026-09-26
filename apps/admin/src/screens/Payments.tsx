@@ -1,76 +1,68 @@
 import { useEffect, useState } from 'react'
-import { Funnel, Download, MoreVertical, CreditCard, ArrowUpRight } from 'lucide-react'
+import { Download, Eye, IndianRupee, Clock, Undo2, Gift } from 'lucide-react'
 import { fetchPayments, runShaktiSettlement } from '../api'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, money, shortDate } from '../components/UI'
-import { Donut } from '../components/Charts'
+import { Card, StatCard, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, money, shortDate, useToast, FilterTabs } from '../components/UI'
 
-type Txn = { id: number; type: string; status?: string; title: string; amount: number; created: string; ref?: string; customer: string; paymentId?: string | null; refunded?: number }
-type Method = { method: string; n: number; amount: number }
+type Txn = { id: number; type: string; status?: string; title: string; amount: number; created: string; ref?: string; customer: string; paymentId?: string | null; refunded?: number; method?: string | null }
 type Summary = { revenue: number; successful: number; pending: number; refunded: number; failed?: number }
-type PaymentsData = { summary: Summary; methods: Method[]; transactions: Txn[] }
+type PaymentsData = { summary: Summary; transactions: Txn[] }
 
-const METHOD_COLORS = ['#16a34a', '#2e90fa', '#f59e0b', '#7c6df7', '#9aa0b4']
-const txnTone = (t: string): string => {
-  const s = (t || '').toLowerCase()
-  if (s === 'credit' || s === 'refund') return 'blue'
-  if (s === 'debit') return 'green'
-  if (s === 'failed') return 'red'
-  return 'gray'
+type Queue = 'paid' | 'pending' | 'failed' | 'refunded' | 'all'
+const queueOf = (t: Txn): Exclude<Queue, 'all'> => {
+  const s = (t.status || '').toUpperCase()
+  if (s === 'PAID' || s === 'VERIFIED' || s === 'CLAIMED') return 'paid'
+  if (s === 'FAILED') return 'failed'
+  if (s.includes('REFUND')) return 'refunded'
+  return 'pending'
 }
+const LABEL_OF = { paid: 'Paid', pending: 'Pending', failed: 'Failed', refunded: 'Refunded' } as const
+const TONE_OF = { paid: 'green', pending: 'amber', failed: 'red', refunded: 'gray' } as const
+const methodLabel = (m?: string | null) => (!m ? '—' : m.toLowerCase() === 'upi' ? 'UPI' : m.charAt(0).toUpperCase() + m.slice(1))
 
 export default function Payments() {
+  const toast = useToast()
   const [d, setD] = useState<PaymentsData | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState('all')
-  const [type, setType] = useState('all')
+  const [queue, setQueue] = useState<Queue>('all')
+  const [method, setMethod] = useState('all')
   const [page, setPage] = useState(1)
-  const pageSize = 10
-
+  const [pageSize, setPageSize] = useState(10)
   const [active, setActive] = useState<Txn | null>(null)
-  const [shaktiBusy, setShaktiBusy] = useState(false)
-  const [shaktiMsg, setShaktiMsg] = useState('')
-  const runShakti = () => {
-    setShaktiBusy(true); setShaktiMsg('')
-    runShaktiSettlement()
-      .then((r) => setShaktiMsg(r.ok ? `✓ Settled ${r.month} — ${r.qualified} worker(s) credited` : `Failed: ${r.error || 'error'}`))
-      .catch((e: Error) => setShaktiMsg('Failed: ' + e.message))
-      .finally(() => setShaktiBusy(false))
-  }
+  const [settleOpen, setSettleOpen] = useState(false)
+  const [settling, setSettling] = useState(false)
 
   const load = () => { setErr(''); fetchPayments().then(setD).catch((e: Error) => setErr(e.message)) }
   useEffect(load, [])
+  useEffect(() => setPage(1), [queue, method, q])
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!d) return <Loading />
 
-  const sum = d.summary || { revenue: 0, successful: 0, pending: 0, refunded: 0 }
-  const methodTotal = (d.methods || []).reduce((a, m) => a + m.amount, 0) || 1
-  const methods = (d.methods || []).map((m, i) => ({
-    label: m.method ? m.method.charAt(0).toUpperCase() + m.method.slice(1) : 'Other',
-    value: m.amount,
-    color: METHOD_COLORS[i % METHOD_COLORS.length],
-    pct: Math.round((m.amount / methodTotal) * 100) + '%',
-    amount: money(m.amount),
-  }))
+  const runSettlement = () => {
+    setSettling(true)
+    runShaktiSettlement()
+      .then((r) => { if (r.ok) { toast(`Settled ${r.month} — ${r.qualified} expert(s) credited`); setSettleOpen(false) } else toast(`Settlement failed: ${r.error || 'error'}`, 'err') })
+      .catch((e: Error) => toast(e.message, 'err'))
+      .finally(() => setSettling(false))
+  }
 
-  const types = Array.from(new Set((d.transactions || []).map((t) => t.type).filter(Boolean)))
-  const statuses = Array.from(new Set((d.transactions || []).map((t) => (t as any).status).filter(Boolean)))
+  const sum = d.summary || { revenue: 0, successful: 0, pending: 0, refunded: 0 }
+  const txns = d.transactions || []
+  const count = (k: Queue) => (k === 'all' ? txns.length : txns.filter((t) => queueOf(t) === k).length)
+  const methods = Array.from(new Set(txns.map((t) => (t.method || '').toLowerCase()).filter(Boolean))).sort()
 
   const ql = q.trim().toLowerCase()
-  const filtered = (d.transactions || [])
-    .filter((t) => type === 'all' || t.type === type)
-    .filter((t) => status === 'all' || (t as any).status === status)
-    .filter((t) =>
-      !ql || String(t.id).includes(ql) || (t.ref || '').toLowerCase().includes(ql) || (t.customer || '').toLowerCase().includes(ql) || (t.title || '').toLowerCase().includes(ql))
+  const filtered = txns
+    .filter((t) => queue === 'all' || queueOf(t) === queue)
+    .filter((t) => method === 'all' || (t.method || '').toLowerCase() === method)
+    .filter((t) => !ql || [`txn${t.id}`, t.ref, t.customer, t.paymentId].some((v) => (v || '').toLowerCase().includes(ql)))
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   const exportCsv = () => {
-    const head = ['Transaction ID', 'Booking Ref', 'Customer', 'Title', 'Amount', 'Type', 'Date']
+    const head = ['Transaction ID', 'Gateway payment ID', 'Booking Ref', 'Customer', 'Method', 'Amount', 'Refunded', 'Status', 'Date']
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const lines = [head.join(',')]
-    filtered.forEach((t) => lines.push([
-      `TXN${t.id}`, t.ref || '', t.customer || '', t.title || '', t.amount, t.type, t.created || '',
-    ].map(esc).join(',')))
+    filtered.forEach((t) => lines.push([`TXN${t.id}`, t.paymentId || '', t.ref || '', t.customer || '', methodLabel(t.method), t.amount, t.refunded || 0, LABEL_OF[queueOf(t)], t.created || ''].map(esc).join(',')))
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = 'transactions.csv'; a.click()
@@ -80,135 +72,96 @@ export default function Payments() {
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div className="stat-row">
-        <StatCard icon={<CreditCard size={22} />} tint="#5b51e8" label="Total Revenue" value={money(sum.revenue)} sub="paid bookings" />
-        <StatCard icon={<CreditCard size={22} />} tint="#16a34a" label="Successful Payments" value={sum.successful.toLocaleString('en-IN')} sub="paid bookings" />
-        <StatCard icon={<CreditCard size={22} />} tint="#f59e0b" label="Pending Payments" value={sum.pending.toLocaleString('en-IN')} sub="awaiting payment" />
-        <StatCard icon={<CreditCard size={22} />} tint="#f04438" label="Transactions" value={(d.transactions || []).length.toLocaleString('en-IN')} sub="recent" />
-        <StatCard icon={<CreditCard size={22} />} tint="#2e90fa" label="Refunds Issued" value={money(sum.refunded)} sub="all time" />
+        <StatCard icon={<IndianRupee size={22} />} tint="#5b51e8" label="Revenue collected" value={money(sum.revenue)} sub={`${sum.successful.toLocaleString('en-IN')} paid payments`} />
+        <StatCard icon={<Clock size={22} />} tint="#f59e0b" label="Pending payments" value={sum.pending.toLocaleString('en-IN')} sub="awaiting payment" />
+        <StatCard icon={<Undo2 size={22} />} tint="#2e90fa" label="Refunded to customers" value={money(sum.refunded)} sub="to card / UPI, all time" />
       </div>
 
-      <Card title="Payroll">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <div style={{ fontWeight: 600, color: 'var(--ink)' }}>Sitara Bonus settlement</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>Credit each qualifying worker's monthly tier bonus (working days + Sundays for Gold) to their wallet. Idempotent — safe to run more than once; auto-runs at month start.</div>
-            {shaktiMsg && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 600, color: shaktiMsg.startsWith('✓') ? '#16a34a' : '#f04438' }}>{shaktiMsg}</div>}
+      <Card>
+        <div className="card-head lg">
+          <h3>Transactions<span className="count">{txns.length.toLocaleString('en-IN')}</span></h3>
+          <div className="head-actions">
+            <button className="btn line" onClick={exportCsv}><Download size={15} /> Export</button>
+            <button className="btn line" onClick={() => setSettleOpen(true)}><Gift size={15} /> Run bonus settlement</button>
           </div>
-          <button className="btn" disabled={shaktiBusy} onClick={runShakti}>{shaktiBusy ? 'Running…' : 'Run settlement'}</button>
         </div>
+
+        <FilterTabs value={queue} onChange={setQueue} tabs={[
+          { key: 'all', label: 'All', count: count('all') },
+          { key: 'paid', label: 'Paid', count: count('paid') },
+          { key: 'pending', label: 'Pending', count: count('pending') },
+          { key: 'failed', label: 'Failed', count: count('failed'), alert: true },
+          { key: 'refunded', label: 'Refunded', count: count('refunded') },
+        ]} />
+
+        <div className="toolbar">
+          <SearchBox value={q} onChange={setQ} placeholder="Search transaction, payment ID, booking or customer" />
+          {methods.length > 1 && (
+            <select className="select flt" value={method} onChange={(e) => setMethod(e.target.value)}>
+              <option value="all">All methods</option>
+              {methods.map((m) => <option key={m} value={m}>{methodLabel(m)}</option>)}
+            </select>
+          )}
+        </div>
+
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Transaction</th><th>Customer</th><th>Booking</th><th>Method</th>
+                <th className="num">Amount</th><th>Status</th><th>Date</th><th className="sticky-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((t) => {
+                const k = queueOf(t)
+                return (
+                  <tr key={t.id}>
+                    <td className="nowrap">
+                      <button className="cell-link" onClick={() => setActive(t)}>
+                        <strong>#TXN{t.id}</strong>
+                        <small className="muted">{t.paymentId || (k === 'failed' ? t.title : 'no gateway ID yet')}</small>
+                      </button>
+                    </td>
+                    <td className="nowrap">{t.customer}</td>
+                    <td className="muted nowrap">{t.ref || '—'}</td>
+                    <td className="nowrap">{methodLabel(t.method)}</td>
+                    <td className="num"><strong>{money(t.amount)}</strong>{(t.refunded || 0) > 0 && k !== 'refunded' ? <small className="muted" style={{ display: 'block', fontSize: 12 }}>{money(t.refunded || 0)} refunded</small> : null}</td>
+                    <td><Badge tone={TONE_OF[k]}>{LABEL_OF[k]}</Badge></td>
+                    <td className="muted nowrap">{shortDate(t.created)}</td>
+                    <td className="sticky-end"><button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => setActive(t)}><Eye size={16} /></button></td>
+                  </tr>
+                )
+              })}
+              {!pageRows.length && (
+                <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: '36px 0' }}>{txns.length ? 'No transactions match these filters.' : 'No payments yet.'}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="transactions" onPage={setPage} onSize={(n) => { setPageSize(n); setPage(1) }} />
       </Card>
 
-      <div className="cols">
-        <Card title="Transactions">
-          <div className="toolbar">
-            <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by Transaction ID, Customer or Booking ID..." />
-            <select className="select flt" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
-              <option value="all">All Status</option>
-              {statuses.map((s) => <option key={s} value={s}>{String(s).replace(/_/g, ' ')}</option>)}
-            </select>
-            <select className="select flt" value={type} onChange={(e) => { setType(e.target.value); setPage(1) }}>
-              <option value="all">All Types</option>
-              {types.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <div className="tb-spacer" />
-            <button className="btn line"><Funnel size={16} /> Filters</button>
-            <button className="btn line" onClick={exportCsv}><Download size={16} /> Export</button>
-          </div>
-
-          <div className="tablewrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>TRANSACTION ID</th>
-                  <th>BOOKING REF</th>
-                  <th>CUSTOMER</th>
-                  <th className="num">AMOUNT</th>
-                  <th>TYPE</th>
-                  <th>DATE</th>
-                  <th>ACTIONS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((t) => (
-                  <tr key={t.id}>
-                    <td className="muted">#TXN{t.id}</td>
-                    <td className="muted">{t.ref || '—'}</td>
-                    <td>
-                      <div className="cell-user">
-                        <Avatar name={t.customer} size={30} />
-                        <div>
-                          <strong>{t.customer}</strong>
-                          <small className="muted" style={{ display: 'block' }}>{t.title}</small>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="num" style={{ fontWeight: 700 }}>{money(t.amount)}</td>
-                    <td><Badge tone={txnTone(t.type)}>{t.type}</Badge></td>
-                    <td><strong>{shortDate(t.created)}</strong></td>
-                    <td><button className="iconbtn" onClick={() => setActive(t)}><MoreVertical size={16} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="transactions" onPage={setPage} />
-        </Card>
-
-        <div className="col-rail">
-          <Card title="Payment Summary">
-            <div className="sumrow"><span className="lbl">Total Revenue</span><span className="val">{money(sum.revenue)}</span></div>
-            <div className="sumrow"><span className="lbl">Successful</span><span className="val">{sum.successful.toLocaleString('en-IN')}</span></div>
-            <div className="sumrow"><span className="lbl">Pending</span><span className="val">{sum.pending.toLocaleString('en-IN')}</span></div>
-            <div className="sumrow"><span className="lbl">Refunded</span><span className="val">{money(sum.refunded)}</span></div>
-          </Card>
-
-          <Card title="Payment Methods">
-            {methods.length ? (
-              <>
-                <Donut
-                  size={150}
-                  legend={false}
-                  data={methods.map((m) => ({ label: m.label, value: m.value, color: m.color }))}
-                />
-                <div className="minilist" style={{ marginTop: 8 }}>
-                  {methods.map((m) => (
-                    <div key={m.label} className="mini-row" style={{ alignItems: 'center' }}>
-                      <span className="bdot" style={{ background: m.color }} />
-                      <div className="mini-bd" style={{ flex: 1 }}><strong>{m.label}</strong></div>
-                      <span className="muted">{m.pct} ({m.amount})</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : <p className="muted">No payment data yet.</p>}
-          </Card>
-
-          <Card title="Recent Activity">
-            <div className="minilist">
-              {(d.transactions || []).slice(0, 5).map((t) => (
-                <div key={t.id} className="mini-row">
-                  <span className="mini-ico"><ArrowUpRight size={16} /></span>
-                  <div className="mini-bd">
-                    <strong>{t.title}</strong>
-                    <small>{shortDate(t.created)}</small>
-                  </div>
-                  <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                    <strong>{money(t.amount)}</strong>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-      </div>
+      {settleOpen && (
+        <Modal title="Run Sitara bonus settlement" onClose={() => setSettleOpen(false)}
+          footer={<>
+            <button className="btn line" onClick={() => setSettleOpen(false)}>Cancel</button>
+            <button className="btn" disabled={settling} onClick={runSettlement}>{settling ? 'Running…' : 'Run settlement'}</button>
+          </>}>
+          <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.55, color: 'var(--ink-2)' }}>
+            Credits each qualifying expert's monthly tier bonus (working days, plus Sundays for Gold) to their wallet.
+            It runs automatically at the start of each month and is safe to run again — experts already paid for the month are skipped.
+          </p>
+        </Modal>
+      )}
 
       {active && (
         <Modal title="Transaction Details" onClose={() => setActive(null)} footer={<button className="btn line" onClick={() => setActive(null)}>Close</button>}>
           <Field label="Transaction ID"><input className="input" value={`#TXN${active.id}`} readOnly /></Field>
-          <Field label="Type"><div><Badge tone={txnTone(active.type)}>{active.type}</Badge></div></Field>
+          <Field label="Status"><div><Badge tone={TONE_OF[queueOf(active)]}>{LABEL_OF[queueOf(active)]}</Badge></div></Field>
+          <Field label="Method"><input className="input" value={methodLabel(active.method)} readOnly /></Field>
           <Field label="Title"><input className="input" value={active.title} readOnly /></Field>
           <Field label="Amount"><input className="input" value={money(active.amount)} readOnly /></Field>
-          <Field label="Status"><input className="input" value={active.status || '—'} readOnly /></Field>
           <Field label="Gateway Payment ID"><input className="input" value={active.paymentId || '—'} readOnly /></Field>
           {(active.refunded ?? 0) > 0 && <Field label="Refunded to card/UPI"><input className="input" value={money(active.refunded || 0)} readOnly /></Field>}
           <Field label="Customer"><input className="input" value={active.customer || '—'} readOnly /></Field>

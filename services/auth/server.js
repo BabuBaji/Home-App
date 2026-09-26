@@ -92,6 +92,9 @@ async function init() {
     // Ledger: which balance a row touched, and a typed reason (ADD_MONEY, CASHBACK, REFUND…).
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS balance_type TEXT NOT NULL DEFAULT 'cash'`,
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS kind TEXT`,
+    // Passbook-only rows (a booking paid by UPI/card/cash): shown to the customer, but no wallet money moved.
+    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS ledger_only BOOLEAN NOT NULL DEFAULT false`,
+    `UPDATE transactions SET ledger_only=true WHERE NOT ledger_only AND kind='BOOKING_PAYMENT' AND title LIKE 'Booking Payment · %'`,
     // Referrals: each user has a unique code; referred_by links a new user to their referrer.
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER`,
@@ -424,7 +427,7 @@ async function recordLedger(uid, { type, kind, title, amount, ref }) {
     const dup = await pool.query('SELECT 1 FROM transactions WHERE user_id=$1 AND ref=$2 AND kind=$3 LIMIT 1', [uid, ref, kind ?? null])
     if (dup.rowCount) return { balance: u.wallet || 0, duplicate: true }
   }
-  await pool.query('INSERT INTO transactions (user_id,type,title,amount,balance,ref,kind,balance_type,created) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+  await pool.query('INSERT INTO transactions (user_id,type,title,amount,balance,ref,kind,balance_type,created,ledger_only) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true)',
     [uid, t, title || 'Transaction', amt, u.wallet || 0, ref ?? null, kind ?? null, 'cash', nowIso()])
   return { balance: u.wallet || 0, recorded: true }
 }
@@ -1158,6 +1161,12 @@ app.get('/api/internal/users/:id/transactions', internalOnly, async (req, res) =
   const { rows } = await pool.query('SELECT * FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200', [Number(req.params.id)])
   res.json(rows)
 })
+// Wallet ledger across all users (admin Wallet page), newest first.
+app.get('/api/internal/wallet-transactions', internalOnly, async (req, res) => {
+  const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 500))
+  const { rows } = await pool.query('SELECT * FROM transactions WHERE NOT ledger_only ORDER BY id DESC LIMIT $1', [limit])
+  res.json(rows)
+})
 // Admin sets the wallet status (active / frozen / blocked / inactive).
 app.post('/api/internal/users/:id/wallet-status', internalOnly, async (req, res) => {
   const status = String(req.body?.status || '').toLowerCase()
@@ -1194,7 +1203,8 @@ app.post('/api/internal/users/:id/wallet', internalOnly, async (req, res) => {
     if (type === 'debit') {
       // Customer spending is blocked on a frozen/blocked wallet; admin debits bypass.
       if (!admin && status !== 'active') return res.status(403).json({ error: `Wallet is ${status}` })
-      if (bt !== 'cash') { const bal = await walletMutate(uid, { balanceType: bt, type: 'debit', kind, title: title || 'Wallet', amount: amt, ref: ref || null }); return res.json({ balance: u.wallet, [bt]: bal }) }
+      // An admin debit takes from exactly the balance it names; customer spending goes promo-first.
+      if (bt !== 'cash' || admin) { const bal = await walletMutate(uid, { balanceType: bt, type: 'debit', kind, title: title || 'Wallet', amount: amt, ref: ref || null }); return res.json({ balance: bt === 'cash' ? bal : u.wallet, [bt]: bal }) }
       const r = await walletSpend(uid, amt, { title: title || 'Booking payment', ref: ref || null, kind }) // promo-first, then cash
       return res.json(r)
     }

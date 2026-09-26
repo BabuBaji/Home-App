@@ -433,6 +433,8 @@ export const campaignUsage = (id: number) => req<{ total: number; customers: num
 
 /* payments / refunds */
 export const fetchPayments = () => req<any>('/payments')
+export type WalletTxn = { id: number; user_id: number; type: string; title: string; amount: number; balance: number; ref?: string | null; created: string; balance_type?: string; customer: string | null; phone: string | null }
+export const fetchWalletTxns = () => req<WalletTxn[]>('/wallet/transactions')
 export const fetchRefunds = () => req<any[]>('/refunds')
 // Routed through the approval matrix (id is the booking id). May execute now or queue for sign-off.
 export const issueRefund = (bookingId: number) => req<ActionResult>('/actions/refund', post('', { bookingId }))

@@ -1,302 +1,200 @@
 import { useEffect, useState } from 'react'
-import { Download, Plus, Wallet, ChevronRight, ArrowRight } from 'lucide-react'
-import { fetchCustomers, adjustWallet, fetchPayments } from '../api'
+import { Download, Plus, Wallet, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
+import { fetchCustomers, adjustWallet, fetchWalletTxns, type WalletTxn } from '../api'
 import type { Customer } from '../types'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Field, Loading, ErrorState, useToast, money, shortDate } from '../components/UI'
-import { Donut } from '../components/Charts'
+import { Card, StatCard, Badge, SearchBox, Pagination, Field, Loading, ErrorState, Modal, useToast, money, shortDate, FilterTabs } from '../components/UI'
 
-/* ---------- static demo data (web visualization build) ---------- */
-
-const QUICK_AMOUNTS = ['₹500', '₹1,000', '₹2,000', '₹5,000', '₹10,000', 'Other']
-
-type Txn = { id: number; type: string; title: string; amount: number; created: string; ref?: string; customer: string }
-
-const typeTone = (t: string): string => {
-  const s = (t || '').toLowerCase()
-  if (s === 'credit') return 'green'
-  if (s === 'debit') return 'amber'
-  return 'violet'
-}
-const typeLabel = (t: string): string => {
-  const s = (t || '').toLowerCase()
-  if (s === 'credit') return 'Added'
-  if (s === 'debit') return 'Used'
-  if (s === 'refund') return 'Refunded'
-  return t || '—'
-}
-
-const QUICK_LINKS = [
-  { title: 'Wallet Transactions', sub: 'View all transactions' },
-  { title: 'Customer Wallets', sub: 'Manage customer wallets' },
-  { title: 'Wallet Adjustments', sub: 'Add / Deduct manually' },
-  { title: 'Bulk Add Funds', sub: 'Add funds to multiple customers' },
-]
-
-const HOW_IT_WORKS = [
-  'Select a customer',
-  'Enter amount & select payment method',
-  'Confirm to add funds to wallet',
-]
-
-type Tab = 'funds' | 'transactions' | 'adjust'
+// Customer wallets: the real ledger (auth `transactions`) plus a manual credit / deduct.
+const QUICK_AMOUNTS = [100, 250, 500, 1000, 2000]
+type Queue = 'all' | 'credit' | 'debit'
+const isCredit = (t: WalletTxn) => (t.type || '').toLowerCase() === 'credit'
 
 export default function WorkerWallet() {
   const toast = useToast()
-  const [tab, setTab] = useState<Tab>('funds')
+  const [customers, setCustomers] = useState<Customer[] | null>(null)
+  const [txns, setTxns] = useState<WalletTxn[] | null>(null)
+  const [err, setErr] = useState('')
+  const [queue, setQueue] = useState<Queue>('all')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
-  const pageSize = 5
+  const [pageSize, setPageSize] = useState(10)
 
-  const [customers, setCustomers] = useState<Customer[] | null>(null)
-  const [txns, setTxns] = useState<Txn[] | null>(null)
-  const [err, setErr] = useState('')
-
-  // Add Funds form
-  const [custId, setCustId] = useState('')
+  // add / deduct form
+  const [open, setOpen] = useState(false)
+  const [dir, setDir] = useState<'credit' | 'debit'>('credit')
+  const [custQ, setCustQ] = useState('')
+  const [custId, setCustId] = useState<number | null>(null)
   const [amount, setAmount] = useState('')
-  const [method, setMethod] = useState('')
-  const [desc, setDesc] = useState('')
+  const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const loadTxns = () => fetchPayments().then((d: any) => setTxns(d.transactions || []))
   const load = () => {
     setErr('')
-    Promise.all([fetchCustomers().then(setCustomers), loadTxns()]).catch((e: Error) => setErr(e.message))
+    Promise.all([fetchCustomers().then(setCustomers), fetchWalletTxns().then(setTxns)]).catch((e: Error) => setErr(e.message))
   }
   useEffect(load, [])
+  useEffect(() => setPage(1), [queue, q])
 
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!customers || !txns) return <Loading />
 
-  const resetForm = () => { setCustId(''); setAmount(''); setMethod(''); setDesc('') }
+  const now = new Date()
+  const inMonth = (iso: string) => { const d = new Date(iso); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() }
+  const totalBalance = customers.reduce((a, c) => a + (c.wallet || 0), 0)
+  const withBalance = customers.filter((c) => (c.wallet || 0) > 0).length
+  const addedMonth = txns.filter((t) => isCredit(t) && inMonth(t.created)).reduce((a, t) => a + t.amount, 0)
+  const usedMonth = txns.filter((t) => !isCredit(t) && inMonth(t.created)).reduce((a, t) => a + t.amount, 0)
 
-  const pickChip = (a: string) => {
-    if (a === 'Other') { setAmount(''); return }
-    setAmount(a.replace(/[₹,]/g, ''))
-  }
+  const nameOf = (t: WalletTxn) => t.customer || `Customer #${t.user_id}`
+  const ql = q.trim().toLowerCase()
+  const filtered = txns
+    .filter((t) => queue === 'all' || (queue === 'credit') === isCredit(t))
+    .filter((t) => !ql || [nameOf(t), t.phone, t.title, t.ref, `wlt${t.id}`].some((v) => (v || '').toLowerCase().includes(ql)))
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  const addFunds = async () => {
+  const cq = custQ.trim().toLowerCase()
+  const matches = cq ? customers.filter((c) => (c.name || '').toLowerCase().includes(cq) || (c.phone || '').includes(cq) || (c.email || '').toLowerCase().includes(cq)).slice(0, 6) : []
+  const picked = customers.find((c) => c.id === custId) || null
+
+  const openForm = (d: 'credit' | 'debit' = 'credit') => { setDir(d); setCustQ(''); setCustId(null); setAmount(''); setNote(''); setOpen(true) }
+  const submit = async () => {
     const amt = Number(amount)
-    if (!custId) { toast('Select a customer', 'err'); return }
+    if (!picked) { toast('Pick a customer', 'err'); return }
     if (!(amt > 0)) { toast('Enter a valid amount', 'err'); return }
+    if (dir === 'debit' && amt > (picked.wallet || 0)) { toast(`${picked.name || 'This customer'} only has ${money(picked.wallet || 0)}`, 'err'); return }
     setSaving(true)
     try {
-      const res = await adjustWallet(Number(custId), amt, desc)
-      toast(res.pending ? 'Sent for approval — a second admin must sign off' : 'Funds added', 'ok')
-      resetForm()
-      await Promise.all([fetchCustomers().then(setCustomers), loadTxns()])
+      const res = await adjustWallet(picked.id, dir === 'credit' ? amt : -amt, note.trim() || undefined)
+      toast(res.pending ? 'Sent for approval — a second admin must sign off' : dir === 'credit' ? `${money(amt)} added` : `${money(amt)} deducted`, 'ok')
+      setOpen(false)
+      load()
     } catch (e) {
-      toast((e as Error).message || 'Could not add funds', 'err')
+      toast((e as Error).message || 'Could not update the wallet', 'err')
     } finally {
       setSaving(false)
     }
   }
 
-  // derived stat numbers
-  const totalBalance = customers.reduce((a, c) => a + (c.wallet || 0), 0)
-  const totalAdded = txns.filter((t) => (t.type || '').toLowerCase() === 'credit').reduce((a, t) => a + t.amount, 0)
-  const totalUsed = txns.filter((t) => (t.type || '').toLowerCase() === 'debit').reduce((a, t) => a + t.amount, 0)
-  const totalRefunds = txns.filter((t) => (t.type || '').toLowerCase() === 'refund').reduce((a, t) => a + t.amount, 0)
-  const activeWallets = customers.filter((c) => (c.wallet || 0) > 0).length
-
-  // Real wallet summary + activity breakdown (from transactions), replacing the old placeholders.
-  const now = new Date()
-  const inMonth = (iso: string) => { const d = new Date(iso); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() }
-  const sumType = (type: string, monthOnly = false) => txns.filter((t) => (t.type || '').toLowerCase() === type && (!monthOnly || inMonth(t.created))).reduce((a, t) => a + t.amount, 0)
-  const SUMMARY_ROWS = [
-    { label: 'Added This Month', value: money(sumType('credit', true)) },
-    { label: 'Used This Month', value: money(sumType('debit', true)) },
-    { label: 'Refunded This Month', value: money(sumType('refund', true)) },
-    { label: 'Active Wallets', value: activeWallets.toLocaleString('en-IN') },
-  ]
-  const ACTIVITY = [
-    { label: 'Added', value: totalAdded, color: '#16a34a' },
-    { label: 'Used', value: totalUsed, color: '#f59e0b' },
-    { label: 'Refunded', value: totalRefunds, color: '#2e90fa' },
-  ].filter((a) => a.value > 0)
-  const actTotal = ACTIVITY.reduce((a, r) => a + r.value, 0) || 1
-
-  const STATS = [
-    { icon: <Wallet size={22} />, tint: '#5b51e8', label: 'Total Wallet Balance', value: money(totalBalance), sub: 'across customers' },
-    { icon: <Download size={22} />, tint: '#16a34a', label: 'Total Added', value: money(totalAdded), sub: 'recent transactions' },
-    { icon: <Plus size={22} />, tint: '#f59e0b', label: 'Total Used', value: money(totalUsed), down: true, sub: 'recent transactions' },
-    { icon: <Wallet size={22} />, tint: '#f04438', label: 'Total Refunds', value: money(totalRefunds), down: true, sub: 'recent transactions' },
-    { icon: <Wallet size={22} />, tint: '#2e90fa', label: 'Active Wallets', value: activeWallets.toLocaleString('en-IN'), sub: 'with balance' },
-  ]
-
-  const ql = q.trim().toLowerCase()
-  const filtered = txns.filter((t) =>
-    !ql || String(t.id).includes(ql) || (t.ref || '').toLowerCase().includes(ql) || (t.customer || '').toLowerCase().includes(ql) || (t.title || '').toLowerCase().includes(ql))
-  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const exportCsv = () => {
+    const head = ['ID', 'Customer', 'Phone', 'Type', 'Description', 'Amount', 'Balance after', 'Ref', 'Date']
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const lines = [head.join(','), ...filtered.map((t) => [`WLT${t.id}`, nameOf(t), t.phone || '', isCredit(t) ? 'Added' : 'Used', t.title, t.amount, t.balance, t.ref || '', t.created].map(esc).join(','))]
+    const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' }))
+    const a = document.createElement('a'); a.href = url; a.download = 'wallet-transactions.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      {/* KPI row */}
       <div className="stat-row">
-        {STATS.map((s) => (
-          <StatCard key={s.label} icon={s.icon} tint={s.tint} label={s.label} value={s.value} sub={s.sub} down={(s as any).down} />
-        ))}
+        <StatCard icon={<Wallet size={22} />} tint="#5b51e8" label="Balance held" value={money(totalBalance)} sub={`${withBalance.toLocaleString('en-IN')} wallets with balance`} />
+        <StatCard icon={<ArrowDownLeft size={22} />} tint="#16a34a" label="Added this month" value={money(addedMonth)} sub="top-ups, refunds & credits" />
+        <StatCard icon={<ArrowUpRight size={22} />} tint="#f59e0b" label="Used this month" value={money(usedMonth)} sub="spent on bookings & deductions" />
       </div>
 
-      <div className="cols">
-        {/* MAIN COLUMN */}
-        <div className="grid" style={{ gap: 16 }}>
-          {/* Tabs + Add Funds panel */}
-          <Card>
-            <div className="tabs">
-              <button className={'tab' + (tab === 'funds' ? ' active' : '')} onClick={() => setTab('funds')}>Add Funds</button>
-              <button className={'tab' + (tab === 'transactions' ? ' active' : '')} onClick={() => setTab('transactions')}>Wallet Transactions</button>
-              <button className={'tab' + (tab === 'adjust' ? ' active' : '')} onClick={() => setTab('adjust')}>Wallet Adjustment</button>
-            </div>
+      <Card>
+        <div className="card-head lg">
+          <h3>Wallet transactions<span className="count">{txns.length.toLocaleString('en-IN')}</span></h3>
+          <div className="head-actions">
+            <button className="btn line" onClick={exportCsv}><Download size={15} /> Export</button>
+            <button className="btn line" onClick={() => openForm('debit')}>Deduct</button>
+            <button className="btn" onClick={() => openForm('credit')}><Plus size={16} /> Add funds</button>
+          </div>
+        </div>
 
-            <div className="grid" style={{ gridTemplateColumns: '1.7fr 1fr', gap: 18, alignItems: 'start', marginTop: 18 }}>
-              <div>
-                <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0 }}>Add Funds to Wallet</h3>
-                <p className="muted" style={{ fontSize: 13, margin: '4px 0 18px' }}>Add balance to customer's wallet</p>
+        <FilterTabs value={queue} onChange={setQueue} tabs={[
+          { key: 'all', label: 'All', count: txns.length },
+          { key: 'credit', label: 'Added', count: txns.filter(isCredit).length },
+          { key: 'debit', label: 'Used', count: txns.filter((t) => !isCredit(t)).length },
+        ]} />
 
-                <div className="form-grid">
-                  <Field label="Select Customer *">
-                    <select value={custId} onChange={(e) => setCustId(e.target.value)}>
-                      <option value="" disabled>Search by name, phone or email…</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''} · {money(c.wallet || 0)}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Amount (₹) *">
-                    <input type="text" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
-                  </Field>
-                  <Field label="Payment Method *">
-                    <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                      <option value="" disabled>Select payment method</option>
-                      <option value="upi">UPI</option>
-                      <option value="card">Credit Card</option>
-                      <option value="netbanking">Net Banking</option>
-                      <option value="wallet">Wallet Balance</option>
-                    </select>
-                  </Field>
-                  <Field label="Description (Optional)">
-                    <input type="text" placeholder="e.g., Promotional bonus, Top-up, etc." value={desc} onChange={(e) => setDesc(e.target.value)} />
-                  </Field>
+        <div className="toolbar">
+          <SearchBox value={q} onChange={setQ} placeholder="Search customer, phone, description or ref" />
+        </div>
+
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Customer</th><th>Description</th><th>Type</th><th className="num">Amount</th><th className="num">Balance after</th><th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((t) => (
+                <tr key={t.id}>
+                  <td className="nowrap">
+                    <strong className={t.customer ? '' : 'muted-name'} style={{ display: 'block', fontWeight: 600 }}>{nameOf(t)}</strong>
+                    <small className="muted" style={{ fontSize: 12 }}>{t.phone || `#WLT${t.id}`}</small>
+                  </td>
+                  <td style={{ maxWidth: 320 }}>
+                    <span style={{ display: 'block' }}>{t.title}</span>
+                    {t.ref && <small className="muted" style={{ fontSize: 12 }}>{t.ref}</small>}
+                  </td>
+                  <td><Badge tone={isCredit(t) ? 'green' : 'amber'}>{isCredit(t) ? 'Added' : 'Used'}</Badge></td>
+                  <td className="num"><strong style={{ color: isCredit(t) ? 'var(--green)' : 'var(--ink)' }}>{isCredit(t) ? '+' : '−'}{money(t.amount)}</strong></td>
+                  <td className="num muted">{money(t.balance)}{t.balance_type && t.balance_type !== 'cash' ? <small style={{ display: 'block', fontSize: 11.5 }}>{t.balance_type} balance</small> : null}</td>
+                  <td className="muted nowrap">{shortDate(t.created)}</td>
+                </tr>
+              ))}
+              {!pageRows.length && (
+                <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: '36px 0' }}>{txns.length ? 'No transactions match these filters.' : 'No wallet activity yet.'}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="transactions" onPage={setPage} onSize={(n) => { setPageSize(n); setPage(1) }} />
+      </Card>
+
+      {open && (
+        <Modal title={dir === 'credit' ? 'Add funds to a wallet' : 'Deduct from a wallet'} onClose={() => setOpen(false)}
+          footer={<>
+            <button className="btn line" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn" disabled={saving} onClick={submit}>{saving ? 'Saving…' : dir === 'credit' ? `Add ${amount ? money(Number(amount) || 0) : 'funds'}` : `Deduct ${amount ? money(Number(amount) || 0) : ''}`}</button>
+          </>}>
+          <div className="seg" style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 8, background: 'var(--line-2)', marginBottom: 14 }}>
+            {(['credit', 'debit'] as const).map((k) => (
+              <button key={k} className={'btn' + (dir === k ? '' : ' line')} style={{ height: 30, border: dir === k ? undefined : 'none', background: dir === k ? undefined : 'transparent' }} onClick={() => setDir(k)}>
+                {k === 'credit' ? 'Add' : 'Deduct'}
+              </button>
+            ))}
+          </div>
+          <Field label="Customer">
+            {picked ? (
+              <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid var(--line-strong)', borderRadius: 8, padding: '8px 12px' }}>
+                <div>
+                  <strong style={{ display: 'block' }}>{picked.name || `Customer #${picked.id}`}</strong>
+                  <small className="muted">{picked.phone || '—'} · balance {money(picked.wallet || 0)}</small>
                 </div>
-
-                <div className="row" style={{ gap: 8, flexWrap: 'wrap', margin: '14px 0 18px' }}>
-                  {QUICK_AMOUNTS.map((a) => <button key={a} className="chip" onClick={() => pickChip(a)}>{a}</button>)}
-                </div>
-
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  <label className="row" style={{ gap: 8, alignItems: 'center', fontSize: 14 }}>
-                    <input type="checkbox" defaultChecked /> Send SMS &amp; Email Notification
-                  </label>
-                  <div className="row" style={{ gap: 10 }}>
-                    <button className="btn line" onClick={resetForm}>Reset</button>
-                    <button className="btn" onClick={addFunds} disabled={saving}><Plus size={15} /> Add Funds</button>
+                <button className="btn line" style={{ height: 28, fontSize: 12.5 }} onClick={() => { setCustId(null); setCustQ('') }}>Change</button>
+              </div>
+            ) : (
+              <>
+                <input autoFocus value={custQ} onChange={(e) => setCustQ(e.target.value)} placeholder="Search name, mobile or email" />
+                {matches.length > 0 && (
+                  <div className="minilist" style={{ border: '1px solid var(--line)', borderRadius: 8, marginTop: 6, padding: 4 }}>
+                    {matches.map((c) => (
+                      <button key={c.id} className="menu-item" style={{ display: 'flex', width: '100%', justifyContent: 'space-between', padding: '7px 10px', border: 0, background: 'none', cursor: 'pointer', borderRadius: 6, textAlign: 'left' }} onClick={() => setCustId(c.id)}>
+                        <span><strong style={{ fontWeight: 600 }}>{c.name || `Customer #${c.id}`}</strong> <span className="muted">{c.phone}</span></span>
+                        <span className="muted">{money(c.wallet || 0)}</span>
+                      </button>
+                    ))}
                   </div>
-                </div>
-              </div>
-
-              {/* How it works panel */}
-              <div className="card" style={{ background: '#f4f3fe', padding: 18, borderRadius: 14, position: 'relative', overflow: 'hidden' }}>
-                <strong style={{ fontSize: 15 }}>How it works</strong>
-                <div className="minilist" style={{ marginTop: 14 }}>
-                  {HOW_IT_WORKS.map((t, i) => (
-                    <div key={i} className="mini-row" style={{ alignItems: 'flex-start' }}>
-                      <span className="mini-ico" style={{ background: '#5b51e8', color: '#fff', borderRadius: '50%', flex: 'none' }}>{i + 1}</span>
-                      <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{t}</strong></div>
-                    </div>
-                  ))}
-                </div>
-                <Wallet size={70} style={{ position: 'absolute', right: -8, bottom: -12, color: '#5b51e8', opacity: 0.1, zIndex: 0, pointerEvents: 'none' }} />
-              </div>
-            </div>
-          </Card>
-
-          {/* Recent Wallet Transactions */}
-          <Card title="Recent Wallet Transactions" right={<span className="link">View All</span>}>
-            <div className="toolbar">
-              <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by transaction, customer or ref…" />
-              <div className="tb-spacer" />
-            </div>
-            <div className="tablewrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Transaction ID</th><th>Customer</th><th>Type</th><th>Amount</th>
-                    <th>Payment Method</th><th>Description</th><th>Date &amp; Time</th><th>Status</th><th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.map((t) => (
-                    <tr key={t.id}>
-                      <td className="num">#WLT{t.id}</td>
-                      <td>
-                        <div className="cell-user">
-                          <Avatar name={t.customer} size={32} />
-                          <div><strong>{t.customer}</strong><small>{t.ref || ''}</small></div>
-                        </div>
-                      </td>
-                      <td><Badge tone={typeTone(t.type)}>{typeLabel(t.type)}</Badge></td>
-                      <td className="num">{money(t.amount)}</td>
-                      <td>
-                        <strong style={{ fontWeight: 500 }}>{t.title}</strong>
-                      </td>
-                      <td>{t.title}</td>
-                      <td className="muted">{shortDate(t.created)}</td>
-                      <td><Badge tone="green">Completed</Badge></td>
-                      <td><span className="link">View</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="transactions" onPage={setPage} />
-          </Card>
-        </div>
-
-        {/* RIGHT RAIL */}
-        <div className="col-rail">
-          <Card title="Wallet Summary" right={<span className="link">View Report</span>}>
-            <div className="card" style={{ background: '#f4f3fe', padding: 16, borderRadius: 12, marginBottom: 14 }}>
-              <small className="muted">Available Balance</small>
-              <div style={{ fontSize: 26, fontWeight: 800 }}>{money(totalBalance)}</div>
-            </div>
-            <div className="minilist">
-              {SUMMARY_ROWS.map((r) => (
-                <div key={r.label} className="mini-row">
-                  <span className="mini-ico" style={{ background: '#5b51e81f', color: '#5b51e8' }}><Wallet size={15} /></span>
-                  <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{r.label}</strong></div>
-                  <strong>{r.value}</strong>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card title="Wallet Activity">
-            <Donut data={ACTIVITY} size={170} legend={false} />
-            <div className="minilist" style={{ marginTop: 10 }}>
-              {ACTIVITY.map((r) => (
-                <div key={r.label} className="mini-row">
-                  <span className="bdot" style={{ background: r.color, marginTop: 5 }} />
-                  <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{r.label}</strong></div>
-                  <span className="num"><strong>{Math.round((r.value / actTotal) * 100)}%</strong> <small className="muted">({money(r.value)})</small></span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card title="Quick Links">
-            <div className="minilist">
-              {QUICK_LINKS.map((l, i) => (
-                <div key={l.title} className="mini-row link-row">
-                  <span className="mini-ico"><Wallet size={16} /></span>
-                  <div className="mini-bd"><strong>{l.title}</strong><small>{l.sub}</small></div>
-                  {i === 3 ? <ArrowRight size={16} className="muted" /> : <ChevronRight size={16} className="muted" />}
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-      </div>
+                )}
+                {cq && !matches.length && <small className="muted">No customer matches “{custQ}”.</small>}
+              </>
+            )}
+          </Field>
+          <Field label="Amount (₹)">
+            <input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))} placeholder="Enter amount" />
+          </Field>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '-4px 0 12px' }}>
+            {QUICK_AMOUNTS.map((a) => <button key={a} className={'chip' + (Number(amount) === a ? ' active' : '')} onClick={() => setAmount(String(a))}>{money(a)}</button>)}
+          </div>
+          <Field label="Note (shown in the customer's wallet history)">
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={dir === 'credit' ? 'e.g. Goodwill credit for delayed booking' : 'e.g. Reversal of duplicate credit'} />
+          </Field>
+        </Modal>
+      )}
     </div>
   )
 }

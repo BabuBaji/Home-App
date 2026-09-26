@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
-import { Funnel, Download, Eye, Calendar, CreditCard, Smartphone, Wallet, Landmark } from 'lucide-react'
+import { Download, Eye, Calendar, CreditCard, Smartphone, Wallet, Landmark } from 'lucide-react'
 import { fetchRefunds, issueRefund } from '../api'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate } from '../components/UI'
+import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, FilterTabs } from '../components/UI'
 
 type Refund = {
   id: number
@@ -41,6 +41,14 @@ const refundTone = (s: string): 'green' | 'amber' | 'red' => {
   return 'amber'
 }
 
+// Anything not paid back and not failed is still waiting (status 'cancelled' = refund pending).
+type Queue = 'pending' | 'failed' | 'refunded' | 'all'
+const queueOf = (s: string | null): Exclude<Queue, 'all'> => {
+  const v = (s || '').toLowerCase()
+  return v === 'refunded' ? 'refunded' : v === 'failed' ? 'failed' : 'pending'
+}
+const statusLabel = (s: string | null) => ({ refunded: 'Refunded', failed: 'Failed', pending: 'Pending' })[queueOf(s)]
+
 const CSV_HEAD = ['Refund ID', 'Booking ID', 'Customer', 'Amount', 'Refunded', 'Payment Method', 'Reason', 'Status', 'Date']
 const csvRow = (r: Refund) => [`#${r.id}`, r.ref, r.customer, r.total, r.refund ?? '', r.payment ?? '', r.cancel_reason ?? '', r.payment_status ?? '', r.created]
 function downloadCsv(name: string, rows: Refund[]) {
@@ -57,10 +65,10 @@ export default function Refunds() {
   const [rows, setRows] = useState<Refund[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState('all')
+  const [queue, setQueue] = useState<Queue>('pending')
   const [method, setMethod] = useState('all')
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   const [active, setActive] = useState<Refund | null>(null)
   const [issuing, setIssuing] = useState(false)
@@ -73,7 +81,7 @@ export default function Refunds() {
   const totalRefunds = rows.reduce((a, r) => a + (r.refund || 0), 0)
   const refundedRows = rows.filter((r) => (r.payment_status || '').toLowerCase() === 'refunded')
   const successful = refundedRows.reduce((a, r) => a + (r.refund || 0), 0)
-  const pendingRows = rows.filter((r) => (r.payment_status || '').toLowerCase() !== 'refunded')
+  const pendingRows = rows.filter((r) => queueOf(r.payment_status) === 'pending')
   const pending = pendingRows.reduce((a, r) => a + (r.total || 0), 0)
   const failed = rows.filter((r) => (r.payment_status || '').toLowerCase() === 'failed').reduce((a, r) => a + (r.total || 0), 0)
   // Real current-month refund total (not a copy of the all-time total).
@@ -85,11 +93,13 @@ export default function Refunds() {
 
   const ql = q.trim().toLowerCase()
   const filtered = rows.filter((r) => {
-    if (status !== 'all' && (r.payment_status || '').toLowerCase() !== status) return false
+    if (queue !== 'all' && queueOf(r.payment_status) !== queue) return false
     if (method !== 'all' && (r.payment || '').toLowerCase() !== method) return false
-    if (ql && !(r.ref.toLowerCase().includes(ql) || (r.customer || '').toLowerCase().includes(ql))) return false
+    if (ql && ![r.ref, r.customer, `#${r.id}`, r.cancel_reason].some((v) => (v || '').toLowerCase().includes(ql))) return false
     return true
   })
+  const methods = Array.from(new Set(rows.map((r) => (r.payment || '').toLowerCase()).filter(Boolean))).sort()
+  const count = (k: Queue) => (k === 'all' ? rows.length : rows.filter((r) => queueOf(r.payment_status) === k).length)
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   const doIssue = (r: Refund) => {
@@ -108,92 +118,76 @@ export default function Refunds() {
         <StatCard icon={<Wallet size={22} />} tint="#2e90fa" label="Refunded this month" value={money(thisMonth)} sub={`${money(totalRefunds)} all time`} />
       </div>
 
-      <Card title="Refunds & Cancellations">
+      <Card>
+        <div className="card-head lg">
+          <h3>Refunds<span className="count">{rows.length.toLocaleString('en-IN')}</span></h3>
+          <div className="head-actions">
+            <button className="btn line" onClick={() => downloadCsv('refunds.csv', filtered)}><Download size={15} /> Export</button>
+          </div>
+        </div>
+
+        <FilterTabs value={queue} onChange={(k) => { setQueue(k); setPage(1) }} tabs={[
+          { key: 'pending', label: 'Pending', count: count('pending'), alert: true },
+          { key: 'failed', label: 'Failed', count: count('failed'), alert: true },
+          { key: 'refunded', label: 'Refunded', count: count('refunded') },
+          { key: 'all', label: 'All', count: count('all') },
+        ]} />
+
         <div className="toolbar">
-          <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by Refund ID, Booking ID, Customer..." />
-          <select className="select flt" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
-            <option value="all">All Status</option>
-            <option value="refunded">Completed</option>
-            <option value="cancelled">Pending</option>
-            <option value="failed">Failed</option>
-          </select>
-          <select className="select flt" value={method} onChange={(e) => { setMethod(e.target.value); setPage(1) }}>
-            <option value="all">All Payment Methods</option>
-            <option value="card">Credit Card</option>
-            <option value="card">Debit Card</option>
-            <option value="upi">UPI</option>
-            <option value="wallet">Wallet</option>
-            <option value="netbanking">Net Banking</option>
-          </select>
-          <select className="select flt">
-            <option>All Cities</option>
-            <option>Mumbai</option>
-            <option>Delhi</option>
-            <option>Bangalore</option>
-          </select>
-          <button className="btn line"><Calendar size={16} /> Select Date Range</button>
-          <div className="tb-spacer" />
-          <button className="btn line"><Funnel size={16} /> Filters</button>
-          <button className="btn line" onClick={() => downloadCsv('refunds.csv', filtered)}><Download size={16} /> Export</button>
+          <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search booking ID, customer or reason" />
+          {methods.length > 1 && (
+            <select className="select flt" value={method} onChange={(e) => { setMethod(e.target.value); setPage(1) }}>
+              <option value="all">All payment methods</option>
+              {methods.map((m) => <option key={m} value={m}>{m.toUpperCase() === 'UPI' ? 'UPI' : m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="tablewrap">
           <table className="tbl">
             <thead>
               <tr>
-                <th>REFUND ID</th>
-                <th>BOOKING ID</th>
-                <th>CUSTOMER</th>
-                <th className="num">AMOUNT</th>
-                <th>PAYMENT METHOD</th>
-                <th>REASON</th>
-                <th>DATE &amp; TIME</th>
-                <th>STATUS</th>
-                <th>ACTIONS</th>
+                <th>Booking</th>
+                <th>Customer</th>
+                <th className="num">Paid</th>
+                <th className="num">Refund</th>
+                <th>Method</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th className="sticky-end">Actions</th>
               </tr>
             </thead>
             <tbody>
               {pageRows.map((r) => (
                 <tr key={r.id}>
-                  <td><strong>#{r.id}</strong></td>
-                  <td className="muted">{r.ref}</td>
-                  <td>
-                    <div className="cell-user">
-                      <Avatar name={r.customer} size={34} />
-                      <div>
-                        <strong>{r.customer}</strong>
-                        <span className="muted" style={{ display: 'block', fontSize: 12 }}>{money(r.refund || 0)} refunded</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="num"><strong>{money(r.total)}</strong></td>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, background: '#5b51e81a', color: '#5b51e8' }}>{methodIcon(r.payment || '')}</span>
-                      <div>
-                        <strong>{r.payment || '—'}</strong>
-                        <span className="muted" style={{ display: 'block', fontSize: 12 }}>{r.cancel_fee != null ? `Fee ${money(r.cancel_fee)}` : '—'}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="muted" style={{ maxWidth: 180, whiteSpace: 'normal' }}>{r.cancel_reason || '—'}</td>
-                  <td>
-                    <strong className="nowrap">{shortDate(r.created)}</strong>
-                  </td>
-                  <td><Badge tone={refundTone(r.payment_status || '')}>{r.payment_status || '—'}</Badge></td>
-                  <td>
+                  <td className="nowrap"><strong>{r.ref}</strong><small className="muted" style={{ display: 'block', fontSize: 12 }}>Refund #{r.id}</small></td>
+                  <td className="nowrap">{r.customer}</td>
+                  <td className="num">{money(r.total)}</td>
+                  <td className="num"><strong>{money(r.refund || 0)}</strong>{r.cancel_fee ? <small className="muted" style={{ display: 'block', fontSize: 12 }}>fee {money(r.cancel_fee)}</small> : null}</td>
+                  <td className="nowrap"><span className="row" style={{ gap: 6, alignItems: 'center', color: 'var(--ink-2)' }}><span style={{ color: 'var(--muted)', display: 'inline-flex' }}>{methodIcon(r.payment || '')}</span>{r.payment ? (r.payment.toLowerCase() === 'upi' ? 'UPI' : r.payment.charAt(0).toUpperCase() + r.payment.slice(1)) : '—'}</span></td>
+                  <td className="muted" style={{ maxWidth: 240, whiteSpace: 'normal' }}>{r.cancel_reason || '—'}</td>
+                  <td><Badge tone={refundTone(r.payment_status || '')}>{statusLabel(r.payment_status)}</Badge></td>
+                  <td className="muted nowrap">{shortDate(r.created)}</td>
+                  <td className="sticky-end">
                     <div className="actions">
-                      <button className="iconbtn" title="View" onClick={() => setActive(r)}><Eye size={16} /></button>
-                      <button className="iconbtn" title="Download" onClick={() => downloadCsv(`${r.ref}.csv`, [r])}><Download size={16} /></button>
+                      {queueOf(r.payment_status) !== 'refunded'
+                        ? <button className="btn line" style={{ height: 30, fontSize: 12.5 }} onClick={() => setActive(r)}>Review</button>
+                        : <button className="iconbtn" title="View" onClick={() => setActive(r)}><Eye size={16} /></button>}
                     </div>
                   </td>
                 </tr>
               ))}
+              {!pageRows.length && (
+                <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: '36px 0' }}>
+                  {queue === 'pending' && !ql ? 'No refunds waiting — nothing to pay back.' : queue === 'failed' && !ql ? 'No failed refunds.' : 'No refunds match these filters.'}
+                </td></tr>
+              )}
             </tbody>
           </table>
         </div>
 
-        <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="refunds" onPage={setPage} />
+        <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="refunds" onPage={setPage} onSize={(n) => { setPageSize(n); setPage(1) }} />
       </Card>
 
       {active && (
@@ -218,7 +212,7 @@ export default function Refunds() {
           <Field label="Cancellation Fee"><input value={active.cancel_fee != null ? money(active.cancel_fee) : '—'} readOnly /></Field>
           <Field label="Payment Method"><input value={active.payment || '—'} readOnly /></Field>
           <Field label="Reason"><input value={active.cancel_reason || '—'} readOnly /></Field>
-          <Field label="Status"><input value={active.payment_status || '—'} readOnly /></Field>
+          <Field label="Status"><input value={statusLabel(active.payment_status)} readOnly /></Field>
           <Field label="Date"><input value={shortDate(active.created)} readOnly /></Field>
         </Modal>
       )}

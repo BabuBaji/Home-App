@@ -1289,6 +1289,21 @@ app.get('/api/admin/customers', admin, requireAnyPerm('customers.view', 'wallet.
     }
   }))
 })
+// Customer wallet ledger (credits, debits, refunds to wallet), limited to customers in the admin's scope.
+app.get('/api/admin/wallet/transactions', admin, requireAnyPerm('wallet.view', 'customers.view'), async (req, res) => {
+  const [rows, customersAll, bookings, defAddrs] = await Promise.all([
+    tryGet(U.auth, '/api/internal/wallet-transactions?limit=500', []),
+    tryGet(U.auth, '/api/internal/customers', []),
+    tryGet(U.booking, '/api/internal/bookings', []),
+    tryGet(U.auth, '/api/internal/addresses/defaults', []),
+  ])
+  const zoneOf = await customerZoneMap(defAddrs, bookings)
+  const byId = new Map(customersAll.filter((c) => customerInScope(req.admin?.scope, c, zoneOf)).map((c) => [c.id, c]))
+  res.json(rows.filter((t) => byId.has(t.user_id)).map((t) => {
+    const c = byId.get(t.user_id)
+    return { ...t, customer: c.name || null, phone: c.phone || null }
+  }))
+})
 // Add Customer (admin). Creates the user in auth by phone (find-or-create is idempotent), then applies
 // the name/email/city. Returns the created customer id.
 app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (req, res) => {
