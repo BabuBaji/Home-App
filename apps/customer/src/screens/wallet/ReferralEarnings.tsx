@@ -66,7 +66,8 @@ export default function ReferralEarnings() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" onClick={() => nav('/refer')}><Share2 size={16} /> Refer Friends &amp; Earn</button>
+        <button className="btn full" onClick={() => nav('/refer')}><Share2 size={16} /> {t('Refer Friends & Earn')}</button>
+
       </div>
     </div>
   )

@@ -93,7 +93,7 @@ export default function History() {
                   <button key={b.id} className="uh-row" onClick={() => nav(`/booking-details/${b.id}`)}>
                     <span className="uh-med"><span className="uh-med-d">{m.day}</span><span className="uh-med-m">{m.mon}</span></span>
                     <span className="uh-main">
-                      <span className="uh-name">{primary?.name}{extra > 0 ? ` +${extra}` : ''}</span>
+                      <span className="uh-name">{t(primary?.name || '')}{extra > 0 ? ` +${extra}` : ''}</span>
                       {dur && <span className="uh-sub">{dur}</span>}
                       <span className={`uh-note ${noteCls}`}>{note}</span>
                     </span>

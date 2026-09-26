@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Search, SlidersHorizontal, ChevronDown, MessageCircleQuestion } from 'lucide-react'
+import { t } from '../../i18n'
 
 const CATS = ['All', 'Bookings', 'Payments', 'Services', 'Others']
 const FAQS: { q: string; a: string; cat: string }[] = [
@@ -26,44 +27,45 @@ export default function FAQs() {
   const [open, setOpen] = useState<number | null>(null)
 
   const shown = useMemo(() => FAQS.filter((f) =>
-    (cat === 'All' || f.cat === cat) && (!q.trim() || (f.q + f.a).toLowerCase().includes(q.toLowerCase()))), [q, cat])
+    (cat === 'All' || f.cat === cat) && (!q.trim() || (f.q + ' ' + f.a + ' ' + t(f.q) + ' ' + t(f.a)).toLowerCase().includes(q.toLowerCase()))), [q, cat])
 
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-        <div className="titles"><h1>Frequently Asked Questions</h1></div>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <div className="titles"><h1>{t('Frequently Asked Questions')}</h1></div>
         <span className="iconbtn ghost" />
       </header>
 
       <div className="content">
         <div className="cp-entry">
-          <span className="faq-search"><Search size={17} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search FAQs..." /></span>
-          <button className="faq-filter" aria-label="Filter"><SlidersHorizontal size={17} /></button>
+          <span className="faq-search"><Search size={17} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search FAQs...')} /></span>
+          <button className="faq-filter" aria-label={t('Filter')}><SlidersHorizontal size={17} /></button>
         </div>
 
         <div className="ord-chips">
-          {CATS.map((c) => <button key={c} className={`ord-chip ${cat === c ? 'active' : ''}`} onClick={() => setCat(c)}>{c}</button>)}
+          {CATS.map((c) => <button key={c} className={`ord-chip ${cat === c ? 'active' : ''}`} onClick={() => setCat(c)}>{t(c)}</button>)}
         </div>
 
-        {shown.length === 0 && <div className="state"><div className="ico">🔍</div><h3>No matching FAQs</h3><p>Try a different search or category.</p></div>}
+        {shown.length === 0 && <div className="state"><div className="ico">🔍</div><h3>{t('No matching FAQs')}</h3><p>{t('Try a different search or category.')}</p></div>}
 
         <div className="faq-list">
           {shown.map((f, i) => (
             <div key={f.q} className={`faq-item ${open === i ? 'open' : ''}`}>
               <button className="faq-q" onClick={() => setOpen(open === i ? null : i)}>
-                <span>{f.q}</span><ChevronDown size={18} className="faq-chev" />
+                <span>{t(f.q)}</span><ChevronDown size={18} className="faq-chev" />
               </button>
-              {open === i && <div className="faq-a">{f.a}</div>}
+              {open === i && <div className="faq-a">{t(f.a)}</div>}
             </div>
           ))}
         </div>
 
         <div className="faq-contact">
           <div>
-            <div className="faq-contact-t">Can't find your answer?</div>
-            <div className="faq-contact-d">Our support team is here to help you.</div>
-            <button className="faq-contact-btn" onClick={() => nav('/support/ticket')}>Contact Support</button>
+            <div className="faq-contact-t">{t("Can't find your answer?")}</div>
+            <div className="faq-contact-d">{t('Our support team is here to help you.')}</div>
+            <button className="faq-contact-btn" onClick={() => nav('/support/ticket')}>{t('Contact Support')}</button>
+
           </div>
           <span className="faq-contact-art"><MessageCircleQuestion size={30} /></span>
         </div>

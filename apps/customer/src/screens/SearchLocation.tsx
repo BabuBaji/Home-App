@@ -6,6 +6,7 @@ import { useStore } from '../store'
 import { fetchAddresses, setDefaultAddressApi, deleteAddressApi, updateMe } from '../api'
 import { searchPlaces, placeDetails, type Place } from '../geo'
 import type { Address } from '../types'
+import { t } from '../i18n'
 
 // Address hub shown when changing location: search + Add address + Use current location + the saved
 // addresses (with the default flagged and an Edit action), Rapido/Swiggy-style.
@@ -27,8 +28,8 @@ export default function SearchLocation() {
 
   useEffect(() => {
     if (q.trim().length < 3) { setResults([]); return }
-    const t = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
-    return () => clearTimeout(t)
+    const tm = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
+    return () => clearTimeout(tm)
   }, [q])
 
   async function pickSearch(p: Place) {
@@ -54,7 +55,7 @@ export default function SearchLocation() {
     try {
       const rest = await deleteAddressApi(a.id)
       setList(rest)
-      toast('Address deleted')
+      toast(t('Address deleted'))
     } catch (e) { toast((e as Error).message) } finally { setBusy(false) }
   }
 
@@ -63,15 +64,15 @@ export default function SearchLocation() {
   return (
     <div className="sl-screen">
       <div className="ad-top">
-        <button className="mp-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
-        <b>Search your location</b>
+        <button className="mp-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
+        <b>{t('Search your location')}</b>
       </div>
 
       <div className="sl-body">
         <div className="sl-search">
           <div className="mp-search-box">
             <Search size={18} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search locality, sector, area" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search locality, sector, area')} />
           </div>
           {results.length > 0 && (
             <div className="mp-results">
@@ -86,15 +87,15 @@ export default function SearchLocation() {
 
         <div className="sl-actions">
           <button className="sl-action" onClick={() => nav('/onboarding/location')}>
-            <Plus size={20} className="sl-a-ic" /><span className="grow">Add address</span><ChevronRight size={18} className="sl-chev" />
+            <Plus size={20} className="sl-a-ic" /><span className="grow">{t('Add address')}</span><ChevronRight size={18} className="sl-chev" />
           </button>
           <div className="sl-div" />
           <button className="sl-action" onClick={() => nav('/onboarding/location', { state: { useCurrent: true } })}>
-            <LocateFixed size={20} className="sl-a-ic" /><span className="grow">Use current location</span><ChevronRight size={18} className="sl-chev" />
+            <LocateFixed size={20} className="sl-a-ic" /><span className="grow">{t('Use current location')}</span><ChevronRight size={18} className="sl-chev" />
           </button>
         </div>
 
-        {list.length > 0 && <div className="sl-label">SAVED ADDRESSES · swipe a card to delete</div>}
+        {list.length > 0 && <div className="sl-label">{t('SAVED ADDRESSES · swipe a card to delete')}</div>}
         {list.map((a) => {
           const dx = swipe?.id === a.id ? swipe.dx : 0
           return (
@@ -112,10 +113,10 @@ export default function SearchLocation() {
               >
                 <div className="sl-addr-ic"><MapPin size={20} /></div>
                 <div className="grow">
-                  <div className="sl-addr-h">{a.label}{a.is_default ? <span className="sl-badge">Currently selected</span> : null}</div>
+                  <div className="sl-addr-h">{t(a.label)}{a.is_default ? <span className="sl-badge">{t('Currently selected')}</span> : null}</div>
                   <div className="sl-addr-line">{a.line}</div>
-                  <div className="sl-addr-mob">Mobile:{mobileOf(a)}</div>
-                  <button className="sl-edit" onClick={(e) => { e.stopPropagation(); nav('/address-details', { state: { edit: a } }) }}>EDIT</button>
+                  <div className="sl-addr-mob">{t('Mobile:')}{mobileOf(a)}</div>
+                  <button className="sl-edit" onClick={(e) => { e.stopPropagation(); nav('/address-details', { state: { edit: a } }) }}>{t('EDIT')}</button>
                 </div>
               </div>
             </div>
@@ -126,11 +127,12 @@ export default function SearchLocation() {
       {confirmDel && (
         <div className="cf-backdrop" onClick={() => setConfirmDel(null)}>
           <div className="cf-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="cf-title">Delete this address?</div>
+            <div className="cf-title">{t('Delete this address?')}</div>
             <div className="cf-text">{confirmDel.line}</div>
             <div className="cf-btns">
-              <button className="cf-cancel" onClick={() => setConfirmDel(null)}>Cancel</button>
-              <button className="cf-del" onClick={() => doDelete(confirmDel)} disabled={busy}>Delete</button>
+              <button className="cf-cancel" onClick={() => setConfirmDel(null)}>{t('Cancel')}</button>
+              <button className="cf-del" onClick={() => doDelete(confirmDel)} disabled={busy}>{t('Delete')}</button>
+
             </div>
           </div>
         </div>

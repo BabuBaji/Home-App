@@ -1,6 +1,7 @@
 import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { API_BASE } from './api'
+import { t } from './i18n'
 
 export interface Place { label: string; sub?: string; lat: number; lng: number; placeId?: string; pincode?: string }
 
@@ -60,8 +61,8 @@ export async function getCurrentPosition(): Promise<{ lat: number; lng: number }
     // Turn on the system location toggle FIRST (pops the in-app dialog); doing this
     // before checkPermissions avoids its "location services not enabled" rejection.
     const enabled = await ensureLocationEnabled()
-    if (!(await ensurePermission())) throw new GeoError('permission', 'Location permission denied')
-    if (!enabled) throw new GeoError('disabled', 'Location is turned off')
+    if (!(await ensurePermission())) throw new GeoError('permission', t('Location permission denied'))
+    if (!enabled) throw new GeoError('disabled', t('Location is turned off'))
     try {
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 })
       return { lat: pos.coords.latitude, lng: pos.coords.longitude }
@@ -73,10 +74,10 @@ export async function getCurrentPosition(): Promise<{ lat: number; lng: number }
   }
   // browser fallback (web)
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new GeoError('unavailable', 'Geolocation not available'))
+    if (!navigator.geolocation) return reject(new GeoError('unavailable', t('Geolocation not available')))
     navigator.geolocation.getCurrentPosition(
       (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      (err) => reject(err?.code === 1 ? new GeoError('permission', 'Location permission denied') : new GeoError('unavailable', 'Could not get location')),
+      (err) => reject(err?.code === 1 ? new GeoError('permission', t('Location permission denied')) : new GeoError('unavailable', t('Could not get location'))),
       { enableHighAccuracy: true, timeout: 15000 },
     )
   })
@@ -112,7 +113,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<{ label:
   const a = j.address || {}
   const area = a.suburb || a.neighbourhood || a.village || a.town || a.city_district || a.locality || ''
   const city = a.city || a.town || a.state_district || a.state || ''
-  const label = [area, city].filter(Boolean).join(', ') || j.display_name?.split(',').slice(0, 2).join(',') || 'Current location'
+  const label = [area, city].filter(Boolean).join(', ') || j.display_name?.split(',').slice(0, 2).join(',') || t('Current location')
   return { label, sub: j.display_name || '', raw: j }
 }
 

@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
+import { t } from './i18n'
 import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification, Offer, CartItem } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the apps
@@ -68,9 +69,9 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (res.status === 401 && token) {
     clearToken(); clearUser()
     onUnauthorized?.()
-    throw new Error('Your session expired — please sign in again.')
+    throw new Error(t('Your session expired — please sign in again.'))
   }
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || `Request failed (${res.status})`) }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || t('Request failed ({status})', { status: res.status })) }
   return res.json()
 }
 

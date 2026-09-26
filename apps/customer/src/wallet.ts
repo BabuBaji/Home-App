@@ -9,7 +9,7 @@ export const money2 = (n?: number) =>
 
 // en-IN renders "10:20 am"; the design shows "10:20 AM".
 export const stamp = (s: string) =>
-  new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  new Date(s).toLocaleString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     .replace(/\b(am|pm)\b/i, (m) => m.toUpperCase())
 
 export const dayStamp = (s: string) =>

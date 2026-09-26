@@ -6,10 +6,11 @@ import { ArrowLeft, CheckCircle2, Share2 } from 'lucide-react'
 import { Loading } from '../../components/UI'
 import { fetchRefunds, fetchBooking, type RefundEntry } from '../../api'
 import type { Booking } from '../../types'
+import { t, dateLocale } from '../../i18n'
 
 const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
-const stamp = (s: string) => new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(/\b(am|pm)\b/i, (m) => m.toUpperCase())
-const day = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const stamp = (s: string) => new Date(s).toLocaleString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(/\b(am|pm)\b/i, (m) => m.toUpperCase())
+const day = (s: string) => new Date(s).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' })
 
 export default function RefundStatus() {
   const nav = useNavigate()
@@ -27,13 +28,13 @@ export default function RefundStatus() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Refund Status</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Refund Status')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
   if (refund === undefined) return <div className="screen">{head}<Loading /></div>
-  if (!refund) return <div className="screen">{head}<div className="state"><div className="ico">↩️</div><h3>No refunds yet</h3><p>Refunds from cancelled bookings show here.</p></div></div>
+  if (!refund) return <div className="screen">{head}<div className="state"><div className="ico">↩️</div><h3>{t('No refunds yet')}</h3><p>{t('Refunds from cancelled bookings show here.')}</p></div></div>
 
   const done = refund.status === 'completed'
   const created = refund.created
@@ -52,37 +53,38 @@ export default function RefundStatus() {
         <div className={`rs-banner ${done ? 'ok' : refund.status === 'failed' ? 'fail' : 'pending'}`}>
           <CheckCircle2 size={22} />
           <div>
-            <div className="rs-banner-id">Refund ID: {refund.ref}</div>
-            <div className="rs-banner-t">{done ? 'Completed' : refund.status === 'failed' ? 'Failed' : 'Pending'}</div>
-            <div className="rs-banner-d">{done ? 'Refund completed successfully' : refund.status === 'failed' ? 'Refund could not be processed' : 'Your refund is being processed'}</div>
+            <div className="rs-banner-id">{t('Refund ID:')} {refund.ref}</div>
+            <div className="rs-banner-t">{done ? t('Completed') : refund.status === 'failed' ? t('Failed') : t('Pending')}</div>
+            <div className="rs-banner-d">{done ? t('Refund completed successfully') : refund.status === 'failed' ? t('Refund could not be processed') : t('Your refund is being processed')}</div>
             <div className="rs-banner-when">{stamp(created)}</div>
           </div>
         </div>
 
-        <div className="rs-sec">Refund Details</div>
+        <div className="rs-sec">{t('Refund Details')}</div>
         <div className="ws-card rs-kv">
-          <Row k="Booking ID" v={refund.ref} />
-          <Row k="Service" v={refund.title} />
-          <Row k="Amount" v={money(refund.amount)} />
-          {booking && <Row k="Payment Method" v={(booking.payment || '—').toUpperCase()} />}
-          <Row k="Refund Date" v={day(created)} />
-          {booking && <Row k="Refunded To" v="HomeHelp Wallet" />}
+          <Row k={t('Booking ID')} v={refund.ref} />
+          <Row k={t('Service')} v={refund.title} />
+          <Row k={t('Amount')} v={money(refund.amount)} />
+          {booking && <Row k={t('Payment Method')} v={(booking.payment || '—').toUpperCase()} />}
+          <Row k={t('Refund Date')} v={day(created)} />
+          {booking && <Row k={t('Refunded To')} v={t('HomeHelp Wallet')} />}
         </div>
 
-        <div className="rs-sec">Refund Timeline</div>
+        <div className="rs-sec">{t('Refund Timeline')}</div>
         <div className="rs-timeline">
           {steps.map((s, i) => (
             <div key={s.t} className={`rs-step ${s.on ? 'on' : ''}`}>
               <span className="rs-dot">{s.on && <CheckCircle2 size={16} />}</span>
               {i < steps.length - 1 && <span className={`rs-line ${steps[i + 1].on ? 'on' : ''}`} />}
-              <div className="rs-step-main"><div className="rs-step-t">{s.t}</div><div className="rs-step-at">{stamp(s.at)}</div></div>
+              <div className="rs-step-main"><div className="rs-step-t">{t(s.t)}</div><div className="rs-step-at">{stamp(s.at)}</div></div>
             </div>
           ))}
         </div>
       </div>
 
       <div className="w-foot">
-        <button className="btn ghost full" onClick={() => nav('/cancellation-policy')}>View Refund Policy</button>
+        <button className="btn ghost full" onClick={() => nav('/cancellation-policy')}>{t('View Refund Policy')}</button>
+
       </div>
     </div>
   )

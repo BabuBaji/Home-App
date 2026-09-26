@@ -3997,3 +3997,26 @@ body { line-height: 1.45; }
 .cw-call:disabled { opacity: .6; }
 .cw-note { background: var(--primary-50); color: var(--primary); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; max-width: 320px; }
 .m2 .au-link, .screen.jt .au-link { color: var(--av, var(--v)); background: none; border: 0; padding: 0; }
+
+/* First-run language picker on the welcome screen (all 13 languages). */
+.aw-lang { position: relative; display: flex; width: fit-content; align-items: center; gap: 6px; margin: -6px 0 6px auto;
+  padding: 6px 12px; border: 1px solid var(--line, #e5e7eb); border-radius: 999px; background: #fff; color: var(--aink, #1c1830);
+  font-size: 13px; font-weight: 600; }
+.aw-lang select { appearance: none; -webkit-appearance: none; border: 0; background: transparent; font: inherit; color: inherit;
+  padding-inline-end: 2px; max-width: 170px; outline: none; }
+
+/* ---------- Right-to-left (Urdu) ----------
+   i18n.ts sets <html dir="rtl"> for Urdu. Flex/grid rows and text already mirror; these rules fix the
+   few things that use physical left/right: directional icons, absolutely placed art/badges and the
+   progress connectors. Inline runs (refs like #HH123, phone numbers, ₹ amounts inside Urdu text)
+   take their direction from their own content. */
+[dir="rtl"] :is(.lucide-arrow-left, .lucide-arrow-right, .lucide-chevron-left, .lucide-chevron-right,
+  .lucide-chevrons-left, .lucide-chevrons-right, .lucide-move-right, .lucide-undo-2, .lucide-send) { transform: scaleX(-1); }
+[dir="rtl"] :is(span, b, strong, small, em, bdi) { unicode-bidi: plaintext; }
+[dir="rtl"] .hd-hero-img { right: auto; left: -6px; }
+[dir="rtl"] .hd-hero-emoji { right: auto; left: 22px; }
+[dir="rtl"] .hd-badge { right: auto; left: 3px; direction: ltr; }
+[dir="rtl"] .jt-step:not(:last-child)::after { left: auto; right: 50%; }
+[dir="rtl"] .rs-line { left: auto; right: 11px; }
+[dir="rtl"] .jt-mini-step:not(:last-child)::after { left: auto; right: 50%; }
+[dir="rtl"] input[type="tel"], [dir="rtl"] input[inputmode="numeric"] { direction: ltr; text-align: right; }

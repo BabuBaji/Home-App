@@ -5,7 +5,7 @@ import { Loading, useBack } from '../../components/UI'
 import { fetchJobMessages, sendJobMessage, type JobMessage } from '../../api'
 import { useJob, proName } from './useJob'
 import { WorkerAvatar } from './parts'
-import { t } from '../../i18n'
+import { t, dateLocale } from '../../i18n'
 
 // Module 6 · #46 — Chat with Worker. Backed by the real job_messages store the worker app already
 // reads and writes, so a message sent here lands on the worker's job screen (and their replies land
@@ -90,7 +90,7 @@ export default function Chat() {
             <div key={m.id} className={`jt-bubble ${mine ? 'me' : 'them'}${'pending' in m ? ' pending' : ''}`}>
               {m.body}
               <span className="jt-bubble-t">
-                {new Date(m.created).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                {new Date(m.created).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
           )

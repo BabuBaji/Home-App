@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ArrowLeft, Search, Check, MapPin } from 'lucide-react'
+import { t } from '../../i18n'
 
 // Module 3 · #19 — Add Landmark (overlay). Pick a popular landmark or type a custom one.
 const POPULAR = [
@@ -17,12 +18,12 @@ export default function LandmarkSelect({ initial, onDone, onClose }:
   return (
     <div className="ad2-overlay m2">
       <div className="ps-top">
-        <button className="au-back" onClick={onClose} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Add Landmark</b><span style={{ width: 42 }} />
+        <button className="au-back" onClick={onClose} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Add Landmark')}</b><span style={{ width: 42 }} />
       </div>
       <div className="content">
-        <div className="au-search"><Search size={18} /><input value={q} onChange={(e) => { setQ(e.target.value); setSel('') }} placeholder="Search or add landmark" /></div>
-        <div className="au-eyebrow">Popular Landmarks</div>
+        <div className="au-search"><Search size={18} /><input value={q} onChange={(e) => { setQ(e.target.value); setSel('') }} placeholder={t('Search or add landmark')} /></div>
+        <div className="au-eyebrow">{t('Popular Landmarks')}</div>
         <div className="ad2-list">
           {list.map((l) => (
             <button key={l} className="ad2-opt" onClick={() => { setSel(l); setQ(l) }}>
@@ -31,11 +32,12 @@ export default function LandmarkSelect({ initial, onDone, onClose }:
               <span className={`au-radio ${value === l ? 'on' : ''}`}>{value === l && <Check size={13} />}</span>
             </button>
           ))}
-          {list.length === 0 && q.trim() && <p className="ad2-hint">Save “{q.trim()}” as your landmark.</p>}
+          {list.length === 0 && q.trim() && <p className="ad2-hint">{t('Save “{name}” as your landmark.', { name: q.trim() })}</p>}
         </div>
       </div>
       <div className="au-foot">
-        <button className="au-btn" onClick={() => onDone(value)} disabled={!value}>Save Landmark</button>
+        <button className="au-btn" onClick={() => onDone(value)} disabled={!value}>{t('Save Landmark')}</button>
+
       </div>
     </div>
   )

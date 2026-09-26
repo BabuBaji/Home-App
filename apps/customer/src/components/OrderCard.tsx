@@ -31,7 +31,7 @@ export default function OrderCard({ b, onClick }: { b: Booking; onClick: () => v
       </span>
 
       <span className="ord-body">
-        <span className="ord-title">{primary?.name}{extra > 0 ? ` +${extra}` : ''}</span>
+        <span className="ord-title">{t(primary?.name || '')}{extra > 0 ? ` +${extra}` : ''}</span>
         <span className="ord-sub">
           {dur && <>{dur} • </>}{money(b.total)}
         </span>

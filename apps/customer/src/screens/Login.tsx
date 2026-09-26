@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ShieldCheck, BadgeCheck, Clock3, Sparkles, Delete } from 'lucide-react'
+import { ArrowLeft, ShieldCheck, BadgeCheck, Clock3, Sparkles, Delete, Globe } from 'lucide-react'
 import { useStore } from '../store'
 import { requestOtp, verifyOtp, googleAuth } from '../api'
 import { useToast } from '../components/UI'
-import { t } from '../i18n'
+import { t, setLang, useLang, LANGUAGES } from '../i18n'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 const OTP_LEN = 4                 // backend issues a 4-digit code (services/auth DEV_OTP)
@@ -14,6 +14,7 @@ export default function Login() {
   const nav = useNavigate()
   const { signIn } = useStore()
   const toast = useToast()
+  const lang = useLang()
   const [step, setStep] = useState<'welcome' | 'phone' | 'otp'>('welcome')
   const [phone, setPhone] = useState('98765 43210')
   const [otp, setOtp] = useState('')
@@ -98,7 +99,17 @@ export default function Login() {
     return (
       <div className="auth auth-welcome">
         <div className="content aw-scroll">
-          <h1 className="au-h1 aw-title">{t('Welcome')}<br />{t('Back!')}</h1>
+          {/* First-run language choice — every supported language, switches the screen instantly.
+              Marked pending so the profile adopts it after sign-in instead of overwriting it. */}
+          <label className="aw-lang">
+            <Globe size={15} aria-hidden="true" />
+            <select value={lang} aria-label={t('Language')}
+              onChange={(e) => { setLang(e.target.value); try { sessionStorage.setItem('hh_lang_pending', '1') } catch { /* ignore */ } }}>
+              {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.code === 'en' ? l.native : `${l.native} · ${l.name}`}</option>)}
+            </select>
+          </label>
+          <h1 className="au-h1 aw-title">
+{t('Welcome')}<br />{t('Back!')}</h1>
           <p className="au-sub">{t("Book trusted home services and relax. We'll take care of the rest.")}</p>
 
           <div className="aw-photo">

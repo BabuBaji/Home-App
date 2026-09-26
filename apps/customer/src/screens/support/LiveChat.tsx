@@ -5,25 +5,26 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, MoreVertical, Send, CheckCheck } from 'lucide-react'
 import { useStore } from '../../store'
 import { sendSupportChat } from '../../api'
+import { t, dateLocale } from '../../i18n'
 
 type Msg = { from: 'bot' | 'user'; text: string; time: string }
-const now = () => new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
+const now = () => new Date().toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
 
 // Local fallback replies when the AI provider is offline, so the chat always responds.
 function fallback(q: string): string {
   const s = q.toLowerCase()
-  if (/reschedul/.test(s)) return 'Sure, I can help with that. Please share your booking ID and I will check available slots.'
-  if (/refund/.test(s)) return 'Refunds are credited to your wallet after a cancellation. You can track it in Refund Status.'
-  if (/cancel/.test(s)) return 'You can cancel from the booking details. Cancellation charges depend on how close it is to the slot.'
-  if (/worker|expert|arriv/.test(s)) return "I'm sorry about that. Share your booking ID and I'll check the expert's status right away."
-  return 'Thank you! Let me check that for you. Could you share your booking ID?'
+  if (/reschedul/.test(s)) return t('Sure, I can help with that. Please share your booking ID and I will check available slots.')
+  if (/refund/.test(s)) return t('Refunds are credited to your wallet after a cancellation. You can track it in Refund Status.')
+  if (/cancel/.test(s)) return t('You can cancel from the booking details. Cancellation charges depend on how close it is to the slot.')
+  if (/worker|expert|arriv/.test(s)) return t("I'm sorry about that. Share your booking ID and I'll check the expert's status right away.")
+  return t('Thank you! Let me check that for you. Could you share your booking ID?')
 }
 
 export default function LiveChat() {
   const nav = useNavigate()
   const { user } = useStore()
-  const first = (user?.name || '').trim().split(' ')[0] || 'there'
-  const [msgs, setMsgs] = useState<Msg[]>([{ from: 'bot', text: `Hello ${first}! 👋 How can I help you today?`, time: now() }])
+  const first = (user?.name || '').trim().split(' ')[0] || t('there')
+  const [msgs, setMsgs] = useState<Msg[]>([{ from: 'bot', text: t('Hello {name}! 👋 How can I help you today?', { name: first }), time: now() }])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
@@ -48,19 +49,19 @@ export default function LiveChat() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-        <div className="titles"><h1>Live Chat</h1></div>
-        <button className="iconbtn" onClick={() => nav('/support/emergency')} aria-label="More"><MoreVertical size={18} /></button>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <div className="titles"><h1>{t('Live Chat')}</h1></div>
+        <button className="iconbtn" onClick={() => nav('/support/emergency')} aria-label={t('More')}><MoreVertical size={18} /></button>
       </header>
 
       <div className="content lc-body">
-        <div className="lc-banner"><CheckCheck size={16} /><div><b>You are now connected</b><span>Our support agent will be with you shortly.</span></div></div>
+        <div className="lc-banner"><CheckCheck size={16} /><div><b>{t('You are now connected')}</b><span>{t('Our support agent will be with you shortly.')}</span></div></div>
 
         {msgs.map((m, i) => (
           <div key={i} className={`lc-msg ${m.from}`}>
             {m.from === 'bot' && <span className="lc-av">🎧</span>}
             <div className="lc-bubble">
-              {m.from === 'bot' && <div className="lc-from">Support</div>}
+              {m.from === 'bot' && <div className="lc-from">{t('Support')}</div>}
               <div className="lc-text">{m.text}</div>
               <div className="lc-time">{m.time}{m.from === 'user' && <CheckCheck size={13} />}</div>
             </div>
@@ -71,8 +72,9 @@ export default function LiveChat() {
       </div>
 
       <div className="lc-input">
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Type your message..." />
-        <button className="lc-send" onClick={send} disabled={!text.trim() || busy} aria-label="Send"><Send size={17} /></button>
+        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder={t('Type your message...')} />
+        <button className="lc-send" onClick={send} disabled={!text.trim() || busy} aria-label={t('Send')}
+><Send size={17} /></button>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useToast } from '../components/UI'
 import { useStore } from '../store'
 import { updateMe } from '../api'
+import { t } from '../i18n'
 
 export default function NameSelect() {
   const nav = useNavigate()
@@ -14,7 +15,7 @@ export default function NameSelect() {
 
   async function next() {
     const clean = name.trim()
-    if (clean.length < 2) return toast('Please enter your name')
+    if (clean.length < 2) return toast(t('Please enter your name'))
     setBusy(true)
     try {
       const { user } = await updateMe({ name: clean, email: email.trim() })
@@ -26,24 +27,25 @@ export default function NameSelect() {
   return (
     <div className="screen">
       <div className="onb-hero">
-        <div className="onb-step">Step 1 of 2</div>
-        <h1>What's your name?</h1>
-        <p>So your experts know who they're helping.</p>
+        <div className="onb-step">{t('Step 1 of 2')}</div>
+        <h1>{t("What's your name?")}</h1>
+        <p>{t("So your experts know who they're helping.")}</p>
       </div>
       <div className="content pad-cta">
         <div className="field" style={{ marginTop: 14 }}>
           <span className="cc">🙂</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" autoFocus
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('Full name')} autoFocus
             onKeyDown={(e) => { if (e.key === 'Enter') next() }} />
         </div>
         <div className="field" style={{ marginTop: 12 }}>
           <span className="cc">✉</span>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)"
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('Email (optional)')}
             inputMode="email" type="email" />
         </div>
       </div>
       <div className="footer-cta">
-        <button className="btn full" onClick={next} disabled={busy}>{busy ? 'Saving…' : 'Continue'}</button>
+        <button className="btn full" onClick={next} disabled={busy}>{busy ? t('Saving…') : t('Continue')}
+</button>
       </div>
     </div>
   )

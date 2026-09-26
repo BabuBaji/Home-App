@@ -37,7 +37,7 @@ export default function Cancel() {
       <div className="content pad-cta">
         <div className="card pad">
           <div className="bk-date">{b.ref}</div>
-          <div className="bk-svcs">{b.items.map((i) => i.name).join(', ')}</div>
+          <div className="bk-svcs">{b.items.map((i) => t(i.name)).join(', ')}</div>
         </div>
 
         {/* Policy banner — the engine tells us the stage + what it costs. */}

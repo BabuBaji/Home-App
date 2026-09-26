@@ -56,7 +56,8 @@ export default function GiftCards() {
             <div>
               <div className="w-hero-k">{t('My Gift Card Balance')}</div>
               <div className="w-hero-v">{money2(info.balance)}</div>
-              <div className="w-hero-sub">{info.active} Active Card{info.active === 1 ? '' : 's'}</div>
+              <div className="w-hero-sub">{info.active === 1 ? t('1 Active Card') : t('{n} Active Cards', { n: info.active })}</div>
+
             </div>
             <Gift size={22} className="w-hero-ico" />
           </div>

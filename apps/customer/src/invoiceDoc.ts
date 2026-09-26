@@ -9,6 +9,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 import type { InvoiceInfo } from './api'
 import type { Booking } from './types'
+import { t } from './i18n'
 
 export const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
@@ -212,11 +213,12 @@ export async function shareInvoice(b: Booking, inv: InvoiceInfo | null, bill?: {
     if (Capacitor.isNativePlatform()) {
       // Share needs a file URI it can grant access to; Cache is the right place for that.
       const w = await Filesystem.writeFile({ path: name, data: html, directory: Directory.Cache, encoding: Encoding.UTF8 })
-      await Share.share({ title: `HomeHelp Invoice ${b.ref}`, text: `Invoice for ${b.ref}`, url: w.uri, dialogTitle: 'Share receipt' })
+      await Share.share({ title: t('HomeHelp Invoice {ref}', { ref: b.ref }), text: t('Invoice for {ref}', { ref: b.ref }), url: w.uri, dialogTitle: t('Share receipt') })
       return true
     }
     if (navigator.share) {
-      await navigator.share({ title: `HomeHelp Invoice ${b.ref}`, text: `Invoice for ${b.ref}` })
+      await navigator.share({ title: t('HomeHelp Invoice {ref}', { ref: b.ref }), text: t('Invoice for {ref}', { ref: b.ref }) })
+
       return true
     }
     return false

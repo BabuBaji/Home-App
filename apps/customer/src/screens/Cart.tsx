@@ -26,7 +26,7 @@ export default function Cart() {
             <div className="cart-row" key={c.id}>
               <span className="ci">{c.icon}</span>
               <div className="grow">
-                <div className="cn">{c.name}</div>
+                <div className="cn">{t(c.name)}</div>
                 <div className="muted sm">{c.durationLabel} · {c.category}</div>
               </div>
               <div className="cp">₹{c.price}</div>

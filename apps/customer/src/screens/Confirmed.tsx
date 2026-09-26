@@ -42,7 +42,7 @@ export default function Confirmed() {
         </button>
 
         <div className="bc-rows">
-          <div className="bc-row"><span>{t('Service')}</span><b>{b.items.map((i) => i.name).join(', ')}</b></div>
+          <div className="bc-row"><span>{t('Service')}</span><b>{b.items.map((i) => t(i.name)).join(', ')}</b></div>
           <div className="bc-row"><span>{t('Date & Time')}</span><b>{when}</b></div>
           <div className="bc-row"><span>{t('Worker')}</span><b>{b.pro_name || t('Being assigned')}</b></div>
           <div className="bc-row"><span>{t('Address')}</span><b className="bc-addr">{b.address || addr?.line || '—'}</b></div>

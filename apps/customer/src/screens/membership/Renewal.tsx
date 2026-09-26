@@ -7,8 +7,9 @@ import { Loading, useToast } from '../../components/UI'
 import { pickPlan, loadPlans, CYCLES, cyclePrice, money, type Plan } from '../../membership'
 import { fetchMembership, renewMembership, type Membership } from '../../api'
 import PaymentSheet from '../../components/PaymentSheet'
+import { t, dateLocale } from '../../i18n'
 
-const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
+const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 
 export default function Renewal() {
   const nav = useNavigate()
@@ -28,7 +29,7 @@ export default function Renewal() {
   }, [nav])
   useEffect(() => { loadPlans().then(setPlans).catch(() => setPlans([])) }, [])
 
-  if (!mem) return <div className="screen"><header className="appbar ord-appbar"><button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button><div className="titles"><h1>Renew Your Plan</h1></div><span className="iconbtn ghost" /></header><Loading /></div>
+  if (!mem) return <div className="screen"><header className="appbar ord-appbar"><button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button><div className="titles"><h1>{t('Renew Your Plan')}</h1></div><span className="iconbtn ghost" /></header><Loading /></div>
 
   const plan = pickPlan(plans, mem.plan || 'gold')
 
@@ -42,10 +43,10 @@ export default function Renewal() {
     setBusy(true)
     try {
       await renewMembership({ cycle, paymentId })
-      toast('Your plan has been renewed 🎉')
+      toast(t('Your plan has been renewed 🎉'))
       nav('/membership/active', { replace: true })
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not renew')
+      toast(e instanceof Error ? e.message : t('Could not renew'))
       setBusy(false)
     }
   }
@@ -53,44 +54,45 @@ export default function Renewal() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-        <div className="titles"><h1>Renew Your Plan</h1></div>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <div className="titles"><h1>{t('Renew Your Plan')}</h1></div>
         <span className="iconbtn ghost" />
       </header>
 
       <div className="content pad-cta">
         <div className="ren-card">
-          <div className="ren-name">{plan.name} Plan</div>
-          <div className="ren-price">{money(plan.price)} <small>/month</small></div>
-          <div className="ren-next">{mem.status === 'cancelled' ? 'Access Until' : 'Next Renewal'}<br /><b>{fmtDate(mem.renewsAt)}</b></div>
+          <div className="ren-name">{t('{name} Plan', { name: t(plan.name) })}</div>
+          <div className="ren-price">{money(plan.price)} <small>{t('/month')}</small></div>
+          <div className="ren-next">{mem.status === 'cancelled' ? t('Access Until') : t('Next Renewal')}<br /><b>{fmtDate(mem.renewsAt)}</b></div>
           <span className="ren-crown">👑</span>
         </div>
 
-        <div className="mem-sec">Choose Renewal Option</div>
+        <div className="mem-sec">{t('Choose Renewal Option')}</div>
         <div className="sub-cycles">
           {CYCLES.map((c) => {
             const cp = cyclePrice(plan.price, c.months, c.savePct)
             return (
               <button key={c.key} className={`sub-cycle ${cycle === c.key ? 'sel' : ''}`} onClick={() => setCycle(c.key)}>
                 <span className={`sub-radio ${cycle === c.key ? 'on' : ''}`} />
-                <span className="sub-cycle-l">{c.label}</span>
-                <span className="sub-cycle-p">{money(cp.total)}{c.months === 1 && <small>/month</small>}</span>
-                {cp.save > 0 && <span className="sub-cycle-save">Save {money(cp.save)}</span>}
+                <span className="sub-cycle-l">{t(c.label)}</span>
+                <span className="sub-cycle-p">{money(cp.total)}{c.months === 1 && <small>{t('/month')}</small>}</span>
+                {cp.save > 0 && <span className="sub-cycle-save">{t('Save {amount}', { amount: money(cp.save) })}</span>}
               </button>
             )
           })}
         </div>
 
-        <div className="mem-sec">Payment Method</div>
+        <div className="mem-sec">{t('Payment Method')}</div>
         <div className="ren-pay">
-          <Smartphone size={17} /><span>UPI</span><span className="sub-rec">Recommended</span>
-          <button className="ren-change" onClick={() => toast('Change payment — coming soon')}>Change</button>
+          <Smartphone size={17} /><span>UPI</span><span className="sub-rec">{t('Recommended')}</span>
+          <button className="ren-change" onClick={() => toast(t('Change payment — coming soon'))}>{t('Change')}</button>
         </div>
       </div>
 
       <div className="w-foot">
-        <button className="btn full" disabled={busy} onClick={() => renew()}>{busy ? 'Processing…' : `Pay ${money(amount)} & Renew`}</button>
-        <div className="ren-note">Renewing extends your plan from {fmtDate(mem.renewsAt)}</div>
+        <button className="btn full" disabled={busy} onClick={() => renew()}>{busy ? t('Processing…') : t('Pay {amount} & Renew', { amount: money(amount) })}</button>
+        <div className="ren-note">{t('Renewing extends your plan from {date}', { date: fmtDate(mem.renewsAt) })}</div>
+
       </div>
       <PaymentSheet open={sheet} amount={amount} onClose={() => setSheet(false)} onPaid={(_m, id) => renew(id)} />
     </div>

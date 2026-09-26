@@ -34,13 +34,13 @@ export default function ServiceDetails() {
   // clipboard as the last resort so the button is never a dead end.
   const share = async () => {
     if (!s) return
-    const text = `${s.name} on HomeHelp — from ₹${s.price}`
+    const text = t('{name} on HomeHelp — from ₹{price}', { name: t(s.name), price: s.price })
     try {
-      await Share.share({ title: s.name, text, dialogTitle: t('Share service') })
+      await Share.share({ title: t(s.name), text, dialogTitle: t('Share service') })
       return
     } catch { /* not on a device, or the user dismissed the sheet */ }
     try {
-      if (navigator.share) { await navigator.share({ title: s.name, text }); return }
+      if (navigator.share) { await navigator.share({ title: t(s.name), text }); return }
       await navigator.clipboard.writeText(text)
       toast(t('Copied to clipboard'))
     } catch { /* dismissed — stay silent */ }
@@ -64,7 +64,7 @@ export default function ServiceDetails() {
         <div className="sd2-body">
           {/* Name and rating share a row — rating sits right, not stacked under the name. */}
           <div className="sd2-title-row">
-            <h1 className="sd2-name">{s.name}</h1>
+            <h1 className="sd2-name">{t(s.name)}</h1>
             <div className="sd2-rate-inline">
               <Star size={15} className="sd2-star" fill="currentColor" />
               <b>{s.rating}</b>

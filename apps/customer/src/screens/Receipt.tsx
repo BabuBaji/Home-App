@@ -6,6 +6,7 @@ import { Loading, useToast } from '../components/UI'
 import { fetchBooking, fetchInvoiceInfo, type InvoiceInfo } from '../api'
 import { downloadInvoice, shareInvoice } from '../invoiceDoc'
 import type { Booking } from '../types'
+import { t } from '../i18n'
 
 export default function Receipt() {
   const { id } = useParams()
@@ -24,7 +25,7 @@ export default function Receipt() {
     setBusy('save')
     const at = await downloadInvoice(b, inv)
     setBusy('')
-    toast(at ? `Receipt saved to ${at}` : 'Could not save the receipt')
+    toast(at ? t('Receipt saved to {path}', { path: at }) : t('Could not save the receipt'))
   }
 
   // Share hands it to the OS picker so it can go to any app or contact.
@@ -33,12 +34,12 @@ export default function Receipt() {
     setBusy('share')
     const ok = await shareInvoice(b, inv)
     setBusy('')
-    if (!ok) toast('Could not share the receipt')
+    if (!ok) toast(t('Could not share the receipt'))
   }
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
       <div className="titles" />
       <span className="iconbtn ghost" />
     </header>
@@ -61,17 +62,18 @@ export default function Receipt() {
           </svg>
         </div>
 
-        <h2 className="rc-title">Your receipt is ready!</h2>
-        <p className="rc-sub">You can download or share your receipt.</p>
+        <h2 className="rc-title">{t('Your receipt is ready!')}</h2>
+        <p className="rc-sub">{t('You can download or share your receipt.')}</p>
 
         <div className="rc-actions">
           <button className="btn full" onClick={save} disabled={!!busy}>
-            <Download size={16} /> {busy === 'save' ? 'Saving…' : 'Download Receipt'}
+            <Download size={16} /> {busy === 'save' ? t('Saving…') : t('Download Receipt')}
           </button>
           <button className="btn ghost full" onClick={send} disabled={!!busy}>
-            <Share2 size={16} /> {busy === 'share' ? 'Opening…' : 'Share Receipt'}
+            <Share2 size={16} /> {busy === 'share' ? t('Opening…') : t('Share Receipt')}
           </button>
-          <button className="rc-back" onClick={() => nav('/bookings')}>Back to Bookings</button>
+          <button className="rc-back" onClick={() => nav('/bookings')}>{t('Back to Bookings')}</button>
+
         </div>
       </div>
     </div>

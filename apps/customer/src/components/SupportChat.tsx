@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Headset, Send, X } from 'lucide-react'
 import { sendSupportChat } from '../api'
 import { pushBackHandler } from '../backStack'
+import { t } from '../i18n'
 
 type Msg = { from: 'bot' | 'user'; text: string }
 
@@ -49,13 +50,13 @@ function answer(raw: string): { text: string; escalate?: boolean } {
   const q = ' ' + raw.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim() + ' '
   let best: Intent | null = null, bestScore = 0
   for (const it of INTENTS) { const sc = scoreIntent(q, it); if (sc > bestScore) { bestScore = sc; best = it } }
-  if (best && bestScore > 0) return { text: best.reply, escalate: best.escalate }
-  return { text: 'I can help with your HomeHelp bookings — cancellations, refunds, rescheduling, payments, invoices, tracking, and the services we offer. Try asking about one of those, or tap a topic below.' }
+  if (best && bestScore > 0) return { text: t(best.reply), escalate: best.escalate }
+  return { text: t('I can help with your HomeHelp bookings — cancellations, refunds, rescheduling, payments, invoices, tracking, and the services we offer. Try asking about one of those, or tap a topic below.') }
 }
 
 export default function SupportChat({ onClose }: { onClose: () => void }) {
   const nav = useNavigate()
-  const [msgs, setMsgs] = useState<Msg[]>([{ from: 'bot', text: GREETING }])
+  const [msgs, setMsgs] = useState<Msg[]>(() => [{ from: 'bot', text: t(GREETING) }])
   const [input, setInput] = useState('')
   const [escalate, setEscalate] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -67,7 +68,9 @@ export default function SupportChat({ onClose }: { onClose: () => void }) {
   // Android hardware back closes the chat (returns to the page underneath) instead of navigating.
   useEffect(() => pushBackHandler(() => closeRef.current()), [])
 
-  async function send(raw: string) {
+  // `raw` is what the customer sees in their bubble; `match` (the English chip text, when a topic
+  // chip was tapped) is what the offline bot matches keywords against.
+  async function send(raw: string, match = raw) {
     const q = raw.trim()
     if (!q || busy) return
     const next: Msg[] = [...msgs, { from: 'user', text: q }]
@@ -79,9 +82,9 @@ export default function SupportChat({ onClose }: { onClose: () => void }) {
       const r = await sendSupportChat(next.map((m) => ({ role: m.from, text: m.text })))
       if (r && r.reply && !r.fallback) reply = r.reply    // AI answered
     } catch { /* offline / provider down → use built-in bot */ }
-    if (!reply) reply = answer(q).text
+    if (!reply) reply = answer(match).text
     setMsgs((m) => [...m, { from: 'bot', text: reply }])
-    setEscalate(/\b(human|agent|talk to|contact|call|complaint|complain)\b/i.test(q))
+    setEscalate(/\b(human|agent|talk to|contact|call|complaint|complain)\b/i.test(match))
     setBusy(false)
   }
 
@@ -89,26 +92,27 @@ export default function SupportChat({ onClose }: { onClose: () => void }) {
     <div className="chat-modal">
       <div className="chat-head">
         <span className="ch-ic"><Headset size={20} /></span>
-        <div className="ch-t"><b>Help &amp; Support</b><span>Typically replies instantly</span></div>
-        <button className="ch-x" onClick={onClose} aria-label="Close">✕</button>
+        <div className="ch-t"><b>{t('Help & Support')}</b><span>{t('Typically replies instantly')}</span></div>
+        <button className="ch-x" onClick={onClose} aria-label={t('Close')}>✕</button>
       </div>
 
       <div className="chat-body">
         {msgs.map((m, i) => <div key={i} className={`msg ${m.from}`}>{m.text}</div>)}
         {busy && <div className="msg bot typing"><span /><span /><span /></div>}
         {escalate && !busy && (
-          <button className="msg bot chat-esc" onClick={() => nav('/support')}>🎧 Raise a support request ›</button>
+          <button className="msg bot chat-esc" onClick={() => nav('/support')}>🎧 {t('Raise a support request')} ›</button>
         )}
         <div ref={endRef} />
       </div>
 
       <div className="chat-chips">
-        {CHIPS.map((c) => <button key={c} className="chat-chip" disabled={busy} onClick={() => send(c)}>{c}</button>)}
+        {CHIPS.map((c) => <button key={c} className="chat-chip" disabled={busy} onClick={() => send(t(c), c)}>{t(c)}</button>)}
       </div>
 
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(input) }}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type your question…" aria-label="Message" disabled={busy} />
-        <button type="submit" aria-label="Send" disabled={busy}><Send size={18} /></button>
+        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={t('Type your question…')} aria-label={t('Message')} disabled={busy} />
+        <button type="submit" aria-label={t('Send')}
+ disabled={busy}><Send size={18} /></button>
       </form>
     </div>
   )

@@ -4,6 +4,7 @@ import { ArrowLeft, Search, LocateFixed, MapPin } from 'lucide-react'
 import { useToast } from '../components/UI'
 import { fetchMapsKey } from '../api'
 import { loadPickerMap } from '../maps'
+import { t } from '../i18n'
 import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
 
 const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GPS is unavailable
@@ -35,7 +36,7 @@ export default function LocationSelect() {
     const g = await reverseGeocodeFull(lat, lng)
     setResolving(false)
     if (g) {
-      const label = g.label || [g.area, g.city].filter(Boolean).join(', ') || 'Selected location'
+      const label = g.label || [g.area, g.city].filter(Boolean).join(', ') || t('Selected location')
       setAddr({ label, name: g.name, sub: g.sub, pincode: g.pincode, lat, lng })
     }
   }
@@ -59,7 +60,7 @@ export default function LocationSelect() {
           revTimer.current = setTimeout(resolveCentre, 350)
         })
       } catch (e) {
-        setLoadErr((e as Error).message || 'Could not load the map')
+        setLoadErr((e as Error).message || t('Could not load the map'))
       }
     })()
     return () => { cancelled = true; if (revTimer.current) clearTimeout(revTimer.current) }
@@ -68,8 +69,8 @@ export default function LocationSelect() {
   // debounced place search
   useEffect(() => {
     if (!q.trim()) { setResults([]); return }
-    const t = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
-    return () => clearTimeout(t)
+    const tm = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
+    return () => clearTimeout(tm)
   }, [q])
 
   async function pickResult(p: Place) {
@@ -81,12 +82,12 @@ export default function LocationSelect() {
 
   async function goToCurrent() {
     try { mapRef.current?.panTo(await getCurrentPosition()) }
-    catch (e) { toast(e instanceof GeoError && e.reason === 'permission' ? 'Allow location permission to use this' : 'Could not get your location') }
+    catch (e) { toast(e instanceof GeoError && e.reason === 'permission' ? t('Allow location permission to use this') : t('Could not get your location')) }
   }
 
   // Confirm → verify we serve this spot (checked ONCE here, not while panning), then continue.
   async function confirm() {
-    if (!addr) return toast('Move the map to your location')
+    if (!addr) return toast(t('Move the map to your location'))
     setChecking(true)
     let ok = true
     try { ok = (await checkServiceable(addr.pincode || undefined, undefined)).serviceable } catch { ok = true }
@@ -95,19 +96,19 @@ export default function LocationSelect() {
     nav('/address-details', { state: { label: addr.label, name: addr.name, sub: addr.sub, pincode: addr.pincode, lat: addr.lat, lng: addr.lng } })
   }
 
-  const headline = resolving ? 'Locating…' : (addr ? (addr.name || addr.label.split(' - ')[0]) : 'Move the map to your spot')
+  const headline = resolving ? t('Locating…') : (addr ? (addr.name || addr.label.split(' - ')[0]) : t('Move the map to your spot'))
 
   return (
     <div className="mp-screen">
       <div className="mp-top">
-        <button className="mp-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
-        <b>Confirm your location</b>
+        <button className="mp-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
+        <b>{t('Confirm your location')}</b>
       </div>
 
       <div className="mp-search">
         <div className="mp-search-box">
           <Search size={18} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search locality, sector, area" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search locality, sector, area')} />
         </div>
         {results.length > 0 && (
           <div className="mp-results">
@@ -126,14 +127,14 @@ export default function LocationSelect() {
         <div className="mp-pin" aria-hidden>
           {addr && (
             <div className="mp-pin-tip">
-              <span>Set this as your location</span>
+              <span>{t('Set this as your location')}</span>
               <b>{addr.name || addr.label.split(' - ')[0].split(',')[0]}</b>
             </div>
           )}
           <MapPin size={42} className="mp-pin-ic" fill="currentColor" />
         </div>
-        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> Go to current location</button>
-        {!ready && !loadErr && <div className="mp-map-msg">Loading map…</div>}
+        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> {t('Go to current location')}</button>
+        {!ready && !loadErr && <div className="mp-map-msg">{t('Loading map…')}</div>}
         {loadErr && <div className="mp-map-msg err">{loadErr}</div>}
       </div>
 
@@ -142,10 +143,11 @@ export default function LocationSelect() {
           <MapPin size={22} className="mp-addr-ic" />
           <div className="grow">
             <b>{headline}</b>
-            <div className="mp-addr-sub">{addr?.sub || (addr?.pincode ? `Pincode ${addr.pincode}` : 'Pan the map to place the pin')}</div>
+            <div className="mp-addr-sub">{addr?.sub || (addr?.pincode ? t('Pincode {pin}', { pin: addr.pincode }) : t('Pan the map to place the pin'))}</div>
           </div>
         </div>
-        <button className="mp-confirm" onClick={confirm} disabled={!addr || checking}>{checking ? 'Checking…' : 'Confirm location'}</button>
+        <button className="mp-confirm" onClick={confirm} disabled={!addr || checking}>{checking ? t('Checking…') : t('Confirm location')}
+</button>
       </div>
     </div>
   )

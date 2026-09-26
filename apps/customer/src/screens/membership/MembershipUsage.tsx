@@ -6,9 +6,10 @@ import { ArrowLeft, PiggyBank, Calendar, Star, RefreshCw, XCircle, Sparkles, Tag
 import { Loading } from '../../components/UI'
 import { money } from '../../membership'
 import { fetchMembershipUsage, type Membership, type MembershipEvent } from '../../api'
+import { t, dateLocale } from '../../i18n'
 
-const fmtDate = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-const monthLabel = (s: string) => new Date(s).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+const fmtDate = (s: string) => new Date(s).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' })
+const monthLabel = (s: string) => new Date(s).toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' })
 const monthKey = (s: string) => { const d = new Date(s); return `${d.getFullYear()}-${d.getMonth()}` }
 
 const EVENT_META: Record<string, { icon: ReactNode; label: string; credit?: boolean }> = {
@@ -32,17 +33,17 @@ export default function MembershipUsage() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Usage History</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Usage History')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
   if (!history) return <div className="screen">{head}<Loading /></div>
 
   const summary = [
-    { icon: <PiggyBank size={18} />, v: money(mem?.usage?.totalSaved ?? 0), l: 'You Saved' },
-    { icon: <Calendar size={18} />, v: String(mem?.usage?.bookings ?? 0), l: 'Bookings' },
-    { icon: <Star size={18} />, v: String(mem?.usage?.addonsUsed ?? 0), l: 'Add-ons' },
+    { icon: <PiggyBank size={18} />, v: money(mem?.usage?.totalSaved ?? 0), l: t('You Saved') },
+    { icon: <Calendar size={18} />, v: String(mem?.usage?.bookings ?? 0), l: t('Bookings') },
+    { icon: <Star size={18} />, v: String(mem?.usage?.addonsUsed ?? 0), l: t('Add-ons') },
   ]
 
   // Group ledger rows by month.
@@ -65,7 +66,7 @@ export default function MembershipUsage() {
         )}
 
         {groups.length === 0 && (
-          <div className="state"><div className="ico">🕘</div><h3>No usage yet</h3><p>Your plan activity appears here.</p></div>
+          <div className="state"><div className="ico">🕘</div><h3>{t('No usage yet')}</h3><p>{t('Your plan activity appears here.')}</p></div>
         )}
 
         {groups.map((g) => (
@@ -78,7 +79,8 @@ export default function MembershipUsage() {
                   <div key={e.id} className="uh-row" style={{ cursor: 'default' }}>
                     <span className="uh-med" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{meta.icon}</span>
                     <span className="uh-main">
-                      <span className="uh-name">{meta.label}</span>
+                      <span className="uh-name">{t(meta.label)}</span>
+
                       {e.detail && <span className="uh-sub">{e.detail}</span>}
                       <span className="uh-sub">{fmtDate(e.created)}</span>
                     </span>

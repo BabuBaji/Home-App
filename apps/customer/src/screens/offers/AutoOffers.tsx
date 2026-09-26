@@ -23,8 +23,8 @@ export default function AutoOffers() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Offers Applied</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Offers Applied')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -35,9 +35,9 @@ export default function AutoOffers() {
   const others = ranked.slice(1)
 
   function apply(code: string | null) {
-    if (!code) { toast('This offer applies automatically at checkout.'); return }
+    if (!code) { toast(t('This offer applies automatically at checkout.')); return }
     navigator.clipboard?.writeText(code).catch(() => {})
-    toast(`${code} copied — apply it at checkout`)
+    toast(t('{code} copied — apply it at checkout', { code }))
   }
 
   return (
@@ -49,45 +49,46 @@ export default function AutoOffers() {
             <div className="ao-banner">
               <CheckCircle2 size={20} className="ao-banner-ico" />
               <div>
-                <div className="ao-banner-t">Best offer available</div>
-                <div className="ao-banner-d">{best.badge} with {best.title}</div>
+                <div className="ao-banner-t">{t('Best offer available')}</div>
+                <div className="ao-banner-d">{t('{badge} with {title}', { badge: best.badge, title: best.title })}</div>
               </div>
             </div>
 
             <div className="ao-save">
               <div>
-                <div className="ao-save-k">Top Saving</div>
+                <div className="ao-save-k">{t('Top Saving')}</div>
                 <div className="ao-save-v">{best.badge}</div>
               </div>
               <span className="ao-save-art" aria-hidden="true"><Gift size={30} /></span>
             </div>
 
-            <div className="ao-sec">Best Offer</div>
+            <div className="ao-sec">{t('Best Offer')}</div>
             <div className="ao-row">
               <div className="ao-row-main">
                 <div className="ao-row-code">{best.title}</div>
                 <div className="ao-row-d">{best.subtitle}</div>
               </div>
-              <span className="ao-applied">Best</span>
+              <span className="ao-applied">{t('Best')}</span>
             </div>
 
             {others.length > 0 && (
               <>
-                <div className="ao-sec">Other Eligible Offers</div>
+                <div className="ao-sec">{t('Other Eligible Offers')}</div>
                 {others.map((o) => (
                   <div key={o.id} className="ao-row">
                     <div className="ao-row-main">
                       <div className="ao-row-code">{o.title}</div>
                       <div className="ao-row-d">{o.subtitle}</div>
                     </div>
-                    <button className="ao-apply" onClick={() => apply(o.code)}>Apply</button>
+                    <button className="ao-apply" onClick={() => apply(o.code)}>{t('Apply')}</button>
                   </div>
                 ))}
               </>
             )}
           </>
         ) : (
-          <div className="state"><div className="ico">🎁</div><h3>No offers available</h3><p>Offers for your area appear here.</p></div>
+          <div className="state"><div className="ico">🎁</div><h3>{t('No offers available')}</h3><p>{t('Offers for your area appear here.')}</p>
+</div>
         )}
       </div>
 

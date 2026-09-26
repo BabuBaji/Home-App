@@ -8,6 +8,7 @@ import { Loading, useToast } from '../../components/UI'
 import { fetchOffers, fetchMe } from '../../api'
 import { useStore } from '../../store'
 import type { Offer, Address } from '../../types'
+import { t } from '../../i18n'
 
 export default function ZoneOffers() {
   const nav = useNavigate()
@@ -21,8 +22,8 @@ export default function ZoneOffers() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Zone Offers</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Zone Offers')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -30,12 +31,12 @@ export default function ZoneOffers() {
 
   // Best available label: apartment/landmark + city, else city, else the zone pincode.
   const area = [addr?.apartment || addr?.landmark, addr?.city].filter(Boolean).join(', ')
-    || addr?.city || (pincode ? `Pincode ${pincode}` : 'your area')
+    || addr?.city || (pincode ? t('Pincode {pin}', { pin: pincode }) : t('your area'))
 
   function apply(code: string | null) {
-    if (!code) { toast('This offer applies automatically at checkout.'); return }
+    if (!code) { toast(t('This offer applies automatically at checkout.')); return }
     navigator.clipboard?.writeText(code).catch(() => {})
-    toast(`${code} copied — apply it at checkout`)
+    toast(t('{code} copied — apply it at checkout', { code }))
   }
 
   return (
@@ -45,22 +46,22 @@ export default function ZoneOffers() {
         <button className="zo-loc" onClick={() => nav('/locations')}>
           <MapPin size={16} className="zo-loc-pin" />
           <span className="zo-loc-main">
-            <span className="zo-loc-k">Your Location</span>
+            <span className="zo-loc-k">{t('Your Location')}</span>
             <span className="zo-loc-v">{area}</span>
           </span>
-          <span className="zo-loc-change">Change</span>
+          <span className="zo-loc-change">{t('Change')}</span>
         </button>
 
         <div className="zo-banner">
           <div>
-            <div className="zo-banner-t">Special offers in your zone!</div>
-            <div className="zo-banner-d">Save more on services near you.</div>
+            <div className="zo-banner-t">{t('Special offers in your zone!')}</div>
+            <div className="zo-banner-d">{t('Save more on services near you.')}</div>
           </div>
           <span className="zo-banner-ico"><Percent size={20} /></span>
         </div>
 
         {offers.length === 0 && (
-          <div className="state"><div className="ico">🏷️</div><h3>No offers in your zone yet</h3><p>Check back soon — new offers appear here.</p></div>
+          <div className="state"><div className="ico">🏷️</div><h3>{t('No offers in your zone yet')}</h3><p>{t('Check back soon — new offers appear here.')}</p></div>
         )}
 
         <div className="zo-list">
@@ -69,9 +70,9 @@ export default function ZoneOffers() {
               <div className="zo-card-main">
                 <div className="zo-code">{o.title}</div>
                 <div className="zo-off">{o.subtitle}</div>
-                <div className="zo-tag">{o.type === 'zone' ? 'Zone offer' : o.type === 'customer' ? 'For you' : 'Coupon'}</div>
+                <div className="zo-tag">{o.type === 'zone' ? t('Zone offer') : o.type === 'customer' ? t('For you') : t('Coupon')}</div>
               </div>
-              <button className="zo-apply" onClick={() => apply(o.code)}>Apply</button>
+              <button className="zo-apply" onClick={() => apply(o.code)}>{t('Apply')}</button>
             </div>
           ))}
         </div>
@@ -79,8 +80,9 @@ export default function ZoneOffers() {
         {offers.length > 0 && (
           // This screen already lists every offer for the zone, so "View All" stays here rather
           // than navigating away (it used to wrongly open the Coupons page).
-          <button className="zo-more" onClick={() => toast('Showing all offers in your zone')}>
-            View All Zone Offers <ChevronRight size={16} />
+          <button className="zo-more" onClick={() => toast(t('Showing all offers in your zone'))}>
+            {t('View All Zone Offers')} <ChevronRight
+ size={16} />
           </button>
         )}
       </div>

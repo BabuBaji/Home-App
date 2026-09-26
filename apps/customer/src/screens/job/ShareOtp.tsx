@@ -24,7 +24,8 @@ export default function ShareOtp() {
 
   async function share() {
     if (!otp) return
-    const text = `My HomeHelp service start OTP is ${otp}. Please share only with the assigned worker.`
+    const text = t('My HomeHelp service start OTP is {otp}. Please share only with the assigned worker.', { otp })
+
     try {
       const { Share } = await import('@capacitor/share')
       await Share.share({ title: t('Service OTP'), text })

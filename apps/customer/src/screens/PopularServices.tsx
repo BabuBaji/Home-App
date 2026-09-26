@@ -48,7 +48,7 @@ export default function PopularServices() {
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
                     {!s.available && <span className="ps-soon">{t('Soon')}</span>}
                   </span>
-                  <span className="ps-name">{s.name}</span>
+                  <span className="ps-name">{t(s.name)}</span>
                   <span className="ps-rate"><Star size={13} className="ps-star" /> {rating} <em>({count})</em></span>
                   <span className="ps-price">{t('From ₹{price}', { price: s.price })}</span>
                 </button>

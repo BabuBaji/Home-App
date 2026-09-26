@@ -1,5 +1,6 @@
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { Capacitor } from '@capacitor/core'
+import { getLang } from './i18n'
 
 // Local (device) notifications. These fire from the app itself, so they alert the customer even
 // when they've navigated away from the Track screen — as long as the app is still running
@@ -64,15 +65,22 @@ export function speakOnce(bookingId: number): boolean {
 // Locales to try in order — en-IN is nicest for our users but its voice data is often not
 // downloaded, in which case the engine rejects it; fall back to the widely-preinstalled ones.
 const TTS_LANGS = ['en-IN', 'en-US', 'en-GB', 'en']
-export function speak(text: string): void {
+// `text` is the line in the app's language; `english` is the same line in English. When the app is
+// not in English we try the language's own voice first (e.g. ta-IN) and fall back to speaking the
+// English line with an English voice if the device has no voice for that language.
+export function speak(text: string, english?: string): void {
+  const code = getLang()
+  const attempts: [string, string][] = code !== 'en' && english !== undefined
+    ? [[text, `${code}-IN`], [text, code], ...TTS_LANGS.map((l): [string, string] => [english, l])]
+    : TTS_LANGS.map((l): [string, string] => [text, l])
   if (Capacitor.isNativePlatform()) {
     void (async () => {
       try {
         const { TextToSpeech } = await import('@capacitor-community/text-to-speech')
         try { await TextToSpeech.stop() } catch { /* nothing playing */ }
-        for (const lang of TTS_LANGS) {
+        for (const [line, lang] of attempts) {
           try {
-            await TextToSpeech.speak({ text, lang, rate: 1.0, pitch: 1.0, volume: 1.0, category: 'playback' })
+            await TextToSpeech.speak({ text: line, lang, rate: 1.0, pitch: 1.0, volume: 1.0, category: 'playback' })
             return // spoke successfully
           } catch (e) {
             console.warn('[tts] lang failed:', lang, (e as Error)?.message || e)
@@ -86,8 +94,12 @@ export function speak(text: string): void {
   try {
     const synth = (window as unknown as { speechSynthesis?: SpeechSynthesis }).speechSynthesis
     if (!synth || typeof SpeechSynthesisUtterance !== 'function') return
-    const u = new SpeechSynthesisUtterance(text)
-    u.lang = 'en-IN'; u.rate = 1; u.pitch = 1; u.volume = 1
+    // Use the app language only when the browser actually has a voice for it; else speak English.
+    const voices = synth.getVoices ? synth.getVoices() : []
+    const native = attempts[0][1] !== 'en-IN' && voices.some((v) => v.lang.toLowerCase().startsWith(code))
+    const u = new SpeechSynthesisUtterance(native ? text : (english ?? text))
+    u.lang = native ? attempts[0][1] : 'en-IN'; u.rate = 1; u.pitch = 1; u.volume = 1
+
     synth.cancel() // drop anything queued so this plays promptly
     synth.speak(u)
   } catch { /* ignore */ }

@@ -4,6 +4,7 @@ import { useToast } from '../components/UI'
 import { useStore } from '../store'
 import { updateMe } from '../api'
 import { COUNTRIES } from '../countries'
+import { t } from '../i18n'
 
 export default function CountrySelect() {
   const nav = useNavigate()
@@ -24,12 +25,12 @@ export default function CountrySelect() {
   return (
     <div className="screen">
       <div className="onb-hero">
-        <div className="onb-step">Step 1 of 2</div>
-        <h1>Where are you?</h1>
-        <p>Select your country to personalise services &amp; pricing.</p>
+        <div className="onb-step">{t('Step 1 of 2')}</div>
+        <h1>{t('Where are you?')}</h1>
+        <p>{t('Select your country to personalise services & pricing.')}</p>
       </div>
       <div className="content pad-cta">
-        <div className="search"><span>🔍</span><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search country" /></div>
+        <div className="search"><span>🔍</span><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search country')} /></div>
         {list.map((c) => (
           <button key={c.code} className={`country-row ${sel === c.code ? 'sel' : ''}`} onClick={() => setSel(c.code)}>
             <span className="cf">{c.flag}</span>
@@ -39,7 +40,8 @@ export default function CountrySelect() {
           </button>
         ))}
       </div>
-      <div className="footer-cta"><button className="btn full" onClick={next} disabled={busy}>{busy ? 'Saving…' : 'Continue'}</button></div>
+      <div className="footer-cta"><button className="btn full" onClick={next} disabled={busy}>{busy ? t('Saving…') : t('Continue')}
+</button></div>
     </div>
   )
 }

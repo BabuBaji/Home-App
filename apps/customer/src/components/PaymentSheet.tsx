@@ -274,7 +274,7 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
                   {g.options.map((o) => (
                     <button key={o.id} className={`pm-row ${method === o.id ? 'sel' : ''}`} onClick={() => setMethod(o.id)}>
                       <RowIcon id={o.id} emoji={o.icon} />
-                      <span className="grow"><span className="pm-name">{o.name}<BrandCluster id={o.id} /></span>{o.sub && <span className="pm-sub">{provider !== 'razorpay' && PKG[o.id] && icons[PKG[o.id]!]?.installed === false ? t('Not installed') : o.sub}</span>}</span>
+                      <span className="grow"><span className="pm-name">{t(o.name)}<BrandCluster id={o.id} /></span>{o.sub && <span className="pm-sub">{provider !== 'razorpay' && PKG[o.id] && icons[PKG[o.id]!]?.installed === false ? t('Not installed') : t(o.sub)}</span>}</span>
                       <span className="pm-radio">{method === o.id ? '●' : ''}</span>
                     </button>
                   ))}

@@ -133,7 +133,7 @@ export default function BookingDetail() {
                 <ServiceThumb service={{ id: i.id, name: i.name, image: `/services/${i.id}.jpg` }} medallion={34} />
               </span>
               <span className="bd-svc-main">
-                <span className="bd-svc-name">{i.name}</span>
+                <span className="bd-svc-name">{t(i.name)}</span>
                 {i.durationLabel && <span className="bd-svc-dur">{i.durationLabel}</span>}
               </span>
               <span className="bd-svc-amt">{money(i.price)}</span>

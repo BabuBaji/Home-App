@@ -5,6 +5,7 @@ import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { StoreProvider } from './store'
 import { initApiBase } from './api'
+import { i18nReady } from './i18n'
 import { Capacitor } from '@capacitor/core'
 
 // Draw the app edge-to-edge behind a transparent status bar (true full screen). The
@@ -35,5 +36,7 @@ function start() {
   )
 }
 
-// Don't block forever on a slow network — cap the wait, then start with whatever we have.
-Promise.race([initApiBase(), new Promise((r) => setTimeout(r, 2500))]).then(start)
+// Don't block forever on a slow network — cap the wait, then start with whatever we have. The saved
+// language's dictionary (a small local chunk) loads in parallel so the first frame is already translated.
+Promise.race([Promise.all([initApiBase(), i18nReady()]), new Promise((r) => setTimeout(r, 2500))]).then(start)
+

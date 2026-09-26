@@ -4,6 +4,7 @@ import { useToast } from '../../components/UI'
 import { fetchMapsKey } from '../../api'
 import { loadPickerMap } from '../../maps'
 import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, GeoError, type Place } from '../../geo'
+import { t } from '../../i18n'
 
 export interface PickedLocation { label: string; name: string; sub: string; pincode: string | null; city: string; lat: number; lng: number }
 
@@ -29,7 +30,7 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
     setResolving(true)
     const g = await reverseGeocodeFull(lat, lng)
     setResolving(false)
-    if (g) setAddr({ label: g.label || [g.area, g.city].filter(Boolean).join(', ') || 'Selected location', name: g.name, sub: g.sub, pincode: g.pincode, city: g.city, lat, lng })
+    if (g) setAddr({ label: g.label || [g.area, g.city].filter(Boolean).join(', ') || t('Selected location'), name: g.name, sub: g.sub, pincode: g.pincode, city: g.city, lat, lng })
   }
 
   useEffect(() => {
@@ -45,15 +46,15 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
         mapRef.current = map
         setReady(true)
         map.onIdle(() => { if (revTimer.current) clearTimeout(revTimer.current); revTimer.current = setTimeout(resolveCentre, 350) })
-      } catch (e) { setLoadErr((e as Error).message || 'Could not load the map') }
+      } catch (e) { setLoadErr((e as Error).message || t('Could not load the map')) }
     })()
     return () => { cancelled = true; if (revTimer.current) clearTimeout(revTimer.current) }
   }, [])
 
   useEffect(() => {
     if (!q.trim()) { setResults([]); return }
-    const t = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
-    return () => clearTimeout(t)
+    const tm = setTimeout(() => { searchPlaces(q).then(setResults).catch(() => {}) }, 400)
+    return () => clearTimeout(tm)
   }, [q])
 
   async function pickResult(p: Place) {
@@ -64,21 +65,21 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
   }
   async function goToCurrent() {
     try { mapRef.current?.panTo(await getCurrentPosition()) }
-    catch (e) { toast(e instanceof GeoError && e.reason === 'permission' ? 'Allow location permission to use this' : 'Could not get your location') }
+    catch (e) { toast(e instanceof GeoError && e.reason === 'permission' ? t('Allow location permission to use this') : t('Could not get your location')) }
   }
 
-  const headline = resolving ? 'Locating…' : (addr ? (addr.name || addr.label.split(' - ')[0]) : 'Move the map to your spot')
+  const headline = resolving ? t('Locating…') : (addr ? (addr.name || addr.label.split(' - ')[0]) : t('Move the map to your spot'))
 
   return (
     <div className="ad2-overlay m2">
       <div className="ps-top">
-        <button className="au-back" onClick={onClose} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Select on Map</b><span style={{ width: 42 }} />
+        <button className="au-back" onClick={onClose} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Select on Map')}</b><span style={{ width: 42 }} />
       </div>
 
       <div className="mp-search">
         <div className="mp-search-box"><Search size={18} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search for area, street or landmark" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search for area, street or landmark')} />
         </div>
         {results.length > 0 && (
           <div className="mp-results">
@@ -95,20 +96,21 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
         <div ref={mapDiv} className="mp-map" />
         <div className="mp-radius" aria-hidden><span /><span /></div>
         <div className="mp-pin" aria-hidden>
-          {addr && <div className="mp-pin-tip"><span>Set this as your location</span><b>{addr.name || addr.label.split(' - ')[0].split(',')[0]}</b></div>}
+          {addr && <div className="mp-pin-tip"><span>{t('Set this as your location')}</span><b>{addr.name || addr.label.split(' - ')[0].split(',')[0]}</b></div>}
           <MapPin size={42} className="mp-pin-ic" fill="currentColor" />
         </div>
-        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> Go to current location</button>
-        {!ready && !loadErr && <div className="mp-map-msg">Loading map…</div>}
+        <button className="mp-locate" onClick={goToCurrent}><LocateFixed size={16} /> {t('Go to current location')}</button>
+        {!ready && !loadErr && <div className="mp-map-msg">{t('Loading map…')}</div>}
         {loadErr && <div className="mp-map-msg err">{loadErr}</div>}
       </div>
 
       <div className="ad2-mapsheet">
         <div className="ad2-mapaddr">
           <MapPin size={20} className="ad2-mapaddr-ic" />
-          <div className="grow"><b>{headline}</b><div className="ad2-mapaddr-sub">{addr?.label || (addr?.pincode ? `Pincode ${addr.pincode}` : 'Pan the map to place the pin')}</div></div>
+          <div className="grow"><b>{headline}</b><div className="ad2-mapaddr-sub">{addr?.label || (addr?.pincode ? t('Pincode {pin}', { pin: addr.pincode }) : t('Pan the map to place the pin'))}</div></div>
         </div>
-        <button className="au-btn" onClick={() => addr && onDone(addr)} disabled={!addr}>Use This Location</button>
+        <button className="au-btn" onClick={() => addr && onDone(addr)} disabled={!addr}>{t('Use This Location')}</button>
+
       </div>
     </div>
   )

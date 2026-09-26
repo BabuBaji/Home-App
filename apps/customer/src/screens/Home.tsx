@@ -8,7 +8,7 @@ import ComingSoon from './ComingSoon'
 import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
 import PackagesStrip from '../components/PackagesStrip'
 import type { Service, Booking, Address } from '../types'
-import { t } from '../i18n'
+import { t, dateLocale } from '../i18n'
 
 // Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
 // then diverge into the theme colour lower down. Kept dark enough for white text + status icons.
@@ -62,7 +62,7 @@ export default function Home() {
   // Header address: the saved label ("Home"/"Work") reads as the title, with a SHORT "flat, city"
   // summary under it - the full street line is in the address sheet a tap away. Falls back to the
   // city alone when no address is saved yet, so a new user still sees something tappable.
-  const addrTitle = addr?.label || cityLabel
+  const addrTitle = addr?.label ? t(addr.label) : cityLabel
   const addrShort = useMemo(() => {
     if (!addr) return ''
     const flat = (addr.house || (addr.line || '').split(',')[0] || '').trim()
@@ -76,7 +76,7 @@ export default function Home() {
   const svcList = useMemo(() => [...services].filter((s) => !cat || s.category === cat).sort((a, b) => Number(b.available) - Number(a.available)), [services, cat])
   // Search by service name (or category), against the same catalog list.
   const q = query.trim().toLowerCase()
-  const results = useMemo(() => (q ? services.filter((s) => s.name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q)).slice(0, 8) : []), [services, q])
+  const results = useMemo(() => (q ? services.filter((s) => s.name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q) || t(s.name).toLowerCase().includes(q)).slice(0, 8) : []), [services, q])
   // Only a genuinely live booking counts as "Continue Booking": an active status that hasn't gone
   // stale (see isContinuable — a job whose slot is >1 day past is abandoned, not continuable). Once
   // it's completed/cancelled or stale it drops out; future-scheduled bookings still show.
@@ -84,7 +84,7 @@ export default function Home() {
 
   // The greeting is always the first slide; live banners rotate in after it.
   const slides: Slide[] = useMemo(() => [
-    { key: 'greeting', kind: 'announcement', title: firstName, subtitle: "Let's make your home spotless today!", emoji: '', theme: 'purple', ctaLabel: '', ctaLink: '', priority: 0, greetingName: firstName },
+    { key: 'greeting', kind: 'announcement', title: firstName, subtitle: t("Let's make your home spotless today!"), emoji: '', theme: 'purple', ctaLabel: '', ctaLink: '', priority: 0, greetingName: firstName },
     ...banners,
   ], [banners, firstName])
   const cur = slides[Math.min(active, slides.length - 1)] || slides[0]
@@ -212,7 +212,7 @@ export default function Home() {
               {results.map((s) => (
                 <button key={s.id} className="hd-search-row" onClick={() => openService(s)}>
                   <img src={s.image || `/services/${s.id}.jpg`} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
-                  <span className="grow"><b>{s.name}</b><small>{s.available ? t('From ₹{price}', { price: s.price }) : t('Not available yet')}</small></span>
+                  <span className="grow"><b>{t(s.name)}</b><small>{s.available ? t('From ₹{price}', { price: s.price }) : t('Not available yet')}</small></span>
                 </button>
               ))}
               {results.length === 0 && <div className="hd-search-row"><small>{t('No services match "{q}"', { q: query.trim() })}</small></div>}
@@ -231,7 +231,7 @@ export default function Home() {
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
               </span>
               <span className="hd-cont-main">
-                <b>{cont.items[0]?.name || t('Booking')}{cont.items.length > 1 ? ` +${cont.items.length - 1}` : ''}</b>
+                <b>{cont.items[0]?.name ? t(cont.items[0].name) : t('Booking')}{cont.items.length > 1 ? ` +${cont.items.length - 1}` : ''}</b>
                 <small>{bkWhen(cont)}</small>
               </span>
               <span className="hd-cont-btn">{t('Track')}</span>
@@ -245,7 +245,7 @@ export default function Home() {
           {categories.length > 1 && (
             <div className="hd-cats ord-chips">
               <button className={`ord-chip ${cat === '' ? 'active' : ''}`} onClick={() => setCat('')}>{t('All')}</button>
-              {categories.map((c) => <button key={c} className={`ord-chip ${cat === c ? 'active' : ''}`} onClick={() => setCat(c)}>{c}</button>)}
+              {categories.map((c) => <button key={c} className={`ord-chip ${cat === c ? 'active' : ''}`} onClick={() => setCat(c)}>{t(c)}</button>)}
             </div>
           )}
           <div className="hd-pop hd-pop-all">
@@ -257,7 +257,7 @@ export default function Home() {
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
                   {!s.available && <span className="hd-pop-soon">{t('Coming Soon')}</span>}
                 </span>
-                <span className="hd-pop-name">{s.name}</span>
+                <span className="hd-pop-name">{t(s.name)}</span>
                 <span className="hd-pop-price">{s.available ? t('From ₹{price}', { price: s.price }) : t('Not available yet')}</span>
               </button>
             ))}
@@ -274,5 +274,5 @@ export default function Home() {
 
 function bkWhen(b: Booking) {
   if (b.date && b.time) return `${b.date}, ${b.time}`
-  return new Date(b.created).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Date(b.created).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' })
 }

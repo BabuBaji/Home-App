@@ -48,7 +48,7 @@ export default function AIRecommendations() {
               <div key={r.service.id} className="air-card">
                 <span className="air-thumb"><ServiceThumb service={{ id: r.service.id, name: r.service.name, image: `/services/${r.service.id}.jpg` }} medallion={30} /></span>
                 <div className="air-main">
-                  <div className="air-name">{r.service.name}</div>
+                  <div className="air-name">{t(r.service.name)}</div>
                   <div className="air-note">
                     {t('You booked this {when}', { when: ago(r.days) })}{r.times > 1 ? ` · ${t('{n} times', { n: r.times })}` : ''}
                   </div>

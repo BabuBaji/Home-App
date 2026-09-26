@@ -2,6 +2,7 @@
 // app already has — bookings, transactions, the service catalog — rather than invented. Where a
 // value cannot be derived (e.g. no bookings yet), the screens fall back to sensible neutral states.
 import type { Booking, Transaction, Service } from './types'
+import { t, dateLocale } from './i18n'
 
 const DAY = 86400000
 const daysSince = (iso?: string | null) => iso ? Math.floor((Date.now() - +new Date(iso)) / DAY) : Infinity
@@ -34,14 +35,14 @@ export interface TimelineItem { id: string; kind: 'booking' | 'payment'; title: 
 export function timeline(bookings: Booking[], txns: Transaction[]): TimelineItem[] {
   const items: TimelineItem[] = []
   for (const b of bookings) {
-    const svc = b.items.map((i) => i.name).join(', ')
-    if (b.status === 'completed') items.push({ id: `bc${b.id}`, kind: 'booking', title: `${svc} Completed`, sub: b.pro_name ? `by ${b.pro_name}` : b.ref, at: b.completed_at || b.created, status: 'ok' })
-    else if (b.status === 'cancelled') items.push({ id: `bx${b.id}`, kind: 'booking', title: `${svc} Cancelled`, sub: b.ref, at: b.created, status: 'info' })
-    else items.push({ id: `bo${b.id}`, kind: 'booking', title: `${svc} Booked`, sub: b.ref, at: b.created, status: 'pending' })
+    const svc = b.items.map((i) => t(i.name)).join(', ')
+    if (b.status === 'completed') items.push({ id: `bc${b.id}`, kind: 'booking', title: t('{service} Completed', { service: svc }), sub: b.pro_name ? t('by {name}', { name: b.pro_name }) : b.ref, at: b.completed_at || b.created, status: 'ok' })
+    else if (b.status === 'cancelled') items.push({ id: `bx${b.id}`, kind: 'booking', title: t('{service} Cancelled', { service: svc }), sub: b.ref, at: b.created, status: 'info' })
+    else items.push({ id: `bo${b.id}`, kind: 'booking', title: t('{service} Booked', { service: svc }), sub: b.ref, at: b.created, status: 'pending' })
   }
-  for (const t of txns) {
-    const credit = t.type === 'credit'
-    items.push({ id: `t${t.id}`, kind: 'payment', title: t.title, sub: `${credit ? '+' : '-'}₹${t.amount}${t.ref ? ` · ${t.ref}` : ''}`, at: t.created, status: credit ? 'ok' : 'pending' })
+  for (const tx of txns) {
+    const credit = tx.type === 'credit'
+    items.push({ id: `t${tx.id}`, kind: 'payment', title: t(tx.title), sub: `${credit ? '+' : '-'}₹${tx.amount}${tx.ref ? ` · ${tx.ref}` : ''}`, at: tx.created, status: credit ? 'ok' : 'pending' })
   }
   return items.sort((a, b) => +new Date(b.at) - +new Date(a.at))
 }
@@ -52,9 +53,9 @@ export function byDay<T extends { at: string }>(items: T[]): { label: string; it
   const dayLabel = (iso: string) => {
     const d = new Date(iso); d.setHours(0, 0, 0, 0)
     const diff = Math.round((+today - +d) / DAY)
-    if (diff === 0) return 'Today'
-    if (diff === 1) return 'Yesterday'
-    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    if (diff === 0) return t('Today')
+    if (diff === 1) return t('Yesterday')
+    return new Date(iso).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' })
   }
   const out: { label: string; items: T[] }[] = []
   for (const it of items) {
@@ -65,5 +66,6 @@ export function byDay<T extends { at: string }>(items: T[]): { label: string; it
   return out
 }
 
-export const timeStr = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
+export const timeStr = (iso: string) => new Date(iso).toLocaleTimeString(dateLocale(),
+ { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
 export const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`

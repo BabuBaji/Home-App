@@ -49,7 +49,7 @@ export default function ExtrasPrompt({ b }: { b: Booking }) {
       {approved.length > 0 && (
         <div className="jt-card">
           <b style={{ display: 'block', marginBottom: 4 }}>{t('Extra tasks')}</b>
-          {approved.map((x) => <div key={x.id} className="muted" style={{ fontSize: 13, display: 'flex', justifyContent: 'space-between' }}><span>{x.name}</span><span>₹{x.price}</span></div>)}
+          {approved.map((x) => <div key={x.id} className="muted" style={{ fontSize: 13, display: 'flex', justifyContent: 'space-between' }}><span>{t(x.name)}</span><span>₹{x.price}</span></div>)}
         </div>
       )}
       <PaymentSheet open={!!paying} amount={paying?.price || 0} onClose={() => setPaying(null)} onPaid={(_m, id) => paying && decide(paying, 'approve', id)} />

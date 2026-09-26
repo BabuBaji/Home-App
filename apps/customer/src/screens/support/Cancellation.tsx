@@ -9,6 +9,7 @@ import OrderCard from '../../components/OrderCard'
 import { fetchBookings } from '../../api'
 import { isLive } from '../../orders'
 import type { Booking } from '../../types'
+import { t } from '../../i18n'
 
 export default function Cancellation() {
   const nav = useNavigate()
@@ -25,8 +26,8 @@ export default function Cancellation() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Cancel Booking</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Cancel Booking')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -37,10 +38,11 @@ export default function Cancellation() {
       {head}
       <div className="content">
         {cancellable.length === 0 ? (
-          <div className="state"><div className="ico">🗓</div><h3>No bookings to cancel</h3><p>Only upcoming or in-progress bookings can be cancelled.</p></div>
+          <div className="state"><div className="ico">🗓</div><h3>{t('No bookings to cancel')}</h3><p>{t('Only upcoming or in-progress bookings can be cancelled.')}</p></div>
         ) : (
           <>
-            <div className="rs-sec">Choose a booking to cancel</div>
+            <div className="rs-sec">{t('Choose a booking to cancel')}</div>
+
             <div className="ord-list">
               {cancellable.map((b) => <OrderCard key={b.id} b={b} onClick={() => nav(`/cancel/${b.id}`)} />)}
             </div>

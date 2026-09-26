@@ -4,8 +4,9 @@ import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions, fetchBooking, fetchJobMessages, fetchLanguage } from './api'
-import { t, setLang, useLang } from './i18n'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions, fetchBooking, fetchJobMessages, fetchLanguage, updateLanguage } from './api'
+
+import { t, tEn, setLang, getLang, useLang } from './i18n'
 import { ensureNotifPermission, fireLocalNotification, speak, speakOnce, onNotificationTap } from './notify'
 import { startPush } from './push'
 import { serviceEndMs, serviceNames } from './screens/job/useJob'
@@ -124,7 +125,15 @@ export default function App() {
   // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
   useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
   // The saved language lives on the profile too — adopt it on sign-in (e.g. a fresh install).
-  useEffect(() => { if (user) fetchLanguage().then((r) => { if (r.language) setLang(r.language) }).catch(() => {}) }, [user?.id])
+  // If the language was picked on the welcome screen before signing in, push that choice to the
+  // profile instead of letting the profile's (older) value overwrite it.
+  useEffect(() => {
+    if (!user) return
+    let pendingPick = false
+    try { pendingPick = sessionStorage.getItem('hh_lang_pending') === '1'; sessionStorage.removeItem('hh_lang_pending') } catch { /* ignore */ }
+    if (pendingPick) { updateLanguage(getLang()).catch(() => {}); return }
+    fetchLanguage().then((r) => { if (r.language) setLang(r.language) }).catch(() => {})
+  }, [user?.id])
 
   // App-wide push alert: notify the customer when a booking is auto-cancelled (no expert accepted),
   // even if they've left the Track screen. Polls every 30s; the first pass seeds silently so old
@@ -144,7 +153,7 @@ export default function App() {
         for (const b of bs) {
           if (b.status === 'cancelled' && b.cancelled_by === 'system' && !seen.has(b.id)) {
             seen.add(b.id); changed = true
-            if (!first) fireLocalNotification('No expert available', `Booking ${b.ref} was cancelled — ₹${b.refund ?? b.total ?? 0} refunded to your wallet.`, undefined, { route: `/booking-details/${b.id}` })
+            if (!first) fireLocalNotification(t('No expert available'), t('Booking {ref} was cancelled — ₹{amount} refunded to your wallet.', { ref: b.ref, amount: b.refund ?? b.total ?? 0 }), undefined, { route: `/booking-details/${b.id}` })
           }
         }
         if (changed || first) localStorage.setItem(KEY, JSON.stringify([...seen]))
@@ -172,12 +181,12 @@ export default function App() {
           if (!pending || seen.has(pending.id)) continue
           seen.add(pending.id)
           localStorage.setItem(KEY, JSON.stringify([...seen]))
-          const who = b.pro?.name || b.pro_name || 'Your expert'
+          const who = b.pro?.name || b.pro_name || t('Your expert')
           fireLocalNotification(
-            `${who} needs ${pending.minutes} more minutes`,
+            t('{name} needs {min} more minutes', { name: who, min: pending.minutes }),
             pending.price > 0
-              ? `The current service may need more time — ₹${pending.price}. Tap to approve or decline.`
-              : 'The current service may need more time. Tap to review.',
+              ? t('The current service may need more time — ₹{price}. Tap to approve or decline.', { price: pending.price })
+              : t('The current service may need more time. Tap to review.'),
             undefined, { route: `/job/${b.id}/extend` },
           )
         }
@@ -219,8 +228,9 @@ export default function App() {
             const k = `soon:${b.id}:${total}`
             if (endMs && msLeft > 0 && msLeft <= 5 * 60000 && !seen.has(k)) {
               mark(k)
-              fireLocalNotification('Service ending soon', `Your ${svc} service will finish in about 5 minutes.`, undefined, { route: `/job/${b.id}` })
-              speak(`Your ${svc} service will be completed in about 5 minutes. If you need more time, you can request an extension.`)
+              fireLocalNotification(t('Service ending soon'), t('Your {service} service will finish in about 5 minutes.', { service: svc }), undefined, { route: `/job/${b.id}` })
+              const line = 'Your {service} service will be completed in about 5 minutes. If you need more time, you can request an extension.'
+              speak(t(line, { service: svc }), tEn(line, { service: svc }))
             }
             // Time's up: the booked (+extended) duration has elapsed but the worker hasn't ended the
             // job yet, so status is still in_progress (the timer sits at 99%). Announce it once, only
@@ -229,8 +239,9 @@ export default function App() {
             const kUp = `up:${b.id}:${total}`
             if (endMs && msLeft <= 0 && msLeft > -120000 && !seen.has(kUp)) {
               mark(kUp)
-              fireLocalNotification('Service time is up', `Your ${svc} service time has ended.`, undefined, { route: `/job/${b.id}` })
-              speak(`Your ${svc} service time is up. If the work is done, your expert will complete the service. If you need more time, you can request an extension.`)
+              fireLocalNotification(t('Service time is up'), t('Your {service} service time has ended.', { service: svc }), undefined, { route: `/job/${b.id}` })
+              const line = 'Your {service} service time is up. If the work is done, your expert will complete the service. If you need more time, you can request an extension.'
+              speak(t(line, { service: svc }), tEn(line, { service: svc }))
             }
           }
           if (b.status === 'arrived') {
@@ -238,15 +249,17 @@ export default function App() {
             if (!seen.has(k)) {
               mark(k)
               if (!first) {
-                const who = b.pro?.name || b.pro_name || 'Your expert'
+                const who = b.pro?.name || b.pro_name || t('Your expert')
                 let otp = b.service_otp ? String(b.service_otp) : ''
                 if (!otp) { try { otp = String((await fetchBooking(b.id)).service_otp || '') } catch { /* keep '' */ } }
                 fireLocalNotification(
-                  `${who} has arrived`,
-                  otp ? `Share your start OTP ${otp} to begin the service.` : 'Your expert has reached your location.',
+                  t('{name} has arrived', { name: who }),
+                  otp ? t('Share your start OTP {otp} to begin the service.', { otp }) : t('Your expert has reached your location.'),
                   undefined, { route: `/job/${b.id}/otp` },
                 )
-                speak(otp ? `Your expert has arrived. Your start O T P is ${otp.split('').join(' ')}.` : 'Your expert has arrived at your location.')
+                const spoken = otp.split('').join(' ')
+                if (otp) speak(t('Your expert has arrived. Your start OTP is {otp}.', { otp: spoken }), tEn('Your expert has arrived. Your start O T P is {otp}.', { otp: spoken }))
+                else speak(t('Your expert has arrived at your location.'), tEn('Your expert has arrived at your location.'))
               }
             }
           }
@@ -255,13 +268,15 @@ export default function App() {
             if (!seen.has(k)) {
               mark(k)
               if (!first) {
-                fireLocalNotification('Service completed', 'Your service is complete. Tap to rate it.', undefined, { route: `/job/${b.id}/completed` })
+                fireLocalNotification(t('Service completed'), t('Your service is complete. Tap to rate it.'), undefined, { route: `/job/${b.id}/completed` })
                 // Announce completion aloud the moment it happens — the same voice the customer would
                 // hear on the ServiceCompleted screen, so they get it even while on the tracking
                 // screen. speakOnce dedupes with that screen, so it plays exactly once per booking.
                 if (speakOnce(b.id)) {
-                  const name = user?.name?.split(' ')[0] || 'there'
-                  speak(`Hi ${name}, your ${serviceNames(b)} service has completed. Please rate your experience in the app.`)
+                  const name = user?.name?.split(' ')[0] || t('there')
+                  const line = 'Hi {name}, your {service} service has completed. Please rate your experience in the app.'
+                  speak(t(line, { name, service: serviceNames(b) }), tEn(line, { name, service: serviceNames(b) }))
+
                 }
               }
             }

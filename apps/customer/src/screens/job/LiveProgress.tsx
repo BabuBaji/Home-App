@@ -166,7 +166,7 @@ export default function LiveProgress() {
                 <img src={`/services/${i.id}.jpg`} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
               </span>
               <div className="jt-lp-svc-main">
-                <b>{i.name}</b>
+                <b>{t(i.name)}</b>
                 <small>{i.durationLabel || t('{n} min', { n: targetMin })}{b.ref ? ` · ${b.ref}` : ''}</small>
               </div>
               <span className={`jt-lp-svc-tag ${done ? 'done' : ''}`}>{done ? t('Done') : t('Live')}</span>

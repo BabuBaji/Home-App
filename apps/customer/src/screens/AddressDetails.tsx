@@ -5,6 +5,7 @@ import { useToast } from '../components/UI'
 import { useStore } from '../store'
 import { addAddressApi, updateAddressApi, updateMe } from '../api'
 import type { Address } from '../types'
+import { t } from '../i18n'
 
 interface LocState { label?: string; name?: string; sub?: string; pincode?: string | null; lat?: number; lng?: number; edit?: Address }
 
@@ -63,7 +64,7 @@ export default function AddressDetails() {
       // reflect the (new/edited) default on the profile so the header + zone update immediately
       const { user: u } = await updateMe({ city: cityGuess, location: localityText })
       setUser(u)
-      toast(edit ? 'Address updated' : 'Address saved')
+      toast(edit ? t('Address updated') : t('Address saved'))
       nav('/home', { replace: true })
     } catch (e) { toast((e as Error).message); setSaving(false) }
   }
@@ -71,67 +72,67 @@ export default function AddressDetails() {
   return (
     <div className="ad-screen">
       <div className="ad-top">
-        <button className="mp-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
-        <b>{edit ? 'Edit address details' : 'Add address details'}</b>
+        <button className="mp-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
+        <b>{edit ? t('Edit address details') : t('Add address details')}</b>
       </div>
 
       <div className="ad-body">
         <div className="ad-card">
-          <div className="ad-h">Address details</div>
-          <div className="ad-sub">Save address as</div>
+          <div className="ad-h">{t('Address details')}</div>
+          <div className="ad-sub">{t('Save address as')}</div>
           <div className="ad-labels">
             {['Home', 'Other'].map((l) => (
-              <button key={l} className={label === l ? 'on' : ''} onClick={() => setLabel(l)}>{l}</button>
+              <button key={l} className={label === l ? 'on' : ''} onClick={() => setLabel(l)}>{t(l)}</button>
             ))}
           </div>
           <div className="ad-grid">
-            <input className="ad-fld" placeholder="Flat/House No.*" value={house} onChange={(e) => setHouse(e.target.value)} />
-            <input className="ad-fld" placeholder="Floor (Optional)" value={floor} onChange={(e) => setFloor(e.target.value)} />
+            <input className="ad-fld" placeholder={t('Flat/House No.*')} value={house} onChange={(e) => setHouse(e.target.value)} />
+            <input className="ad-fld" placeholder={t('Floor (Optional)')} value={floor} onChange={(e) => setFloor(e.target.value)} />
           </div>
-          <input className="ad-fld" placeholder="Apartment / Building name*" value={apartment} onChange={(e) => setApartment(e.target.value)} />
-          <input className="ad-fld" placeholder="Nearby Landmark (Optional)" value={landmark} onChange={(e) => setLandmark(e.target.value)} />
+          <input className="ad-fld" placeholder={t('Apartment / Building name*')} value={apartment} onChange={(e) => setApartment(e.target.value)} />
+          <input className="ad-fld" placeholder={t('Nearby Landmark (Optional)')} value={landmark} onChange={(e) => setLandmark(e.target.value)} />
         </div>
 
         <div className="ad-card">
-          <div className="ad-h">Home profile</div>
-          <div className="ad-sub">Helps us bring the right people & tools for your home.</div>
-          <div className="ad-sub2">House size*</div>
+          <div className="ad-h">{t('Home profile')}</div>
+          <div className="ad-sub">{t('Helps us bring the right people & tools for your home.')}</div>
+          <div className="ad-sub2">{t('House size*')}</div>
           <div className="hp-sizes">
             {['1BHK', '2BHK', '3BHK', '4+ BHK'].map((s) => (
               <button key={s} className={homeSize === s ? 'on' : ''} onClick={() => pickSize(s)}>{s.replace('BHK', ' BHK')}</button>
             ))}
           </div>
           <div className="hp-steps">
-            <Stepper label="Bedrooms" value={bedrooms} onChange={setBedrooms} />
-            <Stepper label="Bathrooms" value={bathrooms} onChange={setBathrooms} />
-            <Stepper label="Fans" value={fans} onChange={setFans} />
-            <Stepper label="ACs" value={acs} onChange={setAcs} />
+            <Stepper label={t('Bedrooms')} value={bedrooms} onChange={setBedrooms} />
+            <Stepper label={t('Bathrooms')} value={bathrooms} onChange={setBathrooms} />
+            <Stepper label={t('Fans')} value={fans} onChange={setFans} />
+            <Stepper label={t('ACs')} value={acs} onChange={setAcs} />
           </div>
         </div>
 
         <div className="ad-card">
           <div className="ad-loc-row">
             <div className="grow">
-              <div className="ad-loc-label">Area/Sector/Locality*</div>
-              <div className="ad-loc-text">{localityText || 'Selected on map'}</div>
+              <div className="ad-loc-label">{t('Area/Sector/Locality*')}</div>
+              <div className="ad-loc-text">{localityText || t('Selected on map')}</div>
             </div>
-            <button className="ad-change" onClick={() => nav('/onboarding/location')}>Change</button>
+            <button className="ad-change" onClick={() => nav('/onboarding/location')}>{t('Change')}</button>
           </div>
         </div>
 
         <div className="ad-card">
-          <div className="ad-h">Receiver details</div>
-          <div className="ad-sub">Our professional will reach out to you on this number.</div>
+          <div className="ad-h">{t('Receiver details')}</div>
+          <div className="ad-sub">{t('Our professional will reach out to you on this number.')}</div>
           <div className="ad-phone">
             <span className="ad-cc">+91</span>
-            <input className="ad-fld phone" placeholder="Receiver's phone number*" inputMode="numeric" maxLength={10}
+            <input className="ad-fld phone" placeholder={t("Receiver's phone number*")} inputMode="numeric" maxLength={10}
               value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} />
           </div>
         </div>
       </div>
 
       <div className="ad-foot">
-        <button className="mp-confirm" onClick={save} disabled={!canSave || saving}>{saving ? 'Saving…' : 'Save address'}</button>
+        <button className="mp-confirm" onClick={save} disabled={!canSave || saving}>{saving ? t('Saving…') : t('Save address')}</button>
       </div>
     </div>
   )
@@ -143,9 +144,10 @@ function Stepper({ label, value, onChange }: { label: string; value: number; onC
     <div className="hp-row">
       <span className="hp-lbl">{label}</span>
       <div className="hp-step">
-        <button type="button" onClick={() => onChange(Math.max(0, value - 1))} disabled={value <= 0} aria-label={`decrease ${label}`}>−</button>
+        <button type="button" onClick={() => onChange(Math.max(0, value - 1))} disabled={value <= 0} aria-label={`− ${label}`}>−</button>
         <b>{value}</b>
-        <button type="button" onClick={() => onChange(value + 1)} aria-label={`increase ${label}`}>+</button>
+        <button type="button" onClick={() => onChange(value + 1)} aria-label={`+ ${label}`}
+>+</button>
       </div>
     </div>
   )

@@ -8,7 +8,7 @@ export function startOfDay(d: Date) { return new Date(d.getFullYear(), d.getMont
 export function sameDay(a: Date, b: Date) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate() }
 export function fmtDate(d: Date) {
   const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${d.getDate()} ${m[d.getMonth()]} ${d.getFullYear()}`
+  return `${d.getDate()} ${t(m[d.getMonth()])} ${d.getFullYear()}`
 }
 
 export default function Calendar({ value, onChange, zh }: { value: Date; onChange: (d: Date) => void; zh?: ZoneHours | null }) {

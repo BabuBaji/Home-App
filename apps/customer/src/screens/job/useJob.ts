@@ -82,7 +82,7 @@ export function fmtDateTime(b: Booking): string {
   return parts.length ? parts.join(', ') : t('Scheduled')
 }
 
-export const serviceNames = (b: Booking) => (b.items || []).map((i) => i.name).join(', ') || t('Home Service')
+export const serviceNames = (b: Booking) => (b.items || []).map((i) => t(i.name)).join(', ') || t('Home Service')
 
 // Booked length in minutes — durationId first (authoritative), then the free-text label. Mirrors the
 // server's rule. Shared by the live clock and the "ending soon" voice alert.

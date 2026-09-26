@@ -9,6 +9,7 @@ import { Loading, useToast } from '../components/UI'
 import { fetchBooking, fetchInvoiceInfo, fetchMe, type InvoiceInfo } from '../api'
 import { invoiceHTML, downloadInvoice, shareInvoice } from '../invoiceDoc'
 import type { Booking, User } from '../types'
+import { t } from '../i18n'
 
 export default function Invoice() {
   const { id } = useParams()
@@ -26,13 +27,13 @@ export default function Invoice() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Invoice</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Invoice')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
 
-  if (err) return <div className="screen">{head}<div className="state"><div className="ico">⚠️</div><h3>Could not load invoice</h3></div></div>
+  if (err) return <div className="screen">{head}<div className="state"><div className="ico">⚠️</div><h3>{t('Could not load invoice')}</h3></div></div>
   if (!b) return <div className="screen">{head}<Loading /></div>
 
   const bill = { name: me?.name || undefined, phone: me?.phone || undefined }
@@ -42,9 +43,9 @@ export default function Invoice() {
     setBusy(true)
     const saved = await downloadInvoice(b, inv, bill)
     setBusy(false)
-    toast(saved ? `Invoice saved to ${saved}` : 'Could not save the invoice')
+    toast(saved ? t('Invoice saved to {path}', { path: saved }) : t('Could not save the invoice'))
   }
-  const onShare = async () => { if (!(await shareInvoice(b, inv, bill))) toast('Sharing is not available here') }
+  const onShare = async () => { if (!(await shareInvoice(b, inv, bill))) toast(t('Sharing is not available here')) }
 
   return (
     <div className="screen inv-screen">
@@ -53,8 +54,9 @@ export default function Invoice() {
         <iframe title={`Invoice ${b.ref}`} srcDoc={html} className="inv-frame" />
       </div>
       <div className="inv-foot">
-        <button className="inv-btn ghost" onClick={onShare}><Share2 size={16} /> Share</button>
-        <button className="inv-btn" disabled={busy} onClick={onDownload}><Download size={16} /> {busy ? 'Saving…' : 'Download'}</button>
+        <button className="inv-btn ghost" onClick={onShare}><Share2 size={16} /> {t('Share')}</button>
+        <button className="inv-btn" disabled={busy} onClick={onDownload}><Download size={16} /> {busy ? t('Saving…') : t('Download')}
+</button>
       </div>
     </div>
   )

@@ -69,7 +69,8 @@ export default function MyProfile() {
           </span>
           <div className="mp-hero-main">
             <div className="mp-name">{user.name || t('Your name')}</div>
-            {user.phone && <div className="mp-line">+91 {user.phone}</div>}
+            {user.phone && <div className="mp-line"><bdi dir="ltr">+91 {user.phone}</bdi></div>
+}
             {user.email && <div className="mp-line">{user.email}</div>}
           </div>
           <button className="mp-edit" onClick={() => nav('/personal')} aria-label={t('Edit')}><Pencil size={15} /></button>

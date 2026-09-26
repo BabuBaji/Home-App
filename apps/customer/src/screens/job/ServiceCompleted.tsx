@@ -5,7 +5,7 @@ import { Loading, useBack } from '../../components/UI'
 import { speak, speakOnce } from '../../notify'
 import { useStore } from '../../store'
 import { useJob, serviceNames } from './useJob'
-import { t, dateLocale } from '../../i18n'
+import { t, tEn, dateLocale } from '../../i18n'
 
 // Module 6 · #51 — Service Completed. Uses the real completed_at timestamp. The star row seeds the
 // rating and jumps into the Module-7 rating flow; Pay & Tip opens the tip screen.
@@ -23,8 +23,10 @@ export default function ServiceCompleted() {
   // never repeats. (Extending is offered only while the job is running — not after it's over.)
   useEffect(() => {
     if (b?.status === 'completed' && speakOnce(b.id)) {
-      const name = user?.name?.split(' ')[0] || 'there'
-      speak(`Hi ${name}, your ${serviceNames(b)} service has completed. Please rate your experience.`)
+      const name = user?.name?.split(' ')[0] || t('there')
+      const line = 'Hi {name}, your {service} service has completed. Please rate your experience.'
+      speak(t(line, { name, service: serviceNames(b) }), tEn(line, { name, service: serviceNames(b) }))
+
     }
   }, [b?.id, b?.status])
 

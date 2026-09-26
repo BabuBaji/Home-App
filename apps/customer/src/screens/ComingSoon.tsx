@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, MapPin } from 'lucide-react'
 import { fetchLiveAreas } from '../api'
+import { t } from '../i18n'
 
 // Cities we're expanding to (shown as "coming soon" alongside the live ones).
 const EXPANSION = ['Mumbai', 'Bangalore', 'Delhi', 'Pune', 'Chennai']
@@ -33,10 +34,10 @@ export default function ComingSoon({ standalone }: { standalone?: boolean }) {
         <div className="cs-hero-glow" />
         <div className="cs-hero-emoji">🌇</div>
       </div>
-      <h1 className="cs-title">Not available in your area yet</h1>
-      <p className="cs-sub">Launching new areas super fast.<br />We'll be there very soon.</p>
+      <h1 className="cs-title">{t('Not available in your area yet')}</h1>
+      <p className="cs-sub">{t('Launching new areas super fast.')}<br />{t("We'll be there very soon.")}</p>
 
-      <h2 className="cs-live-h">We are live in</h2>
+      <h2 className="cs-live-h">{t('We are live in')}</h2>
       <div className="cs-card">
         <div className="cs-cities">
           {cities.map((c) => {
@@ -52,16 +53,16 @@ export default function ComingSoon({ standalone }: { standalone?: boolean }) {
         <div className="cs-areas-box">
           {selLive ? (
             <>
-              <div className="cs-areas-h">Serving {selAreas.length} area{selAreas.length !== 1 ? 's' : ''} in {sel}</div>
+              <div className="cs-areas-h">{selAreas.length === 1 ? t('Serving 1 area in {city}', { city: sel }) : t('Serving {n} areas in {city}', { n: selAreas.length, city: sel })}</div>
               <div className="cs-areas">{selAreas.map((a) => <span key={a} className="cs-area"><MapPin size={13} /> {a}</span>)}</div>
             </>
           ) : (
-            <div className="cs-areas-h">Coming soon to {sel} 🚀</div>
+            <div className="cs-areas-h">{t('Coming soon to {city}', { city: sel })} 🚀</div>
           )}
         </div>
       </div>
 
-      <button className="cs-change" onClick={() => nav('/locations')}>Change location</button>
+      <button className="cs-change" onClick={() => nav('/locations')}>{t('Change location')}</button>
     </div>
   )
 
@@ -69,7 +70,8 @@ export default function ComingSoon({ standalone }: { standalone?: boolean }) {
   return (
     <div className="screen">
       <div className="cs-top">
-        <button className="mp-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
+        <button className="mp-back" onClick={() => nav(-1)} aria-label={t('Back')}
+><ArrowLeft size={20} /></button>
       </div>
       <div className="content">{content}</div>
     </div>

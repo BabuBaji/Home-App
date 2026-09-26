@@ -55,7 +55,7 @@ export function startDate(b: Booking): Date {
 }
 
 // en-IN renders "05:30 am"; the design shows "05:30 AM".
-const time = (d: Date) => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
+const time = (d: Date) => d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
 
 /** "10:00 AM – 12:00 PM" — only when the booked duration is known, else just the start time. */
 export function timeRange(b: Booking): string {

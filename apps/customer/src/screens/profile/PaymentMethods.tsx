@@ -95,7 +95,8 @@ export default function PaymentMethods() {
               ))}
             </div>
             <label className="fm-field"><span>{form.kind === 'card' ? t('Card name') : form.kind === 'netbanking' ? t('Bank name') : t('UPI name')}</span>
-              <input value={form.label} autoFocus onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder={form.kind === 'card' ? 'e.g. Visa' : form.kind === 'netbanking' ? 'e.g. HDFC Bank' : 'e.g. Google Pay'} />
+              <input value={form.label} autoFocus onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder={t('e.g. {example}', { example: form.kind === 'card' ? 'Visa' : form.kind === 'netbanking' ? 'HDFC Bank' : 'Google Pay' })}
+ />
             </label>
             <label className="fm-field"><span>{form.kind === 'upi' ? 'UPI ID' : form.kind === 'card' ? t('Last 4 digits') : t('Account note')}</span>
               <input value={form.detail} maxLength={form.kind === 'card' ? 8 : 40}

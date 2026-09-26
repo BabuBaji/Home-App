@@ -8,13 +8,13 @@ import { useStore } from '../../store'
 import { speak } from '../../notify'
 import { Capacitor } from '@capacitor/core'
 import { useJob, proName, proRating, serviceNames } from './useJob'
-import { t } from '../../i18n'
+import { t, tEn, dateLocale } from '../../i18n'
 
 // Module 6 — Extend Your Service. The expert can ASK for more time; only this screen grants it.
 // Nothing here shortens or rewrites the original booking: the extension is priced and shown as its
 // own line, and the clock only moves once the customer has approved AND paid the extra amount
 // through Razorpay (the same gateway the booking checkout uses).
-const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })
 
 // Load Razorpay's web checkout script once, on demand (browser fallback only; the native app uses
 // the RazorpayNative plugin). Mirrors Payment.tsx so the two checkouts behave identically.
@@ -89,7 +89,7 @@ export default function ExtendService() {
       toast(t('Online payments are not set up yet. Add Razorpay keys in Admin → Settings.'))
       return null
     }
-    const desc = `Service extension +${pending!.minutes} min`
+    const desc = t('Service extension +{min} min', { min: pending!.minutes })
     const order = await createOrder(amount)
     // Native app → Razorpay native SDK (fires the real UPI intent so GPay/PhonePe open directly).
     if (Capacitor.isNativePlatform()) {
@@ -145,8 +145,10 @@ export default function ExtendService() {
       // Announce the extension aloud. From here the live clock, the 5-minute heads-up and the
       // completion voice all follow the NEW end time (extension_minutes feeds serviceEndMs), so the
       // customer hears it confirmed now, then again before and after the extended service ends.
-      const endTxt = newEndMs ? ` Your service will now be completed by ${clock(newEndMs)}.` : ''
-      speak(`Your service has been extended by ${pending.minutes} minutes.${endTxt}`)
+      const line = newEndMs ? 'Your service has been extended by {min} minutes. Your service will now be completed by {time}.' : 'Your service has been extended by {min} minutes.'
+      const vars = { min: pending.minutes, time: newEndMs ? clock(newEndMs) : '' }
+      speak(t(line, vars), tEn(line, vars))
+
       setPending(null)
       nav(`/job/${b.id}/progress`)
     } catch (e) {

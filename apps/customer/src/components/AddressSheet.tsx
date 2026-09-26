@@ -72,7 +72,7 @@ export default function AddressSheet({ open, onClose, onSelect, onAdd }: {
                 <span className="as-ic"><MapPin size={17} /></span>
                 <span className="as-txt">
                   <span className="as-h">
-                    {a.label}
+                    {t(a.label)}
                     {a.is_default && <span className="as-badge">{t('SELECTED')}</span>}
                   </span>
                   <span className="as-line">

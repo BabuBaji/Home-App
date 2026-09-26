@@ -13,7 +13,9 @@ type Tab = 'All' | 'Valid' | 'Expired'
 // Tinted card variants, cycled like the mockup's purple / green / amber cards.
 const TINTS = ['t-violet', 't-green', 't-amber']
 const couponLabel = (c: Coupon) =>
-  c.type === 'pct' ? `${c.value}% OFF${c.max ? ` up to ₹${c.max}` : ''}` : `Flat ₹${c.value} OFF`
+  c.type === 'pct'
+    ? (c.max ? t('{pct}% OFF up to ₹{max}', { pct: c.value, max: c.max }) : t('{pct}% OFF', { pct: c.value }))
+    : t('Flat ₹{amount} OFF', { amount: c.value })
 
 export default function Coupons() {
   const nav = useNavigate()
@@ -41,7 +43,7 @@ export default function Coupons() {
     if (!v) return
     // No cart here — hand the code to checkout via clipboard, where the real validation runs.
     navigator.clipboard?.writeText(v).catch(() => {})
-    toast(`${v} copied — apply it at checkout`)
+    toast(t('{code} copied — apply it at checkout', { code: v }))
   }
 
   const counts = { all: coupons.length, valid: coupons.length, expired: 0 }
@@ -51,8 +53,8 @@ export default function Coupons() {
       {head}
       <div className="content">
         <div className="cp-entry">
-          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Enter coupon code" maxLength={20} />
-          <button className="cp-apply" onClick={() => apply(code)} disabled={!code.trim()}>Apply</button>
+          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={t('Enter coupon code')} maxLength={20} />
+          <button className="cp-apply" onClick={() => apply(code)} disabled={!code.trim()}>{t('Apply')}</button>
         </div>
 
         <div className="cp-tabs">
@@ -64,20 +66,21 @@ export default function Coupons() {
         </div>
 
         {shown.length === 0 && (
-          <div className="state"><div className="ico">🎟️</div><h3>No {tab === 'Expired' ? 'expired ' : ''}coupons</h3><p>Coupons you can use appear here.</p></div>
+          <div className="state"><div className="ico">🎟️</div><h3>{tab === 'Expired' ? t('No expired coupons') : t('No coupons')}</h3><p>{t('Coupons you can use appear here.')}</p></div>
         )}
 
         <div className="cp-list">
           {shown.map((c, i) => (
             <div key={c.code} className={`cp-card ${TINTS[i % TINTS.length]} ${i === 0 ? 'best' : ''}`}>
-              {i === 0 && <span className="cp-best">BEST</span>}
+              {i === 0 && <span className="cp-best">{t('BEST')}</span>}
               <div className="cp-card-main">
                 <div className="cp-code">{c.code}</div>
                 <div className="cp-off">{couponLabel(c)}</div>
                 <div className="cp-desc">{c.label}</div>
-                <div className="cp-meta">Min. order ₹{c.min}{c.max ? ` · Up to ₹${c.max}` : ''}</div>
+                <div className="cp-meta">{t('Min. order ₹{amount}', { amount: c.min })}{c.max ? ` · ${t('Up to ₹{amount}', { amount: c.max })}` : ''}</div>
               </div>
-              <button className="cp-card-btn" onClick={() => apply(c.code)}>Apply</button>
+              <button className="cp-card-btn" onClick={() => apply(c.code)}>{t('Apply')}</button>
+
             </div>
           ))}
         </div>

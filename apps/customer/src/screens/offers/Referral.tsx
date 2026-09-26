@@ -7,6 +7,7 @@ import { Loading, useToast } from '../../components/UI'
 import { Capacitor } from '@capacitor/core'
 import { fetchReferralEarnings, type ReferralInfo } from '../../api'
 import { useStore } from '../../store'
+import { t } from '../../i18n'
 
 const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
@@ -37,8 +38,8 @@ export default function Referral() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Refer &amp; Earn</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Refer & Earn')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -46,30 +47,30 @@ export default function Referral() {
 
   const code = info.code || user?.referralCode || ''
   const reward = info.reward
-  const msg = `Get ${money(reward)} off your first HomeHelp booking! Use my code ${code} when you sign up.`
+  const msg = t('Get {amount} off your first HomeHelp booking! Use my code {code} when you sign up.', { amount: money(reward), code })
 
-  function copy() { navigator.clipboard?.writeText(code).then(() => toast('Code copied!')).catch(() => toast(code)) }
+  function copy() { navigator.clipboard?.writeText(code).then(() => toast(t('Code copied!'))).catch(() => toast(code)) }
   async function share(via?: string) {
     if (via === 'whatsapp') { window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank'); return }
-    if (via === 'instagram') { await copy(); toast('Code copied — paste it into Instagram'); return }
+    if (via === 'instagram') { await copy(); toast(t('Code copied — paste it into Instagram')); return }
     if (via === 'facebook') { window.open(`https://www.facebook.com/sharer/sharer.php?quote=${encodeURIComponent(msg)}`, '_blank'); return }
     try {
-      if (Capacitor.isNativePlatform()) { const { Share } = await import('@capacitor/share'); await Share.share({ title: 'Refer & Earn', text: msg }) }
-      else if (navigator.share) { await navigator.share({ title: 'Refer & Earn', text: msg }) }
+      if (Capacitor.isNativePlatform()) { const { Share } = await import('@capacitor/share'); await Share.share({ title: t('Refer & Earn'), text: msg }) }
+      else if (navigator.share) { await navigator.share({ title: t('Refer & Earn'), text: msg }) }
       else { await copy() }
     } catch { /* dismissed */ }
   }
 
   const STEPS = [
-    { n: 1, t: 'Share your code', d: 'with friends' },
-    { n: 2, t: 'They book using', d: 'your code' },
-    { n: 3, t: `You earn ${money(reward)}`, d: 'in your wallet' },
+    { n: 1, t: t('Share your code'), d: t('with friends') },
+    { n: 2, t: t('They book using'), d: t('your code') },
+    { n: 3, t: t('You earn {amount}', { amount: money(reward) }), d: t('in your wallet') },
   ]
   const SHARE = [
     { k: 'whatsapp', label: 'WhatsApp', cls: 'wa', ico: <WhatsAppLogo /> },
     { k: 'instagram', label: 'Instagram', cls: 'ig', ico: <InstagramLogo /> },
     { k: 'facebook', label: 'Facebook', cls: 'fb', ico: <FacebookLogo /> },
-    { k: 'more', label: 'More', cls: 'more', ico: <MoreHorizontal size={20} /> },
+    { k: 'more', label: t('More'), cls: 'more', ico: <MoreHorizontal size={20} /> },
   ]
 
   return (
@@ -78,20 +79,20 @@ export default function Referral() {
       <div className="content">
         <div className="rf-hero">
           <div className="rf-hero-main">
-            <div className="rf-hero-k">Refer a friend &amp;</div>
-            <div className="rf-hero-v">Earn {money(reward)}</div>
-            <div className="rf-hero-d">Your friend gets {money(reward)} OFF on their first booking!</div>
+            <div className="rf-hero-k">{t('Refer a friend &')}</div>
+            <div className="rf-hero-v">{t('Earn {amount}', { amount: money(reward) })}</div>
+            <div className="rf-hero-d">{t('Your friend gets {amount} OFF on their first booking!', { amount: money(reward) })}</div>
           </div>
           <div className="rf-hero-art" aria-hidden="true">🎁</div>
         </div>
 
-        <div className="rf-code-k">Your Referral Code</div>
+        <div className="rf-code-k">{t('Your Referral Code')}</div>
         <div className="rf-code">
           <span className="rf-code-v">{code || '—'}</span>
-          <button className="rf-code-copy" onClick={copy} aria-label="Copy code"><Copy size={17} /></button>
+          <button className="rf-code-copy" onClick={copy} aria-label={t('Copy code')}><Copy size={17} /></button>
         </div>
 
-        <div className="rf-sec">How it works?</div>
+        <div className="rf-sec">{t('How it works?')}</div>
         <div className="rf-steps">
           {STEPS.map((s, i) => (
             <div key={s.n} className="rf-step">
@@ -103,7 +104,7 @@ export default function Referral() {
           ))}
         </div>
 
-        <div className="rf-sec">Share your link</div>
+        <div className="rf-sec">{t('Share your link')}</div>
         <div className="rf-share">
           {SHARE.map((s) => (
             <button key={s.k} className="rf-share-btn" onClick={() => share(s.k)}>
@@ -113,17 +114,18 @@ export default function Referral() {
           ))}
         </div>
 
-        <div className="rf-sec">Referrals Summary</div>
+        <div className="rf-sec">{t('Referrals Summary')}</div>
         <button className="rf-summary" onClick={() => nav('/wallet/referrals')}>
-          <div className="rf-sum-cell"><div className="rf-sum-k">Total Referrals</div><div className="rf-sum-v">{info.total}</div></div>
+          <div className="rf-sum-cell"><div className="rf-sum-k">{t('Total Referrals')}</div><div className="rf-sum-v">{info.total}</div></div>
           <div className="rf-sum-div" />
-          <div className="rf-sum-cell"><div className="rf-sum-k">Total Earnings</div><div className="rf-sum-v">{money(info.earned)}</div></div>
+          <div className="rf-sum-cell"><div className="rf-sum-k">{t('Total Earnings')}</div><div className="rf-sum-v">{money(info.earned)}</div></div>
           <ChevronRight size={18} className="rf-sum-arrow" />
         </button>
       </div>
 
       <div className="w-foot">
-        <button className="btn full" onClick={() => share()}><Share2 size={16} /> Share &amp; Earn</button>
+        <button className="btn full" onClick={() => share()}><Share2 size={16} /> {t('Share & Earn')}</button>
+
       </div>
     </div>
   )

@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react'
+import { t } from '../i18n'
 
 /* App-wide safety net: a render crash anywhere below shows a recovery screen instead of a blank
  * white app. "Try again" clears any cached session (a common cause) and reloads to a clean state. */
@@ -17,9 +18,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', gap: 12 }}>
         <div style={{ fontSize: 44 }}>😕</div>
-        <div style={{ fontSize: 18, fontWeight: 800 }}>Something went wrong</div>
-        <div style={{ fontSize: 13.5, color: '#667085', maxWidth: 300, lineHeight: 1.5 }}>The app hit an unexpected error. Tap below to reload — you may need to sign in again.</div>
-        <button onClick={this.reset} style={{ marginTop: 10, background: '#5b51e8', color: '#fff', border: 'none', borderRadius: 12, padding: '12px 28px', fontSize: 15, fontWeight: 700 }}>Try again</button>
+        <div style={{ fontSize: 18, fontWeight: 800 }}>{t('Something went wrong')}</div>
+        <div style={{ fontSize: 13.5, color: '#667085', maxWidth: 300, lineHeight: 1.5 }}>{t('The app hit an unexpected error. Tap below to reload — you may need to sign in again.')}</div>
+        <button onClick={this.reset} style={{ marginTop: 10, background: '#5b51e8', color: '#fff', border: 'none', borderRadius: 12, padding: '12px 28px', fontSize: 15, fontWeight: 700 }}>{t('Try again')}</button>
       </div>
     )
   }

@@ -11,7 +11,7 @@ import {
   fetchServiceWorkers, createRecurring, setActivePackage, type SlotInfo,
 } from '../api'
 import type { ServiceDetail, Duration, Quote, Coupon, Address, CartItem } from '../types'
-import { t, dateLocale } from '../i18n'
+import { t, tDur, dateLocale } from '../i18n'
 
 /*
  * THE booking flow. Every way into a booking ends up here:
@@ -268,14 +268,14 @@ export default function BookingFlow() {
     <div className="bf-svc" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
       {cartItems.map((c) => (
         <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-          <div><b>{c.name}</b><small style={{ display: 'block' }}>{c.durationLabel}</small></div><b>₹{c.price}</b>
+          <div><b>{t(c.name)}</b><small style={{ display: 'block' }}>{tDur(c.durationLabel || '')}</small></div><b>₹{c.price}</b>
         </div>
       ))}
     </div>
   ) : (
     <div className="bf-svc">
       <span className="bf-svc-img"><img src={s!.image || `/services/${s!.id}.jpg`} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} /></span>
-      <div><b>{s!.name}</b><small>{dur!.label} · ₹{dur!.price}</small></div>
+      <div><b>{t(s!.name)}</b><small>{tDur(dur!.label)} · ₹{dur!.price}</small></div>
     </div>
   )
 
@@ -296,7 +296,7 @@ export default function BookingFlow() {
           <p className="sf-q">{t('How many hours do you need?')}</p>
           {s.durations.map((d) => (
             <button key={d.id} className={`sf-opt ${dur.id === d.id ? 'on' : ''}`} onClick={() => setDur(d)}>
-              <div className="grow"><div className="sf-opt-t">{d.label}</div></div>
+              <div className="grow"><div className="sf-opt-t">{tDur(d.label)}</div></div>
               <div className="sf-opt-p">₹{d.price}{d.original && d.original > d.price ? <s className="muted" style={{ marginLeft: 6, fontWeight: 400, fontSize: 12 }}>₹{d.original}</s> : null}</div>
               <span className={`sf-radio ${dur.id === d.id ? 'on' : ''}`}>{dur.id === d.id && <Check size={13} />}</span>
             </button>
@@ -358,7 +358,7 @@ export default function BookingFlow() {
           {addrs == null ? <Loading /> : addr ? (
             <div className="bf-worker on" style={{ cursor: 'default' }}>
               <span className="bf-wava"><MapPin size={18} /></span>
-              <div className="grow"><b>{addr.label}</b><small style={{ whiteSpace: 'normal' }}>{addr.house && !(addr.line || '').includes(addr.house) ? `${addr.house}, ${addr.line}` : addr.line}{addr.pincode && !(addr.line || '').includes(addr.pincode) ? `, ${addr.pincode}` : ''}</small></div>
+              <div className="grow"><b>{t(addr.label)}</b><small style={{ whiteSpace: 'normal' }}>{addr.house && !(addr.line || '').includes(addr.house) ? `${addr.house}, ${addr.line}` : addr.line}{addr.pincode && !(addr.line || '').includes(addr.pincode) ? `, ${addr.pincode}` : ''}</small></div>
               <button className="au-link" onClick={() => setAddrSheet(true)}>{t('Change')}</button>
             </div>
           ) : (

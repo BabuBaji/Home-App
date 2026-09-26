@@ -1,4 +1,5 @@
 import { Header } from '../components/UI'
+import { t } from '../i18n'
 
 // Read-only Terms & Conditions. Plain, customer-friendly summary of how HomeHelp works.
 const SECTIONS: { t: string; d: string }[] = [
@@ -19,15 +20,16 @@ const SECTIONS: { t: string; d: string }[] = [
 export default function Terms() {
   return (
     <div className="screen">
-      <Header title="Terms & Conditions" />
+      <Header title={t('Terms & Conditions')} />
       <div className="content">
         <p className="muted sm" style={{ margin: '4px 2px 14px' }}>
-          The essentials of using HomeHelp, in plain language. Last updated July 2026.
+          {t('The essentials of using HomeHelp, in plain language. Last updated July 2026.')}
         </p>
         {SECTIONS.map((s) => (
           <div className="card pad mt" key={s.t}>
-            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>{s.t}</div>
-            <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.55 }}>{s.d}</p>
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>{t(s.t)}</div>
+            <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.55 }}>{t(s.d)}</p>
+
           </div>
         ))}
         <p className="muted sm" style={{ margin: '16px 2px 24px', textAlign: 'center' }}>© 2026 HomeHelp Services Pvt. Ltd.</p>

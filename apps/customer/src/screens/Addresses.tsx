@@ -4,6 +4,7 @@ import { ArrowLeft, Home as HomeIcon, Briefcase, MapPin, Pencil, Trash2, ArrowUp
 import { useToast } from '../components/UI'
 import { fetchAddresses, deleteAddressApi } from '../api'
 import type { Address } from '../types'
+import { t } from '../i18n'
 
 // Module 3 · #15 — My Addresses. Real address list via fetchAddresses; edit/delete/add use
 // the existing APIs. UI redesigned to the mock. No backend change.
@@ -21,16 +22,16 @@ export default function Addresses() {
   useEffect(() => { fetchAddresses().then(setList).catch(() => setList([])) }, [])
 
   async function remove(id: number) {
-    try { setList(await deleteAddressApi(id)); toast('Address removed') }
+    try { setList(await deleteAddressApi(id)); toast(t('Address removed')) }
     catch (e) { toast((e as Error).message) }
   }
 
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>My Addresses</b>
-        <button className="ad2-addnew" onClick={() => nav('/addresses/add')}><Plus size={15} /> Add New</button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('My Addresses')}</b>
+        <button className="ad2-addnew" onClick={() => nav('/addresses/add')}><Plus size={15} /> {t('Add New')}</button>
       </div>
       <div className="content">
         {list?.map((a) => {
@@ -40,24 +41,25 @@ export default function Addresses() {
               <button className="ad2-body" onClick={() => nav('/addresses/default')}>
                 <span className="ad2-ic"><Ic size={20} /></span>
                 <div className="grow">
-                  <div className="ad2-h"><b>{a.label}</b>{a.is_default ? <span className="ad2-def">Default</span> : null}</div>
+                  <div className="ad2-h"><b>{t(a.label)}</b>{a.is_default ? <span className="ad2-def">{t('Default')}</span> : null}</div>
                   <div className="ad2-line">{a.line}{a.pincode && !a.line.includes(a.pincode) ? ` ${a.pincode}` : ''}</div>
-                  {a.landmark && <div className="ad2-lm">Landmark: {a.landmark}</div>}
+                  {a.landmark && <div className="ad2-lm">{t('Landmark:')} {a.landmark}</div>}
                 </div>
               </button>
               <div className="ad2-actions">
-                <button className="ad2-edit" onClick={() => nav('/addresses/add', { state: { edit: a } })}><Pencil size={13} /> Edit</button>
-                <button className="ad2-del" onClick={() => remove(a.id)}><Trash2 size={13} /> Delete</button>
+                <button className="ad2-edit" onClick={() => nav('/addresses/add', { state: { edit: a } })}><Pencil size={13} /> {t('Edit')}</button>
+                <button className="ad2-del" onClick={() => remove(a.id)}><Trash2 size={13} /> {t('Delete')}</button>
               </div>
             </div>
           )
         })}
         {list && list.length === 0 && (
-          <div className="state"><div className="ico"><MapPin size={44} /></div><h3>No saved addresses</h3><p>Add your home, work or any place.</p></div>
+          <div className="state"><div className="ico"><MapPin size={44} /></div><h3>{t('No saved addresses')}</h3><p>{t('Add your home, work or any place.')}</p></div>
         )}
         {list && list.length > 0 && (<>
-          <button className="ad2-reorder" onClick={() => nav('/addresses/saved')}><ArrowUpDown size={15} /> Reorder Addresses</button>
-          <button className="ad2-reorder" onClick={() => nav('/addresses/default')}><Star size={15} /> Set Default Address</button>
+          <button className="ad2-reorder" onClick={() => nav('/addresses/saved')}><ArrowUpDown size={15} /> {t('Reorder Addresses')}</button>
+          <button className="ad2-reorder" onClick={() => nav('/addresses/default')}><Star size={15} /> {t('Set Default Address')}</button>
+
         </>)}
       </div>
     </div>
