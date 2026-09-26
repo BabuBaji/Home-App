@@ -1755,10 +1755,10 @@ app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
 // Global operational overview (trend / revenue / top-services / worker-status / rating) for
 // the admin all-zones dashboard — all real from the booking + worker services.
 app.get('/api/admin/ops-overview', adminAuth, async (req, res) => {
-  // The overview is per-zone or global; a scoped admin gets their zone, or nothing if they span several.
-  const zs = req.admin?.scope?.zoneIds || []
-  if (scoped(req) && zs.length !== 1) return res.json({ trend: [], revenueDaily: [], rating: 0, topServices: [], workerStatus: {}, recent: [] })
-  const zq = scoped(req) ? `?zone_id=${Number(zs[0])}` : ''
+  // A scoped admin gets one combined view over all of their zones.
+  const zs = (req.admin?.scope?.zoneIds || []).map(Number).filter(Number.isFinite)
+  if (scoped(req) && !zs.length) return res.json({ trend: [], revenueDaily: [], rating: 0, topServices: [], workerStatus: {}, recent: [] })
+  const zq = scoped(req) ? `?zone_id=${zs.join(',')}` : ''
   const [ops, ws] = await Promise.all([
     tryGet(BOOKING_URL, `/api/internal/ops-stats${zq}`, {}),
     tryGet(WORKER_URL, `/internal/worker-status${zq}`, {}),

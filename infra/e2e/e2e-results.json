@@ -1,8 +1,8 @@
 {
-  "run": "11532",
+  "run": "14892",
   "zones": {
     "A": {
-      "name": "E2E Zone A 11532",
+      "name": "E2E Zone A 14892",
       "city": "Hyderabad",
       "state": "Telangana",
       "pins": [
@@ -17,20 +17,20 @@
       "price": {
         "mopping": 149
       },
-      "offer": "Zone A Special 11532",
-      "id": 22,
-      "mgr": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoibWFuYWdlciIsInN1YiI6IjIxIiwiYXVkIjoiYWRtaW4iLCJpYXQiOjE3OTAzOTI1MTEsImV4cCI6MTc5MDQzNTcxMX0.i6cbDMdgDomqgXquvizO27b_0w-VlDo7Ac6yCKh8JMA",
-      "wPhone": "9115320001",
-      "wId": 37,
-      "wTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNyIsImF1ZCI6IndvcmtlciIsImlhdCI6MTc5MDM5MjUxMSwiZXhwIjoxNzkyOTg0NTExfQ.NZFEYbEb5VHiO6r40-GmhTTDmtrMIBDG9aD8E4Q2TDI",
-      "cPhone": "9115320011",
-      "cTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyMSIsImF1ZCI6ImN1c3RvbWVyIiwiaWF0IjoxNzkwMzkyNTExLCJleHAiOjE3OTI5ODQ1MTF9.mIqa9jgXionfvpe3Vda462wbUecxS-jRyG-6O3fMl7g",
-      "cId": 21,
-      "addrId": 42,
-      "bookingId": 56
+      "offer": "Zone A Special 14892",
+      "id": 27,
+      "mgr": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoibWFuYWdlciIsInN1YiI6IjI2IiwiYXVkIjoiYWRtaW4iLCJpYXQiOjE3OTAzOTMxMTUsImV4cCI6MTc5MDQzNjMxNX0.Gy7vQDxqUx6aqnEm9_F1iXyitlFUWy612Ezt7nFf3eQ",
+      "wPhone": "9148920001",
+      "wId": 43,
+      "wTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MyIsImF1ZCI6IndvcmtlciIsImlhdCI6MTc5MDM5MzExNSwiZXhwIjoxNzkyOTg1MTE1fQ.57z2IFKFUZZMORqUpTGOpoSAi_pyeZ_yFI7RdxHQTis",
+      "cPhone": "9148920011",
+      "cTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNyIsImF1ZCI6ImN1c3RvbWVyIiwiaWF0IjoxNzkwMzkzMTE1LCJleHAiOjE3OTI5ODUxMTV9.4X8tAvO2K2bgX48ZpkWGRvBnM7nHrqFNevZUIBqCnBs",
+      "cId": 27,
+      "addrId": 54,
+      "bookingId": 73
     },
     "B": {
-      "name": "E2E Zone B 11532",
+      "name": "E2E Zone B 14892",
       "city": "Pune",
       "state": "Maharashtra",
       "pins": [
@@ -44,65 +44,65 @@
       "price": {
         "mopping": 199
       },
-      "offer": "Zone B Special 11532",
-      "id": 23,
-      "mgr": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoibWFuYWdlciIsInN1YiI6IjIyIiwiYXVkIjoiYWRtaW4iLCJpYXQiOjE3OTAzOTI1MTIsImV4cCI6MTc5MDQzNTcxMn0.tEFqDjgUJjmZ1i7QNT5Eq-C3jnrAmRBfHLVa22J_g08",
-      "wPhone": "9115320002",
-      "wId": 38,
-      "wTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzOCIsImF1ZCI6IndvcmtlciIsImlhdCI6MTc5MDM5MjUxMiwiZXhwIjoxNzkyOTg0NTEyfQ.9W54-XHHqEV4DTGMrJtpY6yR11OfTcpgyNKp-aC7HaM",
-      "cPhone": "9115320012",
-      "cTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyMiIsImF1ZCI6ImN1c3RvbWVyIiwiaWF0IjoxNzkwMzkyNTEyLCJleHAiOjE3OTI5ODQ1MTJ9.8L4HWDQQIhYnKy_EUEBemH02ZpMrMrL6Bmuyf0ldtLo",
-      "cId": 22,
-      "addrId": 44,
-      "bookingId": 57
+      "offer": "Zone B Special 14892",
+      "id": 28,
+      "mgr": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoibWFuYWdlciIsInN1YiI6IjI3IiwiYXVkIjoiYWRtaW4iLCJpYXQiOjE3OTAzOTMxMTUsImV4cCI6MTc5MDQzNjMxNX0.rImozZQ2E4i_JvQUeLDKd0Iz1F8L4PDovlnPEkv8n8M",
+      "wPhone": "9148920002",
+      "wId": 44,
+      "wTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0NCIsImF1ZCI6IndvcmtlciIsImlhdCI6MTc5MDM5MzExNSwiZXhwIjoxNzkyOTg1MTE1fQ.LAL6eslRnJVtQtXr6uFOcKYZXzABzeJ46uxP4gS-V58",
+      "cPhone": "9148920012",
+      "cTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyOCIsImF1ZCI6ImN1c3RvbWVyIiwiaWF0IjoxNzkwMzkzMTE1LCJleHAiOjE3OTI5ODUxMTV9.uONiOX9gz5nFF6icLKRXRHIrV6mkc9E_wsvU-2Fzdtw",
+      "cId": 28,
+      "addrId": 56,
+      "bookingId": 74
     }
   },
   "results": [
     {
       "area": "setup",
-      "name": "Zone A created (id 22, pins 500081/500084)",
+      "name": "Zone A created (id 27, pins 500081/500084)",
       "pass": true,
       "detail": ""
     },
     {
       "area": "setup",
-      "name": "Manager A scoped to zone 22",
+      "name": "Manager A scoped to zone 27",
       "pass": true,
-      "detail": "{\"type\":\"zone\",\"zoneIds\":[22],\"cities\":[\"Hyderabad\"],\"cityScopes\":[]}"
+      "detail": "{\"type\":\"zone\",\"zoneIds\":[27],\"cities\":[\"Hyderabad\"],\"cityScopes\":[]}"
     },
     {
       "area": "setup",
-      "name": "Worker A (id 37) onboarded, logged in, online",
-      "pass": true,
-      "detail": ""
-    },
-    {
-      "area": "setup",
-      "name": "Customer A (id 21) registered with address in 500081",
+      "name": "Worker A (id 43) onboarded, logged in, online",
       "pass": true,
       "detail": ""
     },
     {
       "area": "setup",
-      "name": "Zone B created (id 23, pins 411045/411046)",
+      "name": "Customer A (id 27) registered with address in 500081",
       "pass": true,
       "detail": ""
     },
     {
       "area": "setup",
-      "name": "Manager B scoped to zone 23",
-      "pass": true,
-      "detail": "{\"type\":\"zone\",\"zoneIds\":[23],\"cities\":[],\"cityScopes\":[]}"
-    },
-    {
-      "area": "setup",
-      "name": "Worker B (id 38) onboarded, logged in, online",
+      "name": "Zone B created (id 28, pins 411045/411046)",
       "pass": true,
       "detail": ""
     },
     {
       "area": "setup",
-      "name": "Customer B (id 22) registered with address in 411045",
+      "name": "Manager B scoped to zone 28",
+      "pass": true,
+      "detail": "{\"type\":\"zone\",\"zoneIds\":[28],\"cities\":[],\"cityScopes\":[]}"
+    },
+    {
+      "area": "setup",
+      "name": "Worker B (id 44) onboarded, logged in, online",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "setup",
+      "name": "Customer B (id 28) registered with address in 411045",
       "pass": true,
       "detail": ""
     },
@@ -122,13 +122,13 @@
       "area": "offers",
       "name": "Zone A customer sees zone A offer",
       "pass": true,
-      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone A Special 11532"
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone A Special 14892"
     },
     {
       "area": "offers",
       "name": "Zone A customer does NOT see zone B offer",
       "pass": true,
-      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone A Special 11532"
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone A Special 14892"
     },
     {
       "area": "catalogue",
@@ -146,13 +146,13 @@
       "area": "offers",
       "name": "Zone B customer sees zone B offer",
       "pass": true,
-      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone B Special 11532"
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone B Special 14892"
     },
     {
       "area": "offers",
       "name": "Zone B customer does NOT see zone A offer",
       "pass": true,
-      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone B Special 11532"
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone B Special 14892"
     },
     {
       "area": "booking",
@@ -162,21 +162,21 @@
     },
     {
       "area": "booking",
-      "name": "Zone A booking #HH56419 created",
+      "name": "Zone A booking #HH87711 created",
       "pass": true,
       "detail": "status=confirmed"
     },
     {
       "area": "booking",
-      "name": "Zone A booking tagged with zone 22",
+      "name": "Zone A booking tagged with zone 27",
       "pass": true,
-      "detail": "zone_id=22"
+      "detail": "zone_id=27"
     },
     {
       "area": "dispatch",
       "name": "Zone A worker receives the offer",
       "pass": true,
-      "detail": "{\"state\":\"PENDING\",\"bookingId\":56,\"remainingSec\":120}"
+      "detail": "{\"state\":\"PENDING\",\"bookingId\":73,\"remainingSec\":120}"
     },
     {
       "area": "dispatch",
@@ -188,13 +188,13 @@
       "area": "job",
       "name": "Zone A worker accepts",
       "pass": true,
-      "detail": "{\"ok\":true,\"jobStatus\":\"ACCEPTED\",\"activeJob\":{\"id\":\"#HH56419\",\"bookingId\":56,\"customerName\":\"Customer A 11532\",\"initial"
+      "detail": "{\"ok\":true,\"jobStatus\":\"ACCEPTED\",\"activeJob\":{\"id\":\"#HH87711\",\"bookingId\":73,\"customerName\":\"Customer A 14892\",\"initial"
     },
     {
       "area": "job",
       "name": "Customer A sees worker assigned",
       "pass": true,
-      "detail": "status=worker_assigned, pro=Worker A 11532"
+      "detail": "status=worker_assigned, pro=Worker A 14892"
     },
     {
       "area": "job",
@@ -218,7 +218,7 @@
       "area": "job",
       "name": "Zone A correct OTP starts the service",
       "pass": true,
-      "detail": "{\"ok\":true,\"jobStatus\":\"IN_PROGRESS\",\"activeJob\":{\"id\":\"#HH56419\",\"bookingId\":56,\"customerName\":\"Cus"
+      "detail": "{\"ok\":true,\"jobStatus\":\"IN_PROGRESS\",\"activeJob\":{\"id\":\"#HH87711\",\"bookingId\":73,\"customerName\":\"Cus"
     },
     {
       "area": "job",
@@ -246,21 +246,21 @@
     },
     {
       "area": "booking",
-      "name": "Zone B booking #HH27556 created",
+      "name": "Zone B booking #HH50622 created",
       "pass": true,
       "detail": "status=confirmed"
     },
     {
       "area": "booking",
-      "name": "Zone B booking tagged with zone 23",
+      "name": "Zone B booking tagged with zone 28",
       "pass": true,
-      "detail": "zone_id=23"
+      "detail": "zone_id=28"
     },
     {
       "area": "dispatch",
       "name": "Zone B worker receives the offer",
       "pass": true,
-      "detail": "{\"state\":\"PENDING\",\"bookingId\":57,\"remainingSec\":120}"
+      "detail": "{\"state\":\"PENDING\",\"bookingId\":74,\"remainingSec\":120}"
     },
     {
       "area": "dispatch",
@@ -272,13 +272,13 @@
       "area": "job",
       "name": "Zone B worker accepts",
       "pass": true,
-      "detail": "{\"ok\":true,\"jobStatus\":\"ACCEPTED\",\"activeJob\":{\"id\":\"#HH27556\",\"bookingId\":57,\"customerName\":\"Customer B 11532\",\"initial"
+      "detail": "{\"ok\":true,\"jobStatus\":\"ACCEPTED\",\"activeJob\":{\"id\":\"#HH50622\",\"bookingId\":74,\"customerName\":\"Customer B 14892\",\"initial"
     },
     {
       "area": "job",
       "name": "Customer B sees worker assigned",
       "pass": true,
-      "detail": "status=worker_assigned, pro=Worker B 11532"
+      "detail": "status=worker_assigned, pro=Worker B 14892"
     },
     {
       "area": "job",
@@ -302,7 +302,7 @@
       "area": "job",
       "name": "Zone B correct OTP starts the service",
       "pass": true,
-      "detail": "{\"ok\":true,\"jobStatus\":\"IN_PROGRESS\",\"activeJob\":{\"id\":\"#HH27556\",\"bookingId\":57,\"customerName\":\"Cus"
+      "detail": "{\"ok\":true,\"jobStatus\":\"IN_PROGRESS\",\"activeJob\":{\"id\":\"#HH50622\",\"bookingId\":74,\"customerName\":\"Cus"
     },
     {
       "area": "job",
@@ -332,7 +332,7 @@
       "area": "isolation",
       "name": "Manager A worker list excludes zone B worker",
       "pass": true,
-      "detail": "sees 2 workers: 37,5"
+      "detail": "sees 2 workers: 43,5"
     },
     {
       "area": "isolation",
@@ -362,13 +362,13 @@
       "area": "isolation",
       "name": "Manager A customers include own customer",
       "pass": true,
-      "detail": "sees 8"
+      "detail": "sees 10"
     },
     {
       "area": "isolation",
       "name": "Manager A customers exclude zone B customer",
       "pass": true,
-      "detail": "sees 8"
+      "detail": "sees 10"
     },
     {
       "area": "isolation",
@@ -404,7 +404,7 @@
       "area": "isolation",
       "name": "Manager A cannot move own worker into zone B",
       "pass": true,
-      "detail": "PATCH HTTP 403, zone now 22"
+      "detail": "PATCH HTTP 403, zone now 27"
     },
     {
       "area": "isolation",
@@ -416,7 +416,7 @@
       "area": "isolation",
       "name": "Manager B worker list excludes zone A worker",
       "pass": true,
-      "detail": "sees 2 workers: 38,3"
+      "detail": "sees 2 workers: 44,3"
     },
     {
       "area": "isolation",
@@ -446,13 +446,13 @@
       "area": "isolation",
       "name": "Manager B customers include own customer",
       "pass": true,
-      "detail": "sees 8"
+      "detail": "sees 10"
     },
     {
       "area": "isolation",
       "name": "Manager B customers exclude zone A customer",
       "pass": true,
-      "detail": "sees 8"
+      "detail": "sees 10"
     },
     {
       "area": "isolation",
@@ -488,7 +488,7 @@
       "area": "isolation",
       "name": "Manager B cannot move own worker into zone A",
       "pass": true,
-      "detail": "PATCH HTTP 403, zone now 23"
+      "detail": "PATCH HTTP 403, zone now 28"
     },
     {
       "area": "isolation",

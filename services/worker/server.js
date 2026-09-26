@@ -4889,9 +4889,10 @@ async function patchWorker(id, b, res) {
 app.get('/internal/workers', internalOnly, async (req, res) => res.json({ stats: await workerStats(), workers: await listWorkers(req.query) }))
 // Real worker-status breakdown (online / busy / offline) for the admin zone dashboards.
 app.get('/internal/worker-status', internalOnly, async (req, res) => {
-  const zoneId = req.query.zone_id != null && req.query.zone_id !== '' ? Number(req.query.zone_id) : null
-  const where = zoneId != null ? 'WHERE zone_id=$1' : ''
-  const params = zoneId != null ? [zoneId] : []
+  // zone_id may be one id or a comma list (a manager's zones, rolled up into one view).
+  const zoneIds = req.query.zone_id != null && req.query.zone_id !== '' ? String(req.query.zone_id).split(',').map(Number).filter(Number.isFinite) : null
+  const where = zoneIds ? 'WHERE zone_id = ANY($1)' : ''
+  const params = zoneIds ? [zoneIds] : []
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS total,
        COUNT(*) FILTER (WHERE available AND status='active' AND offered_booking IS NULL)::int AS online,

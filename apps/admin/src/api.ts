@@ -402,6 +402,7 @@ export interface Campaign {
   starts: string | null; ends: string | null; status: 'active' | 'paused'
   banner_title: string; banner_subtitle: string
   zoneIds: number[]; rule: CampaignRule | null; coupon: CampaignCoupon | null; usedCount: number
+  readOnly?: boolean // set for a zone manager on offers that reach beyond their zones
 }
 export const fetchCampaigns = () => req<Campaign[]>('/campaigns')
 export const createCampaign = (body: Record<string, unknown>) => req<{ ok: boolean; campaign_id: number }>('/campaigns', post('', body))

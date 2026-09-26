@@ -29,6 +29,12 @@ async function api(method, path, { token, body } = {}) {
 }
 async function must(label, p) { const r = await p; if (!r.ok) throw new Error(`${label} → ${r.status} ${JSON.stringify(r.json).slice(0, 300)}`); return r.json }
 async function waitFor(fn, ms, every = 1000) { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(every) } return v }
+// A slot the way the customer app sends it: "26 Sep 2026" + "10:00 AM", in IST.
+function istSlot(ms) {
+  const d = new Date(ms + 330 * 60e3), M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const h = d.getUTCHours(), m = d.getUTCMinutes()
+  return { date: `${d.getUTCDate()} ${M[d.getUTCMonth()]} ${d.getUTCFullYear()}`, time: `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` }
+}
 const phone = (n) => `8${RUN}${String(n).padStart(4, '0')}`
 const list = (j) => (Array.isArray(j) ? j : j?.workers || j?.bookings || j?.customers || j?.shifts || [])
 
@@ -281,11 +287,18 @@ async function main() {
   scenario = 'S10 Scheduled for tomorrow'
   await online('W1', true)
   const tm = new Date(Date.now() + 26 * 3600e3)
-  r = await book('W', { type: 'schedule', date: tm.toDateString(), time: '10:00 AM', at: tm.toISOString() })
+  r = await book('W', { type: 'schedule', ...istSlot(tm.getTime()), at: tm.toISOString() })
   check('Scheduled booking accepted', r.ok, `HTTP ${r.status} ${r.ok ? '' : JSON.stringify(r.json).slice(0, 120)}`)
   if (r.ok) {
-    got = await waitFor(() => whoIsOffered(r.json.id), 12000)
-    check('Offered immediately (worker is then blocked until tomorrow)', !!got, got ? `offered now to ${got}` : 'held for later', 'info')
+    got = await waitFor(() => whoIsOffered(r.json.id), 15000)
+    check('Not offered yet — held until 2 h before the slot', !got, got ? `offered now to ${got}` : 'held for later')
+    const pulled = await api('POST', '/api/worker/jobs/request', { token: W.W1.tok })
+    check('Cannot be pulled early either', Number(pulled.json?.job?.bookingId) !== r.json.id, `HTTP ${pulled.status}`)
+    if (pulled.ok && pulled.json?.job) await api('POST', '/api/worker/jobs/cancel', { token: W.W1.tok, body: { reason: 'test' } })
+    // Pull the slot to within the lead window: it is dispatched on the next sweep.
+    await api('POST', `/api/bookings/${r.json.id}/reschedule`, { token: C.W.tok, body: istSlot(Date.now() + 60 * 60e3) })
+    got = await waitFor(() => whoIsOffered(r.json.id), 25000)
+    check('Offered once the slot is within 2 h', got === 'W1', got ? `offered to ${got}` : 'nobody')
   }
   await cleanup()
 

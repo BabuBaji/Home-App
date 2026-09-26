@@ -873,7 +873,8 @@ app.post('/api/bookings', auth, async (req, res) => {
     // OFFER, don't assign. The expert has OFFER_TTL_SEC to accept; a decline or a lapse passes the
     // booking to the next available expert (see offerSweep). The booking stays 'confirmed' until
     // somebody accepts, which is what the customer's "finding your expert" state reflects.
-    if (pick) await offerTo(booking, pick)
+    if (!dueForDispatch(booking, await scheduleLeadMs())) console.log(`[booking] ${booking.ref}: scheduled — held until shortly before the slot`)
+    else if (pick) await offerTo(booking, pick)
     else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
   }
 
@@ -1229,9 +1230,10 @@ app.get('/api/internal/zone-metrics', internalOnly, async (_q, res) => {
 // Real operational chart data (7-day trend, 14-day revenue, top services, avg rating).
 // Optional ?zone_id= scopes everything to one zone; otherwise global across zones.
 app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
-  const zoneId = req.query.zone_id != null && req.query.zone_id !== '' ? Number(req.query.zone_id) : null
-  const zw = zoneId != null ? ' AND zone_id=$1' : ''
-  const params = zoneId != null ? [zoneId] : []
+  // zone_id may be one id or a comma list (a manager's zones, rolled up into one view).
+  const zoneIds = req.query.zone_id != null && req.query.zone_id !== '' ? String(req.query.zone_id).split(',').map(Number).filter(Number.isFinite) : null
+  const zw = zoneIds ? ' AND zone_id = ANY($1)' : ''
+  const params = zoneIds ? [zoneIds] : []
   const trend = (await pool.query(
     `SELECT to_char(created::date, 'Dy') AS day, created::date AS d, COUNT(*)::int AS bookings,
        COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue
@@ -1260,7 +1262,8 @@ app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json
 // Dispatch: the open job pool (unclaimed confirmed bookings).
 app.get('/api/internal/pool', internalOnly, async (_q, res) => {
   const { rows } = await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL ORDER BY id DESC")
-  res.json(rows.map(rowTo))
+  const leadMs = await scheduleLeadMs()
+  res.json(rows.map(rowTo).filter((b) => dueForDispatch(b, leadMs)))
 })
 // Live-ops: open + in-progress bookings (lightweight) for the admin control tower.
 app.get('/api/internal/ops', internalOnly, async (_q, res) => {
@@ -1386,6 +1389,16 @@ const AA_ACTIVE = AA_BUSY_STATES
  */
 const OFFER_TTL_SEC = Number(process.env.OFFER_TTL_SEC || 120)
 
+/* A scheduled booking is held back from dispatch until `schedule_dispatch_lead_min` (default 120)
+ * before its slot. Offering tomorrow's job today would tie the expert up for a day and take them
+ * out of the instant queue; the lead leaves time for the chain of offers to run before the slot. */
+const scheduleLeadMs = async () => Math.max(0, await getSettingInt(ADMIN_URL, 'schedule_dispatch_lead_min', 120)) * 60000
+const dueForDispatch = (b, leadMs) => {
+  if (b.type !== 'schedule') return true
+  const t = scheduledStartMs(b)
+  return t == null || t - leadMs <= Date.now()
+}
+
 /** Put `b` in front of `w`, and tell the worker service so the expert's app sees it. */
 async function offerTo(b, w) {
   const upd = await pool.query(
@@ -1417,7 +1430,9 @@ async function offerSweep() {
     // Track who we offer to inside this pass: pickWorker reads committed rows, so without this two
     // bookings in the same sweep could both land on the same idle expert.
     const takenThisPass = new Set()
+    const leadMs = await scheduleLeadMs()
     for (const b of open) {
+      if (!dueForDispatch(b, leadMs)) continue   // scheduled for later — not offered yet
       // A live offer is left alone until its window closes — that is the expert's 2 minutes.
       const offerAgeSec = b.offer_at ? (Date.now() - new Date(b.offer_at).getTime()) / 1000 : null
       if (b.offer_worker_id && offerAgeSec != null && offerAgeSec < OFFER_TTL_SEC) {

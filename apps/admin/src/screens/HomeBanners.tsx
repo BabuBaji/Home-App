@@ -132,7 +132,7 @@ export default function HomeBanners() {
                   <td style={td}>{b.priority}</td>
                   <td style={td}><Badge tone={isLive(b) ? 'green' : b.status === 'paused' ? 'gray' : 'amber'} dot={false}>{isLive(b) ? 'Live' : b.status === 'paused' ? 'Paused' : 'Scheduled'}</Badge></td>
                   <td style={{ ...td, textAlign: 'right' }}>
-                    {canEdit ? (
+                    {canEdit && !b.readOnly ? (
                       <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                         <button className="btn line" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => toggle(b)}>{b.status === 'active' ? 'Pause' : 'Activate'}</button>
                         <button className="btn line" style={{ padding: '5px 9px' }} onClick={() => openEdit(b)} aria-label="Edit"><Pencil size={13} /></button>

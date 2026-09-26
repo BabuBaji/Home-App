@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Trash2, Pencil, X, Tag } from 'lucide-react'
 import { useToast, useConfirm } from '../components/UI'
+import { useStore } from '../store'
 import {
   fetchCampaigns, createCampaign, updateCampaign, deleteCampaign, fetchZones, fetchServices,
   type Campaign,
@@ -124,12 +125,16 @@ export default function Campaigns() {
                   <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scopeLabel(c, zones)}</td>
                   <td style={{ fontSize: 12 }}>{c.starts || c.ends ? `${(c.starts || '').slice(0, 10) || '…'} → ${(c.ends || '').slice(0, 10) || '…'}` : 'Always'}</td>
                   <td>{c.usedCount}</td>
-                  <td><button className={'zo-toggle' + (c.status === 'active' ? ' on' : '')} onClick={() => toggleStatus(c)}><span /></button></td>
+                  <td><button className={'zo-toggle' + (c.status === 'active' ? ' on' : '')} disabled={c.readOnly} style={c.readOnly ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} onClick={() => !c.readOnly && toggleStatus(c)}><span /></button></td>
                   <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="zo-btn line" style={{ padding: 7 }} onClick={() => setEdit(JSON.parse(JSON.stringify(c)))}><Pencil size={14} /></button>
-                      <button className="zo-btn line" style={{ padding: 7 }} onClick={() => del(c.campaign_id)}><Trash2 size={14} /></button>
-                    </div>
+                    {c.readOnly ? (
+                      <span style={{ fontSize: 12, color: 'var(--zmut)' }} title="This offer also runs outside your zones — only a city or central admin can change it.">View only</span>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="zo-btn line" style={{ padding: 7 }} onClick={() => setEdit(JSON.parse(JSON.stringify(c)))}><Pencil size={14} /></button>
+                        <button className="zo-btn line" style={{ padding: 7 }} onClick={() => del(c.campaign_id)}><Trash2 size={14} /></button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}</tbody>
@@ -147,6 +152,8 @@ function CampaignForm({ value, zones, services, onClose, onSave }: {
   value: Partial<Campaign>; zones: Zone[]; services: Svc[]
   onClose: () => void; onSave: (c: Partial<Campaign>) => void
 }) {
+  const { admin } = useStore()
+  const scoped = !!admin?.scopeType && admin.scopeType !== 'all'
   const [c, setC] = useState<Partial<Campaign>>(value)
   const set = (patch: Partial<Campaign>) => setC((p) => ({ ...p, ...patch }))
   const isPct = c.discount_type === 'percent'
@@ -208,7 +215,7 @@ function CampaignForm({ value, zones, services, onClose, onSave }: {
 
           {/* Zone scope (zone campaigns; empty = all zones) */}
           {c.campaign_type !== 'coupon' && (
-            <div className="zo-f"><span>Zones <small style={{ color: 'var(--zmut)' }}>(none selected = all zones)</small></span>
+            <div className="zo-f"><span>Zones <small style={{ color: 'var(--zmut)' }}>{scoped ? '(pick at least one of your zones)' : '(none selected = all zones)'}</small></span>
               <div className="zo-chips-pick">
                 {zones.map((z) => <button key={z.id} type="button" className={'zo-pick' + ((c.zoneIds || []).includes(z.id) ? ' on' : '')} onClick={() => toggleZone(z.id)}>{z.name}</button>)}
                 {zones.length === 0 && <span style={{ color: 'var(--zmut)', fontSize: 12 }}>No zones yet.</span>}
