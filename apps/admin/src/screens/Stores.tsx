@@ -48,7 +48,7 @@ export default function Stores() {
         <button className="zo-btn" onClick={() => setAdding(true)}><Plus size={17} /> Add Store</button>
       </div>
       {loading ? <div className="zo-empty"><p>Loading…</p></div>
-        : stores.length === 0 ? <div className="zo-empty"><div className="e">🏪</div><p>No stores yet. Add your first store.</p></div>
+        : stores.length === 0 ? <div className="zo-panel"><div className="zo-empty"><div className="e">🏪</div><p>No stores yet. Add your first store.</p></div></div>
           : (
             <div className="zo-panel" style={{ overflowX: 'auto', padding: 0 }}>
               <table className="zo-table">

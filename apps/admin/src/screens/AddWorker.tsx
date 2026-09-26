@@ -234,8 +234,9 @@ export default function AddWorker() {
   const zoneStores = stores.filter((s) => !d.zone_id || s.zone_id == null || String(s.zone_id) === d.zone_id)
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: step === 4 ? '1fr' : 'minmax(0, 1fr) 340px', gap: 16, alignItems: 'start' }}>
-      <div style={{ display: 'grid', gap: 14 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: step === 4 ? '1fr' : 'minmax(0, 1fr) 300px', gap: 16, alignItems: 'start' }}>
+      {/* minmax(0,1fr): the form column must not grow past its track (it slid under the summary rail) */}
+      <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
         {/* Stepper */}
         <Card>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -915,7 +916,7 @@ export default function AddWorker() {
   )
 }
 
-const grid4: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 4 }
+const grid4: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 4 }
 
 function ReviewCard({ icon, title, onEdit, info, children }: { icon: React.ReactNode; title: string; onEdit?: () => void; info?: boolean; children: React.ReactNode }) {
   return (

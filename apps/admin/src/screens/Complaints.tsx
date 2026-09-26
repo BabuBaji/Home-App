@@ -173,8 +173,8 @@ export default function Complaints() {
                       <td><strong style={{ fontSize: 13 }}>{shortDate(r.created)}</strong></td>
                       <td>
                         <div className="actions" style={{ position: 'relative' }}>
-                          <button className="btn line" title="View" onClick={() => openView(r)}><Eye size={16} /></button>
-                          <button className="btn line" title="More" onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}><MoreVertical size={16} /></button>
+                          <button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => openView(r)}><Eye size={16} /></button>
+                          <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}><MoreVertical size={16} /></button>
                           {menuFor === r.id && (
                             <div className="menu" style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, background: '#fff', border: '1px solid #e6e6ef', borderRadius: 8, boxShadow: '0 8px 24px rgba(20,20,40,.12)', padding: 4, minWidth: 140 }}>
                               <button className="btn line" style={{ width: '100%', justifyContent: 'flex-start', border: 'none' }} onClick={() => quickResolve(r.id)}>Resolve</button>

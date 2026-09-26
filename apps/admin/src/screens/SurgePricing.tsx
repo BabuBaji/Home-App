@@ -68,7 +68,7 @@ export default function SurgePricing() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 760 }}>
               <thead><tr style={{ color: 'var(--muted,#667085)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 }}>
-                {['Zone', 'City', 'Weather', 'Surge', 'Source', 'Action'].map((h) => <th key={h} style={th}>{h}</th>)}
+                {['Zone', 'City', 'Weather', 'Surge', 'Source', 'Action'].map((h) => <th key={h} style={h === 'Action' ? { ...th, textAlign: 'right' } : th}>{h}</th>)}
               </tr></thead>
               <tbody>{rows.map((r) => (
                 <tr key={r.zoneId} style={r.active ? { boxShadow: 'inset 3px 0 0 #f59e0b' } : undefined}>

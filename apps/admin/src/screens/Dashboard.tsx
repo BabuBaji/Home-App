@@ -62,13 +62,13 @@ export default function Dashboard() {
         <Card title="Recent Bookings" right={<a className="muted" style={{ fontSize: 12.5, color: '#5b51e8', fontWeight: 600, cursor: 'pointer' }} onClick={() => navigate('/bookings')}>View All</a>}>
           <div className="tablewrap">
             <table className="tbl">
-              <thead><tr><th>Booking ID</th><th>Customer</th><th>Service</th><th>Amount</th><th>Status</th></tr></thead>
+              {/* compact for a side card: service under the booking id, no separate column */}
+              <thead><tr><th>Booking</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
               <tbody>
-                {d.recent.map((b) => (
+                {d.recent.slice(0, 6).map((b) => (
                   <tr key={b.id}>
-                    <td><strong className="num" style={{ fontSize: 13 }}>{b.ref}</strong></td>
+                    <td><strong className="num" style={{ fontSize: 13 }}>{b.ref}</strong><small className="muted" style={{ display: 'block', fontSize: 11.5 }}>{b.service}</small></td>
                     <td>{b.customer}</td>
-                    <td className="muted">{b.service}</td>
                     <td className="num">{money(b.total)}</td>
                     <td><Badge>{b.status}</Badge></td>
                   </tr>
@@ -83,7 +83,7 @@ export default function Dashboard() {
       <div className="grid" style={{ gridTemplateColumns: '1fr 1.4fr 1fr' }}>
         <Card title="Bookings by City">
           <div className="row" style={{ gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Donut size={170} data={cityRows.map((c) => ({ label: c.label, value: c.value, color: c.color }))} />
+            <Donut size={170} legend={false} data={cityRows.map((c) => ({ label: c.label, value: c.value, color: c.color }))} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minWidth: 150 }}>
               {cityRows.map((c) => (
                 <div key={c.label} className="row" style={{ justifyContent: 'space-between', fontSize: 13 }}>
@@ -108,7 +108,7 @@ export default function Dashboard() {
 
         <Card title="Worker Summary" right={<a className="muted" style={{ fontSize: 12.5, color: '#5b51e8', fontWeight: 600, cursor: 'pointer' }} onClick={() => navigate('/workers')}>View All</a>}>
           <div className="row" style={{ gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Donut size={170} data={workerRows.map((w) => ({ label: w.label, value: w.value, color: w.color }))} />
+            <Donut size={170} legend={false} data={workerRows.map((w) => ({ label: w.label, value: w.value, color: w.color }))} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, flex: 1, minWidth: 130 }}>
               {workerRows.map((w) => (
                 <div key={w.label} className="row" style={{ justifyContent: 'space-between', fontSize: 13 }}>
@@ -134,7 +134,7 @@ export default function Dashboard() {
               <tbody>
                 {d.registrations.map((u) => (
                   <tr key={u.id}>
-                    <td><strong>{u.name}</strong></td>
+                    <td><strong>{u.name || '—'}</strong></td>
                     <td className="muted">{u.phone ?? '—'}</td>
                     <td>{u.city ?? '—'}</td>
                     <td className="muted">{shortDate(u.created)}</td>

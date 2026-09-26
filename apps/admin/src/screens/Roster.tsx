@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { fetchShifts, createShift, deleteShift, fetchWorkers, fetchZones, type Shift, type Zone } from '../api'
 import type { Worker } from '../types'
-import { Card, Badge, Loading, ErrorState, Modal, Field, useToast } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Field, useToast, Pagination } from '../components/UI'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -12,6 +12,8 @@ export default function Roster() {
   const [workers, setWorkers] = useState<Worker[]>([])
   const [zones, setZones] = useState<Zone[]>([])
   const [err, setErr] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const [modal, setModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [f, setF] = useState<{ worker_id: string; zone_id: string; weekdays: number[]; start: string; end: string }>(
@@ -44,20 +46,17 @@ export default function Roster() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <Card>
+      <Card title="Shifts" right={<button className="btn" onClick={() => setModal(true)}><Plus size={16} /> Add Shift</button>}>
         <div style={{ padding: '2px 4px 12px', color: 'var(--muted)', fontSize: 13, lineHeight: 1.5 }}>
           Roster experts into <b>shifts</b> per zone &amp; time window — the standby supply that powers instant service.
           <b> {onNow}</b> expert{onNow === 1 ? '' : 's'} on shift right now (IST). This feeds the Live Ops on-shift supply.
-        </div>
-        <div className="toolbar">
-          <div className="tb-spacer" />
-          <button className="btn" onClick={() => setModal(true)}><Plus size={16} /> Add Shift</button>
         </div>
         <div className="tablewrap">
           <table className="tbl">
             <thead><tr><th>Expert</th><th>Zone</th><th>Day</th><th>Time</th><th>Now</th><th></th></tr></thead>
             <tbody>
-              {shifts.map((s) => (
+              {/* paged: hundreds of rows made this a 17,000px page */}
+              {shifts.slice((page - 1) * pageSize, page * pageSize).map((s) => (
                 <tr key={s.id}>
                   <td><strong>{s.worker_name}</strong></td>
                   <td>{zoneName(s.zone_id)}</td>
@@ -71,6 +70,7 @@ export default function Roster() {
             </tbody>
           </table>
         </div>
+        {shifts.length > pageSize && <Pagination total={shifts.length} page={page} pageSize={pageSize} onPage={setPage} onSize={(n) => { setPageSize(n); setPage(1) }} noun="shifts" />}
       </Card>
 
       {modal && (

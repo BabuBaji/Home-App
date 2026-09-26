@@ -82,6 +82,10 @@ const TITLES: Record<string, string> = {
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals',
 }
 
+// Every menu item's label by its path — so a page never shows "Dashboard" as its title just
+// because it's missing from TITLES (Time & Extensions, Membership, Home Banners did).
+const NAV_LABEL: Record<string, string> = Object.fromEntries(NAV.flatMap((g) => g.items.map((it) => [it.to, it.label])))
+
 const ROLE_LABEL: Record<string, string> = { super: 'Super Admin', admin: 'Admin', manager: 'Manager', support: 'Support', dispatcher: 'Dispatcher', finance: 'Finance', safety: 'Safety Response', recruiter: 'Recruiter', trainer: 'Trainer', marketing: 'Marketing', auditor: 'Auditor' }
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -94,7 +98,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [alerts, setAlerts] = useState(0)
   useEffect(() => { fetchAlerts().then((a) => setAlerts(a.count)).catch(() => {}) }, [pathname])
   const seg = pathname.split('/')[1] || 'dashboard'
-  const title = TITLES[seg] || 'Dashboard'
+  // Most specific first: a sub-page's own menu label (/zones/cities → "Cities"), then the section.
+  const title = NAV_LABEL[pathname] || TITLES[seg] || NAV_LABEL['/' + seg] || 'Dashboard'
   const isDash = seg === 'dashboard'
 
   return (

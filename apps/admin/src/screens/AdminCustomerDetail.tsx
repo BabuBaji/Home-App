@@ -249,19 +249,19 @@ export default function AdminCustomerDetail() {
         </div>
       </div>
 
-      {/* tab bar — all tabs share the row and shrink to fit (no horizontal scroll) */}
+      {/* tab bar — full labels; the row scrolls sideways when it doesn't fit (labels were cut to "Ove…") */}
       <div className="card" style={{ padding: '0 4px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+        <div style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'thin' }}>
           {TABS.map(({ key, label, Icon }) => (
             <button key={key} onClick={() => setTab(key)} title={label} style={{
-              flex: '0 1 auto', minWidth: 0,
+              flex: 'none',
               display: 'inline-flex', gap: 5, alignItems: 'center', justifyContent: 'center',
               padding: '12px 8px', background: 'none', border: 'none',
               borderBottom: tab === key ? '2px solid #5b51e8' : '2px solid transparent', color: tab === key ? '#5b51e8' : '#667085',
               fontWeight: 600, fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap',
             }}>
               <Icon size={14} style={{ flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+              <span>{label}</span>
             </button>
           ))}
         </div>
@@ -350,7 +350,7 @@ function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, onComm, b
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 16, alignItems: 'start' }}>
         {/* Customer Information */}
         <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><User size={16} /> Customer Information</span>}>
           <div className="grid" style={{ gap: 10 }}>
@@ -390,7 +390,7 @@ function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, onComm, b
         </Card>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 16, alignItems: 'start' }}>
         {/* Spending Summary */}
         <Card title="Spending Summary">
           <div className="grid" style={{ gap: 9, fontSize: 13.5 }}>

@@ -279,8 +279,8 @@ export default function AdminBookingDetail() {
                   </span>
                 }
               >
-                <div className="table-wrap">
-                  <table className="table">
+                <div className="tablewrap">
+                  <table className="tbl">
                     <thead>
                       <tr>
                         <th>Requested</th><th>By</th><th>Extra time</th>

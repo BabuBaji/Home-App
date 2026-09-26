@@ -206,7 +206,7 @@ export default function WorkerWallet() {
                     </div>
                   ))}
                 </div>
-                <Wallet size={70} style={{ position: 'absolute', right: 12, bottom: 10, color: '#5b51e8', opacity: 0.12 }} />
+                <Wallet size={70} style={{ position: 'absolute', right: -8, bottom: -12, color: '#5b51e8', opacity: 0.1, zIndex: 0, pointerEvents: 'none' }} />
               </div>
             </div>
           </Card>
@@ -272,11 +272,11 @@ export default function WorkerWallet() {
           </Card>
 
           <Card title="Wallet Activity">
-            <Donut data={ACTIVITY} size={170} />
+            <Donut data={ACTIVITY} size={170} legend={false} />
             <div className="minilist" style={{ marginTop: 10 }}>
               {ACTIVITY.map((r) => (
                 <div key={r.label} className="mini-row">
-                  <span className="dot" style={{ background: r.color }} />
+                  <span className="bdot" style={{ background: r.color, marginTop: 5 }} />
                   <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{r.label}</strong></div>
                   <span className="num"><strong>{Math.round((r.value / actTotal) * 100)}%</strong> <small className="muted">({money(r.value)})</small></span>
                 </div>

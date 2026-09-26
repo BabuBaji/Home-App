@@ -20,6 +20,23 @@ function useWidth(fallback = 640) {
 const VIOLET = '#5b51e8'
 const GREEN = '#16a34a'
 
+// Axis ticks: about one per 80px, always the last one, but never a stepped tick that would sit
+// right next to it (they overlapped: "2026-09-2326-09-26"). Edge labels anchor inwards so they
+// aren't clipped by the chart edge.
+function showTick(i: number, n: number, w: number) {
+  const step = Math.ceil(n / Math.max(2, Math.floor(w / 80)))
+  if (i === n - 1) return true
+  return i % step === 0 && n - 1 - i >= step
+}
+const tickAnchor = (i: number, n: number) => (n > 1 && i === 0 ? 'start' : n > 1 && i === n - 1 ? 'end' : 'middle')
+// ISO dates read as "20 Sep"
+function axisLabel(v: unknown) {
+  const s = String(v ?? '')
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (!m) return s
+  return `${Number(m[3])} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m[2]) - 1]}`
+}
+
 // smooth path through points (Catmull-Rom → cubic bezier)
 function smooth(pts: [number, number][]) {
   if (!pts.length) return ''
@@ -44,7 +61,8 @@ export function LineChart({ data, keys = ['total', 'completed'], colors = [VIOLE
   const [ref, w] = useWidth()
   const h = height, pad = 28
   const max = Math.max(1, ...data.flatMap((d) => keys.map((k) => d[k] || 0)))
-  const x = (i: number) => pad + (i * (w - pad * 2)) / Math.max(1, data.length - 1)
+  // a single point sits in the middle rather than stuck against the left axis
+  const x = (i: number) => (data.length === 1 ? w / 2 : pad + (i * (w - pad * 2)) / (data.length - 1))
   const y = (v: number) => h - pad - (v / max) * (h - pad * 2)
   return (
     <svg ref={ref} className="chart" viewBox={`0 0 ${w} ${h}`} height={h}>
@@ -72,9 +90,8 @@ export function LineChart({ data, keys = ['total', 'completed'], colors = [VIOLE
         )
       })}
       {data.map((d, i) => {
-        const step = Math.ceil(data.length / Math.max(2, Math.floor(w / 80)))
-        if (i % step !== 0 && i !== data.length - 1) return null
-        return <text key={i} x={x(i)} y={h - 8} textAnchor="middle" className="axis">{d.day ?? d.date ?? ''}</text>
+        if (!showTick(i, data.length, w)) return null
+        return <text key={i} x={x(i)} y={h - 8} textAnchor={tickAnchor(i, data.length)} className="axis">{axisLabel(d.day ?? d.date ?? '')}</text>
       })}
     </svg>
   )
@@ -103,7 +120,7 @@ export function BarChart({ data, valueKey = 'revenue', labelKey = 'day', color =
         return (
           <g key={i}>
             <rect x={pad + i * bw + bw * 0.22} y={h - pad - bh} width={bw * 0.56} height={Math.max(0, bh)} rx={6} fill="url(#bargrad)" />
-            {(i % Math.ceil(data.length / Math.max(2, Math.floor(w / 80))) === 0 || i === data.length - 1) && <text x={pad + i * bw + bw * 0.5} y={h - 8} textAnchor="middle" className="axis">{d[labelKey]}</text>}
+            {showTick(i, data.length, w) && <text x={pad + i * bw + bw * 0.5} y={h - 8} textAnchor="middle" className="axis">{axisLabel(d[labelKey])}</text>}
           </g>
         )
       })}
@@ -114,7 +131,8 @@ export function BarChart({ data, valueKey = 'revenue', labelKey = 'day', color =
 // legend=false when the page draws its own legend next to the ring (with percentages etc.) —
 // otherwise the labels show twice and this one overflows the card.
 export function Donut({ data, size = 180, legend = true }: { data: { label: string; value: number; color: string }[]; size?: number; legend?: boolean }) {
-  const total = Math.max(1, data.reduce((s, d) => s + d.value, 0))
+  const sum = data.reduce((s, d) => s + (d.value > 0 ? d.value : 0), 0)
+  const total = Math.max(1, sum) // scale only — the centre shows the real sum (0, not "1")
   const r = size / 2 - 16, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r
   let acc = 0
   return (
@@ -122,14 +140,15 @@ export function Donut({ data, size = 180, legend = true }: { data: { label: stri
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="#eef0f7" strokeWidth={16} />
         {data.map((d, i) => {
+          if (!(d.value > 0)) return null // a zero slice drew as a stray dot
           const frac = d.value / total
           const dash = `${frac * C} ${C}`
           const off = -acc * C
           acc += frac
           return <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={d.color} strokeWidth={16}
-            strokeDasharray={dash} strokeDashoffset={off} transform={`rotate(-90 ${cx} ${cy})`} strokeLinecap="round" />
+            strokeDasharray={dash} strokeDashoffset={off} transform={`rotate(-90 ${cx} ${cy})`} strokeLinecap={data.filter((x) => x.value > 0).length > 1 ? 'butt' : 'round'} />
         })}
-        <text x={cx} y={cy - 4} textAnchor="middle" className="donut-total">{total.toLocaleString('en-IN')}</text>
+        <text x={cx} y={cy - 4} textAnchor="middle" className="donut-total">{sum.toLocaleString('en-IN')}</text>
         <text x={cx} y={cy + 14} textAnchor="middle" className="donut-cap">Total</text>
       </svg>
       {legend && <div className="legend">

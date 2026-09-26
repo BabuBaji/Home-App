@@ -83,7 +83,11 @@ export default function Analytics() {
   const TOP_CITIES = d.topCitiesByRevenue.map((c) => ({ label: c.label, value: money(c.value), pct: c.value, color: '#5b51e8' }))
   const TOP_SERVICES = d.topServices
   const CUSTOMER_GROWTH = d.growth.map((g) => ({ date: g.date, value: g.n }))
-  const HEAT = d.heatmap
+  // Server sends heatmap[day 0=Sun..6][hour 0..23]. Show 4 six-hour bands (rows) × Mon..Sun
+  // (columns), each cell scaled to the busiest one (raw counts saturated the colour).
+  const HEAT_RAW = [0, 6, 12, 18].map((h0) => [1, 2, 3, 4, 5, 6, 0].map((day) => (d.heatmap?.[day] || []).slice(h0, h0 + 6).reduce((a: number, b: number) => a + b, 0)))
+  const heatMax = Math.max(1, ...HEAT_RAW.flat())
+  const HEAT = HEAT_RAW.map((row) => row.map((v) => v / heatMax))
   const totalServices = TOP_SERVICES.length
   const pageServices = TOP_SERVICES.slice((page - 1) * pageSize, page * pageSize)
 
@@ -128,11 +132,10 @@ export default function Analytics() {
       <div className="grid" style={{ gridTemplateColumns: '1.55fr 1.15fr 0.95fr' }}>
         <Card title="Overview Trend" right={<MonthSel />}>
           <div className="legend" style={{ flexDirection: 'row', gap: 16, marginBottom: 6 }}>
-            <span className="legend-row" style={{ width: 'auto' }}><span className="dot" style={{ background: '#5b51e8' }} /> Revenue (₹)</span>
             <span className="legend-row" style={{ width: 'auto' }}><span className="dot" style={{ background: '#2e90fa' }} /> Bookings</span>
             <span className="legend-row" style={{ width: 'auto' }}><span className="dot" style={{ background: '#16a34a' }} /> Completed</span>
           </div>
-          <LineChart data={series as unknown as Record<string, number>[]} keys={['revenue', 'bookings', 'completed']} colors={['#5b51e8', '#2e90fa', '#16a34a']} height={210} />
+          <LineChart data={series as unknown as Record<string, number>[]} keys={['bookings', 'completed']} colors={['#2e90fa', '#16a34a']} height={210} />
         </Card>
 
         <Card title="Revenue Breakdown" right={<MonthSel />}>
@@ -167,7 +170,7 @@ export default function Analytics() {
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
             <Card title="Bookings by Channel" right={<MonthSel />}>
               <div className="donut-wrap">
-                <Donut data={CHANNELS} size={150} />
+                <Donut data={CHANNELS} size={150} legend={false} />
                 <LegendList rows={CHANNELS} />
               </div>
             </Card>
@@ -181,7 +184,7 @@ export default function Analytics() {
 
             <Card title="New vs Returning Customers" right={<MonthSel />}>
               <div className="donut-wrap">
-                <Donut data={NEW_RETURNING} size={150} />
+                <Donut data={NEW_RETURNING} size={150} legend={false} />
                 <LegendList rows={NEW_RETURNING} />
               </div>
             </Card>
@@ -237,7 +240,7 @@ export default function Analytics() {
                 <Fragment key={'r' + r}>
                   <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>{HEAT_ROWS[r]}</span>
                   {row.map((v, c) => (
-                    <span key={r + '-' + c} style={{ height: 22, borderRadius: 5, background: `rgba(91,81,232,${0.12 + v * 0.78})` }} />
+                    <span key={r + '-' + c} title={`${HEAT_RAW[r][c]} bookings`} style={{ height: 22, borderRadius: 5, background: `rgba(91,81,232,${0.08 + v * 0.82})` }} />
                   ))}
                 </Fragment>
               ))}

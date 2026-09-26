@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState, useRef, createContext, useContext, useCallback } from 'react'
+import { type ReactNode, useEffect, useState, useRef, createContext, useContext, useCallback, Children } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, X, Search, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, ChevronDown, Check } from 'lucide-react'
 
@@ -121,10 +121,24 @@ export function Card({ title, right, children, className = '' }: { title?: React
   )
 }
 
+// Some pages pass a pale background shade as the tint; used as the icon colour it vanished on the
+// near-white chip. Map those to the strong colour of the same family.
+const PALE_TO_STRONG: Record<string, string> = {
+  '#eef0ff': '#5b51e8', '#f1ecfe': '#7c6df7', '#f3eefe': '#7c6df7', '#e7f7ee': '#16a34a', '#fff4e5': '#f59e0b',
+  '#fff6e6': '#f59e0b', '#fdecec': '#ef4444', '#eaf3ff': '#2e90fa',
+}
+function strongTint(tint: string) {
+  const k = (tint || '').toLowerCase()
+  if (PALE_TO_STRONG[k]) return PALE_TO_STRONG[k]
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(k)
+  if (m && (0.2126 * parseInt(m[1], 16) + 0.7152 * parseInt(m[2], 16) + 0.0722 * parseInt(m[3], 16)) / 255 > 0.85) return '#5b51e8'
+  return tint
+}
 export function StatCard({ icon, tint, label, value, delta, sub, down }: { icon: ReactNode; tint: string; label: string; value: ReactNode; delta?: ReactNode; sub?: ReactNode; down?: boolean }) {
+  const c = strongTint(tint)
   return (
     <div className="stat">
-      <div className="stat-ico" style={{ background: `${tint}14`, color: tint }}>{icon}</div>
+      <div className="stat-ico" style={{ background: `${c}14`, color: c }}>{icon}</div>
       <div className="stat-body">
         <span className="stat-label">{label}</span>
         <div className="stat-line">
@@ -145,8 +159,10 @@ const TONE: Record<string, string> = {
   high: 'red', medium: 'amber', low: 'gray', closed: 'gray',
 }
 export function Badge({ children, tone, dot = true }: { children: ReactNode; tone?: string; dot?: boolean }) {
-  const t = tone || TONE[String(children).toLowerCase().replace(/\s+/g, '_')] || 'gray'
-  return <span className={'badge ' + t}>{dot && <i className="bdot" />}{String(children).replace(/_/g, ' ')}</span>
+  // Join mixed children (e.g. ['★ ', 4.5]) — String() of an array put a comma between them.
+  const txt = Children.toArray(children).join('')
+  const t = tone || TONE[txt.toLowerCase().replace(/\s+/g, '_')] || 'gray'
+  return <span className={'badge ' + t}>{dot && <i className="bdot" />}{txt.replace(/_/g, ' ')}</span>
 }
 
 /* ---------- pagination footer ---------- */
@@ -178,7 +194,7 @@ export function Pagination({ page, pageSize, total, noun = 'items', onPage, onSi
       </div>
       <div className="pgsize">
         <select className="select" value={pageSize} onChange={(e) => onSize?.(Number(e.target.value))} disabled={!onSize}>
-          {[5, 10, 20, 50].map((s) => <option key={s} value={s}>{s} / page</option>)}
+          {[...new Set([5, 10, 20, 25, 50, pageSize])].sort((a, b) => a - b).map((s) => <option key={s} value={s}>{s} / page</option>)}
         </select>
       </div>
     </div>
@@ -236,7 +252,8 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 
 /* ---------- avatar ---------- */
 export function Avatar({ name, src, size = 36 }: { name: string; src?: string | null; size?: number }) {
-  const initials = (name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
+  // initials from words that start with a letter/digit ("Customer #45" → "C", not "C#")
+  const initials = ((name || '?').split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w[0] || '')).map((w) => w[0]).slice(0, 2).join('') || '?').toUpperCase()
   const hue = [...(name || 'x')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360
   if (src) return <img className="avatar" src={src} width={size} height={size} alt={name} />
   return <span className="avatar" style={{ width: size, height: size, background: `hsl(${hue} 60% 90%)`, color: `hsl(${hue} 55% 35%)`, fontSize: size * 0.36 }}>{initials}</span>
@@ -269,7 +286,7 @@ export function MiniMap({ lat, lng, height = 200, label }: { lat: number; lng: n
       <iframe title="Customer location" src={src} loading="lazy" style={{ width: '100%', height, border: 0, display: 'block' }} />
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--card, #fff)' }}>
         <span className="muted" style={{ fontSize: 12 }}>📍 {lat.toFixed(5)}, {lng.toFixed(5)}{label ? ` · ${label}` : ''}</span>
-        <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 700, color: 'var(--violet, #5b51e8)' }}>Open in Maps</a>
+        <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 700, color: 'var(--violet, #5b51e8)', whiteSpace: 'nowrap', flexShrink: 0 }}>Open in Maps</a>
       </div>
     </div>
   )

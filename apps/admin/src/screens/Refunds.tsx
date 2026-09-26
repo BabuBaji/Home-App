@@ -179,7 +179,7 @@ export default function Refunds() {
                   </td>
                   <td className="muted" style={{ maxWidth: 180, whiteSpace: 'normal' }}>{r.cancel_reason || '—'}</td>
                   <td>
-                    <strong>{shortDate(r.created)}</strong>
+                    <strong className="nowrap">{shortDate(r.created)}</strong>
                   </td>
                   <td><Badge tone={refundTone(r.payment_status || '')}>{r.payment_status || '—'}</Badge></td>
                   <td>

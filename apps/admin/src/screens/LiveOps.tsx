@@ -71,11 +71,11 @@ function ZoneCard({ z }: { z: LiveOpsZone }) {
     : Math.round(Math.min(1, z.demand.total / Math.max(1, z.supply.online)) * 100)
   return (
     <Card>
-      <div style={{ padding: 14, display: 'grid', gap: 10 }}>
+      <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
           <div>
             <strong style={{ fontSize: 15 }}>{z.name}</strong>
-            <div className="muted" style={{ fontSize: 12 }}>{[z.city, z.state].filter(Boolean).join(', ') || '—'} · {z.pincodeCount} pins</div>
+            <div className="muted" style={{ fontSize: 12 }}>{[z.city, z.state].filter(Boolean).join(', ') || '—'} · <span style={{ whiteSpace: 'nowrap' }}>{z.pincodeCount} {z.pincodeCount === 1 ? 'pin' : 'pins'}</span></div>
           </div>
           <Badge tone={h.tone}>{h.label}</Badge>
         </div>

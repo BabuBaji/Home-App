@@ -20,12 +20,16 @@ function Cell({ r, c, zones, services, upd }: { r: Row; c: Col; zones: Zone[]; s
   )
   if (c.type === 'select') {
     const opts = c.key === 'service_id' ? services.map((s) => ({ value: s.id, label: s.name })) : (c.options || [])
-    return <select className="zo-mini" style={{ width: 140, textAlign: 'left' }} value={(v as string) || ''} onChange={(e) => upd(r.id, c.key, e.target.value)}><option value="">—</option>{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+    return <select className="zo-mini" style={{ minWidth: 180, textAlign: 'left' }} value={(v as string) || ''} onChange={(e) => upd(r.id, c.key, e.target.value)}><option value="">—</option>{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
   }
   return <input className="zo-mini" style={{ width: c.w || 100, textAlign: c.type === 'number' ? 'right' : 'left' }} type={c.type === 'number' ? 'number' : 'text'} value={(v as string | number) ?? ''} onChange={(e) => upd(r.id, c.key, c.type === 'number' ? Number(e.target.value) : e.target.value)} />
 }
 
+// Button/empty-state noun (title minus the "s" gave "Add Citie")
+const SINGULAR: Record<string, string> = { Cities: 'City', Clusters: 'Cluster', Apartments: 'Apartment', Inventory: 'Item', Pricing: 'Price rule' }
+
 function EntityPage({ title, sub, path, cols, zoned = false, defaults = {} }: { title: string; sub: string; path: string; cols: Col[]; zoned?: boolean; defaults?: Record<string, unknown> }) {
+  const singular = SINGULAR[title] || title.replace(/s$/, '')
   const [rows, setRows] = useState<Row[]>([])
   const [zones, setZones] = useState<Zone[]>([])
   const [services, setServices] = useState<{ id: string; name: string }[]>([])
@@ -53,13 +57,13 @@ function EntityPage({ title, sub, path, cols, zoned = false, defaults = {} }: { 
             <option value="">All zones</option>{zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
           </select>
         )}
-        <button className="zo-btn" onClick={add}><Plus size={16} /> Add {title.replace(/s$/, '')}</button>
+        <button className="zo-btn" onClick={add}><Plus size={16} /> Add {singular}</button>
       </div>
       <div className="zo-panel" style={{ padding: 8 }}>
         {loading ? (
           <div style={{ padding: 8 }}>{Array.from({ length: 5 }).map((_, i) => <div key={i} className="zo-sk-row"><span className="zo-sk" style={{ height: 16 }} /><span className="zo-sk" style={{ height: 16 }} /><span className="zo-sk" style={{ height: 16 }} /><span className="zo-sk" style={{ height: 16 }} /><span className="zo-sk" style={{ height: 16 }} /><span className="zo-sk" style={{ height: 16 }} /></div>)}</div>
         ) : rows.length === 0 ? (
-          <div className="zo-empty"><div className="e">📭</div><p>No {title.toLowerCase()} yet. Click "Add" to create one.</p></div>
+          <div className="zo-empty"><div className="e">📭</div><p>No {title.toLowerCase()} yet. Click "Add {singular}" to create one.</p></div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="zo-table">

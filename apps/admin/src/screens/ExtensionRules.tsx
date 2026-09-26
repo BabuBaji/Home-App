@@ -82,8 +82,8 @@ export default function ExtensionRules() {
           what they may offer, what it costs, and how far a booking can be stretched. The customer always approves
           and pays before the clock moves.
         </p>
-        <div className="table-wrap">
-          <table className="table">
+        <div className="tablewrap">
+          <table className="tbl">
             <thead>
               <tr>
                 <th>Service</th><th>Extension</th><th>Blocks offered</th>
@@ -124,8 +124,8 @@ export default function ExtensionRules() {
           </Field>
 
           <h4 style={{ fontSize: 14, fontWeight: 800, margin: '16px 0 8px' }}>Blocks offered</h4>
-          <div className="table-wrap">
-            <table className="table">
+          <div className="tablewrap">
+            <table className="tbl">
               <thead><tr><th>Minutes</th><th>Customer pays ₹</th><th>Worker earns ₹</th><th /></tr></thead>
               <tbody>
                 {draft.blocks.map((b, i) => (

@@ -134,7 +134,11 @@ input, select, textarea { font-family: inherit; }
 
 /* ============ cards / stats ============ */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; transition: box-shadow .18s, transform .18s; }
-.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; flex-wrap: wrap; }
+/* the title keeps at least ~9 characters on a line; below that the picker drops under it */
+.card-head h3 { min-width: min(100%, 9.5em); flex: 1 1 auto; }
+/* a period/filter picker in a card header stays compact so the title keeps its line */
+.card-head .select.flt, .card-head .select { min-width: 0; padding: 6px 26px 6px 10px; font-size: 12px; background-position: right 8px center; }
 .card-head h3 { font-size: 13.5px; font-weight: 800; }
 /* Dense tab: tighter card inset so the panels sit closer together, but they stay distinct rounded
    cards (border + radius kept) rather than a hard boxed grid. */
@@ -226,7 +230,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .toolbar > .searchbox { flex: 1 1 240px; }
 .toolbar > .searchbox + .tb-spacer { display: none; }
 .toolbar .btn { white-space: nowrap; }
-.select.flt { font-weight: 600; color: var(--ink-2); min-width: 120px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23868aa6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; padding-right: 32px; -webkit-appearance: none; appearance: none; }
+.select.flt { font-weight: 600; color: var(--ink-2); min-width: 120px; max-width: 190px; text-overflow: ellipsis; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23868aa6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; padding-right: 32px; -webkit-appearance: none; appearance: none; }
 
 /* ============ pagination footer ============ */
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 4px 2px; flex-wrap: wrap; }
@@ -267,6 +271,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mini-bd { flex: 1; min-width: 0; }
 .mini-row strong { font-size: 13px; font-weight: 600; display: block; line-height: 1.3; }
 .mini-row small { font-size: 11.5px; color: var(--muted); }
+/* secondary lines in a row's text column stack (they ran together: "login26 Sept 2026") */
+.mini-row .mini-bd small { display: block; }
 .mini-chev { color: var(--muted); align-self: center; }
 
 /* ============ forms / modal ============ */
@@ -390,3 +396,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .settings-layout { grid-template-columns: 236px minmax(0, 1fr); }
   .settings-layout > .col-rail { grid-column: 2; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 }
+
+/* Summary row directly on the page (pages that return a fragment) keeps its distance from the cards */
+.content > .stat-row:not(:last-child) { margin-bottom: 16px; }
+.content > .card + .card, .content > .card + .grid, .content > .grid + .card { margin-top: 16px; }
+/* 6+ summary cards in a row: icon above the text so labels get the full card width instead of
+   wrapping to 2–3 lines next to the icon (values ended up at different heights) */
+.stat-row:has(> :nth-child(6)) .stat { flex-direction: column; align-items: flex-start; gap: 7px; }
+.stat-row:has(> :nth-child(6)) .stat-label, .stat-row:has(> :nth-child(6)) .stat-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.stat-body { max-width: 100%; }

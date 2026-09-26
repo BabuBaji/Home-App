@@ -57,11 +57,14 @@ function Kpi({ label, value, sub, tone, trend, invert }: { label: string; value:
 }
 
 /** One item in the status strip (icon + label + value). */
+// compact quick-action buttons so labels fit a two-column grid in the side panel
+const QA: React.CSSProperties = { padding: '9px 10px', fontSize: 13 }
+
 function StatusItem({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
       <span style={{ color: 'var(--muted,#98a2b3)', marginTop: 2, display: 'flex' }}>{icon}</span>
-      <div>
+      <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
         <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{label}</div>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{value}</div>
         {sub && <div style={{ fontSize: 10.5, color: 'var(--muted,#98a2b3)' }}>{sub}</div>}
@@ -1146,8 +1149,8 @@ export default function WorkerDetail() {
 
         <Card>
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 16, height: '100%' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', gap: '14px 10px', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
-            <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? w.liveJob.status : (onDuty ? 'Available' : 'Offline')} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px 10px', paddingBottom: 12, borderBottom: '1px solid var(--line,#eef0f4)' }}>
+            <StatusItem icon={<span style={{ width: 9, height: 9, borderRadius: 9, background: onDuty ? '#16a34a' : '#98a2b3', display: 'inline-block', marginTop: 3 }} />} label="Current Status" value={w.liveJob ? String(w.liveJob.status).replace(/_/g, ' ') : (onDuty ? 'Available' : 'Offline')} />
             <StatusItem icon={<Briefcase size={14} />} label="Current Job" value={w.liveJob ? w.liveJob.ref : '—'} sub={w.liveJob?.service} />
             <StatusItem icon={<MapPin size={14} />} label="Zone" value={zoneName} />
             <StatusItem icon={<CalendarClock size={14} />} label="Last Seen" value={dev.lastSeen ? new Date(dev.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} />
@@ -1218,12 +1221,13 @@ export default function WorkerDetail() {
           </Panel>
           <Panel title="Quick Actions">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <button className="btn" onClick={() => nav('/roster')}><Zap size={14} /> Assign Job</button>
-              <button className="btn" onClick={() => nav('/workers')}><MapPin size={14} /> Change Zone</button>
-              <button className="btn" onClick={() => nav('/worker-wallet')}><Wallet size={14} /> Wallet</button>
-              <button className="btn" onClick={() => toast('Messaging not wired')}><MessageSquare size={14} /> Message</button>
-              <button className="btn" onClick={() => act({ status: 'active', verified: true }, 'Worker approved')}><CheckCircle2 size={14} /> Approve</button>
-              <button className="btn danger" onClick={() => act({ status: 'suspended' }, 'Worker suspended')}><XCircle size={14} /> Suspend</button>
+              {/* navigation actions are secondary; only Approve / Suspend carry colour */}
+              <button className="btn line" style={QA} onClick={() => nav('/roster')}><Zap size={14} /> Assign Job</button>
+              <button className="btn line" style={QA} onClick={() => nav('/workers')}><MapPin size={14} /> Change Zone</button>
+              <button className="btn line" style={QA} onClick={() => nav('/worker-wallet')}><Wallet size={14} /> Wallet</button>
+              <button className="btn line" style={QA} onClick={() => toast('Messaging not wired')}><MessageSquare size={14} /> Message</button>
+              <button className="btn" style={QA} onClick={() => act({ status: 'active', verified: true }, 'Worker approved')}><CheckCircle2 size={14} /> Approve</button>
+              <button className="btn danger" style={QA} onClick={() => act({ status: 'suspended' }, 'Worker suspended')}><XCircle size={14} /> Suspend</button>
             </div>
           </Panel>
           <Panel title="Bank & Payout" action={<Badge tone={w.bank_status === 'Verified' ? 'green' : w.bank_status === 'Rejected' ? 'red' : 'amber'} dot={false}>{w.bank_status || 'Pending'}</Badge>}>

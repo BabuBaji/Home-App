@@ -94,7 +94,7 @@ export default function Reports() {
       </div>
 
       {/* charts: 2 trend cards + revenue-by-service rail */}
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card title="Revenue Overview" right={<span className="muted" style={{ fontSize: 12 }}>Daily</span>}>
           <LineChart data={d.series as unknown as Record<string, number>[]} keys={['revenue']} colors={['#5b51e8']} height={220} />
         </Card>
@@ -107,7 +107,7 @@ export default function Reports() {
       </div>
 
       {/* second chart row: channel donut, new customers, top cities + bookings-by-status rail */}
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card title="Revenue by Channel">
           <Donut data={REVENUE_BY_CHANNEL.map((s) => ({ label: s.label, value: s.value, color: s.color }))} size={170} />
         </Card>
@@ -120,7 +120,7 @@ export default function Reports() {
       </div>
 
       {/* third row: bookings-by-status, key insights, quick links */}
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, alignItems: 'stretch' }}>
         <Card title="Bookings by Status">
           <Donut data={d.statusSplit.map((s, i) => ({ label: s.status.replace(/_/g, ' '), value: s.n, color: COLORS[i % COLORS.length] }))} size={170} />
         </Card>
@@ -129,7 +129,7 @@ export default function Reports() {
             {d.insights.slice(0, 4).map((it, i) => (
               <div key={i} className="mini-row">
                 <span className="mini-ico" style={{ background: INSIGHT_ICONS[i].tint + '1f', color: INSIGHT_ICONS[i].tint }}>{INSIGHT_ICONS[i].icon}</span>
-                <div className="mini-bd"><strong style={{ fontWeight: 500 }}>{it.title}. {it.sub}</strong></div>
+                <div className="mini-bd"><strong style={{ fontWeight: 600 }}>{it.title}</strong><small>{it.sub}</small></div>
               </div>
             ))}
           </div>

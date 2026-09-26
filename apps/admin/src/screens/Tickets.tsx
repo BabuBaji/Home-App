@@ -158,8 +158,8 @@ export default function Tickets() {
                     <td><Badge>{titleCase(t.status)}</Badge></td>
                     <td>
                       <div className="actions" style={{ position: 'relative' }}>
-                        <button className="btn line" title="View" onClick={() => openView(t)}><Eye size={16} /></button>
-                        <button className="btn line" title="More" onClick={() => setMenuFor(menuFor === t.id ? null : t.id)}><MoreVertical size={16} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="View" onClick={() => openView(t)}><Eye size={16} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="More" onClick={() => setMenuFor(menuFor === t.id ? null : t.id)}><MoreVertical size={16} /></button>
                         {menuFor === t.id && (
                           <div className="menu" style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, background: '#fff', border: '1px solid #e6e6ef', borderRadius: 8, boxShadow: '0 8px 24px rgba(20,20,40,.12)', padding: 4, minWidth: 140 }}>
                             <button className="btn line" style={{ width: '100%', justifyContent: 'flex-start', border: 'none' }} onClick={() => quick(t.id, { status: 'Resolved' }, 'Ticket resolved')}>Resolve</button>

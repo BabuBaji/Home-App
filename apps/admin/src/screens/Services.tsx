@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { LayoutGrid, CheckCircle2, PauseCircle, Tag, Funnel, Plus, Eye, Pencil, Trash2 } from 'lucide-react'
 import { fetchServices, createService, updateService, deleteService } from '../api'
 import type { AdminService } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money } from '../components/UI'
+import { StatCard, Card, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money } from '../components/UI'
 
 type Tone = 'green' | 'amber' | 'red' | 'blue' | 'violet' | 'gray'
 
@@ -111,8 +111,7 @@ export default function Services() {
                 <th>Service</th>
                 <th>Category</th>
                 <th>Base Price</th>
-                <th>Duration</th>
-                <th>Workers Assigned</th>
+                <th className="num">Bookings</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -146,19 +145,8 @@ export default function Services() {
                   </td>
                   <td><Badge tone={CAT_TONE[r.category] || 'gray'}>{r.category}</Badge></td>
                   <td className="num">{money(r.price)}</td>
-                  <td>1 - 2 hrs</td>
-                  <td>
-                    <div className="cell-user" style={{ gap: 6 }}>
-                      <span style={{ display: 'inline-flex' }}>
-                        {[0, 1, 2].map((a) => (
-                          <span key={a} style={{ marginLeft: a ? -8 : 0, display: 'inline-flex' }}>
-                            <Avatar name={r.name + a} size={26} />
-                          </span>
-                        ))}
-                      </span>
-                      <span className="muted">+{r.bookings}</span>
-                    </div>
-                  </td>
+                  {/* real count (the column used to show made-up worker avatars and a fixed "1 - 2 hrs") */}
+                  <td className="num">{(r.bookings || 0).toLocaleString('en-IN')}</td>
                   <td><Badge tone={r.available ? 'green' : 'red'}>{r.available ? 'Active' : 'Inactive'}</Badge></td>
                   <td>
                     <div className="actions">

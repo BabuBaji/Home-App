@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical, UserX, AlertTriangle } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones } from '../api'
 import type { AdminBooking } from '../types'
@@ -45,6 +45,8 @@ const paymentTone = (p: string): string => {
   return 'blue'
 }
 
+const CANCELLED_TAB = 5 // index of 'Cancelled' in TABS below
+
 export default function Bookings() {
   const { admin } = useStore()
   const nav = useNavigate()
@@ -53,7 +55,9 @@ export default function Bookings() {
   const [rows, setRows] = useState<AdminBooking[] | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get('q') || '')
-  const [tab, setTab] = useState(0)
+  // /cancellations shares this page; open it on the Cancelled tab rather than All bookings
+  const { pathname } = useLocation()
+  const [tab, setTab] = useState(() => (pathname === '/cancellations' ? CANCELLED_TAB : 0))
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
 

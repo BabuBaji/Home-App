@@ -123,7 +123,7 @@ export default function Shifts() {
               {(sites || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
-          <button onClick={doAssign} style={btn}><MapPin size={15} /> Assign</button>
+          <button onClick={doAssign} style={{ ...btn, marginBottom: 13 }}><MapPin size={15} /> Assign</button>
         </div>
         {/* Apartment list (editable) */}
         <div style={{ overflowX: 'auto' }}>
@@ -207,6 +207,7 @@ export default function Shifts() {
 }
 
 const inp: React.CSSProperties = { width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg, #fff)', color: 'inherit', fontSize: 13 }
-const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', border: 'none', borderRadius: 10, background: '#6d28d9', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }
-const th: React.CSSProperties = { padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap' }
+const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', border: 'none', borderRadius: 10, background: 'linear-gradient(100deg, var(--violet), var(--violet-2))', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' } // same fill as the shared .btn
+// matches .tbl headers elsewhere (small uppercase muted)
+const th: React.CSSProperties = { padding: '8px 10px', fontWeight: 700, whiteSpace: 'nowrap', textAlign: 'left', fontSize: 10.5, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)' }
 const td: React.CSSProperties = { padding: '10px', whiteSpace: 'nowrap' }

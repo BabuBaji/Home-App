@@ -4,7 +4,7 @@ import {
   BellRing, OctagonAlert, History, Clock,
 } from 'lucide-react'
 import { fetchNotifications, broadcast } from '../api'
-import { Card, StatCard, Badge, Field, Modal, Loading, ErrorState, useToast, shortDate } from '../components/UI'
+import { Card, StatCard, Badge, Field, Modal, Loading, ErrorState, useToast, shortDate, SearchBox } from '../components/UI'
 import { Donut, BarChart } from '../components/Charts'
 
 const TABS = ['All', 'System', 'Booking', 'Payment', 'Promotions', 'Reminders', 'Alerts', 'Custom']
@@ -146,7 +146,7 @@ export default function Notifications() {
           </div>
 
           <div className="toolbar">
-            <div className="searchbox"><input placeholder="Search by title, message or recipient…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            <SearchBox value={q} onChange={setQ} placeholder="Search by title, message or recipient…" />
             <select className="select flt" value={recipient} onChange={(e) => setRecipient(e.target.value)}>
               <option value="all">All Recipients</option>
               <option value="all customers">All Customers</option>
@@ -201,8 +201,8 @@ export default function Notifications() {
                     <td><Badge tone="green" dot={false}>Sent</Badge></td>
                     <td>
                       <div className="row" style={{ gap: 4 }}>
-                        <button className="btn line" title="View"><Eye size={16} /></button>
-                        <button className="btn line" title="More"><MoreVertical size={16} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="View"><Eye size={16} /></button>
+                        <button className="iconbtn" style={{ width: 30, height: 30 }} title="More"><MoreVertical size={16} /></button>
                       </div>
                     </td>
                   </tr>
@@ -239,11 +239,11 @@ export default function Notifications() {
           <Card title="Channel Performance" right={<a className="card-link">View Report</a>}>
             <div className="sumbars">
               {CHANNELS.map((c) => (
-                <div key={c.label} className="sumbar" style={{ alignItems: 'center' }}>
+                <div key={c.label} className="sumbar" style={{ alignItems: 'center', gridTemplateColumns: 'auto 1fr auto' }}>
                   <span className="mini-ico" style={{ background: `${c.tint}1f`, color: c.tint }}><c.Icon size={15} /></span>
-                  <span className="sumbar-label" style={{ flex: 1 }}>{c.label}</span>
-                  <span className="sumbar-track"><span className="sumbar-fill" style={{ width: `${c.bar}%`, background: c.color }} /></span>
+                  <span className="sumbar-label">{c.label}</span>
                   <span className="sumbar-val">{c.value} ({c.pct})</span>
+                  <span className="sumbar-track" style={{ gridColumn: '1 / -1' }}><span className="sumbar-fill" style={{ width: `${c.bar}%`, background: c.color }} /></span>
                 </div>
               ))}
             </div>

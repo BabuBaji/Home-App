@@ -117,17 +117,17 @@ export default function ServiceAreas() {
                   <td>
                     <div className="cell-user" style={{ gap: 6 }}>
                       <Badge tone="blue">{z.pincodeCount}</Badge>
-                      <span className="muted" style={{ fontSize: 12 }}>{z.pincodeList.slice(0, 4).join(', ')}{z.pincodeCount > 4 ? '…' : ''}</span>
+                      <span className="muted" style={{ fontSize: 12 }}>{z.pincodeList.slice(0, 2).join(', ')}{z.pincodeCount > 2 ? '…' : ''}</span>
                     </div>
                   </td>
-                  <td>{z.sla_minutes ? `${z.sla_minutes} min` : <span className="muted">—</span>}</td>
-                  <td>{o ? <span><b>{o.supply.onShift}</b> <span className="muted" style={{ fontSize: 12 }}>on shift / {o.supply.assigned}</span></span> : <span className="muted">—</span>}</td>
-                  <td>{o ? <span><b>{o.demand.open}</b> <span className="muted" style={{ fontSize: 12 }}>open · {o.demand.active} active</span></span> : <span className="muted">—</span>}</td>
+                  <td className="nowrap">{z.sla_minutes ? `${z.sla_minutes} min` : <span className="muted">—</span>}</td>
+                  <td>{o ? <span className="nowrap"><b>{o.supply.onShift}</b> <span className="muted" style={{ fontSize: 12 }}>on shift / {o.supply.assigned}</span></span> : <span className="muted">—</span>}</td>
+                  <td>{o ? <span className="nowrap"><b>{o.demand.open}</b> <span className="muted" style={{ fontSize: 12 }}>open · {o.demand.active} active</span></span> : <span className="muted">—</span>}</td>
                   <td>{o && z.status === 'live' ? <Badge tone={HEALTH_TONE[o.health]}>{HEALTH_LABEL[o.health]}</Badge> : <span className="muted">—</span>}</td>
                   <td><Badge tone={STATUS_TONE[z.status]}>{STATUS_LABEL[z.status]}</Badge></td>
                   <td>
                     <div className="actions">
-                      <button className="btn line" style={{ padding: '4px 10px' }} onClick={() => toggle(z)} title={z.status === 'live' ? 'Pause' : 'Go live'}>
+                      <button className="btn line" style={{ padding: '4px 10px', fontSize: 12.5 }} onClick={() => toggle(z)} title={z.status === 'live' ? 'Pause' : 'Go live'}>
                         {z.status === 'live' ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Go Live</>}
                       </button>
                       <button className="iconbtn" title="Edit" onClick={() => openEdit(z)}><Pencil size={16} /></button>

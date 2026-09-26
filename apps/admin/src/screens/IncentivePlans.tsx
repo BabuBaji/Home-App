@@ -121,6 +121,7 @@ export default function IncentivePlans() {
           <table className="tbl">
             <thead><tr><th>Plan</th><th>Components</th><th>Workers</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
             <tbody>
+              {plans.length === 0 && <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 24 }}>No incentive plans yet. Click “Add plan” to create one.</td></tr>}
               {plans.map((p) => (
                 <tr key={p.id}>
                   <td><strong>{p.name}</strong>{p.notes && <div className="muted" style={{ fontSize: 11.5 }}>{p.notes}</div>}</td>
