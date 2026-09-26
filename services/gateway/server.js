@@ -8,8 +8,6 @@
 // {room,event,payload} messages to a Redis pub/sub channel and the gateway relays them to the
 // matching booking room. This is how the customer/admin apps still get live booking updates in
 // a split backend.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import { createServer } from 'node:http'
 import { createProxyMiddleware } from 'http-proxy-middleware'

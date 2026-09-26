@@ -8,8 +8,6 @@
 // Serves the customer-facing /api/auth, /api/me, /api/addresses, /api/wallet, and exposes
 // /api/internal/* for other services (user lookup for token validation, addresses, wallet
 // debit/credit, admin customer management). No monolith involved.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, publishEvent, smsConfigured, sendOtpSms, getSetting } from '@homehelp/shared'

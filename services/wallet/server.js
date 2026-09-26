@@ -5,8 +5,7 @@
 // booking.cancelled (travel/visit compensation) and payout.completed (mark a withdrawal paid),
 // and updates the worker's balance snapshot in the worker service via /internal. Serves the
 // worker wallet screens and the admin wallet actions.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
+import crypto from 'node:crypto'
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
@@ -623,7 +622,6 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
 // A 4-digit PIN over a 10k space is brute-forceable in seconds, so: salted digest at rest, and
 // five wrong tries locks the PIN for 15 minutes rather than letting a thief walk the keyspace.
 
-const crypto = require('crypto')
 const pinDigest = (pin, salt) => crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex')
 const PIN_MAX_FAILS = 5
 const PIN_LOCK_MIN = 15

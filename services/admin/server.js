@@ -7,8 +7,6 @@
 //   • the CONFIG service — the old global `settings` bus. /internal/settings serves the
 //     unmasked values that shared/config.js getSetting() reads.
 // The BFF aggregation endpoints (dashboard/analytics/customers/…) are added in Phase 2i.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, publishEvent, tryGet, internalPost, internalPatch,

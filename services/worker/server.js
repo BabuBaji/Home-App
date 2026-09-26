@@ -4,8 +4,6 @@
 // Serves worker-app auth/bootstrap/profile/documents and the admin worker panel. The dispatch
 // service reads worker availability/services/location from here to match jobs; the wallet
 // service owns the earnings LEDGER and adjusts the balance snapshot here via /internal.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import crypto from 'node:crypto'
 import express from 'express'
 import multer from 'multer'

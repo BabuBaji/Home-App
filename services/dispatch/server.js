@@ -5,8 +5,6 @@
 // availability/services/location from the WORKER service, and claims/advances bookings over the
 // booking service's internal API. Live GPS + status changes surface to the customer via the
 // booking service's realtime events. Owns only ephemeral per-worker skip state.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, tryGet, publishEvent, getSettingInt,

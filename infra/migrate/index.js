@@ -7,8 +7,6 @@
 // Services seed their own demo data on boot, so this is only needed to carry over REAL data
 // from an existing monolith DB. After it runs, the balance snapshots on workers already hold
 // their money; the ledgers are historical.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'

@@ -4,8 +4,6 @@
 // Serves the customer catalogue + quote + coupons + home content, and admin service CRUD.
 // Admin auth + config are delegated to the admin service; per-service booking counts come from
 // the booking service; catalogue changes are broadcast as `services:update` via the realtime bus.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import path from 'path'
 import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))

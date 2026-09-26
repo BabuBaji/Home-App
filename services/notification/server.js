@@ -7,8 +7,6 @@
 //   broadcasts    – admin announcements / push
 // It CONSUMES every service's `activity` / `customer.login` / `admin.action` events and records
 // them, so the admin Activity Monitor and booking timeline work without any service calling it.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import express from 'express'
 import {
   makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet,
