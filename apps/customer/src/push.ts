@@ -3,11 +3,12 @@ import { PushNotifications } from '@capacitor/push-notifications'
 import { registerPushToken } from './api'
 
 /* FCM push for the installed app: works with the app closed (booking status, expert chat, extra
-   task approvals, offers). Needs google-services.json in android/app; without it registration just
-   fails quietly and the app keeps its in-app / local notifications. */
+   task approvals, offers). Needs google-services.json in android/app. Without it register() does NOT
+   fail quietly — the native plugin throws on its own thread and kills the app — so build-apk.ps1
+   sets VITE_PUSH=0 and we never touch the plugin; the app keeps its in-app / local notifications. */
 let started = false
 export async function startPush(onOpen: (route: string) => void): Promise<void> {
-  if (!Capacitor.isNativePlatform() || started) return
+  if (!Capacitor.isNativePlatform() || started || import.meta.env.VITE_PUSH === '0') return
   started = true
   try {
     let p = await PushNotifications.checkPermissions()
