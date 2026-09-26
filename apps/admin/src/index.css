@@ -400,13 +400,65 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* Summary row directly on the page (pages that return a fragment) keeps its distance from the cards */
 .content > .stat-row:not(:last-child) { margin-bottom: 16px; }
 .content > .card + .card, .content > .card + .grid, .content > .grid + .card { margin-top: 16px; }
-/* 6+ summary cards in a row: icon above the text so labels get the full card width instead of
-   wrapping to 2–3 lines next to the icon (values ended up at different heights) */
-.stat-row:has(> :nth-child(6)) .stat { flex-direction: column; align-items: flex-start; gap: 7px; }
-.stat-row:has(> :nth-child(6)) .stat-label, .stat-row:has(> :nth-child(6)) .stat-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .stat-body { max-width: 100%; }
 /* A row of exactly 7 (Bookings, Cancellations): cards may go to 112px so all 7 stay on one line
    even with a wider side menu or browser zoom (the 7th dropped onto its own row) */
 /* …and when 7 don't fit, 4 + 3 rather than 6 + a lone card: the minimum is 112px while the row is
    ≥ 844px wide (7 × 112 + gaps), otherwise a quarter of the row. */
 .stat-row:has(> :nth-child(7):last-child) { grid-template-columns: repeat(auto-fit, minmax(clamp(112px, (844px - 100%) * 999, calc(25% - 8px)), 1fr)); gap: 10px; }
+
+/* ============================================================================================
+   Design standards (product UI)
+   • one control height (36px) and one control radius (8px) for buttons, selects, search
+   • primary = solid brand colour; secondary = white with a neutral border (no coloured icons)
+   • metrics: one strip — label, big number, note — divided by hairlines, not a row of tall boxes
+   • type: 12.5px labels, 13–13.5px body, 22px metric values
+   ============================================================================================ */
+:root { --ctl-h: 36px; --r-ctl: 8px; --line-strong: #e2e2ee; }
+
+.btn { height: var(--ctl-h); padding: 0 14px; border-radius: var(--r-ctl); font-size: 13px; font-weight: 600; gap: 6px;
+  background: var(--violet); box-shadow: 0 1px 2px rgba(26,23,38,.08); }
+.btn:hover { background: var(--indigo); transform: none; }
+.btn svg { width: 15px; height: 15px; }
+.btn.sm { height: 30px; padding: 0 10px; font-size: 12.5px; border-radius: 7px; }
+.btn.line { background: #fff; color: var(--ink-2); border: 1px solid var(--line-strong); box-shadow: 0 1px 1px rgba(26,23,38,.03); font-weight: 600; }
+.btn.line svg { color: var(--muted); }
+.btn.line:hover { background: #fafafe; border-color: #d4d3e6; color: var(--ink); }
+.btn.line:hover svg { color: var(--ink-2); }
+.btn.danger { background: var(--red); }
+
+.select { height: var(--ctl-h); padding: 0 30px 0 12px; border-radius: var(--r-ctl); font-size: 13px; border-color: var(--line-strong); }
+.select.flt { font-weight: 500; color: var(--ink-2); min-width: 0; }
+.searchbox { height: var(--ctl-h); padding: 0 12px; border-radius: var(--r-ctl); border-color: var(--line-strong); gap: 8px; }
+.searchbox input { font-size: 13px; }
+.searchbox > svg { width: 16px; height: 16px; }
+.toolbar { gap: 8px; margin-bottom: 14px; }
+
+/* ---- metrics strip ---- */
+.stat-row { gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.stat-row > .stat { display: block; border: 0; border-radius: 0; box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line); padding: 14px 18px 15px; background: none; }
+.stat-row > .stat:hover { box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line); transform: none; }
+.stat-row .stat-ico { display: inline-grid; width: auto; height: auto; background: none !important; vertical-align: -3px; margin-right: 6px; border-radius: 0; }
+.stat-row .stat-ico svg { width: 15px; height: 15px; }
+.stat-row .stat-body { display: inline; }
+.stat-row .stat-label { font-size: 12.5px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.stat-row .stat-line { margin-top: 6px; }
+.stat-row .stat-value { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.stat-row .stat-sub { font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.content > .stat-row:not(:last-child) { margin-bottom: 16px; }
+
+/* ---- card header with actions (title + count left, actions right) ---- */
+.card-head.lg h3 { font-size: 15px; font-weight: 700; }
+.card-head .count { margin-left: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ---- bulk-selection bar (replaces the filter row while rows are selected) ---- */
+.bulkbar { display: flex; align-items: center; gap: 8px; height: var(--ctl-h); padding: 0 6px 0 14px; margin-bottom: 14px; border-radius: var(--r-ctl);
+  background: var(--violet-50); border: 1px solid var(--violet-100); color: var(--ink); font-size: 13px; font-weight: 600; }
+.bulkbar .tb-spacer { flex: 1; }
+.bulkbar .btn.line { height: 28px; font-size: 12.5px; }
+.muted-name { color: var(--muted); font-weight: 500 !important; font-style: italic; }
+/* icon + label stay on one line; a label too long for its column ends in "…" */
+.stat-row > .stat { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-row .stat-line, .stat-row .stat-sub { white-space: nowrap; }

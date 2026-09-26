@@ -199,54 +199,66 @@ export default function Customers() {
       </div>
 
       <Card>
-        <div className="toolbar">
-          <SearchBox value={q} onChange={setQ} placeholder="Search customer by name, mobile or email…" className="grow" />
-          <select className="select flt" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="blocked">Blocked</option>
-            <option value="inactive">Inactive</option>
-          </select>
-          <select className="select flt" value={city} onChange={(e) => setCity(e.target.value)}>
-            <option value="all">All Cities</option>
-            {cities.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select className="select flt" value={zone} onChange={(e) => setZone(e.target.value)}>
-            <option value="all">All Zones</option>
-            {zones.map((z) => <option key={z} value={z}>{z}</option>)}
-          </select>
-          <select className="select flt" value={segment} onChange={(e) => setSegment(e.target.value)}>
-            <option value="all">All Segments</option>
-            {SEGMENTS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <button className="btn line" onClick={() => toast('More filters coming soon')}><Funnel size={16} /> Filters</button>
-          <button className="btn line" onClick={() => exportCsv(sel.size ? filtered.filter((c) => sel.has(c.id)) : filtered)}><Download size={15} /> Export</button>
-          <button className="btn line" onClick={() => nav('/notifications')}><Send size={15} /> Send Notification</button>
-          <button className="btn" onClick={() => { setAddDraft(EMPTY_ADD); setAddOpen(true) }}><Plus size={17} /> Add Customer</button>
+        {/* header: what this list is + page actions on one line */}
+        <div className="card-head lg">
+          <h3>All customers<span className="count">{filtered.length.toLocaleString('en-IN')}</span></h3>
+          <div className="head-actions">
+            <button className="btn line" onClick={() => exportCsv(filtered)}><Download size={15} /> Export</button>
+            <button className="btn line" onClick={() => nav('/notifications')}><Send size={15} /> Send notification</button>
+            <button className="btn" onClick={() => { setAddDraft(EMPTY_ADD); setAddOpen(true) }}><Plus size={16} /> Add customer</button>
+          </div>
         </div>
 
-        {(activeChips.length > 0 || sel.size > 0) && (
-          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '2px 0 12px' }}>
-            {activeChips.length > 0 && <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>Active Filters:</span>}
-            {activeChips.map((ch, i) => (
-              <span key={i} className="badge violet" style={{ cursor: 'pointer', gap: 6 }} onClick={ch.clear}>{ch.label}<X size={12} /></span>
-            ))}
-            {activeChips.length > 0 && <button className="linkbtn" style={{ fontSize: 12, color: '#e5484d', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }} onClick={clearAll}>Clear All</button>}
+        {/* filters — or, while rows are selected, what you can do with them */}
+        {sel.size > 0 ? (
+          <div className="bulkbar">
+            <span>{sel.size} selected</span>
             <div className="tb-spacer" />
-            {sel.size > 0 && <span className="muted" style={{ fontSize: 12 }}>{sel.size} selected</span>}
+            <button className="btn line" onClick={() => exportCsv(filtered.filter((c) => sel.has(c.id)))}><Download size={14} /> Export selected</button>
+            <button className="btn line" onClick={() => nav('/notifications')}><Send size={14} /> Notify</button>
+            <button className="btn line" onClick={() => setSel(new Set())}><X size={14} /> Clear</button>
+          </div>
+        ) : (
+          <div className="toolbar">
+            <SearchBox value={q} onChange={setQ} placeholder="Search name, mobile or email" />
+            <select className="select flt" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="blocked">Blocked</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <select className="select flt" value={city} onChange={(e) => setCity(e.target.value)}>
+              <option value="all">All cities</option>
+              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select className="select flt" value={zone} onChange={(e) => setZone(e.target.value)}>
+              <option value="all">All zones</option>
+              {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+            </select>
+            <select className="select flt" value={segment} onChange={(e) => setSegment(e.target.value)}>
+              <option value="all">All segments</option>
+              {SEGMENTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
             <div style={{ position: 'relative' }}>
-              <button className="btn line" onClick={(e) => { e.stopPropagation(); setMoreOpen((v) => !v) }}><MoreHorizontal size={15} /> More Actions</button>
+              <button className="btn line" title="More" onClick={(e) => { e.stopPropagation(); setMoreOpen((v) => !v) }}><MoreHorizontal size={15} /></button>
               {moreOpen && (
-                <div className="menu" style={MENU_BOX} onClick={(e) => e.stopPropagation()}>
+                <div className="menu" style={{ ...MENU_BOX, right: 0 }} onClick={(e) => e.stopPropagation()}>
                   <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); load() }}><RefreshCw size={15} /> Refresh</button>
                   <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); exportCsv(filtered) }}><Download size={15} /> Export all ({filtered.length})</button>
-                  {sel.size > 0 && <button className="menu-item" style={MENU_ITEM} onClick={() => { setMoreOpen(false); setSel(new Set()) }}><X size={15} /> Clear selection</button>}
                 </div>
               )}
             </div>
           </div>
         )}
 
+        {activeChips.length > 0 && sel.size === 0 && (
+          <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', margin: '-4px 0 12px' }}>
+            {activeChips.map((ch, i) => (
+              <span key={i} className="badge violet" style={{ cursor: 'pointer', gap: 6 }} onClick={ch.clear}>{ch.label}<X size={12} /></span>
+            ))}
+            <button className="linkbtn" style={{ fontSize: 12.5, color: 'var(--violet)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }} onClick={clearAll}>Clear filters</button>
+          </div>
+        )}
         <div className="tablewrap">
           <table className="tbl">
             <thead>
@@ -272,9 +284,10 @@ export default function Customers() {
                     <td><input type="checkbox" checked={sel.has(c.id)} onChange={() => toggleOne(c.id)} /></td>
                     <td>
                       <div className="cell-user" style={{ cursor: 'pointer' }} onClick={() => nav(`/customers/${c.id}`)}>
-                        <Avatar name={c.name || 'Customer'} size={36} />
+                        <Avatar name={c.name || ''} size={34} />
                         <div style={{ minWidth: 0 }}>
-                          <strong style={{ display: 'block' }}>{c.name || c.phone || <span className="muted">Unnamed</span>}</strong>
+                          {/* a missing name is shown as missing — not the phone number pretending to be a name */}
+                          <strong style={{ display: 'block' }} className={c.name ? '' : 'muted-name'}>{c.name || 'Unnamed customer'}</strong>
                           <Badge tone={SEG_TONE[seg]} dot={false}>{seg}</Badge>
                         </div>
                       </div>
