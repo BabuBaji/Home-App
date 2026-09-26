@@ -350,7 +350,7 @@ function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, onComm, b
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, alignItems: 'start' }}>
         {/* Customer Information */}
         <Card title={<span className="row" style={{ gap: 8, alignItems: 'center' }}><User size={16} /> Customer Information</span>}>
           <div className="grid" style={{ gap: 10 }}>
@@ -390,7 +390,7 @@ function Overview({ m, c, nav, onNote, onMoney, onBlock, onCall, onWa, onComm, b
         </Card>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, alignItems: 'start' }}>
         {/* Spending Summary */}
         <Card title="Spending Summary">
           <div className="grid" style={{ gap: 9, fontSize: 13.5 }}>
