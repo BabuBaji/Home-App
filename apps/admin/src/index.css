@@ -59,6 +59,15 @@ input, select, textarea { font-family: inherit; }
 .nav-chev { margin-left: auto; color: rgba(255,255,255,.5); flex-shrink: 0; }
 .navitem.active .nav-chev { color: #fff; }
 .navitem:hover .nav-chev { color: #fff; }
+.navlist { gap: 2px; }
+.navgroup-btn { background: none; border: none; width: 100%; text-align: left; cursor: pointer; font-family: inherit; }
+.navgroup-btn .nav-chev { transition: transform .15s; }
+.navgroup.open .navgroup-btn .nav-chev { transform: rotate(180deg); }
+.navgroup-btn.has-active { color: #fff; font-weight: 700; }
+.navgroup-btn.has-active svg:first-child { color: #A99BFF; }
+.navgroup-items { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 20px; padding-left: 10px; border-left: 1px solid rgba(255,255,255,.14); }
+.navitem.navsub { padding: 6px 10px; font-size: 12.5px; }
+.shell.collapsed .sidebar .navgroup-items { display: none; }
 .signout { display: flex; align-items: center; gap: 9px; background: #ffffff10; color: #e7e5f5; border: none; padding: 10px 12px; border-radius: 11px; font-size: 13px; font-weight: 600; margin-top: 6px; }
 
 /* ---- collapsible sidebar (in / out) — desktop icon-rail ---- */

@@ -48,7 +48,11 @@ $ip = (Get-NetIPAddress -AddressFamily IPv4 |
   Select-Object -First 1).IPAddress
 if (-not $ip) { throw 'Could not detect a LAN IP. Connect to Wi-Fi and retry.' }
 Write-Host "Backend URL  -> http://$ip`:8080" -ForegroundColor Cyan
-"VITE_API_URL=http://$ip`:8080" | Out-File -FilePath "$root\.env.production" -Encoding ascii
+# Push needs Firebase; without google-services.json the native plugin crashes the app on
+# register(), so tell the web bundle to skip it.
+$push = if (Test-Path "$root\android\app\google-services.json") { '1' } else { '0' }
+if ($push -eq '0') { Write-Host 'Push         -> off (no android\app\google-services.json)' -ForegroundColor Yellow }
+"VITE_API_URL=http://$ip`:8080", "VITE_PUSH=$push" | Out-File -FilePath "$root\.env.production" -Encoding ascii
 
 # 2) Build web bundle
 Push-Location $root
