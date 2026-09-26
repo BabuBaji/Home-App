@@ -61,7 +61,7 @@ export default function Calendar({ value, onChange, zh }: { value: Date; onChang
 export const SLOT_HOURS = Array.from({ length: 12 }, (_, i) => 8 + i)
 export function slotLabel(h: number) {
   const ap = h >= 12 ? 'PM' : 'AM'
-  const hh = h > 12 ? h - 12 : h
+  const hh = h % 12 || 12 // midnight → 12:00 AM, noon → 12:00 PM
   return `${String(hh).padStart(2, '0')}:00 ${ap}`
 }
 export function isSlotDisabled(date: Date, h: number) {

@@ -100,7 +100,7 @@ export default function BookingFlow() {
   const items: { id: string; durationId: string }[] = cartMode
     ? cart.map((c) => ({ id: c.id, durationId: c.durationId }))
     : s && dur ? [{ id: s.id, durationId: dur.id }] : []
-  const names = cartMode ? cart.map((c) => c.name).join(', ') : s?.name || ''
+  const names = cartMode ? cart.map((c) => c.name).join(',') : s?.name || ''
 
   useEffect(() => {
     if (cartMode) return

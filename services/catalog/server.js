@@ -558,7 +558,10 @@ async function quote({ items, coupon, pincode, lat, lng, zoneId: givenZone, cust
   const serviceAmount = Math.max(0, q.subtotal - q.discount - memberDiscount + peakSurcharge + surgeSurcharge)
   const total = gstIncluded ? (serviceAmount + fee) : (serviceAmount + tax + fee)
   const gstBase = gstIncluded ? (serviceAmount - tax) : serviceAmount
-  const gstPct = gstBase > 0 ? Math.round((tax / gstBase) * 100) : 0   // blended rate for display
+  // Display rate: the services' own rate when they share one (a blend of rounded rupees showed
+  // "19%" on an 18% service); only a genuinely mixed cart shows a blended figure.
+  const rates = [...new Set(q.items.map((it) => gmap[it.id] ?? 18))]
+  const gstPct = rates.length === 1 ? rates[0] : gstBase > 0 ? Math.round((taxF / gstBase) * 100) : 0
   return {
     status: 200,
     body: {
