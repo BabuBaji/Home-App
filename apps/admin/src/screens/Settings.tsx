@@ -26,6 +26,7 @@ const NAV = [
 const KEYS = [
   { k: 'razorpay_key_id', label: 'Razorpay Key ID', hint: 'rzp_live_… / rzp_test_…', secret: false },
   { k: 'razorpay_key_secret', label: 'Razorpay Key Secret', hint: 'Stored securely, enables live payments', secret: true },
+  { k: 'razorpay_webhook_secret', label: 'Razorpay Webhook Secret', hint: 'Same secret as the webhook in Razorpay dashboard ▸ Webhooks. Verifies payment & refund webhooks (they are refused while this is empty).', secret: true },
   { k: 'razorpayx_account_number', label: 'RazorpayX Account Number', hint: 'Source account for worker payouts & penny-drop (from RazorpayX dashboard). Enables real payouts.', secret: false },
   { k: 'payout_mode', label: 'Payout Mode', hint: 'IMPS / NEFT / UPI (default IMPS)', secret: false },
   { k: 'payout_webhook_secret', label: 'Payout Webhook Secret', hint: 'Verifies RazorpayX payout & fund-account-validation webhooks', secret: true },

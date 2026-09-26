@@ -78,7 +78,9 @@ reach the VM. **The IP never changes, so this is the last time you touch the URL
 The payment webhook refuses every request until a webhook secret is set, so it can't be forged.
 In the Razorpay dashboard ▸ Webhooks, add `https://<your-api-host>/api/payments/webhook`, choose a
 secret, and tick **payment.captured**, **payment.failed**, **order.paid**, **refund.processed** and
-**refund.failed**. Put the same secret in Admin ▸ Settings ▸ `razorpay_webhook_secret`.
+**refund.failed**. Put the same secret in Admin ▸ Settings ▸ Integrations ▸ **Razorpay Webhook
+Secret**, or set `RAZORPAY_WEBHOOK_SECRET=` in `infra/.env` and restart (the .env value wins on
+every boot).
 
 Without it payments still work (the app verifies each one), but failed attempts are only recorded
 when the app reports them, and refunds stay "Processing" instead of moving to "Credited". A
