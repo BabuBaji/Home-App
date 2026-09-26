@@ -5,6 +5,7 @@ import { Loading, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { fetchService, fetchQuote, fetchServiceReviews } from '../api'
 import type { ServiceDetail, Duration, Quote, Review } from '../types'
+import { t } from '../i18n'
 
 // Module 4 · #24–#31 — Service configuration wizard. Real durations/quote from the backend;
 // Reviews shows REAL customer reviews for this service (fetchServiceReviews), falling back to the
@@ -48,14 +49,14 @@ const POPULAR_DUR = 1
 
 // Reviews carry either a seeded "2 days ago"-style date or a real ISO timestamp — normalise both.
 function ago(d: string): string {
-  const t = Date.parse(d)
-  if (isNaN(t)) return d
-  const diff = (Date.now() - t) / 1000
-  if (diff < 3600) return `${Math.max(1, Math.floor(diff / 60))}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  if (diff < 172800) return 'Yesterday'
-  if (diff < 604800) return `${Math.floor(diff / 86400)} days ago`
-  return `${Math.floor(diff / 604800)} week${Math.floor(diff / 604800) > 1 ? 's' : ''} ago`
+  const ts = Date.parse(d)
+  if (isNaN(ts)) return d
+  const diff = (Date.now() - ts) / 1000
+  if (diff < 3600) return t('{n}m ago', { n: Math.max(1, Math.floor(diff / 60)) })
+  if (diff < 86400) return t('{n}h ago', { n: Math.floor(diff / 3600) })
+  if (diff < 172800) return t('Yesterday')
+  if (diff < 604800) return t('{n} days ago', { n: Math.floor(diff / 86400) })
+  return Math.floor(diff / 604800) > 1 ? t('{n} weeks ago', { n: Math.floor(diff / 604800) }) : t('1 week ago')
 }
 
 export default function ServiceFlow() {
@@ -74,7 +75,7 @@ export default function ServiceFlow() {
   const [gtab, setGtab] = useState<'before' | 'after'>('before')
   const [step, setStep] = useState<Step>('duration')
 
-  useEffect(() => { fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations[0]) }).catch(() => toast('Could not load service')) }, [id, pincode])
+  useEffect(() => { fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations[0]) }).catch(() => toast(t('Could not load service'))) }, [id, pincode])
   useEffect(() => { if (dur) fetchQuote([{ id: id!, durationId: dur.id }], undefined, pincode || undefined).then(setQuote).catch(() => {}) }, [dur, id, pincode])
   // Real customer reviews for this service (best-effort; empty until customers have reviewed).
   useEffect(() => { fetchServiceReviews(id!).then((r) => setRealReviews(r as any)).catch(() => setRealReviews([])) }, [id])
@@ -112,85 +113,85 @@ export default function ServiceFlow() {
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={back} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>{TITLES[step]}</b><span style={{ width: 42 }} />
+        <button className="au-back" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t(TITLES[step])}</b><span style={{ width: 42 }} />
       </div>
 
       {/* ---------- 24 Duration ---------- */}
       {step === 'duration' && (<>
         <div className="content">
-          <p className="sf-q">How many hours do you need?</p>
+          <p className="sf-q">{t('How many hours do you need?')}</p>
           {s.durations.map((d, i) => (
             <button key={d.id} className={`sf-opt ${dur.id === d.id ? 'on' : ''}`} onClick={() => setDur(d)}>
               <div className="grow">
-                <div className="sf-opt-t">{d.label}{i === POPULAR_DUR && <span className="sf-pop">Popular</span>}</div>
+                <div className="sf-opt-t">{d.label}{i === POPULAR_DUR && <span className="sf-pop">{t('Popular')}</span>}</div>
                 <div className="sf-opt-s">{durHint(d.label)}</div>
               </div>
               <div className="sf-opt-p">₹{d.price}</div>
               <span className={`sf-radio ${dur.id === d.id ? 'on' : ''}`}>{dur.id === d.id && <Check size={13} />}</span>
             </button>
           ))}
-          <div className="sf-selrow"><span>Selected: {dur.label}</span><b>₹{dur.price}</b></div>
+          <div className="sf-selrow"><span>{t('Selected: {label}', { label: dur.label })}</span><b>₹{dur.price}</b></div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
       </>)}
 
       {/* ---------- 25 Add-ons ---------- */}
       {step === 'addons' && (<>
         <div className="content">
-          <p className="sf-sub">Enhance your cleaning</p>
+          <p className="sf-sub">{t('Enhance your cleaning')}</p>
           {ADDONS.map((a) => (
             <label key={a.id} className="sf-check">
               <input type="checkbox" checked={addons.has(a.id)} onChange={() => toggleAddon(a.id)} />
               <span className="sf-check-box"><Check size={13} /></span>
-              <div className="grow"><b>{a.name}</b><small>{a.sub}</small></div>
+              <div className="grow"><b>{t(a.name)}</b><small>{t(a.sub)}</small></div>
               <span className="sf-check-p">₹{a.price}</span>
             </label>
           ))}
-          <div className="sf-selrow"><span>Total Add-ons</span><b>₹{addonsTotal}</b></div>
+          <div className="sf-selrow"><span>{t('Total Add-ons')}</span><b>₹{addonsTotal}</b></div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
       </>)}
 
       {/* ---------- 26 Frequency ---------- */}
       {step === 'frequency' && (<>
         <div className="content">
-          <p className="sf-q">How often do you need this service?</p>
+          <p className="sf-q">{t('How often do you need this service?')}</p>
           {FREQ.map((f) => (
             <button key={f.id} className={`sf-opt ${freq === f.id ? 'on' : ''}`} onClick={() => setFreq(f.id)}>
               <span className="sf-freq-ic"><Repeat size={16} /></span>
-              <div className="grow"><div className="sf-opt-t">{f.label}</div><div className="sf-opt-s">{f.sub}</div></div>
+              <div className="grow"><div className="sf-opt-t">{t(f.label)}</div><div className="sf-opt-s">{t(f.sub)}</div></div>
               <span className={`sf-radio ${freq === f.id ? 'on' : ''}`}>{freq === f.id && <Check size={13} />}</span>
             </button>
           ))}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
       </>)}
 
       {/* ---------- 28 Instructions ---------- */}
       {step === 'instructions' && (<>
         <div className="content">
-          <p className="sf-sub">Any special instructions?</p>
+          <p className="sf-sub">{t('Any special instructions?')}</p>
           <textarea className="sf-ta" rows={3} maxLength={200} value={note} onChange={(e) => setNote(e.target.value)}
-            placeholder="e.g. Please focus more on kitchen and bathroom." />
+            placeholder={t('e.g. Please focus more on kitchen and bathroom.')} />
           <div className="sf-count">{note.length}/200</div>
-          <h3 className="sf-h">Additional Preferences</h3>
+          <h3 className="sf-h">{t('Additional Preferences')}</h3>
           {PREFS.map((p) => (
             <div key={p.id} className="sf-pref">
-              <span className="grow">{p.label}</span>
+              <span className="grow">{t(p.label)}</span>
               <button className={`sf-switch ${prefs[p.id] ? 'on' : ''}`} onClick={() => setPrefs((st) => ({ ...st, [p.id]: !st[p.id] }))}><span /></button>
             </div>
           ))}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
       </>)}
 
       {/* ---------- 29 Before / After ---------- */}
       {step === 'gallery' && (<>
         <div className="content">
           <div className="sf-tabs">
-            <button className={gtab === 'before' ? 'on' : ''} onClick={() => setGtab('before')}>Before</button>
-            <button className={gtab === 'after' ? 'on' : ''} onClick={() => setGtab('after')}>After</button>
+            <button className={gtab === 'before' ? 'on' : ''} onClick={() => setGtab('before')}>{t('Before')}</button>
+            <button className={gtab === 'after' ? 'on' : ''} onClick={() => setGtab('after')}>{t('After')}</button>
           </div>
           {GALLERY.map((g) => (
             <div key={g.room} className="sf-gal">
@@ -199,36 +200,36 @@ export default function ServiceFlow() {
                 <span className="sf-gal-swap"><ChevronRight size={14} /></span>
                 <img src={g.after} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} className={gtab === 'after' ? 'hi' : ''} />
               </div>
-              <div className="sf-gal-room">{g.room}</div>
+              <div className="sf-gal-room">{t(g.room)}</div>
             </div>
           ))}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
       </>)}
 
       {/* ---------- 30 Pricing ---------- */}
       {step === 'pricing' && (<>
         <div className="content">
-          <p className="sf-sub">Review your selection</p>
+          <p className="sf-sub">{t('Review your selection')}</p>
           {surgeAmount > 0 && (
             <div className="note-box" style={{ background: '#eef4ff', borderColor: '#bcd0ff', color: '#1d4ed8', marginBottom: 12 }}>
               {quote?.surgeReason === 'rain'
-                ? `🌧️ Rain incoming — demand is high, so prices are up ${surgePct}% right now.`
-                : `⚡ High demand right now — prices are up ${surgePct}%.`}
+                ? t('🌧️ Rain incoming — demand is high, so prices are up {p}% right now.', { p: surgePct })
+                : t('⚡ High demand right now — prices are up {p}%.', { p: surgePct })}
             </div>
           )}
           <div className="sf-price-row"><span>{s.name} ({dur.label})</span><b>₹{base}</b></div>
-          {addonList.map((a) => <div key={a.id} className="sf-price-row"><span>{a.name} (Add-on)</span><b>₹{a.price}</b></div>)}
+          {addonList.map((a) => <div key={a.id} className="sf-price-row"><span>{t(a.name)} ({t('Add-on')})</span><b>₹{a.price}</b></div>)}
           <div className="sf-div" />
-          <div className="sf-price-row"><span>Subtotal</span><b>₹{subtotal}</b></div>
-          {surgeAmount > 0 && <div className="sf-price-row"><span>{quote?.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'} (+{surgePct}%)</span><b>+₹{surgeAmount}</b></div>}
-          <div className="sf-price-row"><span>Platform Fee</span><b>₹{fee}</b></div>
-          <div className="sf-price-row"><span>GST (18%)</span><b>₹{gst}</b></div>
+          <div className="sf-price-row"><span>{t('Subtotal')}</span><b>₹{subtotal}</b></div>
+          {surgeAmount > 0 && <div className="sf-price-row"><span>{quote?.surgeReason === 'rain' ? t('🌧️ Rain surge') : t('Demand surge')} (+{surgePct}%)</span><b>+₹{surgeAmount}</b></div>}
+          <div className="sf-price-row"><span>{t('Platform Fee')}</span><b>₹{fee}</b></div>
+          <div className="sf-price-row"><span>{t('GST (18%)')}</span><b>₹{gst}</b></div>
           <div className="sf-div" />
-          <div className="sf-price-row total"><span>Total Amount</span><b>₹{total}</b></div>
-          {savings > 0 && <div className="sf-save"><Check size={15} /> You are saving ₹{savings} on this booking</div>}
+          <div className="sf-price-row total"><span>{t('Total Amount')}</span><b>₹{total}</b></div>
+          {savings > 0 && <div className="sf-save"><Check size={15} /> {t('You are saving ₹{amt} on this booking', { amt: savings })}</div>}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>Continue to Reviews</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue to Reviews')}</button></div>
       </>)}
 
       {/* ---------- 31 Reviews (real customer reviews) ---------- */}
@@ -238,7 +239,7 @@ export default function ServiceFlow() {
             <div className="sf-rev-score">
               <b>{s.rating}</b>
               <div className="sf-rev-stars">{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={14} className={n <= Math.round(s.rating) ? 'f' : ''} />)}</div>
-              <small>({(s.reviewsCount ?? 0).toLocaleString()} ratings)</small>
+              <small>{t('({n} ratings)', { n: (s.reviewsCount ?? 0).toLocaleString() })}</small>
             </div>
             <div className="sf-rev-bars">
               {dist.map((p, i) => (
@@ -246,22 +247,22 @@ export default function ServiceFlow() {
               ))}
             </div>
           </div>
-          {!usingReal && reviews.length > 0 && <div className="sf-rev-note">Sample reviews — real customer reviews appear here once bookings are rated.</div>}
+          {!usingReal && reviews.length > 0 && <div className="sf-rev-note">{t('Sample reviews — real customer reviews appear here once bookings are rated.')}</div>}
           <div className="sf-reviews">
             {reviews.map((r, i) => (
               <div key={i} className="sf-review">
                 <div className="sf-rev-top">
                   <span className="sf-rev-ava">{(r.name || 'C')[0]}</span>
-                  <div className="grow"><b>{r.name || 'Customer'}</b><small>{ago(r.date)}{(r as any).pro ? ` · ${(r as any).pro}` : ''}</small></div>
+                  <div className="grow"><b>{r.name || t('Customer')}</b><small>{ago(r.date)}{(r as any).pro ? ` · ${(r as any).pro}` : ''}</small></div>
                   <span className="sf-rev-rate">{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={11} className={n <= r.rating ? 'f' : ''} />)}</span>
                 </div>
                 <p className="sf-rev-text">{r.text}</p>
               </div>
             ))}
-            {reviews.length === 0 && <p className="ad2-hint">No reviews yet — be the first to review this service.</p>}
+            {reviews.length === 0 && <p className="ad2-hint">{t('No reviews yet — be the first to review this service.')}</p>}
           </div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => nav(`/booking/${id}`, { state: { durationId: dur.id, freq, note } })}>Continue to Book</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => nav(`/booking/${id}`, { state: { durationId: dur.id, freq, note } })}>{t('Continue to Book')}</button></div>
       </>)}
     </div>
   )
@@ -269,5 +270,5 @@ export default function ServiceFlow() {
 
 function durHint(label: string): string {
   const h = parseInt(label) || 1
-  return h <= 1 ? 'Perfect for small apartments' : h === 2 ? 'Ideal for 2 BHK homes' : h <= 4 ? 'Best for deep cleaning' : 'Complete home cleaning'
+  return h <= 1 ? t('Perfect for small apartments') : h === 2 ? t('Ideal for 2 BHK homes') : h <= 4 ? t('Best for deep cleaning') : t('Complete home cleaning')
 }

@@ -4,6 +4,7 @@ import { ArrowLeft, ShieldCheck, BadgeCheck, Clock3, Sparkles, Delete } from 'lu
 import { useStore } from '../store'
 import { requestOtp, verifyOtp, googleAuth } from '../api'
 import { useToast } from '../components/UI'
+import { t } from '../i18n'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 const OTP_LEN = 4                 // backend issues a 4-digit code (services/auth DEV_OTP)
@@ -31,7 +32,7 @@ export default function Login() {
     setBusy(true)
     try {
       const { devOtp } = await requestOtp(phone.replace(/\s/g, ''))
-      setHint(`Demo OTP: ${devOtp}`)
+      setHint(t('Demo OTP: {otp}', { otp: devOtp }))
       setOtp('')
       setStep('otp')
       setLeft(RESEND_SECONDS)
@@ -41,9 +42,9 @@ export default function Login() {
     if (left > 0) return
     try {
       const { devOtp } = await requestOtp(phone.replace(/\s/g, ''))
-      setHint(`Demo OTP: ${devOtp}`)
+      setHint(t('Demo OTP: {otp}', { otp: devOtp }))
       setLeft(RESEND_SECONDS)
-      toast('OTP resent')
+      toast(t('OTP resent'))
     } catch (e) { toast((e as Error).message) }
   }
   async function verify(code = otp) {
@@ -97,8 +98,8 @@ export default function Login() {
     return (
       <div className="auth auth-welcome">
         <div className="content aw-scroll">
-          <h1 className="au-h1 aw-title">Welcome<br />Back!</h1>
-          <p className="au-sub">Book trusted home services and relax. We'll take care of the rest.</p>
+          <h1 className="au-h1 aw-title">{t('Welcome')}<br />{t('Back!')}</h1>
+          <p className="au-sub">{t("Book trusted home services and relax. We'll take care of the rest.")}</p>
 
           <div className="aw-photo">
             <img src="/auth/welcome.jpg" alt="" />
@@ -107,15 +108,15 @@ export default function Login() {
 
           <ul className="aw-feats">
             <li><span className="aw-fi"><BadgeCheck size={18} /></span>
-              <div><b>Verified Professionals</b><small>Background checked &amp; trained</small></div></li>
+              <div><b>{t('Verified Professionals')}</b><small>{t('Background checked & trained')}</small></div></li>
             <li><span className="aw-fi"><Clock3 size={18} /></span>
-              <div><b>On-time Service</b><small>Punctual and reliable</small></div></li>
+              <div><b>{t('On-time Service')}</b><small>{t('Punctual and reliable')}</small></div></li>
             <li><span className="aw-fi"><Sparkles size={18} /></span>
-              <div><b>100% Satisfaction</b><small>Quality service, every time</small></div></li>
+              <div><b>{t('100% Satisfaction')}</b><small>{t('Quality service, every time')}</small></div></li>
           </ul>
         </div>
         <div className="au-foot">
-          <button className="au-btn" onClick={() => setStep('phone')}>Get Started</button>
+          <button className="au-btn" onClick={() => setStep('phone')}>{t('Get Started')}</button>
         </div>
       </div>
     )
@@ -126,28 +127,28 @@ export default function Login() {
     return (
       <div className="auth">
         <div className="au-top">
-          <button className="au-back" onClick={() => setStep('welcome')} aria-label="Back"><ArrowLeft size={22} /></button>
+          <button className="au-back" onClick={() => setStep('welcome')} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         </div>
         <div className="content au-body">
-          <h1 className="au-h1">Enter your<br /><span className="av">mobile number</span></h1>
-          <p className="au-sub">We'll send you a verification code to verify your number</p>
+          <h1 className="au-h1">{t('Enter your')}<br /><span className="av">{t('mobile number')}</span></h1>
+          <p className="au-sub">{t("We'll send you a verification code to verify your number")}</p>
 
           <div className="au-field">
             <span className="au-cc"><span className="au-flag">🇮🇳</span> +91</span>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Enter mobile number"
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('Enter mobile number')}
               inputMode="numeric" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') sendOtp() }} />
           </div>
 
-          <div className="au-safe"><ShieldCheck size={16} /> Your number is safe with us</div>
+          <div className="au-safe"><ShieldCheck size={16} /> {t('Your number is safe with us')}</div>
 
           {/* Google sign-in only when a client id is configured (the server verifies the token). */}
           {GOOGLE_CLIENT_ID && <div ref={gbtnRef} className="au-google-real" />}
         </div>
         <div className="au-foot">
           <button className="au-btn" onClick={sendOtp} disabled={busy || phone.replace(/\D/g, '').length < 10}>
-            {busy ? 'Sending OTP…' : 'Send OTP'}
+            {busy ? t('Sending OTP…') : t('Send OTP')}
           </button>
-          <p className="au-terms">By continuing, you agree to our <b>Terms of Service</b> and <b>Privacy Policy</b></p>
+          <p className="au-terms">{t('By continuing, you agree to our Terms of Service and Privacy Policy')}</p>
         </div>
       </div>
     )
@@ -157,13 +158,13 @@ export default function Login() {
   return (
     <div className="auth">
       <div className="au-top">
-        <button className="au-back" onClick={() => { setStep('phone'); setOtp('') }} aria-label="Back"><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => { setStep('phone'); setOtp('') }} aria-label={t('Back')}><ArrowLeft size={22} /></button>
       </div>
       <div className="content au-body">
-        <h1 className="au-h1">Enter <span className="av">OTP</span></h1>
+        <h1 className="au-h1">{t('Enter')} <span className="av">OTP</span></h1>
         <p className="au-sub">
-          We've sent a {OTP_LEN}-digit code to<br />+91 {phone}{' '}
-          <button className="au-link" onClick={() => { setStep('phone'); setOtp('') }}>Change</button>
+          {t("We've sent a {n}-digit code to", { n: OTP_LEN })}<br />+91 {phone}{' '}
+          <button className="au-link" onClick={() => { setStep('phone'); setOtp('') }}>{t('Change')}</button>
         </p>
 
         <div className="au-otp">
@@ -176,14 +177,14 @@ export default function Login() {
 
         <div className="au-resend">
           {left > 0
-            ? <>Resend OTP in <b>00:{String(left).padStart(2, '0')}</b></>
-            : <button className="au-link" onClick={resend}>Resend OTP</button>}
+            ? <>{t('Resend OTP in')} <b>00:{String(left).padStart(2, '0')}</b></>
+            : <button className="au-link" onClick={resend}>{t('Resend OTP')}</button>}
         </div>
         {hint && <p className="au-hint">{hint}</p>}
 
         <div className="au-help">
           <ShieldCheck size={18} />
-          <div><b>Didn't receive the code?</b><small>Check your SMS spam folder or resend the code.</small></div>
+          <div><b>{t("Didn't receive the code?")}</b><small>{t('Check your SMS spam folder or resend the code.')}</small></div>
         </div>
       </div>
 
@@ -194,7 +195,7 @@ export default function Login() {
         ))}
         <span />
         <button className="au-key" onClick={() => press('0')}>0</button>
-        <button className="au-key au-key-del" onClick={backspace} aria-label="Delete"><Delete size={22} /></button>
+        <button className="au-key au-key-del" onClick={backspace} aria-label={t('Delete')}><Delete size={22} /></button>
       </div>
     </div>
   )

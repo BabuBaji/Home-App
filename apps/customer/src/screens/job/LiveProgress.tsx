@@ -6,6 +6,7 @@ import { fetchExtensions, completeBooking, type ExtensionState } from '../../api
 import { useJob, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
 import ExtrasPrompt from '../../components/ExtrasPrompt'
+import { t } from '../../i18n'
 
 // Module 6 · #50 — Live Progress. A circular service timer (elapsed vs the booked duration — the same
 // real math the Track screen uses) plus who's working, what service is running, and where. Nothing is
@@ -87,14 +88,14 @@ export default function LiveProgress() {
   }
 
   const addr = b.addr
-  const flat = addr ? [addr.house, addr.apartment, addr.floor && `Floor ${addr.floor}`].filter(Boolean).join(', ') : ''
+  const flat = addr ? [addr.house, addr.apartment, addr.floor && t('Floor {n}', { n: addr.floor })].filter(Boolean).join(', ') : ''
   const area = addr?.line || b.address || ''
 
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Live Progress</b><span style={{ width: 40 }} />
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Live Progress')}</b><span style={{ width: 40 }} />
       </div>
 
       <div className="content jt-scroll">
@@ -106,18 +107,18 @@ export default function LiveProgress() {
             style={{ width: '100%', textAlign: 'left', borderColor: '#6D4AFF', background: '#F3F0FF', cursor: 'pointer' }}
             onClick={() => nav(`/job/${b.id}/extend`)}
           >
-            <b style={{ display: 'block' }}>{proName(b)} needs {ext.pending.minutes} more minutes</b>
+            <b style={{ display: 'block' }}>{t('{name} needs {n} more minutes', { name: proName(b), n: ext.pending.minutes })}</b>
             <span className="muted" style={{ fontSize: 12.5 }}>
-              {ext.pending.price > 0 ? `Additional ₹${ext.pending.price} · tap to approve or decline` : 'No extra charge · tap to review'}
+              {ext.pending.price > 0 ? t('Additional ₹{amt} · tap to approve or decline', { amt: ext.pending.price }) : t('No extra charge · tap to review')}
             </span>
           </button>
         )}
         {/* Already granted — explains why the countdown is longer than the booked time. */}
         {!ext?.pending && !!ext?.extensionMinutes && (
           <div className="jt-card" style={{ borderColor: '#6D4AFF' }}>
-            <b style={{ display: 'block' }}>Service Extended</b>
+            <b style={{ display: 'block' }}>{t('Service Extended')}</b>
             <span className="muted" style={{ fontSize: 12.5 }}>
-              +{ext.extensionMinutes} min added{ext.extensionTotal > 0 ? ` · ₹${ext.extensionTotal} paid` : ''}
+              {t('+{n} min added', { n: ext.extensionMinutes })}{ext.extensionTotal > 0 ? ` · ${t('₹{amt} paid', { amt: ext.extensionTotal })}` : ''}
             </span>
           </div>
         )}
@@ -125,7 +126,7 @@ export default function LiveProgress() {
         {/* circular timer */}
         <div className={`jt-timer-card ${done ? 'done' : ''}`}>
           <span className={`jt-lp-badge ${done ? 'done' : ''}`}>
-            {done ? 'Completed' : timeUp ? 'Scheduled Time Completed' : 'In Progress'}
+            {done ? t('Completed') : timeUp ? t('Scheduled Time Completed') : t('In Progress')}
           </span>
           <div className="jt-timer">
             <svg viewBox="0 0 200 200" className="jt-timer-svg" aria-hidden="true">
@@ -137,40 +138,40 @@ export default function LiveProgress() {
               <div className="jt-timer-emoji">{done ? '✅' : timeUp ? '⏱' : '🧹'}</div>
               {/* A frozen 00:00 under "remaining" reads as a broken clock. Say what actually
                   happened: the booked time is over and the expert is wrapping up. */}
-              <div className="jt-timer-time">{done ? 'Done' : timeUp ? 'Time up' : mmss(remaining)}</div>
+              <div className="jt-timer-time">{done ? t('Done') : timeUp ? t('Time up') : mmss(remaining)}</div>
               <div className="jt-timer-lbl">
-                {done ? '100% complete' : timeUp ? `booked time over${overrunMin > 0 ? ` · +${overrunMin} min` : ''}` : 'remaining'}
+                {done ? t('100% complete') : timeUp ? `${t('booked time over')}${overrunMin > 0 ? ` · +${t('{n} min', { n: overrunMin })}` : ''}` : t('remaining')}
               </div>
             </div>
           </div>
           <div className="jt-timer-meta">
-            <span>Elapsed <b>{mmss(elapsed)}</b></span>
+            <span>{t('Elapsed')} <b>{mmss(elapsed)}</b></span>
             <span className="jt-timer-pct">{pct}%</span>
-            <span>Booked <b>{bookedMin} min</b>{extraMin > 0 && <> +<b>{extraMin}</b></>}</span>
+            <span>{t('Booked')} <b>{t('{n} min', { n: bookedMin })}</b>{extraMin > 0 && <> +<b>{extraMin}</b></>}</span>
           </div>
         </div>
 
         {/* who's working */}
         {assigned && (
-          <div className="jt-lp-sec-h"><Sparkles size={15} /> Your Expert</div>
+          <div className="jt-lp-sec-h"><Sparkles size={15} /> {t('Your Expert')}</div>
         )}
         {assigned && (
           <div className="jt-card jt-worker2 jt-lp-worker">
-            <button className="jt-worker2-ava" onClick={() => nav(`/job/${b.id}/worker`)} aria-label="Worker profile">
+            <button className="jt-worker2-ava" onClick={() => nav(`/job/${b.id}/worker`)} aria-label={t('Worker profile')}>
               <WorkerAvatar b={b} size={48} /><span className="jt-online" />
             </button>
             <button className="jt-worker2-main" onClick={() => nav(`/job/${b.id}/worker`)}>
               <div className="jt-worker2-name">{proName(b)}{verified && <BadgeCheck size={15} className="jt-vcheck" />}</div>
-              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {jobs} jobs</div>
-              <div className="jt-lp-w-status"><span className="jt-lp-dot" /> {done ? 'Service finished' : 'Working on your service now'}</div>
+              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {t('{n} jobs', { n: jobs })}</div>
+              <div className="jt-lp-w-status"><span className="jt-lp-dot" /> {done ? t('Service finished') : t('Working on your service now')}</div>
             </button>
-            <button className="jt-wmini ghost" onClick={chat} aria-label="Chat"><MessageCircle size={17} /></button>
-            <button className="jt-wmini" onClick={call} aria-label="Call"><Phone size={17} /></button>
+            <button className="jt-wmini ghost" onClick={chat} aria-label={t('Chat')}><MessageCircle size={17} /></button>
+            <button className="jt-wmini" onClick={call} aria-label={t('Call')}><Phone size={17} /></button>
           </div>
         )}
 
         {/* what's being done */}
-        <div className="jt-lp-sec-h"><CheckCircle2 size={15} /> {done ? 'Service completed' : 'Service in progress'}</div>
+        <div className="jt-lp-sec-h"><CheckCircle2 size={15} /> {done ? t('Service completed') : t('Service in progress')}</div>
         <div className="jt-card jt-lp-svc-card">
           {(b.items || []).map((i) => (
             <div key={i.id} className="jt-lp-svc">
@@ -179,16 +180,16 @@ export default function LiveProgress() {
               </span>
               <div className="jt-lp-svc-main">
                 <b>{i.name}</b>
-                <small>{i.durationLabel || `${targetMin} min`}{b.ref ? ` · ${b.ref}` : ''}</small>
+                <small>{i.durationLabel || t('{n} min', { n: targetMin })}{b.ref ? ` · ${b.ref}` : ''}</small>
               </div>
-              <span className={`jt-lp-svc-tag ${done ? 'done' : ''}`}>{done ? 'Done' : 'Live'}</span>
+              <span className={`jt-lp-svc-tag ${done ? 'done' : ''}`}>{done ? t('Done') : t('Live')}</span>
             </div>
           ))}
         </div>
 
         {/* where */}
         {area && (<>
-          <div className="jt-lp-sec-h"><MapPin size={15} /> Service location</div>
+          <div className="jt-lp-sec-h"><MapPin size={15} /> {t('Service location')}</div>
           <div className="jt-card jt-lp-loc-card">
             {/* No "View on Map" here: once the expert has started, they're at the address — the
                 map only answers "where are they now?", which is a pre-arrival question. It stays
@@ -206,28 +207,28 @@ export default function LiveProgress() {
 
       <div className="jt-foot">
         {done ? (
-          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}>View Summary</button>
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}>{t('View Summary')}</button>
         ) : (<>
-          <button className="jt-btn ghost" onClick={() => nav(`/job/${b.id}`)}>Booking Details</button>
+          <button className="jt-btn ghost" onClick={() => nav(`/job/${b.id}`)}>{t('Booking Details')}</button>
           {/* The customer can close the job themselves — useful when the expert has finished but
               hasn't ended it on their app. */}
-          <button className="jt-btn" onClick={() => setEnding(true)}><CheckCircle2 size={16} /> End Service</button>
+          <button className="jt-btn" onClick={() => setEnding(true)}><CheckCircle2 size={16} /> {t('End Service')}</button>
         </>)}
       </div>
 
       {ending && (
         <div className="cf-backdrop" onClick={() => !busy && setEnding(false)}>
           <div className="cf-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="cf-title">End this service?</div>
+            <div className="cf-title">{t('End this service?')}</div>
             <div className="cf-text">
               {timeUp
-                ? 'The booked time is over. '
-                : `${mmss(remaining)} of the booked ${bookedMin} min is still left. `}
-              Ending marks the job complete for {proName(b)} and finalises payment. You'll be asked to rate it next.
+                ? t('The booked time is over.')
+                : t('{left} of the booked {n} min is still left.', { left: mmss(remaining), n: bookedMin })}{' '}
+              {t("Ending marks the job complete for {name} and finalises payment. You'll be asked to rate it next.", { name: proName(b) })}
             </div>
             <div className="cf-btns">
-              <button className="cf-cancel" onClick={() => setEnding(false)} disabled={busy}>Not yet</button>
-              <button className="cf-del" onClick={endService} disabled={busy}>{busy ? 'Ending…' : 'End Service'}</button>
+              <button className="cf-cancel" onClick={() => setEnding(false)} disabled={busy}>{t('Not yet')}</button>
+              <button className="cf-del" onClick={endService} disabled={busy}>{busy ? t('Ending…') : t('End Service')}</button>
             </div>
           </div>
         </div>

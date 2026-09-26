@@ -11,6 +11,7 @@ import { pushBackHandler } from '../backStack'
 import { fetchBookings } from '../api'
 import { byMonth, durationLabel, isLive } from '../orders'
 import type { Booking } from '../types'
+import { t, dateLocale } from '../i18n'
 
 type Tab = 'All' | 'Bookings' | 'Add-ons' | 'Discounts'
 const TABS: Tab[] = ['All', 'Bookings', 'Add-ons', 'Discounts']
@@ -44,16 +45,16 @@ export default function History() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Usage History</h1></div>
-      <button className="iconbtn" onClick={() => setShowSort(true)} aria-label="Filter"><Filter size={18} /></button>
+      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Usage History')}</h1></div>
+      <button className="iconbtn" onClick={() => setShowSort(true)} aria-label={t('Filter')}><Filter size={18} /></button>
     </header>
   )
   if (!items) return <div className="screen">{head}<Loading /></div>
 
   const dm = (b: Booking) => {
     const d = new Date(b.completed_at || b.scheduled_at || b.created)
-    return { day: d.toLocaleDateString('en-IN', { day: '2-digit' }), mon: d.toLocaleDateString('en-IN', { month: 'short' }) }
+    return { day: d.toLocaleDateString('en-IN', { day: '2-digit' }), mon: d.toLocaleDateString(dateLocale(), { month: 'short' }) }
   }
 
   return (
@@ -61,15 +62,15 @@ export default function History() {
       {head}
       <div className="content">
         <div className="ord-chips">
-          {TABS.map((t) => (
-            <button key={t} className={`ord-chip ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
+          {TABS.map((tb) => (
+            <button key={tb} className={`ord-chip ${tab === tb ? 'active' : ''}`} onClick={() => setTab(tb)}>{t(tb)}</button>
           ))}
         </div>
 
         {groups.length === 0 && (
           <div className="state"><div className="ico">🕘</div>
-            <h3>No {tab === 'All' ? '' : tab.toLowerCase() + ' '}usage yet</h3>
-            <p>{tab === 'Add-ons' ? 'Add-on purchases will appear here.' : "Services you've completed will appear here."}</p>
+            <h3>{tab === 'All' ? t('No usage yet') : t('No {kind} usage yet', { kind: t(tab).toLowerCase() })}</h3>
+            <p>{tab === 'Add-ons' ? t('Add-on purchases will appear here.') : t("Services you've completed will appear here.")}</p>
           </div>
         )}
 
@@ -85,8 +86,8 @@ export default function History() {
                 const disc = b.discount ?? 0
                 // Third line mirrors the mockup's green "Gold Plan Discount" slot, with the real
                 // reason: the coupon that was applied, else the booking's outcome.
-                const note = disc > 0 ? (b.coupon ? `${b.coupon} discount` : 'Discount applied')
-                  : b.status === 'cancelled' ? 'Cancelled' : 'Completed'
+                const note = disc > 0 ? (b.coupon ? t('{code} discount', { code: b.coupon }) : t('Discount applied'))
+                  : b.status === 'cancelled' ? t('Cancelled') : t('Completed')
                 const noteCls = disc > 0 ? 'saved' : b.status === 'cancelled' ? 'cancel' : 'ok'
                 return (
                   <button key={b.id} className="uh-row" onClick={() => nav(`/booking-details/${b.id}`)}>
@@ -106,7 +107,7 @@ export default function History() {
 
         {hasMore && (
           <button className="uh-more" onClick={() => setLimit((n) => n + PAGE)}>
-            View More History <ChevronRight size={16} />
+            {t('View More History')} <ChevronRight size={16} />
           </button>
         )}
       </div>
@@ -114,10 +115,10 @@ export default function History() {
       {showSort && (
         <div className="sheet-wrap" onClick={() => setShowSort(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-h">Sort by</div>
+            <div className="sheet-h">{t('Sort by')}</div>
             {([['new', 'Newest first'], ['old', 'Oldest first']] as const).map(([v, label]) => (
               <button key={v} className="sheet-row" onClick={() => { setSort(v); setShowSort(false) }}>
-                <span>{label}</span>{sort === v && <Check size={16} />}
+                <span>{t(label)}</span>{sort === v && <Check size={16} />}
               </button>
             ))}
           </div>

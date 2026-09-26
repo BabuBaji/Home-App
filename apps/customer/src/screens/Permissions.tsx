@@ -6,6 +6,7 @@ import { ensureNotifPermission } from '../notify'
 import { updateMe } from '../api'
 import { useStore } from '../store'
 import { useToast } from '../components/UI'
+import { t } from '../i18n'
 
 /* Module-1 #6 — Allow Permissions (Location & Notifications). "Allow & Continue" captures
    the exact live GPS fix (OS prompt), reverse-geocodes it to a full street-level address,
@@ -41,11 +42,11 @@ export default function Permissions() {
       const line = g ? streetLine(g) : `${pos.lat},${pos.lng}`    // full street address, else raw coords (backend geocodes)
       await saveLocation(line)
       try { localStorage.setItem('hh_geo', JSON.stringify({ lat: pos.lat, lng: pos.lng, ts: Date.now() })) } catch { /* ignore */ }
-      toast(g ? `Location set: ${line}` : 'Location captured')
+      toast(g ? t('Location set: {line}', { line }) : t('Location captured'))
     } catch (e) {
       if (selectedCity) try { await saveLocation(selectedCity) } catch { /* ignore */ }   // fall back to the chosen city
       const denied = e instanceof GeoError && e.reason === 'permission'
-      toast(denied ? 'Location off — using your city; set exact address later.' : 'Could not get GPS — using your city.')
+      toast(denied ? t('Location off — using your city; set exact address later.') : t('Could not get GPS — using your city.'))
     }
     try { await ensureNotifPermission() } catch { /* denied — continue */ }
     setBusy(false)
@@ -60,8 +61,8 @@ export default function Permissions() {
   return (
     <div className="auth auth-perm">
       <div className="content au-body">
-        <h1 className="au-h1">Allow <span className="av">Permissions</span></h1>
-        <p className="au-sub">To provide you the best service experience</p>
+        <h1 className="au-h1">{t('Allow')} <span className="av">{t('Permissions')}</span></h1>
+        <p className="au-sub">{t('To provide you the best service experience')}</p>
 
         <div className="ap-art" aria-hidden>
           <span className="ap-glow" />
@@ -74,20 +75,20 @@ export default function Permissions() {
 
         <div className="ap-card">
           <span className="ap-ic"><MapPin size={20} /></span>
-          <div className="grow"><b>Location Access</b><small>Helps us find services near you and track your bookings</small></div>
+          <div className="grow"><b>{t('Location Access')}</b><small>{t('Helps us find services near you and track your bookings')}</small></div>
           <span className="ap-tick"><Check size={13} /></span>
         </div>
         <div className="ap-card">
           <span className="ap-ic"><Bell size={20} /></span>
-          <div className="grow"><b>Notifications</b><small>Stay updated on your bookings and offers</small></div>
+          <div className="grow"><b>{t('Notifications')}</b><small>{t('Stay updated on your bookings and offers')}</small></div>
           <span className="ap-tick muted"><Check size={13} /></span>
         </div>
 
-        <p className="ap-note"><Info size={15} /> You can change these permissions anytime in settings.</p>
+        <p className="ap-note"><Info size={15} /> {t('You can change these permissions anytime in settings.')}</p>
       </div>
       <div className="au-foot">
-        <button className="au-btn" onClick={allow} disabled={busy}>{busy ? 'Getting your location…' : 'Allow & Continue'}</button>
-        <button className="au-btn-text" onClick={notNow} disabled={busy}>Not Now</button>
+        <button className="au-btn" onClick={allow} disabled={busy}>{busy ? t('Getting your location…') : t('Allow & Continue')}</button>
+        <button className="au-btn-text" onClick={notNow} disabled={busy}>{t('Not Now')}</button>
       </div>
     </div>
   )

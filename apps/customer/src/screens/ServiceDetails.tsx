@@ -8,6 +8,7 @@ import { useStore } from '../store'
 import { fetchService, fetchServices } from '../api'
 import { ServiceHeroImg } from '../serviceArt'
 import type { ServiceDetail, Service } from '../types'
+import { t } from '../i18n'
 
 // Service Details — full-bleed hero photo, then name / price / rating / description /
 // includes / excludes / duration / additional info, over a sticky Schedule + Book Instant bar.
@@ -21,7 +22,7 @@ export default function ServiceDetails() {
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [siblings, setSiblings] = useState<Service[]>([])
 
-  useEffect(() => { fetchService(id!, pincode || undefined).then(setS).catch(() => toast('Could not load service')) }, [id, pincode])
+  useEffect(() => { fetchService(id!, pincode || undefined).then(setS).catch(() => toast(t('Could not load service'))) }, [id, pincode])
   // Other services in the same category → the side-scrolling row under the price.
   useEffect(() => {
     if (!s) return
@@ -44,13 +45,13 @@ export default function ServiceDetails() {
     if (!s) return
     const text = `${s.name} on HomeHelp — from ₹${s.price}`
     try {
-      await Share.share({ title: s.name, text, dialogTitle: 'Share service' })
+      await Share.share({ title: s.name, text, dialogTitle: t('Share service') })
       return
     } catch { /* not on a device, or the user dismissed the sheet */ }
     try {
       if (navigator.share) { await navigator.share({ title: s.name, text }); return }
       await navigator.clipboard.writeText(text)
-      toast('Copied to clipboard')
+      toast(t('Copied to clipboard'))
     } catch { /* dismissed — stay silent */ }
   }
 
@@ -65,8 +66,8 @@ export default function ServiceDetails() {
       <div className="content no-pad">
         <div className="sd2-hero">
           <ServiceHeroImg service={s} />
-          <button className="sd2-iconbtn back" onClick={goBack} aria-label="Back"><ArrowLeft size={20} /></button>
-          <button className="sd2-iconbtn share" onClick={share} aria-label="Share"><Share2 size={18} /></button>
+          <button className="sd2-iconbtn back" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
+          <button className="sd2-iconbtn share" onClick={share} aria-label={t('Share')}><Share2 size={18} /></button>
         </div>
 
         <div className="sd2-body">
@@ -82,7 +83,7 @@ export default function ServiceDetails() {
           <div className="sd2-price-row">
             <span className="sd2-price">₹{s.price}</span>
             {orig && <span className="sd2-orig">₹{orig}</span>}
-            {off > 0 && <span className="sd2-off">{off}% OFF</span>}
+            {off > 0 && <span className="sd2-off">{t('{n}% OFF', { n: off })}</span>}
           </div>
 
           {siblings.length > 1 && (
@@ -101,7 +102,7 @@ export default function ServiceDetails() {
 
           {s.includes.length > 0 && (
             <section className="incl-sec">
-              <h3 className="incl-head">The expert is trained to</h3>
+              <h3 className="incl-head">{t('The expert is trained to')}</h3>
               <ul className="wi-list">
                 {s.includes.map((i) => <li key={i} className="wi-item"><span className="wi-ic ok"><Check size={13} /></span>{i}</li>)}
               </ul>
@@ -110,7 +111,7 @@ export default function ServiceDetails() {
 
           {s.excludes?.length > 0 && (
             <section className="incl-sec">
-              <h3 className="incl-head">What is not included</h3>
+              <h3 className="incl-head">{t('What is not included')}</h3>
               <ul className="wi-list">
                 {s.excludes.map((i) => <li key={i} className="wi-item"><span className="wi-ic no"><X size={13} /></span>{i}</li>)}
               </ul>
@@ -119,7 +120,7 @@ export default function ServiceDetails() {
 
           {(s.note || s.terms?.length) && (
             <section className="incl-sec">
-              <h3 className="incl-head">Additional information</h3>
+              <h3 className="incl-head">{t('Additional information')}</h3>
               {s.note && <p className="sd2-desc">{s.note}</p>}
               {s.terms?.map((t) => (
                 <div key={t.t} className="sd2-term">
@@ -135,18 +136,18 @@ export default function ServiceDetails() {
       <div className="au-foot wi-foot">
         {!instantOpen && (
           <div className="wi-closed-note">
-            🌙 Instant slots are not available right now{shiftLabel ? ` · ${shiftLabel}` : ''} — use <b>Schedule</b> to book for later.
+            🌙 {t('Instant slots are not available right now')}{shiftLabel ? ` · ${shiftLabel}` : ''} — {t('use Schedule to book for later.')}
           </div>
         )}
-        <button className="wi-schedule" onClick={() => book('schedule')}>Schedule</button>
+        <button className="wi-schedule" onClick={() => book('schedule')}>{t('Schedule')}</button>
         {/* aria-disabled, not `disabled`: a disabled button swallows the tap, so a customer who
             taps anyway gets no feedback at all. This keeps the tap and explains it in a toast. */}
         <button
           className={`wi-instant ${instantOpen ? '' : 'off'}`}
           aria-disabled={!instantOpen}
-          onClick={() => (instantOpen ? book('instant') : toast('Instant slots are not available right now — please Schedule for later'))}
+          onClick={() => (instantOpen ? book('instant') : toast(t('Instant slots are not available right now — please Schedule for later')))}
         >
-          {instantOpen ? 'Book Instant' : 'Slots Unavailable'}
+          {instantOpen ? t('Book Instant') : t('Slots Unavailable')}
         </button>
       </div>
     </div>

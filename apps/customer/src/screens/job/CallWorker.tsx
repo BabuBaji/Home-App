@@ -5,6 +5,7 @@ import { Loading } from '../../components/UI'
 import { useJob, proName } from './useJob'
 import { WorkerAvatar } from './parts'
 import { callExpert } from '../../api'
+import { t } from '../../i18n'
 
 // Module 6 · #47 — Call Worker. Asks the server to connect the call: with masked calling on, our
 // number rings the customer and bridges them to the expert (neither sees the other's number);
@@ -40,25 +41,25 @@ export default function CallWorker() {
       <div className="jt-call-top">
         <WorkerAvatar b={b} size={120} />
         <h2>{proName(b)}</h2>
-        <div className="jt-call-num">{state === 'bridging' ? 'Your phone will ring — pick up to be connected' : phone || 'Private number'}</div>
-        <div className="jt-call-state">{state === 'failed' ? 'Could not connect the call' : state === 'bridging' ? `Connecting… ${mmss}` : 'Tap the green button to call'}</div>
+        <div className="jt-call-num">{state === 'bridging' ? t('Your phone will ring — pick up to be connected') : phone || t('Private number')}</div>
+        <div className="jt-call-state">{state === 'failed' ? t('Could not connect the call') : state === 'bridging' ? `${t('Connecting…')} ${mmss}` : t('Tap the green button to call')}</div>
       </div>
 
       <div className="jt-call-ctrls">
         <button className={`jt-call-btn ${muted ? 'on' : ''}`} onClick={() => setMuted((m) => !m)}>
-          {muted ? <MicOff size={22} /> : <Mic size={22} />}<span>Mute</span>
+          {muted ? <MicOff size={22} /> : <Mic size={22} />}<span>{t('Mute')}</span>
         </button>
         <button className="jt-call-btn" onClick={dial}>
-          <Grid3x3 size={22} /><span>Keypad</span>
+          <Grid3x3 size={22} /><span>{t('Keypad')}</span>
         </button>
         <button className={`jt-call-btn ${speaker ? 'on' : ''}`} onClick={() => setSpeaker((s) => !s)}>
-          <Volume2 size={22} /><span>Speaker</span>
+          <Volume2 size={22} /><span>{t('Speaker')}</span>
         </button>
       </div>
 
       <div className="jt-call-actions">
-        <button className="jt-call-dial" onClick={dial} aria-label="Dial"><Phone size={26} /></button>
-        <button className="jt-call-end" onClick={() => nav(-1)} aria-label="End call"><PhoneOff size={26} /></button>
+        <button className="jt-call-dial" onClick={dial} aria-label={t('Dial')}><Phone size={26} /></button>
+        <button className="jt-call-end" onClick={() => nav(-1)} aria-label={t('End call')}><PhoneOff size={26} /></button>
       </div>
     </div>
   )

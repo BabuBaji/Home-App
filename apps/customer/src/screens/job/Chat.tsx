@@ -5,6 +5,7 @@ import { Loading } from '../../components/UI'
 import { fetchJobMessages, sendJobMessage, type JobMessage } from '../../api'
 import { useJob, proName } from './useJob'
 import { WorkerAvatar } from './parts'
+import { t } from '../../i18n'
 
 // Module 6 · #46 — Chat with Worker. Backed by the real job_messages store the worker app already
 // reads and writes, so a message sent here lands on the worker's job screen (and their replies land
@@ -45,22 +46,22 @@ export default function Chat() {
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [all.length])
 
   async function send() {
-    const t = text.trim()
-    if (!t || !bid) return
-    const draft: Pending = { id: -Date.now(), sender: 'customer', body: t, created: new Date().toISOString(), pending: true }
+    const msg = text.trim()
+    if (!msg || !bid) return
+    const draft: Pending = { id: -Date.now(), sender: 'customer', body: msg, created: new Date().toISOString(), pending: true }
     setText(''); setErr(''); setPending((p) => [...p, draft])
     try {
-      await sendJobMessage(bid, t)
+      await sendJobMessage(bid, msg)
       // Drop the placeholder and refetch, so ordering/ids come from the server rather than guesswork.
       setPending((p) => p.filter((m) => m.id !== draft.id))
       setMsgs(await fetchJobMessages(bid))
     } catch (e) {
       // Keep what they typed — losing a message to a failed request is worse than a retry.
       setPending((p) => p.filter((m) => m.id !== draft.id))
-      setText(t)
+      setText(msg)
       setErr(e instanceof Error && /no longer active/i.test(e.message)
-        ? 'This job has ended — you can no longer message your expert.'
-        : 'Could not send. Check your connection and try again.')
+        ? t('This job has ended — you can no longer message your expert.')
+        : t('Could not send. Check your connection and try again.'))
     }
   }
 
@@ -70,20 +71,20 @@ export default function Chat() {
   return (
     <div className="screen jt">
       <div className="jt-top jt-chat-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <div className="jt-chat-who">
           <WorkerAvatar b={b} size={36} />
-          <div><div className="jt-chat-name">{proName(b)}</div><div className="jt-chat-status">Assigned to your job</div></div>
+          <div><div className="jt-chat-name">{proName(b)}</div><div className="jt-chat-status">{t('Assigned to your job')}</div></div>
         </div>
         {phone
-          ? <a className="jt-ic" href={`tel:${phone}`} aria-label="Call"><Phone size={19} /></a>
-          : <button className="jt-ic" onClick={() => nav(`/job/${bid}/call`)} aria-label="Call"><Phone size={19} /></button>}
+          ? <a className="jt-ic" href={`tel:${phone}`} aria-label={t('Call')}><Phone size={19} /></a>
+          : <button className="jt-ic" onClick={() => nav(`/job/${bid}/call`)} aria-label={t('Call')}><Phone size={19} /></button>}
       </div>
 
       <div className="content jt-chat-body">
-        <div className="jt-chat-day">Today</div>
+        <div className="jt-chat-day">{t('Today')}</div>
         {loaded && all.length === 0 && (
-          <div className="jt-chat-empty">Send a message to {proName(b).split(' ')[0]} about your booking. They'll see it on the job.</div>
+          <div className="jt-chat-empty">{t("Send a message to {name} about your booking. They'll see it on the job.", { name: proName(b).split(' ')[0] })}</div>
         )}
         {all.map((m) => {
           const mine = m.sender === 'customer'
@@ -106,10 +107,10 @@ export default function Chat() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') send() }}
-          placeholder="Type a message…"
+          placeholder={t('Type a message…')}
           maxLength={1000}
         />
-        <button className="jt-send" onClick={send} aria-label="Send" disabled={!text.trim()}><Send size={17} /></button>
+        <button className="jt-send" onClick={send} aria-label={t('Send')} disabled={!text.trim()}><Send size={17} /></button>
       </div>
     </div>
   )

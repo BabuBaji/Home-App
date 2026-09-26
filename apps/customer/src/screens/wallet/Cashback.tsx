@@ -5,6 +5,7 @@ import { ArrowLeft, Gift, TrendingUp, TrendingDown, Clock } from 'lucide-react'
 import { Loading } from '../../components/UI'
 import { fetchCashback, type CashbackInfo } from '../../api'
 import { byMonth, money2, stamp } from '../../wallet'
+import { t } from '../../i18n'
 
 type Tab = 'All' | 'Earned' | 'Used' | 'Expired'
 const TABS: Tab[] = ['All', 'Earned', 'Used', 'Expired']
@@ -24,8 +25,8 @@ export default function Cashback() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Cashback</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Cashback')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -38,23 +39,23 @@ export default function Cashback() {
         <div className="w-hero">
           <div className="w-hero-top">
             <div>
-              <div className="w-hero-k">Total Cashback Earned</div>
+              <div className="w-hero-k">{t('Total Cashback Earned')}</div>
               <div className="w-hero-v">{money2(info.lifetime)}</div>
             </div>
             <Gift size={22} className="w-hero-ico" />
           </div>
           <div className="w-hero-split">
-            <div><div className="w-hero-sk">Lifetime Cashback</div><div className="w-hero-sv">{money2(info.lifetime)}</div></div>
-            <div><div className="w-hero-sk">Usable Cashback</div><div className="w-hero-sv">{money2(info.usable)}</div></div>
+            <div><div className="w-hero-sk">{t('Lifetime Cashback')}</div><div className="w-hero-sv">{money2(info.lifetime)}</div></div>
+            <div><div className="w-hero-sk">{t('Usable Cashback')}</div><div className="w-hero-sv">{money2(info.usable)}</div></div>
           </div>
         </div>
 
         <div className="ord-chips">
-          {TABS.map((t) => <button key={t} className={`ord-chip ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>)}
+          {TABS.map((tb) => <button key={tb} className={`ord-chip ${tab === tb ? 'active' : ''}`} onClick={() => setTab(tb)}>{t(tb)}</button>)}
         </div>
 
         {groups.length === 0 && (
-          <div className="state"><div className="ico">🎁</div><h3>No {tab === 'All' ? '' : tab.toLowerCase() + ' '}cashback yet</h3><p>Cashback from your bookings shows up here.</p></div>
+          <div className="state"><div className="ico">🎁</div><h3>{tab === 'All' ? t('No cashback yet') : t('No {kind} cashback yet', { kind: t(tab).toLowerCase() })}</h3><p>{t('Cashback from your bookings shows up here.')}</p></div>
         )}
 
         {groups.map((g) => (
@@ -72,7 +73,7 @@ export default function Cashback() {
                   </div>
                   <div className="wt-right">
                     <div className={`wt-amt ${h.state === 'earned' ? 'credit' : 'debit'}`}>{h.state === 'earned' ? '+' : '−'} {money2(h.amount)}</div>
-                    <div className={`wt-tag ${h.state === 'earned' ? 'credit' : 'debit'}`}>{h.state[0].toUpperCase() + h.state.slice(1)}</div>
+                    <div className={`wt-tag ${h.state === 'earned' ? 'credit' : 'debit'}`}>{t(h.state[0].toUpperCase() + h.state.slice(1))}</div>
                   </div>
                 </div>
               ))}

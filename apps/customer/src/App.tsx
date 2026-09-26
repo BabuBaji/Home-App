@@ -4,7 +4,8 @@ import { Capacitor } from '@capacitor/core'
 import { ToastHost } from './components/UI'
 import Splash from './components/Splash'
 import { useStore } from './store'
-import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions, fetchBooking, fetchJobMessages } from './api'
+import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions, fetchBooking, fetchJobMessages, fetchLanguage } from './api'
+import { t, setLang, useLang } from './i18n'
 import { ensureNotifPermission, fireLocalNotification, speak, speakOnce, onNotificationTap } from './notify'
 import { startPush } from './push'
 import { serviceEndMs, serviceNames } from './screens/job/useJob'
@@ -122,6 +123,9 @@ import Loyalty from './screens/offers/Loyalty'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
+  // Re-render the whole tree when the language changes (Profile → Language), so every t() string on
+  // screen switches immediately. Screens read t() at render time; nothing is cached per language.
+  useLang()
   const [minTime, setMinTime] = useState(false)
   // Returning users hydrate instantly from cache → no wait. Only a logged-in
   // user with no cached profile yet needs to wait for the first /me call.
@@ -137,6 +141,8 @@ export default function App() {
   // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
   // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
   useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+  // The saved language lives on the profile too — adopt it on sign-in (e.g. a fresh install).
+  useEffect(() => { if (user) fetchLanguage().then((r) => { if (r.language) setLang(r.language) }).catch(() => {}) }, [user?.id])
 
   // App-wide push alert: notify the customer when a booking is auto-cancelled (no expert accepted),
   // even if they've left the Track screen. Polls every 30s; the first pass seeds silently so old
@@ -503,8 +509,8 @@ function ChatNotifier() {
           localStorage.setItem(KEY, JSON.stringify(seen))
           const onThisChat = locRef.current === `/job/${b.id}/chat`
           if (!first && !onThisChat) {
-            const who = b.pro?.name || b.pro_name || 'Your expert'
-            fireLocalNotification(`New message from ${who}`, last.body, undefined, { route: `/job/${b.id}/chat` })
+            const who = b.pro?.name || b.pro_name || t('Your expert')
+            fireLocalNotification(t('New message from {name}', { name: who }), last.body, undefined, { route: `/job/${b.id}/chat` })
           }
         }
         first = false

@@ -1,4 +1,5 @@
 // Shared helpers for the Module 9 wallet screens (66-73).
+import { t, dateLocale } from './i18n'
 // Everything derives from what the wallet/refund endpoints return — nothing is invented.
 
 export const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
@@ -12,7 +13,7 @@ export const stamp = (s: string) =>
     .replace(/\b(am|pm)\b/i, (m) => m.toUpperCase())
 
 export const dayStamp = (s: string) =>
-  new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  new Date(s).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' })
 
 /** Group any dated rows into month sections ("May 2025"), preserving the incoming order. */
 export function byMonth<T>(rows: T[], dateOf: (r: T) => string): { key: string; label: string; items: T[] }[] {
@@ -22,7 +23,7 @@ export function byMonth<T>(rows: T[], dateOf: (r: T) => string): { key: string; 
     const key = `${d.getFullYear()}-${d.getMonth()}`
     const found = out.find((g) => g.key === key)
     if (found) found.items.push(r)
-    else out.push({ key, label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), items: [r] })
+    else out.push({ key, label: d.toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' }), items: [r] })
   }
   return out
 }
@@ -34,7 +35,8 @@ export function byMonth<T>(rows: T[], dateOf: (r: T) => string): { key: string; 
  */
 export type TxnTab = 'All' | 'Credit' | 'Debit' | 'Refund'
 
-export const txnKindLabel = (kind: string | null | undefined, type: 'credit' | 'debit'): string => {
+export const txnKindLabel = (kind: string | null | undefined, type: 'credit' | 'debit'): string => t(txnKindKey(kind, type))
+const txnKindKey = (kind: string | null | undefined, type: 'credit' | 'debit'): string => {
   switch (kind) {
     case 'ADD_MONEY': return 'Success'
     case 'BOOKING_PAYMENT':

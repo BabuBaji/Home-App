@@ -3,6 +3,7 @@
 import { Star } from 'lucide-react'
 import type { Booking } from '../types'
 import { addressLines, chipClass, durationLabel, medallion, STATUS_LABEL, whenLine } from '../orders'
+import { t } from '../i18n'
 
 const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 
@@ -48,10 +49,10 @@ export default function OrderCard({ b, onClick }: { b: Booking; onClick: () => v
                 ) : null}
               </>
             ) : (
-              <span className="ord-worker-name muted">Expert not assigned yet</span>
+              <span className="ord-worker-name muted">{t('Expert not assigned yet')}</span>
             )}
           </span>
-          <span className={`status-chip ${chipClass(b.status)}`}>{STATUS_LABEL[b.status] || b.status}</span>
+          <span className={`status-chip ${chipClass(b.status)}`}>{t(STATUS_LABEL[b.status] || b.status)}</span>
         </span>
       </span>
     </button>

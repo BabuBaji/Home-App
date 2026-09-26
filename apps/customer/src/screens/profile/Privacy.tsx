@@ -6,6 +6,7 @@ import { useToast } from '../../components/UI'
 import { pushBackHandler } from '../../backStack'
 import { deleteAccount } from '../../api'
 import { useStore } from '../../store'
+import { t } from '../../i18n'
 
 export default function Privacy() {
   const nav = useNavigate()
@@ -18,7 +19,7 @@ export default function Privacy() {
 
   async function del() {
     setBusy(true)
-    try { await deleteAccount(); signOut(); toast('Account deleted'); nav('/login', { replace: true }) }
+    try { await deleteAccount(); signOut(); toast(t('Account deleted')); nav('/login', { replace: true }) }
     catch (e) { toast((e as Error).message); setBusy(false) }
   }
 
@@ -26,14 +27,14 @@ export default function Privacy() {
     { icon: <FileText size={17} />, t: 'Privacy Policy', d: 'Read our privacy policy', to: () => nav('/terms') },
     { icon: <Database size={17} />, t: 'Data Usage', d: 'How we use your data', to: () => nav('/terms') },
     { icon: <MapPin size={17} />, t: 'Location Permission', d: 'Manage location access', to: () => nav('/permissions') },
-    { icon: <Share2 size={17} />, t: 'Third Party Sharing', d: 'Manage data sharing preferences', to: () => toast('You control what is shared. We never sell your data.') },
+    { icon: <Share2 size={17} />, t: 'Third Party Sharing', d: 'Manage data sharing preferences', to: () => toast(t('You control what is shared. We never sell your data.')) },
   ]
 
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-        <div className="titles"><h1>Privacy</h1></div>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <div className="titles"><h1>{t('Privacy')}</h1></div>
         <span className="iconbtn ghost" />
       </header>
 
@@ -42,30 +43,30 @@ export default function Privacy() {
           {ROWS.map((r) => (
             <button key={r.t} className="ws-row" onClick={r.to}>
               <span className="ws-ico">{r.icon}</span>
-              <span className="ws-main"><span className="ws-t">{r.t}</span><span className="ws-d">{r.d}</span></span>
+              <span className="ws-main"><span className="ws-t">{t(r.t)}</span><span className="ws-d">{t(r.d)}</span></span>
               <ChevronRight size={17} className="ws-chev" />
             </button>
           ))}
           <button className="ws-row" onClick={() => setConfirm(true)}>
             <span className="ws-ico danger"><Trash2 size={17} /></span>
-            <span className="ws-main"><span className="ws-t danger">Delete Account</span><span className="ws-d">Permanently delete your account</span></span>
+            <span className="ws-main"><span className="ws-t danger">{t('Delete Account')}</span><span className="ws-d">{t('Permanently delete your account')}</span></span>
             <ChevronRight size={17} className="ws-chev" />
           </button>
         </div>
 
         <div className="pv-note">
           <ShieldCheck size={18} />
-          <div><div className="pv-note-t">Your privacy is important to us.</div><div className="pv-note-d">We never share your data without your consent.</div></div>
+          <div><div className="pv-note-t">{t('Your privacy is important to us.')}</div><div className="pv-note-d">{t('We never share your data without your consent.')}</div></div>
         </div>
       </div>
 
       {confirm && (
         <div className="sheet-wrap" onClick={() => setConfirm(false)}>
           <div className="sheet fm-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="fm-sheet-head"><span>Delete account?</span><button onClick={() => setConfirm(false)} aria-label="Close"><X size={18} /></button></div>
-            <p className="pv-warn">This permanently removes your account, addresses, saved methods and wallet history. This cannot be undone.</p>
-            <button className="btn full danger-btn" onClick={del} disabled={busy}>{busy ? 'Deleting…' : 'Delete My Account'}</button>
-            <button className="btn ghost full" onClick={() => setConfirm(false)}>Cancel</button>
+            <div className="fm-sheet-head"><span>{t('Delete account?')}</span><button onClick={() => setConfirm(false)} aria-label={t('Close')}><X size={18} /></button></div>
+            <p className="pv-warn">{t('This permanently removes your account, addresses, saved methods and wallet history. This cannot be undone.')}</p>
+            <button className="btn full danger-btn" onClick={del} disabled={busy}>{busy ? t('Deleting…') : t('Delete My Account')}</button>
+            <button className="btn ghost full" onClick={() => setConfirm(false)}>{t('Cancel')}</button>
           </div>
         </div>
       )}

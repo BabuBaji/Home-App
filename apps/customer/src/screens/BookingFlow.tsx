@@ -7,6 +7,7 @@ import Calendar, { startOfDay, fmtDate, slotLabel, isSlotDisabled } from '../com
 import { useStore } from '../store'
 import { fetchService, fetchQuote, fetchSlots, fetchCoupons, validateCoupon, fetchWallet, fetchMe, createBookingApi, fetchServiceWorkers, getCachedPosition, createRecurring, type SlotInfo } from '../api'
 import type { ServiceDetail, Duration, Quote, Coupon, Address } from '../types'
+import { t, dateLocale } from '../i18n'
 
 interface SvcWorker { id: number; name: string; rating: number; jobs: number; km: number | null; favourite?: boolean }
 
@@ -58,7 +59,7 @@ export default function BookingFlow() {
   const [newId, setNewId] = useState<number | null>(null)
 
   useEffect(() => {
-    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations.find((x) => x.id === preDurationId) || d.durations[0]) }).catch(() => toast('Could not load service'))
+    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations.find((x) => x.id === preDurationId) || d.durations[0]) }).catch(() => toast(t('Could not load service')))
     fetchCoupons().then(setCoupons).catch(() => {})
     fetchWallet().then((w) => setWallet(w.total)).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
@@ -104,7 +105,7 @@ export default function BookingFlow() {
   async function applyCoupon(cc?: string) {
     const c = (cc || code).trim().toUpperCase()
     if (!c) return
-    try { const r = await validateCoupon(c, dur!.price); setCoupon(r.code); setCode(''); toast(`${r.code} applied · ₹${r.discount} off`) }
+    try { const r = await validateCoupon(c, dur!.price); setCoupon(r.code); setCode(''); toast(t('{code} applied · ₹{amt} off', { code: r.code, amt: r.discount })) }
     catch (e) { toast((e as Error).message) }
   }
 
@@ -132,8 +133,8 @@ export default function BookingFlow() {
             payment: payable === 0 || method === 'wallet' ? 'wallet' : 'cash', addressId: addr?.id, pincode: pincode || undefined,
             ...(worker !== 'any' ? { workerId: Number(worker) } : {}),
           })
-          toast('Repeat visits set up — manage them in Profile → Repeat bookings')
-        } catch (e) { toast(`Booked, but repeat visits could not be set up: ${(e as Error).message}`) }
+          toast(t('Repeat visits set up — manage them in Profile → Repeat bookings'))
+        } catch (e) { toast(t('Booked, but repeat visits could not be set up: {msg}', { msg: (e as Error).message })) }
       }
       // Payment done → Payment Success (39) → Booking Confirmed (40) → Tracking (41).
       setNewId(b.id); go('success')
@@ -156,8 +157,8 @@ export default function BookingFlow() {
     <div className="screen m2">
       {step !== 'success' && (
         <div className="ps-top">
-          <button className="au-back" onClick={back} aria-label="Back"><ArrowLeft size={22} /></button>
-          <b>{TITLES[step]}</b><span style={{ width: 42 }} />
+          <button className="au-back" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+          <b>{t(TITLES[step])}</b><span style={{ width: 42 }} />
         </div>
       )}
 
@@ -165,23 +166,23 @@ export default function BookingFlow() {
       {step === 'date' && (<>
         <div className="content">
           {serviceCard}
-          <div className="bf-lbl">Select Date</div>
+          <div className="bf-lbl">{t('Select Date')}</div>
           <Calendar value={date} onChange={(d) => { setDate(d); setSlot(null) }} zh={null} />
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => go('slot')}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => go('slot')}>{t('Continue')}</button></div>
       </>)}
 
       {/* 33 Slot */}
       {step === 'slot' && (<>
         <div className="content">
           {serviceCard}
-          <div className="bf-row"><div className="bf-lbl">Selected Date</div><button className="au-link" onClick={() => go('date')}>Change</button></div>
-          <div className="bf-date">{date.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-          <div className="bf-lbl">Available Slots</div>
-          {slotData == null ? <div className="ad2-hint">Loading slots…</div> : (
+          <div className="bf-row"><div className="bf-lbl">{t('Selected Date')}</div><button className="au-link" onClick={() => go('date')}>{t('Change')}</button></div>
+          <div className="bf-date">{date.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+          <div className="bf-lbl">{t('Available Slots')}</div>
+          {slotData == null ? <div className="ad2-hint">{t('Loading slots…')}</div> : (
             Object.entries(grouped).map(([g, list]) => list.length === 0 ? null : (
               <div key={g} className="bf-slotgrp">
-                <div className="bf-slot-h">{g}</div>
+                <div className="bf-slot-h">{t(g)}</div>
                 <div className="bf-slots">
                   {list.map((x: any) => (
                     <button key={x.h} className={`bf-slot ${slot === x.h ? 'on' : ''}`} disabled={x.disabled} onClick={() => setSlot(x.h)}>{x.label}</button>
@@ -191,135 +192,135 @@ export default function BookingFlow() {
             ))
           )}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => slot === null ? toast('Pick a time slot') : go('worker')} disabled={slot === null}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => slot === null ? toast(t('Pick a time slot')) : go('worker')} disabled={slot === null}>{t('Continue')}</button></div>
       </>)}
 
       {/* 34 Worker */}
       {step === 'worker' && (<>
         <div className="content">
           {serviceCard}
-          {workers.length === 0 && <div className="ad2-hint">Finding workers for this service…</div>}
+          {workers.length === 0 && <div className="ad2-hint">{t('Finding workers for this service…')}</div>}
           {workers[0] && <>
-            <div className="bf-lbl">Preferred Worker</div>
+            <div className="bf-lbl">{t('Preferred Worker')}</div>
             <WorkerRow w={workers[0]} sel={worker} onPick={setWorker} />
           </>}
           {workers.length > 1 && <>
-            <div className="bf-lbl">Other Available Workers</div>
+            <div className="bf-lbl">{t('Other Available Workers')}</div>
             {workers.slice(1).map((w) => <WorkerRow key={w.id} w={w} sel={worker} onPick={setWorker} />)}
           </>}
           <button className={`bf-worker any ${worker === 'any' ? 'on' : ''}`} onClick={() => setWorker('any')}>
             <span className="bf-wava any">✦</span>
-            <div className="grow"><b>Any available worker</b><small>We'll assign the best available partner</small></div>
+            <div className="grow"><b>{t('Any available worker')}</b><small>{t("We'll assign the best available partner")}</small></div>
             <span className={`sf-radio ${worker === 'any' ? 'on' : ''}`}>{worker === 'any' && <Check size={13} />}</span>
           </button>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => go('summary')}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => go('summary')}>{t('Continue')}</button></div>
       </>)}
 
       {/* 35 Summary */}
       {step === 'summary' && (<>
         <div className="content">
-          <div className="bf-lbl">Service Details</div>
+          <div className="bf-lbl">{t('Service Details')}</div>
           <div className="bf-sum-svc">{serviceCard}<b className="bf-sum-p">₹{dur.price}</b></div>
-          <div className="bf-sumrow"><span>Date</span><b>{date.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</b></div>
-          <div className="bf-sumrow"><span>Time</span><b>{slot !== null ? slotLabel(slot) : '—'}</b></div>
-          <div className="bf-sumrow"><span>Worker</span><b>{worker === 'any' ? 'Any available' : (workers.find((w) => String(w.id) === worker)?.name || 'Any available')}</b></div>
-          <div className="bf-sumrow"><span>Address</span><b className="bf-addr">{addr?.line || 'Set address'}</b></div>
+          <div className="bf-sumrow"><span>{t('Date')}</span><b>{date.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</b></div>
+          <div className="bf-sumrow"><span>{t('Time')}</span><b>{slot !== null ? slotLabel(slot) : '—'}</b></div>
+          <div className="bf-sumrow"><span>{t('Worker')}</span><b>{worker === 'any' ? t('Any available') : (workers.find((w) => String(w.id) === worker)?.name || t('Any available'))}</b></div>
+          <div className="bf-sumrow"><span>{t('Address')}</span><b className="bf-addr">{addr?.line || t('Set address')}</b></div>
           <div className="bf-div" />
           {(quote?.surgeAmount || 0) > 0 && (
             <div className="note-box" style={{ background: '#eef4ff', borderColor: '#bcd0ff', color: '#1d4ed8', marginBottom: 10 }}>
               {quote?.surgeReason === 'rain'
-                ? `🌧️ Rain incoming — demand is high, so prices are up ${quote?.surgePct}% right now.`
-                : `⚡ High demand right now — prices are up ${quote?.surgePct}%.`}
+                ? t('🌧️ Rain incoming — demand is high, so prices are up {p}% right now.', { p: quote?.surgePct ?? 0 })
+                : t('⚡ High demand right now — prices are up {p}%.', { p: quote?.surgePct ?? 0 })}
             </div>
           )}
-          <div className="bf-lbl">Price Details</div>
-          <div className="bf-sumrow sm"><span>Service Charges</span><b>₹{quote?.subtotal ?? dur.price}</b></div>
-          {(quote?.discount || 0) > 0 && <div className="bf-sumrow sm disc"><span>Coupon ({coupon})</span><b>−₹{quote!.discount}</b></div>}
-          {(quote?.surgeAmount || 0) > 0 && <div className="bf-sumrow sm"><span>{quote?.surgeReason === 'rain' ? '🌧️ Rain surge' : 'Demand surge'}{quote?.surgePct ? ` (+${quote.surgePct}%)` : ''}</span><b>+₹{quote!.surgeAmount}</b></div>}
-          {(quote?.fee || 0) > 0 && <div className="bf-sumrow sm"><span>Platform Fee</span><b>₹{quote!.fee}</b></div>}
+          <div className="bf-lbl">{t('Price Details')}</div>
+          <div className="bf-sumrow sm"><span>{t('Service Charges')}</span><b>₹{quote?.subtotal ?? dur.price}</b></div>
+          {(quote?.discount || 0) > 0 && <div className="bf-sumrow sm disc"><span>{t('Coupon')} ({coupon})</span><b>−₹{quote!.discount}</b></div>}
+          {(quote?.surgeAmount || 0) > 0 && <div className="bf-sumrow sm"><span>{quote?.surgeReason === 'rain' ? t('🌧️ Rain surge') : t('Demand surge')}{quote?.surgePct ? ` (+${quote.surgePct}%)` : ''}</span><b>+₹{quote!.surgeAmount}</b></div>}
+          {(quote?.fee || 0) > 0 && <div className="bf-sumrow sm"><span>{t('Platform Fee')}</span><b>₹{quote!.fee}</b></div>}
           {(quote?.tax || 0) > 0 && <div className="bf-sumrow sm"><span>GST{quote!.gstPct ? ` (${quote!.gstPct}%)` : ''}</span><b>₹{quote!.tax}</b></div>}
           <div className="bf-div" />
-          <div className="bf-sumrow total"><span>Total Amount</span><b>₹{orderTotal}</b></div>
+          <div className="bf-sumrow total"><span>{t('Total Amount')}</span><b>₹{orderTotal}</b></div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => go('coupon')}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => go('coupon')}>{t('Continue')}</button></div>
       </>)}
 
       {/* 36 Coupon */}
       {step === 'coupon' && (<>
         <div className="content">
-          <div className="bf-coupon-in"><input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Enter coupon code" /><button onClick={() => applyCoupon()}>Apply</button></div>
-          <div className="bf-lbl">Available Coupons</div>
+          <div className="bf-coupon-in"><input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={t('Enter coupon code')} /><button onClick={() => applyCoupon()}>{t('Apply')}</button></div>
+          <div className="bf-lbl">{t('Available Coupons')}</div>
           {coupons.map((c) => (
             <div key={c.code} className={`bf-coupon ${coupon === c.code ? 'on' : ''}`}>
-              <div className="grow"><b>{c.code}</b><small>{c.label}</small>{c.min ? <small className="bf-cmin">Min order ₹{c.min}</small> : null}</div>
-              {coupon === c.code ? <span className="bf-capplied"><Check size={16} /></span> : <button className="au-link" onClick={() => applyCoupon(c.code)}>Apply</button>}
+              <div className="grow"><b>{c.code}</b><small>{c.label}</small>{c.min ? <small className="bf-cmin">{t('Min order ₹{amt}', { amt: c.min })}</small> : null}</div>
+              {coupon === c.code ? <span className="bf-capplied"><Check size={16} /></span> : <button className="au-link" onClick={() => applyCoupon(c.code)}>{t('Apply')}</button>}
             </div>
           ))}
-          {coupons.length === 0 && <p className="ad2-hint">No coupons available right now.</p>}
+          {coupons.length === 0 && <p className="ad2-hint">{t('No coupons available right now.')}</p>}
           <div className="bf-div" />
-          <div className="bf-sumrow"><span>Total Amount</span><b>₹{quote?.subtotal ?? dur.price}</b></div>
-          {(quote?.discount || 0) > 0 && <div className="bf-sumrow disc"><span>Discount ({coupon})</span><b>− ₹{quote!.discount}</b></div>}
-          <div className="bf-sumrow total"><span>Payable Amount</span><b>₹{orderTotal}</b></div>
+          <div className="bf-sumrow"><span>{t('Total Amount')}</span><b>₹{quote?.subtotal ?? dur.price}</b></div>
+          {(quote?.discount || 0) > 0 && <div className="bf-sumrow disc"><span>{t('Discount')} ({coupon})</span><b>− ₹{quote!.discount}</b></div>}
+          <div className="bf-sumrow total"><span>{t('Payable Amount')}</span><b>₹{orderTotal}</b></div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => go('wallet')}>Continue</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => go('wallet')}>{t('Continue')}</button></div>
       </>)}
 
       {/* 37 Wallet */}
       {step === 'wallet' && (<>
         <div className="content">
-          <div className="bf-wcard"><div><small>Available Balance</small><b>₹{wallet}</b></div><span className="bf-wic"><WalletIcon size={22} /></span></div>
-          <div className="bf-wtoggle"><span className="grow">Use wallet balance</span><button className={`sf-switch ${useWallet ? 'on' : ''}`} onClick={() => setUseWallet((u) => !u)}><span /></button></div>
+          <div className="bf-wcard"><div><small>{t('Available Balance')}</small><b>₹{wallet}</b></div><span className="bf-wic"><WalletIcon size={22} /></span></div>
+          <div className="bf-wtoggle"><span className="grow">{t('Use wallet balance')}</span><button className={`sf-switch ${useWallet ? 'on' : ''}`} onClick={() => setUseWallet((u) => !u)}><span /></button></div>
           {useWallet && (<>
-            <div className="bf-lbl">Amount to use</div>
+            <div className="bf-lbl">{t('Amount to use')}</div>
             <div className="bf-wamt">₹{walletUsed}</div>
-            <div className="bf-whint">(Max usable ₹{Math.min(wallet, orderTotal)})</div>
+            <div className="bf-whint">{t('(Max usable ₹{amt})', { amt: Math.min(wallet, orderTotal) })}</div>
           </>)}
           <div className="bf-div" />
-          <div className="bf-sumrow total"><span>Remaining to pay</span><b>₹{payable}</b></div>
+          <div className="bf-sumrow total"><span>{t('Remaining to pay')}</span><b>₹{payable}</b></div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => go('payment')}>Continue to Payment</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => go('payment')}>{t('Continue to Payment')}</button></div>
       </>)}
 
       {/* 38 Payment */}
       {step === 'payment' && (<>
         <div className="content">
-          <div className="bf-payrow"><span>Amount to Pay</span><b>₹{payable}</b></div>
-          <div className="bf-payrow sm"><span>Order Total</span><b>₹{orderTotal}</b></div>
-          {walletUsed > 0 && <div className="bf-payrow sm disc"><span>Wallet Discount</span><b>− ₹{walletUsed}</b></div>}
+          <div className="bf-payrow"><span>{t('Amount to Pay')}</span><b>₹{payable}</b></div>
+          <div className="bf-payrow sm"><span>{t('Order Total')}</span><b>₹{orderTotal}</b></div>
+          {walletUsed > 0 && <div className="bf-payrow sm disc"><span>{t('Wallet Discount')}</span><b>− ₹{walletUsed}</b></div>}
           <div className="bf-div" />
-          <div className="bf-lbl">{payable === 0 ? 'Paying via wallet' : 'Recommended'}</div>
+          <div className="bf-lbl">{payable === 0 ? t('Paying via wallet') : t('Recommended')}</div>
           <button className={`bf-pay ${payMethod === 'upi' ? 'on' : ''}`} onClick={() => setPayMethod('upi')}>
             <span className="bf-pay-ic upi"><Smartphone size={18} /></span>
-            <div className="grow"><b>UPI</b><small>Pay using any UPI app</small></div>
+            <div className="grow"><b>UPI</b><small>{t('Pay using any UPI app')}</small></div>
             <span className={`sf-radio ${payMethod === 'upi' ? 'on' : ''}`}>{payMethod === 'upi' && <Check size={13} />}</span>
           </button>
-          <div className="bf-lbl">Other Options</div>
+          <div className="bf-lbl">{t('Other Options')}</div>
           {[['card', 'Credit / Debit Card', 'Visa, MasterCard, RuPay', CreditCard], ['netbanking', 'Net Banking', 'All major banks', Building2], ['phonepe', 'PhonePe Wallet', 'Pay using PhonePe balance', WalletIcon], ['gpay', 'Google Pay', 'Pay using GPay', Smartphone]].map(([mid, name, sub, Ic]: any) => (
             <button key={mid} className={`bf-pay ${payMethod === mid ? 'on' : ''}`} onClick={() => setPayMethod(mid)}>
               <span className="bf-pay-ic"><Ic size={18} /></span>
-              <div className="grow"><b>{name}</b><small>{sub}</small></div>
+              <div className="grow"><b>{t(name)}</b><small>{t(sub)}</small></div>
               <span className={`sf-radio ${payMethod === mid ? 'on' : ''}`}>{payMethod === mid && <Check size={13} />}</span>
             </button>
           ))}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => pay(payMethod)} disabled={placing}>{placing ? 'Please wait…' : `Pay ₹${payable}`}</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => pay(payMethod)} disabled={placing}>{placing ? t('Please wait…') : t('Pay ₹{amt}', { amt: payable })}</button></div>
       </>)}
 
       {/* 39 Payment Success */}
       {step === 'success' && (
         <div className="content bf-success">
           <div className="bf-succ-ic"><Check size={44} /></div>
-          <h1>Payment Successful!</h1>
-          <p>₹{payable} paid successfully</p>
+          <h1>{t('Payment Successful!')}</h1>
+          <p>{t('₹{amt} paid successfully', { amt: payable })}</p>
           <div className="bf-succ-card">
-            <div className="bf-payrow sm"><span>Order Total</span><b>₹{orderTotal}</b></div>
-            {walletUsed > 0 && <div className="bf-payrow sm disc"><span>Wallet Discount</span><b>− ₹{walletUsed}</b></div>}
-            <div className="bf-payrow"><span>Amount Paid</span><b>₹{payable}</b></div>
+            <div className="bf-payrow sm"><span>{t('Order Total')}</span><b>₹{orderTotal}</b></div>
+            {walletUsed > 0 && <div className="bf-payrow sm disc"><span>{t('Wallet Discount')}</span><b>− ₹{walletUsed}</b></div>}
+            <div className="bf-payrow"><span>{t('Amount Paid')}</span><b>₹{payable}</b></div>
             <div className="bf-div" />
-            <div className="bf-payrow sm"><span>Payment Method</span><b>{payable === 0 ? 'Wallet Balance' : payMethod.toUpperCase()}</b></div>
+            <div className="bf-payrow sm"><span>{t('Payment Method')}</span><b>{payable === 0 ? t('Wallet Balance') : payMethod.toUpperCase()}</b></div>
           </div>
-          <button className="au-btn" onClick={() => nav(`/confirmed/${newId}`, { replace: true })} style={{ marginTop: 20 }}>Continue</button>
+          <button className="au-btn" onClick={() => nav(`/confirmed/${newId}`, { replace: true })} style={{ marginTop: 20 }}>{t('Continue')}</button>
         </div>
       )}
 
@@ -333,7 +334,7 @@ function WorkerRow({ w, sel, onPick }: { w: SvcWorker; sel: string; onPick: (id:
   return (
     <button className={`bf-worker ${sel === id ? 'on' : ''}`} onClick={() => onPick(id)}>
       <span className="bf-wava">{w.name[0]?.toUpperCase()}</span>
-      <div className="grow"><b>{w.name}{w.favourite ? ' ♥' : ''}</b><small><Star size={11} className="bf-star" /> {w.rating} ({w.jobs} jobs){w.km != null ? ` · ${w.km} km away` : ''}</small></div>
+      <div className="grow"><b>{w.name}{w.favourite ? ' ♥' : ''}</b><small><Star size={11} className="bf-star" /> {w.rating} {t('({n} jobs)', { n: w.jobs })}{w.km != null ? ` · ${t('{km} km away', { km: w.km })}` : ''}</small></div>
       <span className={`sf-radio ${sel === id ? 'on' : ''}`}>{sel === id && <Check size={13} />}</span>
     </button>
   )

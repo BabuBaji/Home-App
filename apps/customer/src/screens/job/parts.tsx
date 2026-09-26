@@ -1,6 +1,7 @@
 import { MINI_STEPS, miniIdx } from './useJob'
 import { Check } from 'lucide-react'
 import type { Booking } from '../../types'
+import { t } from '../../i18n'
 
 // Worker avatar — real photo if the worker has one, else a violet initial circle. No stock image.
 export function WorkerAvatar({ b, size = 56, initial }: { b?: Booking; size?: number; initial?: string }) {
@@ -21,7 +22,7 @@ export function MiniTimeline({ status }: { status: string }) {
         return (
           <div key={s} className={`jt-mini-step ${ok ? 'ok' : ''} ${i === reached && !done ? 'cur' : ''}`}>
             <span className="jt-mini-dot">{ok ? <Check size={11} /> : <i />}</span>
-            <span className="jt-mini-lbl">{s}</span>
+            <span className="jt-mini-lbl">{t(s)}</span>
           </div>
         )
       })}

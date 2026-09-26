@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { ChevronLeft, House, CalendarDays, History, AlertTriangle } from 'lucide-react'
+import { t } from '../i18n'
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string) => void>(() => {})
@@ -29,7 +30,7 @@ export function Header({ title, subtitle, right, back = true }: {
   const nav = useNavigate()
   return (
     <header className="appbar">
-      {back ? <button className="iconbtn" onClick={() => nav(-1)}><ChevronLeft size={24} /></button> : <span className="iconbtn ghost" />}
+      {back ? <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ChevronLeft size={24} /></button> : <span className="iconbtn ghost" />}
       <div className="titles">
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
@@ -52,12 +53,12 @@ export function BottomNav() {
         const active = pathname.startsWith(n.to)
         return (
           <Link key={n.to} to={n.to} className={active ? 'active' : ''}>
-            <span className="ni"><n.Icon size={22} strokeWidth={active ? 2.4 : 2} /></span>{n.label}
+            <span className="ni"><n.Icon size={22} strokeWidth={active ? 2.4 : 2} /></span>{t(n.label)}
           </Link>
         )
       })}
       <Link to="/history" className={`bn-history ${pathname.startsWith('/history') ? 'active' : ''}`}>
-        <History size={20} strokeWidth={2.2} /><span>History</span>
+        <History size={20} strokeWidth={2.2} /><span>{t('History')}</span>
       </Link>
     </nav>
   )
@@ -76,9 +77,9 @@ export function ErrorState({ msg, onRetry }: { msg: string; onRetry: () => void 
   return (
     <div className="state">
       <div className="ico"><AlertTriangle size={42} /></div>
-      <h3>Something went wrong</h3>
+      <h3>{t('Something went wrong')}</h3>
       <p>{msg}</p>
-      <button className="btn" style={{ maxWidth: 200 }} onClick={onRetry}>Retry</button>
+      <button className="btn" style={{ maxWidth: 200 }} onClick={onRetry}>{t('Retry')}</button>
     </div>
   )
 }

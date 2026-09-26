@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchBooking, getSocket } from '../../api'
 import type { Booking } from '../../types'
+import { t } from '../../i18n'
 
 // Shared booking loader for the Module-6 live-job screens: fetches once, subscribes to the live
 // booking room, and polls every 8s as a fallback so every screen reflects the real backend status.
@@ -70,18 +71,18 @@ export const miniIdx = (status: string): number => {
   }
 }
 
-export const proName = (b: Booking) => b.pro?.name || b.pro_name || 'Your Expert'
+export const proName = (b: Booking) => b.pro?.name || b.pro_name || t('Your Expert')
 export const proInitial = (b: Booking) => (proName(b).trim()[0] || 'W').toUpperCase()
 export const proPhone = (b: Booking) => b.pro?.phone || ''
 export const proRating = (b: Booking) => b.pro?.rating ?? b.pro_rating ?? 4.7
 
 export function fmtDateTime(b: Booking): string {
-  if (b.type === 'instant') return 'Now (ASAP)'
+  if (b.type === 'instant') return t('Now (ASAP)')
   const parts = [b.date, b.time].filter(Boolean)
-  return parts.length ? parts.join(', ') : 'Scheduled'
+  return parts.length ? parts.join(', ') : t('Scheduled')
 }
 
-export const serviceNames = (b: Booking) => (b.items || []).map((i) => i.name).join(', ') || 'Home Service'
+export const serviceNames = (b: Booking) => (b.items || []).map((i) => i.name).join(', ') || t('Home Service')
 
 // Booked length in minutes — durationId first (authoritative), then the free-text label. Mirrors the
 // server's rule. Shared by the live clock and the "ending soon" voice alert.

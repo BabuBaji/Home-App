@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { Header, FooterCTA } from '../components/UI'
 import { useStore } from '../store'
+import { t } from '../i18n'
 
 export default function Cart() {
   const nav = useNavigate()
@@ -9,16 +10,16 @@ export default function Cart() {
   if (cart.length === 0) {
     return (
       <div className="screen">
-        <Header title="Your Booking" />
-        <div className="state"><div className="ico">🛒</div><h3>No services added</h3><p>Browse services and add them to your booking.</p>
-          <button className="btn" style={{ maxWidth: 220 }} onClick={() => nav('/home')}>Browse services</button></div>
+        <Header title={t('Your Booking')} />
+        <div className="state"><div className="ico">🛒</div><h3>{t('No services added')}</h3><p>{t('Browse services and add them to your booking.')}</p>
+          <button className="btn" style={{ maxWidth: 220 }} onClick={() => nav('/home')}>{t('Browse services')}</button></div>
       </div>
     )
   }
 
   return (
     <div className="screen">
-      <Header title="Your Booking" subtitle={`${cart.length} service${cart.length === 1 ? '' : 's'}`} />
+      <Header title={t('Your Booking')} subtitle={cart.length === 1 ? t('1 service') : t('{n} services', { n: cart.length })} />
       <div className="content pad-cta">
         <div className="card pad">
           {cart.map((c) => (
@@ -34,18 +35,18 @@ export default function Cart() {
           ))}
         </div>
 
-        <button className="add-more" onClick={() => nav('/home')}>+ Add more services</button>
+        <button className="add-more" onClick={() => nav('/home')}>{t('+ Add more services')}</button>
 
         <div className="card pad mt">
-          <div className="kv"><span className="k">Subtotal</span><span className="v">₹{subtotal}</span></div>
-          <p className="muted sm" style={{ marginTop: 4 }}>Coupons applied at summary.</p>
+          <div className="kv"><span className="k">{t('Subtotal')}</span><span className="v">₹{subtotal}</span></div>
+          <p className="muted sm" style={{ marginTop: 4 }}>{t('Coupons applied at summary.')}</p>
         </div>
       </div>
 
       <FooterCTA>
         <div className="sumbar">
-          <div className="grow"><div className="cnt">₹{subtotal}</div><div className="sub">{cart.length} service{cart.length === 1 ? '' : 's'}</div></div>
-          <button className="btn" onClick={() => nav('/address')}>Select address →</button>
+          <div className="grow"><div className="cnt">₹{subtotal}</div><div className="sub">{cart.length === 1 ? t('1 service') : t('{n} services', { n: cart.length })}</div></div>
+          <button className="btn" onClick={() => nav('/address')}>{t('Select address →')}</button>
         </div>
       </FooterCTA>
     </div>

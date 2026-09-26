@@ -13,6 +13,7 @@ import { WorkerAvatar } from './parts'
 import ExtrasPrompt from '../../components/ExtrasPrompt'
 import { isLive } from '../../orders'
 import type { Booking } from '../../types'
+import { t } from '../../i18n'
 
 // Module 6 · #42 — Booking Details / Worker Assigned. All real booking data (ref, service, date,
 // full address, assigned worker) polled from /api/bookings/:id. Hub for the live-job screens, with
@@ -50,15 +51,15 @@ export default function JobTracking() {
     setMenu(false)
     if (!b) return
     const text = [
-      `HomeHelp booking ${b.ref}`,
+      t('HomeHelp booking {ref}', { ref: b.ref || '' }),
       serviceNames(b),
       fmtDateTime(b),
-      fullAddress(b) ? `At: ${fullAddress(b)}` : '',
+      fullAddress(b) ? t('At: {addr}', { addr: fullAddress(b) }) : '',
     ].filter(Boolean).join('\n')
     try {
-      if (Capacitor.isNativePlatform()) await Share.share({ title: `HomeHelp ${b.ref}`, text, dialogTitle: 'Share booking' })
+      if (Capacitor.isNativePlatform()) await Share.share({ title: `HomeHelp ${b.ref}`, text, dialogTitle: t('Share booking') })
       else if (navigator.share) await navigator.share({ title: `HomeHelp ${b.ref}`, text })
-      else { await navigator.clipboard.writeText(text); toast('Booking details copied') }
+      else { await navigator.clipboard.writeText(text); toast(t('Booking details copied')) }
     } catch { /* user dismissed the sheet — not an error */ }
   }
 
@@ -68,27 +69,27 @@ export default function JobTracking() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Booking Details</b>
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Booking Details')}</b>
         <div className="jt-top-r">
-          <button className="jt-ic round" onClick={share} aria-label="Share booking"><Share2 size={18} /></button>
-          <button className="jt-ic round" onClick={() => setMenu(true)} aria-label="More options"><MoreVertical size={18} /></button>
+          <button className="jt-ic round" onClick={share} aria-label={t('Share booking')}><Share2 size={18} /></button>
+          <button className="jt-ic round" onClick={() => setMenu(true)} aria-label={t('More options')}><MoreVertical size={18} /></button>
         </div>
 
         {menu && (
           <div className="jt-menu" onClick={(e) => e.stopPropagation()}>
             {cancellable && b.type === 'schedule' && (
-              <button className="jt-mi" onClick={() => go(`/reschedule/${b.id}`)}><CalendarClock size={16} /> Reschedule Booking</button>
+              <button className="jt-mi" onClick={() => go(`/reschedule/${b.id}`)}><CalendarClock size={16} /> {t('Reschedule Booking')}</button>
             )}
             {started && (
-              <button className="jt-mi" onClick={() => go(`/job/${b.id}/progress`)}><Bike size={16} /> View Live Progress</button>
+              <button className="jt-mi" onClick={() => go(`/job/${b.id}/progress`)}><Bike size={16} /> {t('View Live Progress')}</button>
             )}
             {cancellable && (
-              <button className="jt-mi danger" onClick={() => go(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
+              <button className="jt-mi danger" onClick={() => go(`/cancel/${b.id}`)}><XCircle size={16} /> {t('Cancel Booking')}</button>
             )}
-            <button className="jt-mi" onClick={share}><Share2 size={16} /> Share Booking</button>
-            <button className="jt-mi" onClick={() => go('/cancellation-policy')}><ShieldQuestion size={16} /> Cancellation Policy</button>
-            <button className="jt-mi" onClick={() => go('/support')}><Headset size={16} /> Get Help</button>
+            <button className="jt-mi" onClick={share}><Share2 size={16} /> {t('Share Booking')}</button>
+            <button className="jt-mi" onClick={() => go('/cancellation-policy')}><ShieldQuestion size={16} /> {t('Cancellation Policy')}</button>
+            <button className="jt-mi" onClick={() => go('/support')}><Headset size={16} /> {t('Get Help')}</button>
           </div>
         )}
       </div>
@@ -101,11 +102,11 @@ export default function JobTracking() {
             <WorkerAvatar b={b} size={66} />
             {assigned && <span className="jt-hero-check"><Check size={14} strokeWidth={3} /></span>}
           </div>
-          <h2>{assigned ? 'Worker Assigned!' : 'Confirming your expert…'}</h2>
+          <h2>{assigned ? t('Worker Assigned!') : t('Confirming your expert…')}</h2>
           <p>{assigned
-            ? `Great! ${proName(b).split(' ')[0]} has been assigned to your service.`
-            : 'Your booking is confirmed. We are assigning the best expert near you — this usually takes a moment.'}</p>
-          <span className="jt-badge-confirm"><ShieldCheck size={15} /> Your booking is confirmed</span>
+            ? t('Great! {name} has been assigned to your service.', { name: proName(b).split(' ')[0] })
+            : t('Your booking is confirmed. We are assigning the best expert near you — this usually takes a moment.')}</p>
+          <span className="jt-badge-confirm"><ShieldCheck size={15} /> {t('Your booking is confirmed')}</span>
         </div>
 
         {/* Order: expert → where → what was booked. Who is coming (or already working) is what the
@@ -114,23 +115,23 @@ export default function JobTracking() {
         {/* worker — compact single row: avatar + info (→ profile) + small chat/call icons */}
         {assigned ? (
           <div className="jt-card jt-worker2">
-            <button className="jt-worker2-ava" onClick={() => nav(`/job/${b.id}/worker`)} aria-label="View worker profile">
+            <button className="jt-worker2-ava" onClick={() => nav(`/job/${b.id}/worker`)} aria-label={t('View worker profile')}>
               <WorkerAvatar b={b} size={46} />
               <span className="jt-online" />
             </button>
             <button className="jt-worker2-main" onClick={() => nav(`/job/${b.id}/worker`)}>
               <div className="jt-worker2-name">{proName(b)}{verified && <BadgeCheck size={15} className="jt-vcheck" />}</div>
-              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {jobs} jobs{verified ? ' · Verified' : ''}</div>
+              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {t('{n} jobs', { n: jobs })}{verified ? ` · ${t('Verified')}` : ''}</div>
             </button>
-            <button className="jt-wmini ghost" onClick={chat} aria-label="Chat with worker"><MessageCircle size={17} /></button>
-            <button className="jt-wmini" onClick={call} aria-label="Call worker"><Phone size={17} /></button>
+            <button className="jt-wmini ghost" onClick={chat} aria-label={t('Chat with worker')}><MessageCircle size={17} /></button>
+            <button className="jt-wmini" onClick={call} aria-label={t('Call worker')}><Phone size={17} /></button>
           </div>
         ) : (
           <div className="jt-card jt-worker pending">
             <span className="jt-ava jt-ava-init" style={{ width: 50, height: 50, fontSize: 20 }}>…</span>
             <div className="jt-worker-main">
-              <div className="jt-worker-name">Assigning your expert…</div>
-              <div className="jt-worker-sub">Finding someone near you</div>
+              <div className="jt-worker-name">{t('Assigning your expert…')}</div>
+              <div className="jt-worker-sub">{t('Finding someone near you')}</div>
             </div>
           </div>
         )}
@@ -140,10 +141,10 @@ export default function JobTracking() {
           <div className="jt-addr">
             <span className="jt-addr-ic"><MapPin size={16} /></span>
             <div className="jt-addr-main">
-              <div className="jt-addr-k">Address</div>
+              <div className="jt-addr-k">{t('Address')}</div>
               {addr.flat && <div className="jt-addr-primary">{addr.flat}</div>}
               <div className="jt-addr-line">{addr.area || '—'}</div>
-              {addr.landmark && <div className="jt-addr-land">Near {addr.landmark}</div>}
+              {addr.landmark && <div className="jt-addr-land">{t('Near {place}', { place: addr.landmark })}</div>}
             </div>
           </div>
           {/* No map button here at any stage — the address card says where the service is, and that
@@ -153,13 +154,13 @@ export default function JobTracking() {
 
         {/* what was booked — reference/service/timing, below the address */}
         <div className="jt-card jt-details">
-          <Row label="Booking ID" value={b.ref} />
-          <Row label="Service" value={serviceNames(b)} />
-          <Row label="Date & Time" value={fmtDateTime(b)} />
+          <Row label={t('Booking ID')} value={b.ref} />
+          <Row label={t('Service')} value={serviceNames(b)} />
+          <Row label={t('Date & Time')} value={fmtDateTime(b)} />
           {/* Approved extra time was invisible here, and this is the screen the Home "Track" button
               lands on — so a customer who had just paid for more time saw no sign of it. */}
           {!!b.extension_minutes && (
-            <Row label="Extra time" value={`+${b.extension_minutes} min${b.extension_total ? ` · ₹${b.extension_total}` : ''}`} />
+            <Row label={t('Extra time')} value={`+${t('{n} min', { n: b.extension_minutes })}${b.extension_total ? ` · ₹${b.extension_total}` : ''}`} />
           )}
         </div>
 
@@ -180,11 +181,11 @@ export default function JobTracking() {
 
         {/* safety */}
         <div className="jt-safety">
-          <div className="jt-safety-head"><ShieldCheck size={15} /> Your safety is our priority</div>
+          <div className="jt-safety-head"><ShieldCheck size={15} /> {t('Your safety is our priority')}</div>
           <div className="jt-safety-items">
-            <span><BadgeCheck size={13} /> Background Verified</span>
-            <span><Headset size={13} /> Support Available</span>
-            <span><ShieldCheck size={13} /> Quality Assured</span>
+            <span><BadgeCheck size={13} /> {t('Background Verified')}</span>
+            <span><Headset size={13} /> {t('Support Available')}</span>
+            <span><ShieldCheck size={13} /> {t('Quality Assured')}</span>
           </div>
         </div>
       </div>
@@ -193,16 +194,16 @@ export default function JobTracking() {
           instead. Before it starts, Chat + Cancel; once completed, the summary. */}
       <div className="jt-foot">
         {started ? (
-          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/progress`)}><Bike size={16} /> View Live Progress</button>
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/progress`)}><Bike size={16} /> {t('View Live Progress')}</button>
         ) : b.status === 'completed' ? (
-          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}><Check size={16} /> View Summary</button>
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}><Check size={16} /> {t('View Summary')}</button>
         ) : cancellable ? (
           <>
-            <button className="jt-btn ghost" onClick={chat}><MessageCircle size={16} /> Chat with Worker</button>
-            <button className="jt-btn danger" onClick={() => nav(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
+            <button className="jt-btn ghost" onClick={chat}><MessageCircle size={16} /> {t('Chat with Worker')}</button>
+            <button className="jt-btn danger" onClick={() => nav(`/cancel/${b.id}`)}><XCircle size={16} /> {t('Cancel Booking')}</button>
           </>
         ) : (
-          <button className="jt-btn" onClick={call}><Phone size={16} /> Call Worker</button>
+          <button className="jt-btn" onClick={call}><Phone size={16} /> {t('Call Worker')}</button>
         )}
       </div>
 
@@ -217,7 +218,7 @@ export default function JobTracking() {
 function addressParts(b: Booking): { flat: string; area: string; landmark: string } {
   const a = b.addr
   if (a && (a.house || a.apartment || a.floor)) {
-    const flat = [a.house, a.apartment, a.floor && `Floor ${a.floor}`].filter(Boolean).join(', ')
+    const flat = [a.house, a.apartment, a.floor && t('Floor {n}', { n: a.floor })].filter(Boolean).join(', ')
     const area = a.line || [a.street, a.city, a.pincode].filter(Boolean).join(', ') || b.address || ''
     return { flat, area, landmark: a.landmark || '' }
   }
@@ -226,19 +227,19 @@ function addressParts(b: Booking): { flat: string; area: string; landmark: strin
 // One-line full address for the share sheet.
 function fullAddress(b: Booking): string {
   const p = addressParts(b)
-  return [p.flat, p.area, p.landmark && `Near ${p.landmark}`].filter(Boolean).join(', ')
+  return [p.flat, p.area, p.landmark && t('Near {place}', { place: p.landmark })].filter(Boolean).join(', ')
 }
 
 /* ---------- live status card ---------- */
 function arrivalFor(b: Booking): { icon: JSX.Element; title: string; sub: string; path: string } | null {
   const eta = b.eta
-  const etaText = eta ? `Estimated arrival in ${eta}–${eta + 3} mins` : 'Estimated arrival in 12–15 mins'
+  const etaText = t('Estimated arrival in {a}–{b} mins', { a: eta || 12, b: eta ? eta + 3 : 15 })
   switch (b.status) {
-    case 'worker_assigned': return { icon: <Bike size={20} />, title: 'Worker is getting ready', sub: 'Preparing to head to your location', path: 'otw' }
-    case 'on_the_way': return { icon: <Bike size={20} />, title: 'Worker is on the way', sub: etaText, path: 'map' }
-    case 'arrived': return { icon: <MapPin size={20} />, title: 'Worker has arrived', sub: 'Share your start OTP to begin', path: 'otp' }
-    case 'in_progress': return { icon: <Check size={20} />, title: 'Service in progress', sub: 'Your service is underway', path: 'progress' }
-    case 'completed': return { icon: <Check size={20} />, title: 'Service completed', sub: 'View your service summary', path: 'completed' }
+    case 'worker_assigned': return { icon: <Bike size={20} />, title: t('Worker is getting ready'), sub: t('Preparing to head to your location'), path: 'otw' }
+    case 'on_the_way': return { icon: <Bike size={20} />, title: t('Worker is on the way'), sub: etaText, path: 'map' }
+    case 'arrived': return { icon: <MapPin size={20} />, title: t('Worker has arrived'), sub: t('Share your start OTP to begin'), path: 'otp' }
+    case 'in_progress': return { icon: <Check size={20} />, title: t('Service in progress'), sub: t('Your service is underway'), path: 'progress' }
+    case 'completed': return { icon: <Check size={20} />, title: t('Service completed'), sub: t('View your service summary'), path: 'completed' }
     default: return null
   }
 }
@@ -259,7 +260,7 @@ function StepTimeline({ status }: { status: string }) {
         return (
           <div key={s} className={`jt-step ${isDone ? 'done' : ''} ${isCur ? 'cur' : ''}`}>
             <span className="jt-step-dot">{isDone ? <Check size={14} strokeWidth={3} /> : i + 1}</span>
-            <span className="jt-step-lbl">{s}</span>
+            <span className="jt-step-lbl">{t(s)}</span>
           </div>
         )
       })}

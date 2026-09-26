@@ -7,6 +7,7 @@ import { BottomNav, Loading } from '../../components/UI'
 import { fetchMe, fetchSavedMethods, fetchFamily } from '../../api'
 import { useStore } from '../../store'
 import type { User } from '../../types'
+import { t } from '../../i18n'
 
 export default function MyProfile() {
   const nav = useNavigate()
@@ -23,8 +24,8 @@ export default function MyProfile() {
   const head = (
     <header className="appbar ord-appbar">
       <span className="iconbtn ghost" />
-      <div className="titles"><h1>My Profile</h1></div>
-      <button className="iconbtn" onClick={() => nav('/personal')} aria-label="Edit profile"><Pencil size={17} /></button>
+      <div className="titles"><h1>{t('My Profile')}</h1></div>
+      <button className="iconbtn" onClick={() => nav('/personal')} aria-label={t('Edit Profile')}><Pencil size={17} /></button>
     </header>
   )
   if (!user) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
@@ -32,10 +33,10 @@ export default function MyProfile() {
   const ROWS = [
     { icon: <Zap size={17} />, t: 'Quick Actions', to: '/quick-actions' },
     { icon: <Pencil size={17} />, t: 'Edit Profile', to: '/personal' },
-    { icon: <MapPin size={17} />, t: 'Addresses', sub: `${counts.addr} Saved`, to: '/addresses' },
+    { icon: <MapPin size={17} />, t: 'Addresses', sub: t('{n} Saved', { n: counts.addr }), to: '/addresses' },
     { icon: <Repeat size={17} />, t: 'Repeat bookings', to: '/profile/repeat' },
-    { icon: <CreditCard size={17} />, t: 'Payment Methods', sub: `${counts.pay} Saved`, to: '/profile/payment-methods' },
-    { icon: <Users size={17} />, t: 'Family Members', sub: `${counts.family} Member${counts.family === 1 ? '' : 's'}`, to: '/profile/family' },
+    { icon: <CreditCard size={17} />, t: 'Payment Methods', sub: t('{n} Saved', { n: counts.pay }), to: '/profile/payment-methods' },
+    { icon: <Users size={17} />, t: 'Family Members', sub: counts.family === 1 ? t('1 Member') : t('{n} Members', { n: counts.family }), to: '/profile/family' },
     { icon: <Bell size={17} />, t: 'Notification Settings', to: '/profile/notifications' },
     { icon: <Globe size={17} />, t: 'Language', to: '/profile/language' },
     { icon: <Shield size={17} />, t: 'Privacy', to: '/profile/privacy' },
@@ -61,25 +62,25 @@ export default function MyProfile() {
               )}
           </span>
           <div className="mp-hero-main">
-            <div className="mp-name">{user.name || 'Your name'}</div>
+            <div className="mp-name">{user.name || t('Your name')}</div>
             {user.phone && <div className="mp-line">+91 {user.phone}</div>}
             {user.email && <div className="mp-line">{user.email}</div>}
           </div>
-          <button className="mp-edit" onClick={() => nav('/personal')} aria-label="Edit"><Pencil size={15} /></button>
+          <button className="mp-edit" onClick={() => nav('/personal')} aria-label={t('Edit')}><Pencil size={15} /></button>
         </div>
 
         <div className="ws-card">
           {ROWS.map((r) => (
             <button key={r.t} className="ws-row" onClick={() => nav(r.to)}>
               <span className="ws-ico">{r.icon}</span>
-              <span className="ws-main"><span className="ws-t">{r.t}</span></span>
+              <span className="ws-main"><span className="ws-t">{t(r.t)}</span></span>
               {r.sub && <span className="mp-count">{r.sub}</span>}
               <ChevronRight size={17} className="ws-chev" />
             </button>
           ))}
           <button className="ws-row" onClick={() => nav('/profile/logout')}>
             <span className="ws-ico danger"><LogOut size={17} /></span>
-            <span className="ws-main"><span className="ws-t danger">Logout</span></span>
+            <span className="ws-main"><span className="ws-t danger">{t('Logout')}</span></span>
             <ChevronRight size={17} className="ws-chev" />
           </button>
         </div>

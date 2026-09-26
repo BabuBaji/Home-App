@@ -5,6 +5,7 @@
 // hardcoded. If a value is not knowable from the booking, these helpers return null and the UI
 // omits that line rather than showing a placeholder.
 import type { Booking, BookingStatus } from './types'
+import { t, dateLocale } from './i18n'
 
 // Live (in-flight) statuses, in the order the job actually moves through them. This mirrors the
 // BookingStatus union in types.ts and the STEPS list Track.tsx already renders.
@@ -40,7 +41,7 @@ export function bookingMinutes(b: Booking): number | null {
 export function durationLabel(b: Booking): string | null {
   const labels = b.items.map((i) => i.durationLabel).filter(Boolean)
   if (!labels.length) return null
-  return labels.length === 1 ? labels[0] : `${labels.length} services`
+  return labels.length === 1 ? labels[0] : t('{n} services', { n: labels.length })
 }
 
 /** When the job is (or was) meant to start: the scheduled slot, else when it was booked. */
@@ -71,7 +72,7 @@ export function timeRange(b: Booking): string {
  */
 export function scheduleDisplay(b: Booking): string {
   const d = startDate(b)
-  const day = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const day = d.toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' })
   return `${day} · ${timeRange(b)}`
 }
 
@@ -79,9 +80,9 @@ export function scheduleDisplay(b: Booking): string {
 export function medallion(b: Booking) {
   const d = statusDate(b) ?? startDate(b)
   return {
-    month: d.toLocaleDateString('en-IN', { month: 'short' }).toUpperCase(),
+    month: d.toLocaleDateString(dateLocale(), { month: 'short' }).toUpperCase(),
     day: d.toLocaleDateString('en-IN', { day: '2-digit' }),
-    weekday: d.toLocaleDateString('en-IN', { weekday: 'short' }),
+    weekday: d.toLocaleDateString(dateLocale(), { weekday: 'short' }),
   }
 }
 
@@ -93,16 +94,16 @@ export function statusDate(b: Booking): Date | null {
 }
 
 const dayTime = (d: Date) =>
-  `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}, ${time(d)}`
+  `${d.toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short' })}, ${time(d)}`
 
 /**
  * The line under the price: the booked window while upcoming/active, or when it finished/was
  * cancelled. Returns null when the underlying timestamp is not present.
  */
 export function whenLine(b: Booking): string | null {
-  if (b.status === 'completed') return b.completed_at ? `Completed on ${dayTime(new Date(b.completed_at))}` : null
-  if (b.status === 'cancelled') return `Cancelled on ${dayTime(new Date(b.created))}`
-  if (b.status === 'in_progress') return b.started_at ? `Started at ${time(new Date(b.started_at))}` : null
+  if (b.status === 'completed') return b.completed_at ? t('Completed on {when}', { when: dayTime(new Date(b.completed_at)) }) : null
+  if (b.status === 'cancelled') return t('Cancelled on {when}', { when: dayTime(new Date(b.created)) })
+  if (b.status === 'in_progress') return b.started_at ? t('Started at {when}', { when: time(new Date(b.started_at)) }) : null
   return timeRange(b)
 }
 
@@ -122,7 +123,7 @@ export const monthKey = (b: Booking) => {
 }
 export const monthLabel = (b: Booking) => {
   const d = statusDate(b) ?? startDate(b)
-  return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+  return d.toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' })
 }
 
 /** Group bookings into month sections, newest month first. */

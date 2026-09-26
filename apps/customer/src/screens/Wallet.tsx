@@ -8,6 +8,7 @@ import { BottomNav, Loading, useToast } from '../components/UI'
 import { fetchWallet, fetchCashback, fetchReferralEarnings, fetchRefunds, applyReferral } from '../api'
 import { useStore } from '../store'
 import { money, money2 } from '../wallet'
+import { t } from '../i18n'
 
 export default function Wallet() {
   const nav = useNavigate()
@@ -40,7 +41,7 @@ export default function Wallet() {
       const r = await applyReferral(code)
       setRefDone(true)
       if (user) setUser({ ...user, referredBy: -1 })
-      toast(`Code applied! ${r.referrer} earns ${money(r.reward)} when you finish your first booking.`)
+      toast(t('Code applied! {name} earns {amt} when you finish your first booking.', { name: r.referrer, amt: money(r.reward) }))
     } catch (e) { toast((e as Error).message) } finally { setRefBusy(false) }
   }
 
@@ -48,9 +49,9 @@ export default function Wallet() {
     <header className="appbar ord-appbar">
       {/* Wallet is a bottom-nav tab but is also reached from the Home wallet icon, so offer a back
           button; fall back to Home when there's no in-app history to pop. */}
-      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Wallet</h1></div>
-      <button className="iconbtn" onClick={() => nav('/support')} aria-label="Help"><HelpCircle size={18} /></button>
+      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Wallet')}</h1></div>
+      <button className="iconbtn" onClick={() => nav('/support')} aria-label={t('Help')}><HelpCircle size={18} /></button>
     </header>
   )
   if (!w) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
@@ -77,7 +78,7 @@ export default function Wallet() {
         <div className="w-hero">
           <div className="w-hero-top">
             <div>
-              <div className="w-hero-k">Total Wallet Balance</div>
+              <div className="w-hero-k">{t('Total Wallet Balance')}</div>
               <button className="w-hero-v as-text" onClick={() => hidden && setReveal((r) => !r)}>
                 {show(w.total)}
                 {hidden && <Eye size={15} className="w-hero-eye" />}
@@ -87,15 +88,15 @@ export default function Wallet() {
           </div>
           <div className="w-hero-split">
             {/* Cash spends anywhere; Promo is locked to bookings — that is the split. */}
-            <div><div className="w-hero-sk">Available Balance</div><div className="w-hero-sv">{show(w.available)}</div></div>
-            <div><div className="w-hero-sk">Locked Balance</div><div className="w-hero-sv">{show(w.locked)}</div></div>
+            <div><div className="w-hero-sk">{t('Available Balance')}</div><div className="w-hero-sv">{show(w.available)}</div></div>
+            <div><div className="w-hero-sk">{t('Locked Balance')}</div><div className="w-hero-sv">{show(w.locked)}</div></div>
           </div>
         </div>
 
         {w.status !== 'active' && (
           <div className="card offer" style={{ background: '#fff4de' }}>
             <span className="oi">⚠️</span>
-            <div><div className="ot">Wallet {w.status}</div><div className="od">You can't add or use your wallet right now. Contact support.</div></div>
+            <div><div className="ot">{t('Wallet {status}', { status: w.status })}</div><div className="od">{t("You can't add or use your wallet right now. Contact support.")}</div></div>
           </div>
         )}
 
@@ -103,17 +104,17 @@ export default function Wallet() {
           {ACTIONS.map((a) => (
             <button key={a.k} className="w-act" onClick={() => nav(a.to)}>
               <span className="w-act-ico">{a.icon}</span>
-              <span className="w-act-k">{a.k}</span>
+              <span className="w-act-k">{t(a.k)}</span>
             </button>
           ))}
         </div>
 
         <div className="ws-card">
-          <div className="w-ov-h">Quick Overview</div>
+          <div className="w-ov-h">{t('Quick Overview')}</div>
           {OVERVIEW.map((o) => (
             <button key={o.k} className="w-ov" onClick={() => nav(o.to)}>
               <span className={`w-ov-ico ${o.cls}`}>{o.icon}</span>
-              <span className="w-ov-k">{o.k}</span>
+              <span className="w-ov-k">{t(o.k)}</span>
               <span className="w-ov-v">{o.v === null ? '—' : money(o.v)}</span>
               <ChevronRight size={15} className="ws-chev" />
             </button>
@@ -122,29 +123,29 @@ export default function Wallet() {
 
         <div className="w-invite">
           <div className="w-invite-main">
-            <div className="w-invite-t">Invite &amp; Earn</div>
-            <div className="w-invite-d">Invite friends and earn on their first booking.</div>
-            <button className="w-invite-btn" onClick={() => nav('/refer')}>Refer Now</button>
+            <div className="w-invite-t">{t('Invite & Earn')}</div>
+            <div className="w-invite-d">{t('Invite friends and earn on their first booking.')}</div>
+            <button className="w-invite-btn" onClick={() => nav('/refer')}>{t('Refer Now')}</button>
           </div>
           <div className="w-invite-art" aria-hidden="true">🎁</div>
         </div>
 
         {!user?.referredBy && !refDone && (
           <div className="card pad ref-apply">
-            <div className="ra-t">🎁 Have a referral code?</div>
-            <div className="ra-d">Apply a friend's code — they earn when you complete your first booking.</div>
+            <div className="ra-t">🎁 {t('Have a referral code?')}</div>
+            <div className="ra-d">{t("Apply a friend's code — they earn when you complete your first booking.")}</div>
             <div className="ra-row">
               <div className="field ra-input">
                 <input value={refCode} onChange={(e) => setRefCode(e.target.value.toUpperCase())} placeholder="e.g. HH1A2B3C" maxLength={12} />
               </div>
-              <button className="btn ra-btn" onClick={applyRef} disabled={refBusy || !refCode.trim()}>{refBusy ? '…' : 'Apply'}</button>
+              <button className="btn ra-btn" onClick={applyRef} disabled={refBusy || !refCode.trim()}>{refBusy ? '…' : t('Apply')}</button>
             </div>
           </div>
         )}
 
         <div className="banner-soft">
           <span className="bi">🛡</span>
-          <div className="grow"><div className="bt">100% Secure Transactions</div><div className="bd">Wallet is credited only after your payment is verified.</div></div>
+          <div className="grow"><div className="bt">{t('100% Secure Transactions')}</div><div className="bd">{t('Wallet is credited only after your payment is verified.')}</div></div>
         </div>
       </div>
       <BottomNav />

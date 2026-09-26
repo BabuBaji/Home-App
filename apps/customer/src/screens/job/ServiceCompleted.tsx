@@ -6,6 +6,7 @@ import { speak, speakOnce } from '../../notify'
 import { sendJobMessage } from '../../api'
 import { useStore } from '../../store'
 import { useJob, serviceNames, proName } from './useJob'
+import { t, dateLocale } from '../../i18n'
 
 // Module 6 · #51 — Service Completed. Uses the real completed_at timestamp. The star row seeds the
 // rating and jumps into the Module-7 rating flow; Pay & Tip opens the tip screen.
@@ -30,7 +31,7 @@ export default function ServiceCompleted() {
   }, [b?.id, b?.status])
 
   if (!b) return <div className="screen jt"><Loading /></div>
-  const completedAt = b.completed_at ? new Date(b.completed_at).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }) : '—'
+  const completedAt = b.completed_at ? new Date(b.completed_at).toLocaleString(dateLocale(), { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }) : '—'
 
   // "Yes, extend" → message the assigned expert (by the customer's name) on the same job chat the
   // worker app reads, so they get the alert and can raise an extension request. That request then
@@ -43,11 +44,11 @@ export default function ServiceCompleted() {
       await sendJobMessage(b.id, `Hi, this is ${name}. I'd like to extend my ${serviceNames(b)} service. Could you please raise an extension request?`)
       setExtend('sent')
       const who = proName(b)
-      toast(`We've informed ${who}. They'll send you an extension request to approve.`)
+      toast(t("We've informed {name}. They'll send you an extension request to approve.", { name: who }))
       speak(`We have informed ${who}. They will send you an extension request shortly.`)
     } catch {
       setExtend('idle')
-      toast('Could not reach your expert. Please try again.')
+      toast(t('Could not reach your expert. Please try again.'))
     }
   }
 
@@ -55,38 +56,38 @@ export default function ServiceCompleted() {
     <div className="screen jt">
       <div className="content jt-scroll jt-center">
         <div className="jt-check"><Check size={40} strokeWidth={3} /></div>
-        <h2 className="jt-done-title">Service Completed!</h2>
-        <p className="jt-done-sub">Thank you for choosing our service.</p>
+        <h2 className="jt-done-title">{t('Service Completed!')}</h2>
+        <p className="jt-done-sub">{t('Thank you for choosing our service.')}</p>
 
-        <div className="jt-card jt-kv"><span>Completed At</span><b>{completedAt}</b></div>
+        <div className="jt-card jt-kv"><span>{t('Completed At')}</span><b>{completedAt}</b></div>
 
         {/* Extend offer — voiced above and actionable here. */}
         {extend === 'sent' ? (
           <div className="jt-card" style={{ borderColor: 'var(--brand, #6D4AFF)' }}>
-            <b>Extension requested</b>
+            <b>{t('Extension requested')}</b>
             <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-              {proName(b)} will send you an extension request — approve &amp; pay it on the Extend screen.
+              {t('{name} will send you an extension request — approve & pay it on the Extend screen.', { name: proName(b) })}
             </p>
           </div>
         ) : extend !== 'declined' ? (
           <div className="jt-card">
-            <b>Need more time?</b>
+            <b>{t('Need more time?')}</b>
             <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-              We can ask {proName(b)} to extend your {serviceNames(b)} service.
+              {t('We can ask {name} to extend your {service} service.', { name: proName(b), service: serviceNames(b) })}
             </p>
             <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
               <button className="jt-btn" style={{ flex: 1.4 }} disabled={extend === 'sending'} onClick={requestExtend}>
-                {extend === 'sending' ? 'Please wait…' : 'Yes, extend'}
+                {extend === 'sending' ? t('Please wait…') : t('Yes, extend')}
               </button>
               <button className="jt-btn ghost" style={{ flex: 1 }} disabled={extend === 'sending'} onClick={() => setExtend('declined')}>
-                No, thanks
+                {t('No, thanks')}
               </button>
             </div>
           </div>
         ) : null}
 
         <div className="jt-sc-rate">
-          <div className="jt-sc-rate-q">How was your experience?</div>
+          <div className="jt-sc-rate-q">{t('How was your experience?')}</div>
           <div className="jt-stars">
             {[1, 2, 3, 4, 5].map((n) => (
               <span key={n} className={n <= stars ? 'on' : ''} onClick={() => { setStars(n); nav(`/rate/${b.id}?stars=${n}`) }}>★</span>
@@ -96,8 +97,8 @@ export default function ServiceCompleted() {
       </div>
 
       <div className="jt-foot col">
-        <button className="jt-btn" onClick={() => nav(`/tip/${b.id}`)}>Pay &amp; Tip</button>
-        <button className="jt-btn ghost" onClick={() => nav('/home')}>Back to Home</button>
+        <button className="jt-btn" onClick={() => nav(`/tip/${b.id}`)}>{t('Pay & Tip')}</button>
+        <button className="jt-btn ghost" onClick={() => nav('/home')}>{t('Back to Home')}</button>
       </div>
     </div>
   )

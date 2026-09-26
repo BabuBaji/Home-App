@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, HelpCircle, MessageCircle, Phone, Mail, Ticket, ChevronRight, Headset } from 'lucide-react'
 import { useToast } from '../../components/UI'
 import SupportChat from '../../components/SupportChat'
+import { t } from '../../i18n'
 
 export default function Help() {
   const nav = useNavigate()
@@ -21,14 +22,14 @@ export default function Help() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-        <div className="titles"><h1>Help &amp; Support</h1></div>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <div className="titles"><h1>{t('Help & Support')}</h1></div>
         <span className="iconbtn ghost" />
       </header>
 
       <div className="content">
         <div className="hp-hero">
-          <div><div className="hp-hero-t">Need Help?</div><div className="hp-hero-d">We are here to assist you</div></div>
+          <div><div className="hp-hero-t">{t('Need Help?')}</div><div className="hp-hero-d">{t('We are here to assist you')}</div></div>
           <span className="hp-hero-art"><Headset size={26} /></span>
         </div>
 
@@ -36,7 +37,7 @@ export default function Help() {
           {ROWS.map((r) => (
             <button key={r.t} className="ws-row" onClick={r.on}>
               <span className="ws-ico">{r.icon}</span>
-              <span className="ws-main"><span className="ws-t">{r.t}{r.live && <span className="hp-live">Live</span>}</span><span className="ws-d">{r.d}</span></span>
+              <span className="ws-main"><span className="ws-t">{t(r.t)}{r.live && <span className="hp-live">{t('Live')}</span>}</span><span className="ws-d">{t(r.d)}</span></span>
               <ChevronRight size={17} className="ws-chev" />
             </button>
           ))}

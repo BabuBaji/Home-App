@@ -6,6 +6,7 @@ import { createBookingApi, fetchQuote, fetchPaymentConfig, createOrder, verifyPa
 import { RazorpayNative } from '../razorpayNative'
 import { PayIcon, PayCluster } from '../components/PayIcon'
 import { Capacitor } from '@capacitor/core'
+import { t } from '../i18n'
 
 // Load Razorpay's web checkout script once, on demand (browser fallback only).
 let rzpLoading: Promise<boolean> | null = null
@@ -66,7 +67,7 @@ export default function Payment() {
     ...extra,
   })
 
-  async function finishBooking(extra: Record<string, unknown> = {}, msg = 'Payment successful!') {
+  async function finishBooking(extra: Record<string, unknown> = {}, msg = t('Payment successful!')) {
     const b = await createBookingApi(bookingPayload(extra))
     toast(msg); clearCart()
     setTimeout(() => nav(`/track/${b.id}`, { replace: true }), 300)
@@ -77,7 +78,7 @@ export default function Payment() {
     // Wallet / cash book directly (server marks paid from wallet, or pay-after-service).
     if (payment === 'wallet' || payment === 'cash') {
       setBusy(true)
-      try { await finishBooking({}, payment === 'cash' ? 'Booking confirmed!' : 'Payment successful!') }
+      try { await finishBooking({}, payment === 'cash' ? t('Booking confirmed!') : t('Payment successful!')) }
       catch (e) { toast((e as Error).message); setBusy(false) }
       return
     }
@@ -88,11 +89,11 @@ export default function Payment() {
     // No Razorpay keys yet → in demo mode simulate success so the flow is testable.
     if (demo) {
       setBusy(true)
-      try { await finishBooking({ paymentId: await mockPay(total, payment) }, 'Payment successful!') }
+      try { await finishBooking({ paymentId: await mockPay(total, payment) }, t('Payment successful!')) }
       catch (e) { toast((e as Error).message); setBusy(false) }
       return
     }
-    toast('Online payments are not set up yet. Add Razorpay keys in Admin → Settings.')
+    toast(t('Online payments are not set up yet. Add Razorpay keys in Admin → Settings.'))
   }
 
   async function payWithRazorpay(upiOnly = false) {
@@ -110,11 +111,11 @@ export default function Payment() {
           })
           await verifyPayment({ razorpay_order_id: r.razorpay_order_id || order.orderId, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })
           await finishBooking({ paymentId: r.razorpay_payment_id })
-        } catch (e) { toast((e as Error).message || 'Payment cancelled'); setBusy(false) }
+        } catch (e) { toast((e as Error).message || t('Payment cancelled')); setBusy(false) }
         return
       }
       // Browser fallback — web checkout.js
-      if (!(await loadRazorpay())) { toast('Could not load payment gateway'); setBusy(false); return }
+      if (!(await loadRazorpay())) { toast(t('Could not load payment gateway')); setBusy(false); return }
       const opts: any = {
         key: order.keyId, order_id: order.orderId, amount: total! * 100, currency: 'INR',
         name: 'HomeHelp', description: cart.map((x) => x.name).join(', ').slice(0, 80) || 'Service booking',
@@ -131,7 +132,7 @@ export default function Payment() {
         modal: { ondismiss: () => setBusy(false) },
       }
       const rzp = new (window as any).Razorpay(opts)
-      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || 'Payment failed'); setBusy(false) })
+      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || t('Payment failed')); setBusy(false) })
       rzp.open()
     } catch (e) { toast((e as Error).message); setBusy(false) }
   }
@@ -143,7 +144,7 @@ export default function Payment() {
         {id === 'upi'
           ? <span className="oicon pay brand cluster"><PayCluster /></span>
           : <span className="oicon pay brand"><PayIcon id={id} /></span>}
-        <div className="obody"><h3 className="sm2">{name}</h3><p>{sub}</p></div>
+        <div className="obody"><h3 className="sm2">{t(name)}</h3><p>{t(sub)}</p></div>
         <span className="radio">{active ? '✓' : ''}</span>
       </div>
     )
@@ -151,29 +152,29 @@ export default function Payment() {
 
   return (
     <div className="screen">
-      <Header title="Payment" />
+      <Header title={t('Payment')} />
       <div className="content pad-cta">
         <div className="amount-banner">
-          <div className="lbl">Amount to Pay</div>
+          <div className="lbl">{t('Amount to Pay')}</div>
           <div className="amt">₹{total ?? '—'}</div>
-          <div className="det">{payment === 'cash' ? 'Pay after service' : 'Secured by 256-bit encryption'}</div>
+          <div className="det">{payment === 'cash' ? t('Pay after service') : t('Secured by 256-bit encryption')}</div>
         </div>
 
-        <div className="label">Pay by UPI</div>
+        <div className="label">{t('Pay by UPI')}</div>
         <Row {...METHODS[0]} />
-        <div className="label">Other Payment Options</div>
+        <div className="label">{t('Other Payment Options')}</div>
         {METHODS.slice(1).map((m) => <Row key={m.id} {...m} />)}
 
-        <div className="banner-soft"><span className="bi">🛡</span><div><div className="bt">100% Secure Payments</div><div className="bd">UPI, cards & wallet are encrypted and verified by Razorpay.</div></div></div>
+        <div className="banner-soft"><span className="bi">🛡</span><div><div className="bt">{t('100% Secure Payments')}</div><div className="bd">{t('UPI, cards & wallet are encrypted and verified by Razorpay.')}</div></div></div>
       </div>
 
       <FooterCTA>
         <button className="btn full pay-btn" onClick={pay} disabled={busy || total === null}>
           {busy
-            ? <><span className="pay-spin" aria-hidden /> Processing…</>
+            ? <><span className="pay-spin" aria-hidden /> {t('Processing…')}</>
             : payment === 'cash'
-              ? <><span className="pay-ic">✓</span> Confirm Booking · ₹{total}</>
-              : <><span className="pay-ic secure">🔒</span> Pay ₹{total} <span className="pay-live" aria-hidden /></>}
+              ? <><span className="pay-ic">✓</span> {t('Confirm Booking · ₹{amt}', { amt: total ?? '' })}</>
+              : <><span className="pay-ic secure">🔒</span> {t('Pay ₹{amt}', { amt: total ?? '' })} <span className="pay-live" aria-hidden /></>}
         </button>
       </FooterCTA>
     </div>

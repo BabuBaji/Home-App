@@ -7,6 +7,7 @@ import { Capacitor } from '@capacitor/core'
 import { useToast } from '../../components/UI'
 import { fetchBookings, getCachedPosition, raiseSos, supportContact } from '../../api'
 import { isLive } from '../../orders'
+import { t } from '../../i18n'
 
 async function open(url: string) {
   if (Capacitor.isNativePlatform()) { try { const { AppLauncher } = await import('@capacitor/app-launcher'); await AppLauncher.openUrl({ url }); return } catch { /* fall through */ } }
@@ -42,49 +43,49 @@ export default function EmergencySupport() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-        <div className="titles"><h1>Emergency Support</h1></div>
-        <button className="iconbtn" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell size={18} /></button>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <div className="titles"><h1>{t('Emergency Support')}</h1></div>
+        <button className="iconbtn" onClick={() => nav('/notifications')} aria-label={t('Notifications')}><Bell size={18} /></button>
       </header>
 
       <div className="content">
         <div className="es-hero">
           <span className="es-hero-ico"><Phone size={26} /></span>
-          <div className="es-hero-t">Need Immediate Help?</div>
-          <div className="es-hero-d">Contact our 24/7 emergency support team for urgent issues.</div>
+          <div className="es-hero-t">{t('Need Immediate Help?')}</div>
+          <div className="es-hero-d">{t('Contact our 24/7 emergency support team for urgent issues.')}</div>
         </div>
 
         {liveId && (
           <button className="btn full" disabled={sent} onClick={sos} style={{ background: '#dc2626', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Siren size={18} /> {sent ? 'Safety team alerted' : 'SOS — alert the safety team now'}
+            <Siren size={18} /> {sent ? t('Safety team alerted') : t('SOS — alert the safety team now')}
           </button>
         )}
         <div className="es-actions">
           {PHONE && <button className="es-act" onClick={() => open(`tel:+${PHONE}`)}>
             <span className="es-act-ico call"><Phone size={20} /></span>
-            <span className="es-act-t">Call Now</span>
+            <span className="es-act-t">{t('Call Now')}</span>
             <span className="es-act-d">{contact.phone}</span>
           </button>}
           {WA && <button className="es-act" onClick={() => open(`https://wa.me/${WA}`)}>
             <span className="es-act-ico wa"><MessageCircle size={20} /></span>
             <span className="es-act-t">WhatsApp</span>
-            <span className="es-act-d">Chat Now</span>
+            <span className="es-act-d">{t('Chat Now')}</span>
           </button>}
           <button className="es-act" onClick={() => nav('/support/chat')}>
             <span className="es-act-ico chat"><MessageCircle size={20} /></span>
-            <span className="es-act-t">Live Chat</span>
-            <span className="es-act-d">Start Chat</span>
+            <span className="es-act-t">{t('Live Chat')}</span>
+            <span className="es-act-d">{t('Start Chat')}</span>
           </button>
         </div>
 
-        <div className="es-when-h">When to use Emergency Support</div>
+        <div className="es-when-h">{t('When to use Emergency Support')}</div>
         <ul className="es-when">
-          {WHEN.map((w) => <li key={w}>{w}</li>)}
+          {WHEN.map((w) => <li key={w}>{t(w)}</li>)}
         </ul>
 
         <div className="es-avail">
-          <div className="es-avail-t">Our team is available 24/7</div>
-          <div className="es-avail-d">Average response time: 2-3 minutes</div>
+          <div className="es-avail-t">{t('Our team is available 24/7')}</div>
+          <div className="es-avail-d">{t('Average response time: 2-3 minutes')}</div>
         </div>
       </div>
     </div>

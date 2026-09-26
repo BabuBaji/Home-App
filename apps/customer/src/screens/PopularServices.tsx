@@ -5,6 +5,7 @@ import { BottomNav, Loading } from '../components/UI'
 import { useStore } from '../store'
 import { fetchServices } from '../api'
 import type { Service } from '../types'
+import { t } from '../i18n'
 
 // Module 2 · #11 — Popular Services. Full-screen browse grid over the real catalogue
 // (fetchServices). Tapping a card opens the existing service/booking flow. Ratings are
@@ -30,9 +31,9 @@ export default function PopularServices() {
   return (
     <div className="screen has-nav m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Popular Services</b>
-        <button className="au-back" onClick={() => nav('/cart')} aria-label="Cart"><ShoppingCart size={20} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Popular Services')}</b>
+        <button className="au-back" onClick={() => nav('/cart')} aria-label={t('Cart')}><ShoppingCart size={20} /></button>
       </div>
 
       {!services ? <Loading /> : (
@@ -45,15 +46,15 @@ export default function PopularServices() {
                   <span className="ps-img">
                     <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-                    {!s.available && <span className="ps-soon">Soon</span>}
+                    {!s.available && <span className="ps-soon">{t('Soon')}</span>}
                   </span>
                   <span className="ps-name">{s.name}</span>
                   <span className="ps-rate"><Star size={13} className="ps-star" /> {rating} <em>({count})</em></span>
-                  <span className="ps-price">From ₹{s.price}</span>
+                  <span className="ps-price">{t('From ₹{price}', { price: s.price })}</span>
                 </button>
               )
             })}
-            {services.length === 0 && <p className="muted" style={{ gridColumn: '1/-1', padding: 24, textAlign: 'center' }}>No services found.</p>}
+            {services.length === 0 && <p className="muted" style={{ gridColumn: '1/-1', padding: 24, textAlign: 'center' }}>{t('No services found.')}</p>}
           </div>
         </div>
       )}

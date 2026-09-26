@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client'
 import { getCurrentPosition } from './geo'
-import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification, Offer } from './types'
+import type { Booking, Address, Transaction, User, ServiceDetail, Service, Coupon, Quote, Ticket, HomeContent, PaymentGroup, ChargeResult, AppNotification, Offer, CartItem } from './types'
 
 // Backend base URL. Resolved at startup from a small public config file so the apps
 // can be repointed at a new tunnel/host WITHOUT rebuilding the APK. Falls back to the
@@ -134,7 +134,11 @@ export const removeFavouriteApi = (id: string) => req<string[]>(`/api/favourites
 /* coupons & quote */
 export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
 export const validateCoupon = (code: string, subtotal: number) => req<{ code: string; discount: number; label: string }>('/api/coupons/validate', { method: 'POST', body: JSON.stringify({ code, subtotal }) })
-export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string, at?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode, at, ...(zoneLoc || {}) }) })
+/* The package the cart was filled from (if any). Sent with quotes and bookings; the server applies
+   it only while the cart is still exactly that bundle, so a stale id is harmless. */
+let activePackageId: number | null = null
+export const setActivePackage = (id: number | null) => { activePackageId = id }
+export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string, at?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode, at, packageId: activePackageId, ...(zoneLoc || {}) }) })
 
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
@@ -332,7 +336,7 @@ export const createBookingApi = async (payload: any) => {
     // Send without coords (the server falls back) and warm the cache in the background.
     else { captureLocationOnOpen() }
   }
-  return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...payload, ...coords }) })
+  return req<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ ...(activePackageId ? { packageId: activePackageId } : {}), ...payload, ...coords }) })
 }
 export const fetchBookings = () => req<Booking[]>('/api/bookings')
 // Real customer reviews for a service (from reviewed bookings). Public/read-only.
@@ -422,3 +426,5 @@ export const registerPushToken = (token: string, platform: string) => req<{ ok: 
 export const callExpert = (bookingId: number) => req<{ ok: boolean; mode: 'bridge' | 'direct'; phone?: string | null }>(`/api/bookings/${bookingId}/call`, { method: 'POST' })
 export const supportContact = () => req<{ phone: string; whatsapp: string }>('/api/support/contact')
 export const raiseSos = (bookingId: number, lat?: number, lng?: number) => req<{ ok: boolean; message: string }>(`/api/bookings/${bookingId}/sos`, { method: 'POST', body: JSON.stringify({ lat, lng }) })
+export interface ServicePackage { id: number; name: string; description: string; items: CartItem[]; services: string[]; price: number; was: number; save: number }
+export const fetchPackages = () => req<ServicePackage[]>(`/api/packages?${locParams()}`)

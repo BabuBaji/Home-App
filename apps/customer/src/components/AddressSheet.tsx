@@ -5,6 +5,7 @@ import { useToast } from './UI'
 import { useStore } from '../store'
 import { fetchAddresses, setDefaultAddressApi, deleteAddressApi, updateMe } from '../api'
 import type { Address } from '../types'
+import { t } from '../i18n'
 
 // Saved-address picker for the Home header. A bottom sheet rather than a route push: the header
 // only carries a short "flat, city" summary, so the full text has to be one tap away without
@@ -47,7 +48,7 @@ export default function AddressSheet({ open, onClose, onSelect }: {
 
   async function remove(a: Address) {
     setMenu(null)
-    try { setList(await deleteAddressApi(a.id)); toast('Address removed') }
+    try { setList(await deleteAddressApi(a.id)); toast(t('Address removed')) }
     catch (e) { toast((e as Error).message) }
   }
 
@@ -56,9 +57,9 @@ export default function AddressSheet({ open, onClose, onSelect }: {
       <div className="as-sheet" onClick={(e) => e.stopPropagation()}>
         <span className="as-grab" aria-hidden />
         <div className="as-head">
-          <b>Saved Address</b>
+          <b>{t('Saved Address')}</b>
           <button className="as-add" onClick={() => { onClose(); nav('/onboarding/location') }}>
-            <Plus size={15} /> Add address
+            <Plus size={15} /> {t('Add address')}
           </button>
         </div>
 
@@ -70,7 +71,7 @@ export default function AddressSheet({ open, onClose, onSelect }: {
                 <span className="as-txt">
                   <span className="as-h">
                     {a.label}
-                    {a.is_default && <span className="as-badge">SELECTED</span>}
+                    {a.is_default && <span className="as-badge">{t('SELECTED')}</span>}
                   </span>
                   <span className="as-line">
                     {a.line}{a.pincode && !(a.line || '').includes(a.pincode) ? `, ${a.pincode}` : ''}
@@ -78,18 +79,18 @@ export default function AddressSheet({ open, onClose, onSelect }: {
                 </span>
               </button>
               <div className="as-menuwrap">
-                <button className="as-more" onClick={() => setMenu(menu === a.id ? null : a.id)} aria-label="More">
+                <button className="as-more" onClick={() => setMenu(menu === a.id ? null : a.id)} aria-label={t('More options')}>
                   <MoreVertical size={18} />
                 </button>
                 {menu === a.id && (
                   <div className="ad2-menu as-menu">
                     <button onClick={() => { setMenu(null); onClose(); nav('/address-details', { state: { edit: a } }) }}>
-                      <Pencil size={14} /> Edit
+                      <Pencil size={14} /> {t('Edit')}
                     </button>
                     {/* the selected address has no delete — removing it would leave the app with no
                         address to price against until the customer picks another */}
                     {!a.is_default && (
-                      <button className="danger" onClick={() => remove(a)}><Trash2 size={14} /> Delete</button>
+                      <button className="danger" onClick={() => remove(a)}><Trash2 size={14} /> {t('Delete')}</button>
                     )}
                   </div>
                 )}
@@ -97,7 +98,7 @@ export default function AddressSheet({ open, onClose, onSelect }: {
             </div>
           ))}
           {list && list.length === 0 && (
-            <div className="as-empty">No saved addresses yet — add one to get started.</div>
+            <div className="as-empty">{t('No saved addresses yet — add one to get started.')}</div>
           )}
         </div>
       </div>

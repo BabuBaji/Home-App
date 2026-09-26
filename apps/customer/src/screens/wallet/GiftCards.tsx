@@ -7,9 +7,10 @@ import { Loading, useToast } from '../../components/UI'
 import { pushBackHandler } from '../../backStack'
 import { fetchGiftCards, redeemGiftCard, type GiftCardInfo } from '../../api'
 import { money2 } from '../../wallet'
+import { t, dateLocale } from '../../i18n'
 
 const validTill = (s: string | null) =>
-  s ? `Valid till ${new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : 'No expiry'
+  s ? t('Valid till {date}', { date: new Date(s).toLocaleDateString(dateLocale(), { day: '2-digit', month: 'short', year: 'numeric' }) }) : t('No expiry')
 
 export default function GiftCards() {
   const nav = useNavigate()
@@ -29,16 +30,16 @@ export default function GiftCards() {
     setBusy(true)
     try {
       const r = await redeemGiftCard(c)
-      toast(`${money2(r.card.amount)} added from ${c}`)
+      toast(t('{amt} added from {code}', { amt: money2(r.card.amount), code: c }))
       setAdd(false); setCode(''); await load()
     } catch (e) { toast((e as Error).message) } finally { setBusy(false) }
   }
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Gift Cards</h1></div>
-      <button className="iconbtn" onClick={() => setAdd(true)} aria-label="Add gift card"><Plus size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Gift Cards')}</h1></div>
+      <button className="iconbtn" onClick={() => setAdd(true)} aria-label={t('Add a gift card')}><Plus size={18} /></button>
     </header>
   )
   if (!info) return <div className="screen">{head}<Loading /></div>
@@ -53,7 +54,7 @@ export default function GiftCards() {
         <div className="w-hero">
           <div className="w-hero-top">
             <div>
-              <div className="w-hero-k">My Gift Card Balance</div>
+              <div className="w-hero-k">{t('My Gift Card Balance')}</div>
               <div className="w-hero-v">{money2(info.balance)}</div>
               <div className="w-hero-sub">{info.active} Active Card{info.active === 1 ? '' : 's'}</div>
             </div>
@@ -61,9 +62,9 @@ export default function GiftCards() {
           </div>
         </div>
 
-        <h2 className="ord-month-h" style={{ marginTop: 16 }}>My Gift Cards</h2>
+        <h2 className="ord-month-h" style={{ marginTop: 16 }}>{t('My Gift Cards')}</h2>
         {info.cards.length === 0 ? (
-          <div className="state"><div className="ico">🎁</div><h3>No gift cards yet</h3><p>Add a gift card code and its value lands in your wallet.</p></div>
+          <div className="state"><div className="ico">🎁</div><h3>{t('No gift cards yet')}</h3><p>{t('Add a gift card code and its value lands in your wallet.')}</p></div>
         ) : (
           <div className="gc-list">
             {info.cards.map((c) => (
@@ -71,7 +72,7 @@ export default function GiftCards() {
                 <span className="gc-ico"><Gift size={17} /></span>
                 <div className="gc-main">
                   <div className="gc-code">{c.code}</div>
-                  <div className="gc-valid">{expired(c) ? 'Used / expired' : validTill(c.expires)}</div>
+                  <div className="gc-valid">{expired(c) ? t('Used / expired') : validTill(c.expires)}</div>
                 </div>
                 <div className="gc-amt">{money2(c.balance)}</div>
               </div>
@@ -81,8 +82,8 @@ export default function GiftCards() {
 
         <button className="gc-add" onClick={() => setAdd(true)}>
           <span>
-            <span className="gc-add-k">Have a Gift Card?</span>
-            <span className="gc-add-v">Add Gift Card</span>
+            <span className="gc-add-k">{t('Have a Gift Card?')}</span>
+            <span className="gc-add-v">{t('Add Gift Card')}</span>
           </span>
           <ChevronRight size={18} />
         </button>
@@ -91,13 +92,13 @@ export default function GiftCards() {
       {add && (
         <div className="sheet-wrap" onClick={() => setAdd(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-h">Add a gift card</div>
+            <div className="sheet-h">{t('Add a gift card')}</div>
             <div className="gc-form">
               <div className="am-field sm">
-                <input value={code} autoFocus placeholder="Enter code" maxLength={20}
+                <input value={code} autoFocus placeholder={t('Enter code')} maxLength={20}
                   onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
               </div>
-              <button className="btn full" disabled={!code.trim() || busy} onClick={redeem}>{busy ? 'Adding…' : 'Add Gift Card'}</button>
+              <button className="btn full" disabled={!code.trim() || busy} onClick={redeem}>{busy ? t('Adding…') : t('Add Gift Card')}</button>
             </div>
           </div>
         </div>

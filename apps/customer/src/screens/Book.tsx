@@ -8,6 +8,7 @@ import type { ZoneHours } from '../components/Calendar'
 import { useStore } from '../store'
 import { fetchService, fetchQuote, createBookingApi, fetchZoneHours, fetchSlots, type SlotInfo } from '../api'
 import type { ServiceDetail, Duration, Quote } from '../types'
+import { t, dateLocale } from '../i18n'
 
 // Part-of-day buckets for the schedule time grid.
 const TOD: { key: string; label: string; test: (h: number) => boolean }[] = [
@@ -46,7 +47,7 @@ export default function Book() {
   const [placing, setPlacing] = useState(false)
 
   useEffect(() => {
-    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations.find((x) => x.id === preDurationId) || d.durations[0]) }).catch(() => toast('Could not load service'))
+    fetchService(id!, pincode || undefined).then((d) => { setS(d); setDur(d.durations.find((x) => x.id === preDurationId) || d.durations[0]) }).catch(() => toast(t('Could not load service')))
   }, [id, pincode])
 
   // Live authoritative bill (server applies zone price, offers, membership, peak/surge, tax).
@@ -101,14 +102,14 @@ export default function Book() {
   // Schedule date chips: exactly three — Today, Tomorrow, and the next day (by weekday). Further-out
   // dates are picked from the calendar.
   const chipDays = Array.from({ length: 3 }, (_, i) => { const d = startOfDay(new Date()); d.setDate(d.getDate() + i); return d })
-  const chipLabel = (d: Date, i: number) => (i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-IN', { weekday: 'long' }))
+  const chipLabel = (d: Date, i: number) => (i === 0 ? t('Today') : i === 1 ? t('Tomorrow') : d.toLocaleDateString(dateLocale(), { weekday: 'long' }))
   const dateIsChip = selDate && chipDays.some((d) => sameDay(d, selDate))
   // Booking window: Today/Tomorrow/next day are open; further-out dates unlock at 8 PM daily.
   const maxOffset = new Date().getHours() >= 20 ? 3 : 2
   const daysAhead = selDate ? Math.round((startOfDay(selDate).getTime() - startOfDay(new Date()).getTime()) / 86400000) : 0
   const locked = !!selDate && daysAhead > maxOffset
   const lastOpen = startOfDay(new Date()); lastOpen.setDate(lastOpen.getDate() + maxOffset)
-  const payLabel = payment === 'phonepe' ? 'PhonePe UPI' : payment === 'wallet' ? 'Wallet' : 'UPI'
+  const payLabel = payment === 'phonepe' ? 'PhonePe UPI' : payment === 'wallet' ? t('Wallet') : 'UPI'
   const showDetails = instant || !!selDate   // schedule: reveal duration/time only after a date is chosen
 
   async function onPaid(method: string, txnId: string) {
@@ -132,37 +133,37 @@ export default function Book() {
 
   const startPay = () => {
     if (closedNow) { setBookingType('schedule'); return }
-    if (!instant && !selDate) return toast('Please pick a date')
-    if (!instant && slot === null) return toast('Please pick a time slot')
+    if (!instant && !selDate) return toast(t('Please pick a date'))
+    if (!instant && slot === null) return toast(t('Please pick a time slot'))
     setSheet(true)
   }
 
   return (
     <div className="screen">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>{instant ? 'Book Instant' : 'Schedule'}</b><span style={{ width: 42 }} />
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{instant ? t('Book Instant') : t('Schedule')}</b><span style={{ width: 42 }} />
       </div>
 
       <div className="content pad-cta bkx-scroll">
-        {instant && (closedNow ? <h1 className="sheet-title">We're closed right now 🌙</h1> : <h1 className="sheet-title pink">Arrives in {ETA_MIN} min ⚡</h1>)}
+        {instant && (closedNow ? <h1 className="sheet-title">{t("We're closed right now 🌙")}</h1> : <h1 className="sheet-title pink">{t('Arrives in {n} min ⚡', { n: ETA_MIN })}</h1>)}
 
         {closedNow && (
           <div className="note-box" style={{ background: '#fff4ec', borderColor: '#fed7aa', color: '#c2410c' }}>
-            🌙 We're closed right now{todayHoursLabel(zh) ? ` · Hours ${todayHoursLabel(zh)}` : ''}. <b onClick={() => setBookingType('schedule')} style={{ textDecoration: 'underline', cursor: 'pointer' }}>Schedule for later</b>.
+            🌙 {t("We're closed right now")}{todayHoursLabel(zh) ? ` · ${t('Hours {h}', { h: todayHoursLabel(zh) })}` : ''}. <b onClick={() => setBookingType('schedule')} style={{ textDecoration: 'underline', cursor: 'pointer' }}>{t('Schedule for later')}</b>.
           </div>
         )}
 
         {/* SCHEDULE step 1 — pick a date (3 chips + calendar for future dates) */}
         {!instant && (
           <div className="bkx-card">
-            <div className="bkx-sec">Select Date</div>
+            <div className="bkx-sec">{t('Select Date')}</div>
             <div className="bkx-dates">
               {chipDays.map((d, i) => (
                 <button key={i} className={`bkx-date ${selDate && sameDay(d, selDate) ? 'sel' : ''}`} onClick={() => { setSelDate(d); setShowCal(false) }}>{chipLabel(d, i)}</button>
               ))}
               <button className={`bkx-date bkx-date-more ${selDate && !dateIsChip ? 'sel' : ''}`} onClick={() => setShowCal((v) => !v)}>
-                📅 {selDate && !dateIsChip ? fmtDate(selDate) : 'Pick date'}
+                📅 {selDate && !dateIsChip ? fmtDate(selDate) : t('Pick date')}
               </button>
             </div>
             {showCal && <div className="bkx-cal"><Calendar value={selDate ?? startOfDay(new Date())} onChange={(d) => { setSelDate(d); setShowCal(false) }} zh={zh} /></div>}
@@ -172,7 +173,7 @@ export default function Book() {
         {/* SCHEDULE step 2 (revealed after a date) / INSTANT — duration */}
         {showDetails && (
           <div className={instant ? '' : 'bkx-card'}>
-            <div className="bkx-sec">Select duration</div>
+            <div className="bkx-sec">{t('Select duration')}</div>
             <div className={`${instant ? 'durx-grid' : 'bkx-dur-scroll'} ${locked ? 'bkx-dim' : ''}`}>
               {s.durations.map((d) => (
                 <button key={d.id} className={`durx ${dur.id === d.id ? 'sel' : ''}`} disabled={locked} onClick={() => setDur(d)}>
@@ -187,25 +188,25 @@ export default function Book() {
         {/* SCHEDULE step 3 — start time (15-min slots, revealed after a date) */}
         {!instant && selDate && (
           <div className="bkx-card">
-            <div className="bkx-sec">Select Start Time</div>
+            <div className="bkx-sec">{t('Select Start Time')}</div>
             <div className="bkx-tod">
-              {TOD.map((t) => <button key={t.key} className={`bkx-tod-tab ${tod === t.key ? 'sel' : ''}`} onClick={() => setTod(t.key)}>{t.label}</button>)}
+              {TOD.map((p) => <button key={p.key} className={`bkx-tod-tab ${tod === p.key ? 'sel' : ''}`} onClick={() => setTod(p.key)}>{t(p.label)}</button>)}
             </div>
             {locked ? (
-              <div className="bkx-locked"><span className="bkx-lock">🔒</span><b>Slots open at 8 PM tonight</b><span className="muted">Booking is open up to {lastOpen.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}. Later dates release every day at 8 PM.</span></div>
+              <div className="bkx-locked"><span className="bkx-lock">🔒</span><b>{t('Slots open at 8 PM tonight')}</b><span className="muted">{t('Booking is open up to {date}. Later dates release every day at 8 PM.', { date: lastOpen.toLocaleDateString(dateLocale(), { day: 'numeric', month: 'short' }) })}</span></div>
             ) : slotsLoading ? (
-              <div className="note-box">Checking availability…</div>
+              <div className="note-box">{t('Checking availability…')}</div>
             ) : dayClosed ? (
-              <div className="bkx-locked"><span className="bkx-lock">🔒</span><b>Not available on {selDate.toLocaleDateString('en-IN', { weekday: 'long' })}</b><span className="muted">Please pick another date</span></div>
+              <div className="bkx-locked"><span className="bkx-lock">🔒</span><b>{t('Not available on {day}', { day: selDate.toLocaleDateString(dateLocale(), { weekday: 'long' }) })}</b><span className="muted">{t('Please pick another date')}</span></div>
             ) : bookableCount === 0 ? (
-              <div className="bkx-locked"><span className="bkx-lock">🔒</span><b>Sold out for this day</b><span className="muted">Please try another date</span></div>
+              <div className="bkx-locked"><span className="bkx-lock">🔒</span><b>{t('Sold out for this day')}</b><span className="muted">{t('Please try another date')}</span></div>
             ) : todSlots.length === 0 ? (
-              <div className="note-box">No {TOD.find((t) => t.key === tod)!.label.toLowerCase()} slots — try another part of the day.</div>
+              <div className="note-box">{t('No {part} slots — try another part of the day.', { part: t(TOD.find((p) => p.key === tod)!.label).toLowerCase() })}</div>
             ) : (
               <div className="slot-grid bkx-slots">
                 {todSlots.map((x) => (
                   <button key={x.mins} className={`slot ${slot === x.mins ? 'sel' : ''} ${x.soldout ? 'soldout' : ''}`} disabled={x.disabled} onClick={() => setSlot(x.mins)}>
-                    {x.label}{x.soldout && <span className="slot-out">Sold out</span>}
+                    {x.label}{x.soldout && <span className="slot-out">{t('Sold out')}</span>}
                   </button>
                 ))}
               </div>
@@ -215,7 +216,7 @@ export default function Book() {
 
         {/* schedule: gentle hint before a date is chosen */}
         {!instant && !selDate && (
-          <div className="muted" style={{ fontSize: 13, textAlign: 'center', marginTop: 22 }}>Pick a date to choose your duration and time.</div>
+          <div className="muted" style={{ fontSize: 13, textAlign: 'center', marginTop: 22 }}>{t('Pick a date to choose your duration and time.')}</div>
         )}
       </div>
 
@@ -223,14 +224,14 @@ export default function Book() {
       <div className="footer-cta">
         <div className="paybar">
           <div className="pay-using">
-            <span className="muted sm">Pay using</span>
+            <span className="muted sm">{t('Pay using')}</span>
             {/* layout lives in .pay-name (index.css): an inline style here used to override the
                 stylesheet's display:block, which collapsed the label and method onto one line and
                 ran the brand mark into the "Pay using" text. */}
             <span className="pay-name">{payment === 'wallet' ? <span className="pay-name-ic">👛</span> : <PhonePeMini />}<span className="pay-name-t">{payLabel}</span></span>
           </div>
           <button className="btn pay-now" onClick={startPay} disabled={placing || closedNow || (!instant && (!selDate || slot === null))}>
-            {closedNow ? <span>Schedule →</span> : <><b>₹{total}</b><span>{placing ? 'Booking…' : 'Pay Now'} →</span></>}
+            {closedNow ? <span>{t('Schedule')} →</span> : <><b>₹{total}</b><span>{placing ? t('Booking…') : t('Pay Now')} →</span></>}
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { Loading } from '../../components/UI'
 import { ServiceThumb } from '../../serviceArt'
 import { fetchRefunds, type RefundEntry } from '../../api'
 import { byMonth, money2, stamp } from '../../wallet'
+import { t } from '../../i18n'
 
 type Tab = 'All' | 'Completed' | 'Pending' | 'Failed'
 const TABS: Tab[] = ['All', 'Completed', 'Pending', 'Failed']
@@ -26,8 +27,8 @@ export default function RefundHistory() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Refund History</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Refund History')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -38,11 +39,11 @@ export default function RefundHistory() {
       {head}
       <div className="content">
         <div className="ord-chips">
-          {TABS.map((t) => <button key={t} className={`ord-chip ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>)}
+          {TABS.map((tb) => <button key={tb} className={`ord-chip ${tab === tb ? 'active' : ''}`} onClick={() => setTab(tb)}>{t(tb)}</button>)}
         </div>
 
         {groups.length === 0 && (
-          <div className="state"><div className="ico">↩️</div><h3>No {tab === 'All' ? '' : tab.toLowerCase() + ' '}refunds</h3><p>Refunds from cancelled bookings show up here.</p></div>
+          <div className="state"><div className="ico">↩️</div><h3>{tab === 'All' ? t('No refunds') : t('No {kind} refunds', { kind: t(tab).toLowerCase() })}</h3><p>{t('Refunds from cancelled bookings show up here.')}</p></div>
         )}
 
         {groups.map((g) => (
@@ -61,7 +62,7 @@ export default function RefundHistory() {
                   <div className="wt-right">
                     <div className={`wt-amt ${r.status === 'failed' ? 'debit' : 'credit'}`}>+ {money2(r.amount)}</div>
                     <div className={`wt-tag ${r.status === 'completed' ? 'credit' : r.status === 'failed' ? 'debit' : 'pending'}`}>
-                      {r.status[0].toUpperCase() + r.status.slice(1)}
+                      {t(r.status[0].toUpperCase() + r.status.slice(1))}
                     </div>
                   </div>
                 </button>

@@ -7,6 +7,7 @@ import { pushBackHandler } from '../../backStack'
 import { fetchWallet } from '../../api'
 import { byMonth, inTxnTab, money2, stamp, txnKindLabel, type TxnTab } from '../../wallet'
 import type { Transaction } from '../../types'
+import { t } from '../../i18n'
 
 const TABS: TxnTab[] = ['All', 'Credit', 'Debit', 'Refund']
 
@@ -42,9 +43,9 @@ export default function WalletTransactions() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Transactions</h1></div>
-      <button className="iconbtn" onClick={() => setShowSort(true)} aria-label="Sort"><SlidersHorizontal size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Transactions')}</h1></div>
+      <button className="iconbtn" onClick={() => setShowSort(true)} aria-label={t('Sort')}><SlidersHorizontal size={18} /></button>
     </header>
   )
   if (!txns) return <div className="screen">{head}<Loading /></div>
@@ -54,13 +55,13 @@ export default function WalletTransactions() {
       {head}
       <div className="content">
         <div className="ord-chips">
-          {TABS.map((t) => (
-            <button key={t} className={`ord-chip ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
+          {TABS.map((tb) => (
+            <button key={tb} className={`ord-chip ${tab === tb ? 'active' : ''}`} onClick={() => setTab(tb)}>{t(tb)}</button>
           ))}
         </div>
 
         {groups.length === 0 && (
-          <div className="state"><div className="ico">🧾</div><h3>No {tab === 'All' ? '' : tab.toLowerCase() + ' '}transactions</h3><p>They'll show up here.</p></div>
+          <div className="state"><div className="ico">🧾</div><h3>{tab === 'All' ? t('No transactions') : t('No {kind} transactions', { kind: t(tab).toLowerCase() })}</h3><p>{t("They'll show up here.")}</p></div>
         )}
 
         {groups.map((g) => (
@@ -88,10 +89,10 @@ export default function WalletTransactions() {
       {showSort && (
         <div className="sheet-wrap" onClick={() => setShowSort(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-h">Sort by</div>
+            <div className="sheet-h">{t('Sort by')}</div>
             {([['new', 'Newest first'], ['old', 'Oldest first']] as const).map(([v, label]) => (
               <button key={v} className="sheet-row" onClick={() => { setSort(v); setShowSort(false) }}>
-                <span>{label}</span>{sort === v && <Check size={16} />}
+                <span>{t(label)}</span>{sort === v && <Check size={16} />}
               </button>
             ))}
           </div>

@@ -10,6 +10,7 @@ import { fetchPaymentMethods, fetchWallet, walletTopup } from '../../api'
 import { useStore } from '../../store'
 import { money } from '../../wallet'
 import type { PaymentGroup } from '../../types'
+import { t } from '../../i18n'
 
 // /api/payment/methods is the booking-checkout list. Two of its options cannot fund a top-up:
 // you can't pay for wallet money with wallet money, and cash is handed to the expert after a job.
@@ -52,15 +53,15 @@ export default function AddMoney() {
     try {
       const { balance } = await walletTopup(paymentId, amount)
       if (typeof balance === 'number' && user) setUser({ ...user, wallet: balance })
-      toast(`${money(amount)} added to your wallet`)
+      toast(t('{amt} added to your wallet', { amt: money(amount) }))
       nav('/wallet', { replace: true })
     } catch (e) { toast((e as Error).message) }
   }
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Add Money</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Add Money')}</h1></div>
       <span className="iconbtn ghost" />
     </header>
   )
@@ -72,7 +73,7 @@ export default function AddMoney() {
     <div className="screen">
       {head}
       <div className="content pad-cta">
-        <div className="am-label">Enter Amount</div>
+        <div className="am-label">{t('Enter Amount')}</div>
         <div className="am-field">
           <span className="am-rs">₹</span>
           <input inputMode="numeric" value={raw} autoFocus placeholder="0"
@@ -89,7 +90,7 @@ export default function AddMoney() {
           </div>
         )}
 
-        <div className="am-sec">Recommended</div>
+        <div className="am-sec">{t('Recommended')}</div>
         <div className="am-methods">
           {flat.map((o) => (
             <button key={o.id} className={`am-m ${method === o.id ? 'sel' : ''}`} onClick={() => setMethod(o.id)}>
@@ -101,13 +102,13 @@ export default function AddMoney() {
               <span className={`am-radio ${method === o.id ? 'on' : ''}`} />
             </button>
           ))}
-          {flat.length === 0 && <p className="muted center-text" style={{ padding: 14 }}>No payment methods available right now.</p>}
+          {flat.length === 0 && <p className="muted center-text" style={{ padding: 14 }}>{t('No payment methods available right now.')}</p>}
         </div>
       </div>
 
       <div className="w-foot">
         <button className="btn full" disabled={!amount || amount < 1 || !method} onClick={() => setPayOpen(true)}>
-          {amount > 0 ? `Add ${money(amount)}` : 'Add Money'}
+          {amount > 0 ? t('Add {amt}', { amt: money(amount) }) : t('Add Money')}
         </button>
       </div>
 

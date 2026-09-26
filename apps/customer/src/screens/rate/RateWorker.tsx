@@ -5,6 +5,7 @@ import { fetchFavExperts, saveFavExpert, removeFavExpert } from '../../api'
 import { Loading } from '../../components/UI'
 import { useJob, proName, serviceNames } from '../job/useJob'
 import { WorkerAvatar } from '../job/parts'
+import { t } from '../../i18n'
 
 // Module 7 · #52 — Rate Your Experience. Worker + service + date are real booking data. Rating,
 // feedback and quick-tags are carried to the Upload-Photos step, which submits via reviewBooking.
@@ -23,14 +24,14 @@ export default function RateWorker() {
   const [tags, setTags] = useState<string[]>([])
 
   if (!b) return <div className="screen jt"><Loading /></div>
-  const toggle = (t: string) => setTags((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t])
+  const toggle = (tag: string) => setTags((p) => p.includes(tag) ? p.filter((x) => x !== tag) : [...p, tag])
   const when = [b.date, b.time].filter(Boolean).join(', ')
 
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav('/home')} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Rate Your Experience</b><span style={{ width: 40 }} />
+        <button className="jt-ic" onClick={() => nav('/home')} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Rate Your Experience')}</b><span style={{ width: 40 }} />
       </div>
 
       <div className="content jt-scroll">
@@ -42,25 +43,25 @@ export default function RateWorker() {
           {b.worker_id && <FavButton wid={b.worker_id} name={proName(b).split(' ')[0]} />}
         </div>
 
-        <div className="rt-q">How was your overall experience?</div>
+        <div className="rt-q">{t('How was your overall experience?')}</div>
         <div className="jt-stars big">{[1, 2, 3, 4, 5].map((n) => <span key={n} className={n <= rating ? 'on' : ''} onClick={() => setRating(n)}>★</span>)}</div>
-        <div className="rt-lbl">{rating > 0 ? LABELS[rating] : 'Tap a star to rate'}</div>
+        <div className="rt-lbl">{rating > 0 ? t(LABELS[rating]) : t('Tap a star to rate')}</div>
 
         <div className="rt-field">
-          <label>Share your feedback (Optional)</label>
-          <textarea maxLength={300} value={text} onChange={(e) => setText(e.target.value)} placeholder="Tell us about your experience…" />
+          <label>{t('Share your feedback (Optional)')}</label>
+          <textarea maxLength={300} value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Tell us about your experience…')} />
           <span className="rt-count">{text.length}/300</span>
         </div>
 
         <div className="rt-quick">
-          {QUICK.map((q) => <button key={q} className={`rt-pill ${tags.includes(q) ? 'on' : ''}`} onClick={() => toggle(q)}>{q}</button>)}
+          {QUICK.map((q) => <button key={q} className={`rt-pill ${tags.includes(q) ? 'on' : ''}`} onClick={() => toggle(q)}>{t(q)}</button>)}
         </div>
       </div>
 
       <div className="jt-foot">
         <button className="jt-btn" disabled={rating === 0}
           onClick={() => nav(`/rate/${b.id}/photos`, { state: { rating, text, tags } })}>
-          {rating === 0 ? 'Select a rating' : 'Continue'}
+          {rating === 0 ? t('Select a rating') : t('Continue')}
         </button>
       </div>
     </div>
@@ -76,7 +77,7 @@ function FavButton({ wid, name }: { wid: number; name: string }) {
   return (
     <button className="btn-ghost" onClick={toggle} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <Heart size={16} fill={fav ? '#e5484d' : 'none'} color={fav ? '#e5484d' : 'currentColor'} />
-      {fav ? `${name} is a favourite` : `Save ${name} as favourite`}
+      {fav ? t('{name} is a favourite', { name }) : t('Save {name} as favourite', { name })}
     </button>
   )
 }

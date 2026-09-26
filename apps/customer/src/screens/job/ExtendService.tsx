@@ -8,6 +8,7 @@ import { useStore } from '../../store'
 import { speak } from '../../notify'
 import { Capacitor } from '@capacitor/core'
 import { useJob, proName, proRating, serviceNames } from './useJob'
+import { t } from '../../i18n'
 
 // Module 6 — Extend Your Service. The expert can ASK for more time; only this screen grants it.
 // Nothing here shortens or rewrites the original booking: the extension is priced and shown as its
@@ -85,7 +86,7 @@ export default function ExtendService() {
   async function payForExtension(amount: number): Promise<string | null> {
     if (provider !== 'razorpay') {
       if (demo) { try { return await mockPay(amount) } catch (e) { toast((e as Error).message); return null } } // no keys → server-side test payment
-      toast('Online payments are not set up yet. Add Razorpay keys in Admin → Settings.')
+      toast(t('Online payments are not set up yet. Add Razorpay keys in Admin → Settings.'))
       return null
     }
     const desc = `Service extension +${pending!.minutes} min`
@@ -99,10 +100,10 @@ export default function ExtendService() {
         })
         await verifyPayment({ razorpay_order_id: r.razorpay_order_id || order.orderId, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })
         return r.razorpay_payment_id
-      } catch (e) { toast((e as Error).message || 'Payment cancelled'); return null }
+      } catch (e) { toast((e as Error).message || t('Payment cancelled')); return null }
     }
     // Browser fallback — web checkout.js
-    if (!(await loadRazorpay())) { toast('Could not load payment gateway'); return null }
+    if (!(await loadRazorpay())) { toast(t('Could not load payment gateway')); return null }
     return new Promise<string | null>((resolve) => {
       const opts: any = {
         key: order.keyId, order_id: order.orderId, amount: amount * 100, currency: 'INR',
@@ -113,12 +114,12 @@ export default function ExtendService() {
           try {
             await verifyPayment({ razorpay_order_id: resp.razorpay_order_id, razorpay_payment_id: resp.razorpay_payment_id, razorpay_signature: resp.razorpay_signature })
             resolve(resp.razorpay_payment_id)
-          } catch { toast('Payment verification failed'); resolve(null) }
+          } catch { toast(t('Payment verification failed')); resolve(null) }
         },
         modal: { ondismiss: () => resolve(null) },
       }
       const rzp = new (window as any).Razorpay(opts)
-      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || 'Payment failed'); resolve(null) })
+      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || t('Payment failed')); resolve(null) })
       rzp.open()
     })
   }
@@ -129,17 +130,17 @@ export default function ExtendService() {
     try {
       if (!approve) {
         await declineExtension(b.id, pending.id)
-        toast('Extension declined')
+        toast(t('Extension declined'))
       } else if (pending.price > 0) {
         // Paid extension → collect through Razorpay first; only grant once it's paid & recorded.
         const paymentId = await payForExtension(pending.price)
         if (!paymentId) return // cancelled/failed — leave the request pending, don't approve
         await approveExtension(b.id, pending.id, { paymentId })
-        toast(`Approved — ₹${pending.price} paid`)
+        toast(t('Approved — ₹{amt} paid', { amt: pending.price }))
       } else {
         // Free extension → nothing to charge.
         await approveExtension(b.id, pending.id)
-        toast('Extra time approved')
+        toast(t('Extra time approved'))
       }
       // Announce the extension aloud. From here the live clock, the 5-minute heads-up and the
       // completion voice all follow the NEW end time (extension_minutes feeds serviceEndMs), so the
@@ -149,7 +150,7 @@ export default function ExtendService() {
       setPending(null)
       nav(`/job/${b.id}/progress`)
     } catch (e) {
-      const msg = (e as Error).message || 'Could not complete that'
+      const msg = (e as Error).message || t('Could not complete that')
       toast(msg)
     } finally { setBusy(false) }
   }
@@ -157,46 +158,46 @@ export default function ExtendService() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(`/job/${b.id}/progress`)} aria-label="Back"><ArrowLeft size={22} /></button>
-        <b>Extend Your Service?</b><span style={{ width: 40 }} />
+        <button className="jt-ic" onClick={() => nav(`/job/${b.id}/progress`)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Extend Your Service?')}</b><span style={{ width: 40 }} />
       </div>
 
       <div className="content jt-scroll">
         {!pending ? (
           <div className="jt-card jt-center" style={{ padding: 28 }}>
             <Clock size={30} />
-            <h3 style={{ margin: '12px 0 4px' }}>No request right now</h3>
+            <h3 style={{ margin: '12px 0 4px' }}>{t('No request right now')}</h3>
             <p className="muted" style={{ fontSize: 13 }}>
               {granted > 0
-                ? `Your service was extended by ${granted} minutes.`
-                : 'Your expert hasn’t asked for extra time.'}
+                ? t('Your service was extended by {n} minutes.', { n: granted })
+                : t('Your expert hasn’t asked for extra time.')}
             </p>
           </div>
         ) : (
           <>
             <div className="jt-card">
-              <div className="jt-kv"><span>Current Booking</span><b>{serviceNames(b)}</b></div>
-              <div className="jt-kv"><span>Original duration</span><b>{bookedMinutes(b)} mins</b></div>
-              {granted > 0 && <div className="jt-kv"><span>Already extended</span><b>+{granted} mins</b></div>}
-              {!!currentEndMs && <div className="jt-kv"><span>Current end time</span><b>{clock(currentEndMs)}</b></div>}
+              <div className="jt-kv"><span>{t('Current Booking')}</span><b>{serviceNames(b)}</b></div>
+              <div className="jt-kv"><span>{t('Original duration')}</span><b>{t('{n} mins', { n: bookedMinutes(b) })}</b></div>
+              {granted > 0 && <div className="jt-kv"><span>{t('Already extended')}</span><b>+{t('{n} mins', { n: granted })}</b></div>}
+              {!!currentEndMs && <div className="jt-kv"><span>{t('Current end time')}</span><b>{clock(currentEndMs)}</b></div>}
             </div>
 
             <div className="jt-card" style={{ borderColor: 'var(--brand, #6D4AFF)' }}>
-              <div className="jt-kv"><span>Requested extension</span><b>+{pending.minutes} mins</b></div>
-              {!!newEndMs && <div className="jt-kv"><span>New expected completion</span><b>{clock(newEndMs)}</b></div>}
+              <div className="jt-kv"><span>{t('Requested extension')}</span><b>+{t('{n} mins', { n: pending.minutes })}</b></div>
+              {!!newEndMs && <div className="jt-kv"><span>{t('New expected completion')}</span><b>{clock(newEndMs)}</b></div>}
               <div className="jt-kv">
-                <span>Additional amount</span>
-                <b>{pending.price > 0 ? `₹${pending.price}` : 'No charge'}</b>
+                <span>{t('Additional amount')}</span>
+                <b>{pending.price > 0 ? `₹${pending.price}` : t('No charge')}</b>
               </div>
             </div>
 
             <div className="jt-card">
               <div className="jt-kv" style={{ alignItems: 'center' }}>
-                <span>Your expert</span>
+                <span>{t('Your expert')}</span>
                 <b>{proName(b)} <Star size={12} fill="#F5A623" strokeWidth={0} /> {proRating(b)}</b>
               </div>
               <div style={{ marginTop: 8 }}>
-                <div className="muted" style={{ fontSize: 12 }}>Reason</div>
+                <div className="muted" style={{ fontSize: 12 }}>{t('Reason')}</div>
                 <div style={{ fontSize: 14 }}>{pending.reasonLabel}</div>
                 {!!pending.reasonText && <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{pending.reasonText}</div>}
               </div>
@@ -204,7 +205,7 @@ export default function ExtendService() {
 
             {pending.price === 0 && (
               <p className="muted" style={{ fontSize: 12.5, textAlign: 'center' }}>
-                This extra time is not being charged to you.
+                {t('This extra time is not being charged to you.')}
               </p>
             )}
           </>
@@ -213,9 +214,9 @@ export default function ExtendService() {
 
       {!!pending && (
         <div className="jt-foot" style={{ display: 'flex', gap: 10 }}>
-          <button className="jt-btn ghost" disabled={busy} style={{ flex: 1 }} onClick={() => decide(false)}>Decline</button>
+          <button className="jt-btn ghost" disabled={busy} style={{ flex: 1 }} onClick={() => decide(false)}>{t('Decline')}</button>
           <button className="jt-btn" disabled={busy} style={{ flex: 1.6 }} onClick={() => decide(true)}>
-            {busy ? 'Please wait…' : pending.price > 0 ? `Approve ₹${pending.price}` : 'Approve'}
+            {busy ? t('Please wait…') : pending.price > 0 ? t('Approve ₹{amt}', { amt: pending.price }) : t('Approve')}
           </button>
         </div>
       )}

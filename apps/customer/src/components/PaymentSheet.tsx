@@ -6,6 +6,7 @@ import type { PaymentGroup } from '../types'
 import { UPI_APPS, payByUpi, type UpiApp } from '../upi'
 import { Upi } from '../upiNative'
 import { RazorpayNative } from '../razorpayNative'
+import { t } from '../i18n'
 
 interface Props {
   open: boolean
@@ -167,10 +168,10 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
           })
           await verifyPayment({ razorpay_order_id: r.razorpay_order_id || order.orderId, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })
           setPhase('done'); setTimeout(() => onPaid(method, r.razorpay_payment_id), 650)
-        } catch (e) { toast((e as Error).message || 'Payment cancelled'); setPhase('select') }
+        } catch (e) { toast((e as Error).message || t('Payment cancelled')); setPhase('select') }
         return
       }
-      if (!(await loadRazorpay())) { toast('Could not load Razorpay'); setPhase('select'); return }
+      if (!(await loadRazorpay())) { toast(t('Could not load Razorpay')); setPhase('select'); return }
       const opts: any = {
         key: order.keyId || keyId, order_id: order.orderId, amount: amount * 100, currency: 'INR',
         name: 'HomeHelp', description: 'Service booking',
@@ -188,7 +189,7 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
       // inside the Android WebView that can yield zero eligible methods ("no appropriate payment
       // method found"). Razorpay renders its eligible methods with UPI preselected.
       const rzp = new (window as any).Razorpay(opts)
-      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || 'Payment failed'); setPhase('select') })
+      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || t('Payment failed')); setPhase('select') })
       rzp.open()
     } catch (e) { toast((e as Error).message); setPhase('select') }
   }
@@ -197,14 +198,14 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
   async function payUpiDirect() {
     const app = upiAppFor(method)
     const ref = 'HH' + Date.now().toString().slice(-10)
-    setTxnRef(ref); setPhase('processing'); toast(`Opening ${app.name}…`)
+    setTxnRef(ref); setPhase('processing'); toast(t('Opening {app}…', { app: app.name }))
     createPaymentsOrder(amount, method).catch(() => {})
     let status = 'NOT_OPENED'
     try { status = (await payByUpi(app, { vpa: upiCfg.vpa, payeeName: upiCfg.payeeName, amount, note: `HomeHelp ${ref}`, txnRef: ref })).status } catch { status = 'NOT_OPENED' }
     if (status === 'SUCCESS') { setPhase('done'); setTimeout(() => onPaid(method, ref), 750); return }
-    if (status === 'FAILURE') { toast('Payment failed in the UPI app.'); setPhase('select'); return }
-    if (status === 'CANCELLED') { toast('Payment cancelled.'); setPhase('select'); return }
-    if (status === 'NOT_OPENED') { toast(`Couldn't open ${app.name}.`); setPhase('select'); return }
+    if (status === 'FAILURE') { toast(t('Payment failed in the UPI app.')); setPhase('select'); return }
+    if (status === 'CANCELLED') { toast(t('Payment cancelled.')); setPhase('select'); return }
+    if (status === 'NOT_OPENED') { toast(t("Couldn't open {app}.", { app: app.name })); setPhase('select'); return }
     setPhase('confirm')
   }
 
@@ -262,18 +263,18 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
             <div className="pm-head">
               <div>
                 <div className="pm-amt">₹{amount}</div>
-                <div className="muted sm">Choose a payment method</div>
+                <div className="muted sm">{t('Choose a payment method')}</div>
               </div>
-              <button className="pm-x" onClick={onClose}>✕</button>
+              <button className="pm-x" onClick={onClose} aria-label={t('Close')}>✕</button>
             </div>
             <div className="pm-scroll">
               {groups.map((g) => (
                 <div className="pm-group" key={g.group}>
-                  <div className="pm-glabel">{g.group}{g.recommended && <span className="pm-rec">Recommended</span>}</div>
+                  <div className="pm-glabel">{g.group}{g.recommended && <span className="pm-rec">{t('Recommended')}</span>}</div>
                   {g.options.map((o) => (
                     <button key={o.id} className={`pm-row ${method === o.id ? 'sel' : ''}`} onClick={() => setMethod(o.id)}>
                       <RowIcon id={o.id} emoji={o.icon} />
-                      <span className="grow"><span className="pm-name">{o.name}<BrandCluster id={o.id} /></span>{o.sub && <span className="pm-sub">{provider !== 'razorpay' && PKG[o.id] && icons[PKG[o.id]!]?.installed === false ? 'Not installed' : o.sub}</span>}</span>
+                      <span className="grow"><span className="pm-name">{o.name}<BrandCluster id={o.id} /></span>{o.sub && <span className="pm-sub">{provider !== 'razorpay' && PKG[o.id] && icons[PKG[o.id]!]?.installed === false ? t('Not installed') : o.sub}</span>}</span>
                       <span className="pm-radio">{method === o.id ? '●' : ''}</span>
                     </button>
                   ))}
@@ -281,8 +282,8 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
               ))}
             </div>
             <div className="pm-foot">
-              <div className="pm-secure">🔒 100% secure payments{provider === 'razorpay' ? ' · Razorpay' : ''}</div>
-              <button className="btn full" onClick={pay}>{cash ? `Confirm · ₹${amount}` : `Pay ₹${amount}`}</button>
+              <div className="pm-secure">🔒 {t('100% secure payments')}{provider === 'razorpay' ? ' · Razorpay' : ''}</div>
+              <button className="btn full" onClick={pay}>{cash ? t('Confirm · ₹{amt}', { amt: amount }) : t('Pay ₹{amt}', { amt: amount })}</button>
             </div>
           </>
         )}
@@ -290,58 +291,58 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
         {phase === 'processing' && (
           <div className="pm-state">
             <div className="spinner" />
-            <h3>{cash ? 'Confirming…' : provider === 'razorpay' ? 'Opening secure checkout…' : isUpiMethod(method) ? `Opening ${appName}…` : 'Processing payment…'}</h3>
-            <p className="muted">Please don't close the app</p>
+            <h3>{cash ? t('Confirming…') : provider === 'razorpay' ? t('Opening secure checkout…') : isUpiMethod(method) ? t('Opening {app}…', { app: appName }) : t('Processing payment…')}</h3>
+            <p className="muted">{t("Please don't close the app")}</p>
           </div>
         )}
 
         {phase === 'confirm' && (
           <div className="pm-state">
             <div className="pm-tick" style={{ background: '#fff7e6', color: '#b45309' }}>⏳</div>
-            <h3>Complete payment in {appName}</h3>
-            <p className="muted">Pay ₹{amount} to {upiCfg.payeeName} ({upiCfg.vpa}), then confirm.</p>
-            <button className="btn full" onClick={confirmPaid} style={{ marginTop: 12 }}>I've paid</button>
-            <button className="btn full ghost" onClick={() => payUpiDirect()} style={{ marginTop: 8, background: 'transparent', color: '#5b51e8' }}>Reopen {appName}</button>
-            <button className="btn full ghost" onClick={() => setPhase('select')} style={{ marginTop: 8, background: 'transparent', color: '#6b7280' }}>Cancel</button>
+            <h3>{t('Complete payment in {app}', { app: appName })}</h3>
+            <p className="muted">{t('Pay ₹{amt} to {name} ({vpa}), then confirm.', { amt: amount, name: upiCfg.payeeName, vpa: upiCfg.vpa })}</p>
+            <button className="btn full" onClick={confirmPaid} style={{ marginTop: 12 }}>{t("I've paid")}</button>
+            <button className="btn full ghost" onClick={() => payUpiDirect()} style={{ marginTop: 8, background: 'transparent', color: '#5b51e8' }}>{t('Reopen {app}', { app: appName })}</button>
+            <button className="btn full ghost" onClick={() => setPhase('select')} style={{ marginTop: 8, background: 'transparent', color: '#6b7280' }}>{t('Cancel')}</button>
           </div>
         )}
 
         {phase === 'done' && (
           <div className="pm-state">
             <div className="pm-tick">✓</div>
-            <h3>{cash ? 'Booking confirmed!' : 'Payment successful!'}</h3>
-            <p className="muted">₹{amount} {cash ? 'to pay after service' : 'paid'}</p>
+            <h3>{cash ? t('Booking confirmed!') : t('Payment successful!')}</h3>
+            <p className="muted">{cash ? t('₹{amt} to pay after service', { amt: amount }) : t('₹{amt} paid', { amt: amount })}</p>
           </div>
         )}
       </div>
 
       {/* In-app UPI pay screen (demo) — looks like the chosen app, shows the amount, no real money. */}
       {phase === 'upiapp' && (() => {
-        const t = APP_THEME[method] || APP_THEME.upi
+        const th = APP_THEME[method] || APP_THEME.upi
         const initial = (upiCfg.payeeName || 'H').trim().charAt(0).toUpperCase()
         return (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: t.bg, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: th.bg, display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px', color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span onClick={() => setPhase('select')} style={{ fontSize: 26, lineHeight: 1, cursor: 'pointer' }}>‹</span>
               <RowIcon id={method} emoji="UPI" />
-              <strong style={{ fontSize: 17 }}>{t.name}</strong>
+              <strong style={{ fontSize: 17 }}>{th.name}</strong>
             </div>
             <div style={{ background: '#fff', flex: 1, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-                <span style={{ width: 44, height: 44, borderRadius: '50%', background: t.bg, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{initial}</span>
+                <span style={{ width: 44, height: 44, borderRadius: '50%', background: th.bg, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>{initial}</span>
                 <div><div style={{ fontWeight: 700 }}>{upiCfg.payeeName}</div><div className="muted sm">{upiCfg.vpa}</div></div>
               </div>
               <div style={{ fontSize: 36, fontWeight: 800, color: '#111' }}>₹{amount}</div>
-              <div className="muted" style={{ marginTop: 4 }}>Message: Payment for HomeHelp service</div>
+              <div className="muted" style={{ marginTop: 4 }}>{t('Message: Payment for HomeHelp service')}</div>
               <div style={{ marginTop: 16, padding: 12, background: '#f4f5f7', borderRadius: 12, fontSize: 13, color: '#6b7280' }}>
-                🔒 Demo mode — this is a preview of the UPI payment. <b>No real money will be deducted.</b>
+                🔒 {t('Demo mode — this is a preview of the UPI payment.')} <b>{t('No real money will be deducted.')}</b>
               </div>
               <div style={{ flex: 1 }} />
               <div style={{ borderTop: '1px solid #eee', paddingTop: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <span className="muted">Total Payable</span><strong>₹{amount}</strong>
+                  <span className="muted">{t('Total Payable')}</span><strong>₹{amount}</strong>
                 </div>
-                <button className="btn full" style={{ background: t.bg, color: '#fff' }} onClick={payDemoUpi}>Pay ₹{amount}</button>
+                <button className="btn full" style={{ background: th.bg, color: '#fff' }} onClick={payDemoUpi}>{t('Pay ₹{amt}', { amt: amount })}</button>
               </div>
             </div>
           </div>

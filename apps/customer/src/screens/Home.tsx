@@ -6,7 +6,9 @@ import AddressSheet from '../components/AddressSheet'
 import { useStore } from '../store'
 import ComingSoon from './ComingSoon'
 import { fetchServices, fetchBookings, fetchMe, fetchNotifications, fetchWallet, fetchHomeBanners, mediaUrl, isContinuable, type HomeBanner } from '../api'
+import PackagesStrip from '../components/PackagesStrip'
 import type { Service, Booking, Address } from '../types'
+import { t } from '../i18n'
 
 // Hero slide backgrounds — all start at the app-bar purple (#5b63d6) so the header stays seamless,
 // then diverge into the theme colour lower down. Kept dark enough for white text + status icons.
@@ -24,7 +26,7 @@ type Slide = HomeBanner & { greetingName?: string }
 
 function greeting() {
   const h = new Date().getHours()
-  return h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening'
+  return h < 12 ? t('Good Morning') : h < 17 ? t('Good Afternoon') : t('Good Evening')
 }
 
 export default function Home() {
@@ -53,7 +55,7 @@ export default function Home() {
     fetchHomeBanners(pincode || undefined).then(setBanners).catch(() => setBanners([]))
   }, [pincode])
 
-  const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || 'Set location'
+  const cityLabel = addr?.city || user?.city || (user?.location || '').split(',').pop()?.trim() || user?.location || t('Set location')
   // Header address: the saved label ("Home"/"Work") reads as the title, with a SHORT "flat, city"
   // summary under it - the full street line is in the address sheet a tap away. Falls back to the
   // city alone when no address is saved yet, so a new user still sees something tappable.
@@ -107,19 +109,19 @@ export default function Home() {
   })), [])
 
   function guardServiceable(): boolean {
-    if (serviceable === false) { toast("We're not in your area yet — coming soon! 🚧"); return false }
+    if (serviceable === false) { toast(t("We're not in your area yet — coming soon! 🚧")); return false }
     return true
   }
   function bookNow() { if (guardServiceable()) { setBookingType('schedule'); nav('/popular-services') } }
   function openService(s: Service) { if (guardServiceable()) nav(`/service/${s.id}`) }
 
   const QUICK = [
-    { key: 'book', label: 'Book Now', Icon: CalendarPlus, on: bookNow },
-    { key: 'offers', label: 'Offers', Icon: Tag, on: () => nav('/offers') },
-    { key: 'ai', label: 'AI Insights', Icon: Sparkles, on: () => nav('/ai-home') },
-    { key: 'membership', label: 'Membership', Icon: Crown, on: () => nav('/membership') },
-    { key: 'mybk', label: 'My Bookings', Icon: ClipboardList, on: () => nav('/bookings') },
-    { key: 'help', label: 'Help', Icon: Headset, on: () => nav('/support') },
+    { key: 'book', label: t('Book Now'), Icon: CalendarPlus, on: bookNow },
+    { key: 'offers', label: t('Offers'), Icon: Tag, on: () => nav('/offers') },
+    { key: 'ai', label: t('AI Insights'), Icon: Sparkles, on: () => nav('/ai-home') },
+    { key: 'membership', label: t('Membership'), Icon: Crown, on: () => nav('/membership') },
+    { key: 'mybk', label: t('My Bookings'), Icon: ClipboardList, on: () => nav('/bookings') },
+    { key: 'help', label: t('Help'), Icon: Headset, on: () => nav('/support') },
   ]
 
   return (
@@ -133,15 +135,15 @@ export default function Home() {
         </button>
         <div className="hd-top-r">
           {/* wallet with the live available balance shown inline, like the notification count */}
-          <button className="hd-wallet" onClick={() => nav('/wallet')} aria-label="Wallet">
+          <button className="hd-wallet" onClick={() => nav('/wallet')} aria-label={t('Wallet')}>
             <WalletIcon size={18} />
             {walletBal != null && <span className="hd-wallet-bal">₹{walletBal.toLocaleString('en-IN')}</span>}
           </button>
-          <button className="hd-bell" onClick={() => nav('/notifications')} aria-label="Notifications">
+          <button className="hd-bell" onClick={() => nav('/notifications')} aria-label={t('Notifications')}>
             <Bell size={20} />
             {notifCount > 0 && <span className="hd-badge">{notifCount > 9 ? '9+' : notifCount}</span>}
           </button>
-          <button className="hd-prof" onClick={() => nav('/profile')} aria-label="Profile">
+          <button className="hd-prof" onClick={() => nav('/profile')} aria-label={t('Profile')}>
             {firstName && firstName !== 'there' ? firstName[0].toUpperCase() : <User size={19} />}
           </button>
         </div>
@@ -172,14 +174,14 @@ export default function Home() {
               {cur.key === 'greeting' ? (<>
                 <div className="hd-hi">{greeting()} 👋</div>
                 <div className="hd-name">{firstName}</div>
-                <div className="hd-sub">{cur.subtitle}</div>
+                <div className="hd-sub">{t("Let's make your home spotless today!")}</div>
               </>) : cur.kind === 'weather' ? (<>
                 <div className="hd-hi">{greeting()} 👋</div>
                 <div className="hd-name">{firstName}</div>
-                <div className="hd-sub">Rainy day out there — perfect time for a spotless home ☔</div>
-                <div className="hd-hero-surge"><b>{cur.emoji} {cur.prob != null ? `${cur.prob}% rain` : 'Rain'}</b> · +{cur.pct}% surge</div>
+                <div className="hd-sub">{t('Rainy day out there — perfect time for a spotless home ☔')}</div>
+                <div className="hd-hero-surge"><b>{cur.emoji} {cur.prob != null ? t('{p}% rain', { p: cur.prob }) : t('Rain')}</b> · {t('+{p}% surge', { p: cur.pct ?? 0 })}</div>
               </>) : (<>
-                <div className="hd-hi">{cur.kind === 'offer' ? 'OFFER' : cur.kind.toUpperCase()}</div>
+                <div className="hd-hi">{cur.kind === 'offer' ? t('OFFER') : cur.kind.toUpperCase()}</div>
                 <div className="hd-name">{cur.title}</div>
                 {cur.subtitle && <div className="hd-sub">{cur.subtitle}</div>}
                 {cur.ctaLabel && cur.ctaLink && (
@@ -193,7 +195,7 @@ export default function Home() {
             {slides.length > 1 && (
               <div className="hd-dots">
                 {slides.map((s, i) => (
-                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => setActive(i)} aria-label={`Slide ${i + 1}`} />
+                  <button key={s.key} className={`hd-dot${i === active ? ' on' : ''}`} onClick={() => setActive(i)} aria-label={t('Slide {n}', { n: i + 1 })} />
                 ))}
               </div>
             )}
@@ -204,36 +206,38 @@ export default function Home() {
               than via the list — `cont` is continuable by definition, which is the same branch the
               list's Continue button takes. */}
           {cont && (<>
-            <div className="hd-sec-head"><h3>Continue Booking</h3></div>
+            <div className="hd-sec-head"><h3>{t('Continue Booking')}</h3></div>
             <button className="hd-cont" onClick={() => nav(`/track/${cont.id}`)}>
               <span className="hd-cont-img">
                 <img src={`/services/${cont.items[0]?.id}.jpg`} alt=""
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
               </span>
               <span className="hd-cont-main">
-                <b>{cont.items[0]?.name || 'Booking'}{cont.items.length > 1 ? ` +${cont.items.length - 1}` : ''}</b>
+                <b>{cont.items[0]?.name || t('Booking')}{cont.items.length > 1 ? ` +${cont.items.length - 1}` : ''}</b>
                 <small>{bkWhen(cont)}</small>
               </span>
-              <span className="hd-cont-btn">Track</span>
+              <span className="hd-cont-btn">{t('Track')}</span>
             </button>
           </>)}
 
+          <PackagesStrip />
+
           {/* all services */}
-          <div className="hd-sec-head"><h3>All Services</h3></div>
+          <div className="hd-sec-head"><h3>{t('All Services')}</h3></div>
           <div className="hd-pop hd-pop-all">
             {svcList.map((s) => (
               <button key={s.id} className={`hd-pop-card${s.available ? '' : ' soon'}`}
-                onClick={() => s.available ? openService(s) : toast(`${s.name} is coming soon to your area 🚧`)}>
+                onClick={() => s.available ? openService(s) : toast(t('{name} is coming soon to your area 🚧', { name: s.name }))}>
                 <span className="hd-pop-img">
                   <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-                  {!s.available && <span className="hd-pop-soon">Coming Soon</span>}
+                  {!s.available && <span className="hd-pop-soon">{t('Coming Soon')}</span>}
                 </span>
                 <span className="hd-pop-name">{s.name}</span>
-                <span className="hd-pop-price">{s.available ? `From ₹${s.price}` : 'Not available yet'}</span>
+                <span className="hd-pop-price">{s.available ? t('From ₹{price}', { price: s.price }) : t('Not available yet')}</span>
               </button>
             ))}
-            {svcList.length === 0 && <p className="muted" style={{ padding: 12 }}>Loading services…</p>}
+            {svcList.length === 0 && <p className="muted" style={{ padding: 12 }}>{t('Loading services…')}</p>}
           </div>
 
         </>)}

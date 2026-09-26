@@ -8,6 +8,7 @@ import OrderCard, { WorkerAvatar } from '../components/OrderCard'
 import { fetchBookings } from '../api'
 import { estimatedCompletion, isActive, liveProgress, LIVE_LABEL, medallion, durationLabel, whenLine } from '../orders'
 import type { Booking } from '../types'
+import { t } from '../i18n'
 
 const money = (n?: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`
 // Newest first — the job that started most recently is the one the customer means by "active".
@@ -23,10 +24,10 @@ export default function ActiveBooking() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Active Booking</h1></div>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Active Booking')}</h1></div>
       {b?.pro_name
-        ? <button className="iconbtn" onClick={() => nav(`/job/${b.id}/call`)} aria-label="Call expert"><Phone size={18} /></button>
+        ? <button className="iconbtn" onClick={() => nav(`/job/${b.id}/call`)} aria-label={t('Call expert')}><Phone size={18} /></button>
         : <span className="iconbtn ghost" />}
     </header>
   )
@@ -34,7 +35,7 @@ export default function ActiveBooking() {
   if (!items) return <div className="screen">{head}<Loading /></div>
   if (!b) return (
     <div className="screen">{head}
-      <div className="state"><div className="ico">🧹</div><h3>No active booking</h3><p>Your in-progress job will show here.</p></div>
+      <div className="state"><div className="ico">🧹</div><h3>{t('No active booking')}</h3><p>{t('Your in-progress job will show here.')}</p></div>
     </div>
   )
 
@@ -58,7 +59,7 @@ export default function ActiveBooking() {
           <span className="ord-body">
             <span className="ord-title">{b.items.map((i) => i.name).join(', ')}</span>
             <span className="ord-sub">{dur && <>{dur} • </>}{money(b.total)}</span>
-            <span className="ord-live"><i className="ord-dot" />{LIVE_LABEL[b.status] || b.status}</span>
+            <span className="ord-live"><i className="ord-dot" />{t(LIVE_LABEL[b.status] || b.status)}</span>
             {sub && <span className="ord-when">{sub}</span>}
           </span>
         </div>
@@ -71,21 +72,21 @@ export default function ActiveBooking() {
               <div className="ord-pro-name">{b.pro_name}</div>
               <div className="ord-pro-meta">
                 {b.pro_rating ? <><span className="ord-rate">{b.pro_rating}<Star size={11} className="ord-star" /></span></> : null}
-                {b.pro?.reviewsCount ? <span className="muted"> ({b.pro.reviewsCount} reviews)</span> : null}
+                {b.pro?.reviewsCount ? <span className="muted"> {t('({n} reviews)', { n: b.pro.reviewsCount })}</span> : null}
               </div>
               {b.started_at && (
-                <div className="ord-pro-since">On-site since {new Date(b.started_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
+                <div className="ord-pro-since">{t('On-site since')} {new Date(b.started_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
               )}
             </div>
-            <button className="ord-call" onClick={() => nav(`/job/${b.id}/call`)} aria-label="Call expert"><Phone size={16} /></button>
+            <button className="ord-call" onClick={() => nav(`/job/${b.id}/call`)} aria-label={t('Call expert')}><Phone size={16} /></button>
           </div>
         )}
 
         {/* progress — derived from where the booking sits in the live pipeline */}
         {prog && (
           <div className="ord-block">
-            <div className="ord-block-h">Service Progress</div>
-            <div className="ord-prog-line">Step {prog.step} of {prog.total} · {prog.label}</div>
+            <div className="ord-block-h">{t('Service Progress')}</div>
+            <div className="ord-prog-line">{t('Step {a} of {b}', { a: prog.step, b: prog.total })} · {t(prog.label)}</div>
             <div className="ord-bar"><i style={{ width: `${prog.pct}%` }} /></div>
             <div className="ord-prog-pct">{prog.pct}%</div>
           </div>
@@ -93,14 +94,14 @@ export default function ActiveBooking() {
 
         {eta && (
           <div className="ord-block">
-            <div className="ord-block-h">Estimated Completion</div>
+            <div className="ord-block-h">{t('Estimated Completion')}</div>
             <div className="ord-eta">{eta}</div>
           </div>
         )}
 
         {active.length > 1 && (
           <section className="ord-sec">
-            <div className="ord-sec-head"><h2>Other active</h2></div>
+            <div className="ord-sec-head"><h2>{t('Other active')}</h2></div>
             <div className="ord-list">
               {active.slice(1).map((o) => <OrderCard key={o.id} b={o} onClick={() => nav(`/booking-details/${o.id}`)} />)}
             </div>
@@ -109,8 +110,8 @@ export default function ActiveBooking() {
       </div>
 
       <div className="bd-foot col">
-        <button className="btn full" onClick={() => nav(`/job/${b.id}/map`)}>Track Live</button>
-        {b.pro_name && <button className="btn ghost full" onClick={() => nav(`/job/${b.id}/chat`)}>Chat with Worker</button>}
+        <button className="btn full" onClick={() => nav(`/job/${b.id}/map`)}>{t('Track Live')}</button>
+        {b.pro_name && <button className="btn ghost full" onClick={() => nav(`/job/${b.id}/chat`)}>{t('Chat with Worker')}</button>}
       </div>
     </div>
   )

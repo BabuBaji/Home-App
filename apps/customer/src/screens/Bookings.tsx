@@ -8,6 +8,7 @@ import OrderCard from '../components/OrderCard'
 import { fetchBookings } from '../api'
 import { isActive, isUpcoming } from '../orders'
 import type { Booking } from '../types'
+import { t } from '../i18n'
 
 type Group = 'Upcoming' | 'Active' | 'Completed' | 'Cancelled'
 const GROUPS: Group[] = ['Upcoming', 'Active', 'Completed', 'Cancelled']
@@ -31,9 +32,9 @@ export default function Bookings() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav('/support')} aria-label="Help & Support"><Headset size={18} /></button>
-      <div className="titles"><h1>My Bookings</h1></div>
-      <button className="iconbtn" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell size={18} /></button>
+      <button className="iconbtn" onClick={() => nav('/support')} aria-label={t('Help & Support')}><Headset size={18} /></button>
+      <div className="titles"><h1>{t('My Bookings')}</h1></div>
+      <button className="iconbtn" onClick={() => nav('/notifications')} aria-label={t('Notifications')}><Bell size={18} /></button>
     </header>
   )
 
@@ -46,21 +47,21 @@ export default function Bookings() {
       {head}
       <div className="content">
         <div className="ord-chips">
-          <button className="ord-chip active">All</button>
+          <button className="ord-chip active">{t('All')}</button>
           {GROUPS.map((g) => (
-            <button key={g} className="ord-chip" onClick={() => nav(ROUTE[g])}>{g}</button>
+            <button key={g} className="ord-chip" onClick={() => nav(ROUTE[g])}>{t(g)}</button>
           ))}
         </div>
 
         {sections.length === 0 && (
-          <div className="state"><div className="ico">🗓</div><h3>No bookings yet</h3><p>Your bookings will show up here.</p></div>
+          <div className="state"><div className="ico">🗓</div><h3>{t('No bookings yet')}</h3><p>{t('Your bookings will show up here.')}</p></div>
         )}
 
         {sections.map(({ g, list }) => (
           <section key={g} className="ord-sec">
             <div className="ord-sec-head">
-              <h2>{g}</h2>
-              <button className="ord-viewall" onClick={() => nav(ROUTE[g])}>View All</button>
+              <h2>{t(g)}</h2>
+              <button className="ord-viewall" onClick={() => nav(ROUTE[g])}>{t('View All')}</button>
             </div>
             <div className="ord-list">
               {list.slice(0, PREVIEW).map((b) => (

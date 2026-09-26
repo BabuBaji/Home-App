@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { t } from '../i18n'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -28,11 +29,11 @@ export default function Calendar({ value, onChange, zh }: { value: Date; onChang
     <div className="card cal">
       <div className="cal-head">
         <button onClick={() => canPrev && setView(new Date(year, month - 1, 1))} disabled={!canPrev}>‹</button>
-        <span className="m">{MONTHS[month]} {year}</span>
+        <span className="m">{t(MONTHS[month])} {year}</span>
         <button onClick={() => setView(new Date(year, month + 1, 1))}>›</button>
       </div>
       <div className="cal-grid">
-        {DOW.map((d) => <div key={d} className="cal-dow">{d}</div>)}
+        {DOW.map((d) => <div key={d} className="cal-dow">{t(d)}</div>)}
         {cells.map((d, i) => {
           if (d === null) return <div key={`e${i}`} />
           const date = new Date(year, month, d)
@@ -45,7 +46,7 @@ export default function Calendar({ value, onChange, zh }: { value: Date; onChang
               key={d}
               className={`cal-day ${selected ? 'sel' : ''} ${past ? 'past' : ''} ${closed ? 'closed' : ''} ${isToday && !selected ? 'today' : ''}`}
               onClick={() => { if (!past && !closed) onChange(date) }}
-              title={closed ? 'Closed this day' : undefined}
+              title={closed ? t('Closed this day') : undefined}
             >
               {d}
             </div>

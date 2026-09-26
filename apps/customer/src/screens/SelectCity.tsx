@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Search, Check } from 'lucide-react'
 import { fetchLiveAreas } from '../api'
+import { t } from '../i18n'
 
 /* Module-1 #5 — Select City. Carries the chosen city forward to the Permission screen,
    which captures the exact GPS address and stores it as the profile's default address.
@@ -38,31 +39,31 @@ export default function SelectCity() {
   return (
     <div className="auth">
       <div className="au-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
       </div>
       <div className="content au-body">
-        <h1 className="au-h1">Select your<br /><span className="av">city</span></h1>
-        <p className="au-sub">Services available in your city</p>
+        <h1 className="au-h1">{t('Select your')}<br /><span className="av">{t('city')}</span></h1>
+        <p className="au-sub">{t('Services available in your city')}</p>
 
         <div className="au-search">
           <Search size={18} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search for your city" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search for your city')} />
         </div>
 
-        <div className="au-eyebrow">{q ? 'Results' : 'Cities'}</div>
+        <div className="au-eyebrow">{q ? t('Results') : t('Cities')}</div>
         <div className="au-city-list">
           {cities.map((c) => (
             <button key={c} className={`au-city ${picked === c ? 'sel' : ''}`} onClick={() => setPicked(c)}>
               <b className="grow">{c}</b>
-              {!live.includes(c) && <small className="au-soon">Coming soon</small>}
+              {!live.includes(c) && <small className="au-soon">{t('Coming soon')}</small>}
               <span className={`au-radio ${picked === c ? 'on' : ''}`}>{picked === c && <Check size={13} />}</span>
             </button>
           ))}
-          {cities.length === 0 && <p className="au-empty">No city matches “{q}”.</p>}
+          {cities.length === 0 && <p className="au-empty">{t('No city matches “{q}”.', { q })}</p>}
         </div>
       </div>
       <div className="au-foot">
-        <button className="au-btn" onClick={cont} disabled={!picked}>Continue</button>
+        <button className="au-btn" onClick={cont} disabled={!picked}>{t('Continue')}</button>
       </div>
     </div>
   )

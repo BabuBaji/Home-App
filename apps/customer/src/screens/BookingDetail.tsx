@@ -14,6 +14,7 @@ import { fetchBooking } from '../api'
 import { actualDuration, money, txnRef, dt } from '../invoiceDoc'
 import { chipClass, isLive, medallion, scheduleDisplay, STATUS_LABEL, whenLine } from '../orders'
 import type { Booking } from '../types'
+import { t } from '../i18n'
 
 export default function BookingDetail() {
   const { id } = useParams()
@@ -29,14 +30,14 @@ export default function BookingDetail() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
       {/* spacer: balances the two icons on the right so the title stays centred */}
       {b && <span className="iconbtn ghost" />}
-      <div className="titles"><h1>Booking Details</h1></div>
+      <div className="titles"><h1>{t('Booking Details')}</h1></div>
       {b ? (
         <>
-          <button className="iconbtn" onClick={share} aria-label="Share booking"><Share2 size={18} /></button>
-          <button className="iconbtn" onClick={() => setMenu(true)} aria-label="More options"><MoreVertical size={18} /></button>
+          <button className="iconbtn" onClick={share} aria-label={t('Share booking')}><Share2 size={18} /></button>
+          <button className="iconbtn" onClick={() => setMenu(true)} aria-label={t('More options')}><MoreVertical size={18} /></button>
         </>
       ) : <span className="iconbtn ghost" />}
 
@@ -46,19 +47,19 @@ export default function BookingDetail() {
           {/* Reschedule/Cancel only while the job is still live — the cancel screen then applies
               the real cancellation terms (fee/refund quote) before anything is cancelled. */}
           {isLive(b.status) && b.type === 'schedule' && (
-            <button className="bd-mi" onClick={() => go(`/reschedule/${b.id}`)}><CalendarClock size={16} /> Reschedule Booking</button>
+            <button className="bd-mi" onClick={() => go(`/reschedule/${b.id}`)}><CalendarClock size={16} /> {t('Reschedule Booking')}</button>
           )}
           {isLive(b.status) && (
-            <button className="bd-mi danger" onClick={() => go(`/cancel/${b.id}`)}><XCircle size={16} /> Cancel Booking</button>
+            <button className="bd-mi danger" onClick={() => go(`/cancel/${b.id}`)}><XCircle size={16} /> {t('Cancel Booking')}</button>
           )}
           {b.status === 'completed' && (
-            <button className="bd-mi" onClick={() => go(`/invoice/${b.id}`)}><FileText size={16} /> View Invoice</button>
+            <button className="bd-mi" onClick={() => go(`/invoice/${b.id}`)}><FileText size={16} /> {t('View Invoice')}</button>
           )}
           {(b.status === 'completed' || b.status === 'cancelled') && (
-            <button className="bd-mi" onClick={() => go(`/rebook/${b.id}`)}><RotateCcw size={16} /> Rebook Service</button>
+            <button className="bd-mi" onClick={() => go(`/rebook/${b.id}`)}><RotateCcw size={16} /> {t('Rebook Service')}</button>
           )}
-          <button className="bd-mi" onClick={() => go('/cancellation-policy')}><ShieldQuestion size={16} /> Cancellation Policy</button>
-          <button className="bd-mi" onClick={() => go('/support')}><Headset size={16} /> Get Help</button>
+          <button className="bd-mi" onClick={() => go('/cancellation-policy')}><ShieldQuestion size={16} /> {t('Cancellation Policy')}</button>
+          <button className="bd-mi" onClick={() => go('/support')}><Headset size={16} /> {t('Get Help')}</button>
         </div>
       )}
     </header>
@@ -68,25 +69,25 @@ export default function BookingDetail() {
     if (!b) return
     const when = whenLine(b)
     const text = [
-      `HomeHelp booking ${b.ref}`,
+      t('HomeHelp booking {ref}', { ref: b.ref }),
       b.items.map((i) => i.name).join(', '),
       when || '',
-      b.address ? `At: ${b.address}` : '',
-      `Total: ${money(b.total)}`,
+      b.address ? t('At: {addr}', { addr: b.address }) : '',
+      t('Total: {amt}', { amt: money(b.total) }),
     ].filter(Boolean).join('\n')
     try {
       if (Capacitor.isNativePlatform()) {
-        await Share.share({ title: `HomeHelp ${b.ref}`, text, dialogTitle: 'Share booking' })
+        await Share.share({ title: `HomeHelp ${b.ref}`, text, dialogTitle: t('Share booking') })
       } else if (navigator.share) {
         await navigator.share({ title: `HomeHelp ${b.ref}`, text })
       } else {
         await navigator.clipboard.writeText(text)
-        toast('Booking details copied')
+        toast(t('Booking details copied'))
       }
     } catch { /* user dismissed the sheet — not an error */ }
   }
 
-  if (err) return <div className="screen">{head}<div className="state"><div className="ico">⚠️</div><h3>Could not load booking</h3></div></div>
+  if (err) return <div className="screen">{head}<div className="state"><div className="ico">⚠️</div><h3>{t('Could not load booking')}</h3></div></div>
   if (!b) return <div className="screen">{head}<Loading /></div>
 
   const m = medallion(b)
@@ -111,16 +112,16 @@ export default function BookingDetail() {
             <span className="ord-med-w">{m.weekday}</span>
           </span>
           <span className="bd-hero-main">
-            <span className="bd-hero-k">Booking ID</span>
+            <span className="bd-hero-k">{t('Booking ID')}</span>
             <span className="bd-hero-ref">{b.ref}</span>
             {when && <span className="bd-hero-when">{when}</span>}
           </span>
-          <span className={`status-chip ${chipClass(b.status)}`}>{STATUS_LABEL[b.status] || b.status}</span>
+          <span className={`status-chip ${chipClass(b.status)}`}>{t(STATUS_LABEL[b.status] || b.status)}</span>
         </div>
 
         {/* service */}
         <div className="ord-block">
-          <div className="ord-block-h">Service Details</div>
+          <div className="ord-block-h">{t('Service Details')}</div>
           {b.items.map((i, n) => (
             <div key={n} className="bd-svc">
               {/* ServiceThumb is absolutely positioned — it needs this sized, relative box */}
@@ -139,16 +140,16 @@ export default function BookingDetail() {
         {/* extended service — extra paid time the customer granted, itemised with amount + method */}
         {Array.isArray(b.extensions) && b.extensions.some((x) => x.status === 'approved') && (
           <div className="ord-block">
-            <div className="ord-block-h">Extended Service</div>
+            <div className="ord-block-h">{t('Extended Service')}</div>
             {b.extensions.filter((x) => x.status === 'approved').map((x) => (
               <div key={x.id} className="bd-svc">
                 <span className="bd-svc-main">
-                  <span className="bd-svc-name">+{x.minutes} min extra time</span>
+                  <span className="bd-svc-name">{t('+{n} min extra time', { n: x.minutes })}</span>
                   <span className="bd-svc-dur">
                     {x.reasonLabel}{x.paymentMethod ? ` · ${x.paymentMethod.toUpperCase()}` : ''} · {dt(x.decided || x.created)}
                   </span>
                 </span>
-                <span className="bd-svc-amt">{x.price > 0 ? money(x.price) : 'No charge'}</span>
+                <span className="bd-svc-amt">{x.price > 0 ? money(x.price) : t('No charge')}</span>
               </div>
             ))}
           </div>
@@ -157,80 +158,80 @@ export default function BookingDetail() {
         {/* expert */}
         {b.pro_name && (
           <div className="ord-block">
-            <div className="ord-block-h">Worker Details</div>
+            <div className="ord-block-h">{t('Worker Details')}</div>
             <div className="ord-pro flat">
               <WorkerAvatar name={b.pro_name} src={b.pro?.avatar} size={40} />
               <div className="ord-pro-main">
                 <div className="ord-pro-name">{b.pro_name}</div>
                 <div className="ord-pro-meta">
                   {b.pro_rating ? <span className="ord-rate">{b.pro_rating}<Star size={11} className="ord-star" /></span> : null}
-                  {b.pro?.reviewsCount ? <span className="muted"> ({b.pro.reviewsCount} reviews)</span> : null}
+                  {b.pro?.reviewsCount ? <span className="muted"> {t('({n} reviews)', { n: b.pro.reviewsCount })}</span> : null}
                 </div>
               </div>
-              {live && <button className="ord-call" onClick={() => nav(`/job/${b.id}/call`)} aria-label="Call expert"><Phone size={16} /></button>}
+              {live && <button className="ord-call" onClick={() => nav(`/job/${b.id}/call`)} aria-label={t('Call expert')}><Phone size={16} /></button>}
             </div>
           </div>
         )}
 
         {/* schedule + address */}
         <div className="ord-block">
-          <Row k="Date & Time" v={b.type === 'instant' ? `Instant · ${dt(b.created)}` : scheduleDisplay(b)} />
-          {b.started_at && <Row k="Started" v={dt(b.started_at)} />}
-          {b.completed_at && <Row k="Completed" v={dt(b.completed_at)} />}
-          {dur && <Row k="Duration worked" v={dur} />}
-          <Row k="Address" v={b.address || '—'} />
+          <Row k={t('Date & Time')} v={b.type === 'instant' ? `${t('Instant')} · ${dt(b.created)}` : scheduleDisplay(b)} />
+          {b.started_at && <Row k={t('Started')} v={dt(b.started_at)} />}
+          {b.completed_at && <Row k={t('Completed')} v={dt(b.completed_at)} />}
+          {dur && <Row k={t('Duration worked')} v={dur} />}
+          <Row k={t('Address')} v={b.address || '—'} />
         </div>
 
         {/* payment */}
         <div className="ord-block">
-          <div className="ord-block-h">Payment Summary</div>
-          <Row k="Service Charges" v={money(b.subtotal)} />
-          <Row k="Platform Fee" v={money(b.fee)} />
-          {b.tax > 0 && <Row k="Taxes & GST" v={money(b.tax)} />}
-          {b.discount > 0 && <Row k={`Discount${b.coupon ? ` (${b.coupon})` : ''}`} v={<span className="green">− {money(b.discount)}</span>} />}
+          <div className="ord-block-h">{t('Payment Summary')}</div>
+          <Row k={t('Service Charges')} v={money(b.subtotal)} />
+          <Row k={t('Platform Fee')} v={money(b.fee)} />
+          {b.tax > 0 && <Row k={t('Taxes & GST')} v={money(b.tax)} />}
+          {b.discount > 0 && <Row k={`${t('Discount')}${b.coupon ? ` (${b.coupon})` : ''}`} v={<span className="green">− {money(b.discount)}</span>} />}
           <div className="ord-sep" />
-          <Row k={<b>Total {b.payment_status === 'paid' ? 'Paid' : 'Payable'}</b>} v={<b>{money(b.total)}</b>} />
+          <Row k={<b>{b.payment_status === 'paid' ? t('Total Paid') : t('Total Payable')}</b>} v={<b>{money(b.total)}</b>} />
           {(b.extension_total ?? 0) > 0 && (
             <>
-              <Row k={`Extra time (${b.extension_minutes || 0} min)`} v={money(b.extension_total)} />
+              <Row k={t('Extra time ({n} min)', { n: b.extension_minutes || 0 })} v={money(b.extension_total)} />
               <div className="ord-sep" />
-              <Row k={<b>Total incl. extensions</b>} v={<b>{money(b.total + (b.extension_total || 0))}</b>} />
+              <Row k={<b>{t('Total incl. extensions')}</b>} v={<b>{money(b.total + (b.extension_total || 0))}</b>} />
             </>
           )}
-          <Row k="Method" v={`${(b.payment || '').toUpperCase()} · ${b.payment_status}`} />
-          {b.status === 'completed' && <Row k="Transaction ID" v={txnRef(b)} />}
-          {b.status === 'cancelled' && (b.refund ?? 0) > 0 && <Row k="Refunded" v={<span className="green">{money(b.refund)} to wallet</span>} />}
-          {b.status === 'cancelled' && b.cancel_reason && <Row k="Cancel reason" v={b.cancel_reason} />}
+          <Row k={t('Method')} v={`${(b.payment || '').toUpperCase()} · ${b.payment_status}`} />
+          {b.status === 'completed' && <Row k={t('Transaction ID')} v={txnRef(b)} />}
+          {b.status === 'cancelled' && (b.refund ?? 0) > 0 && <Row k={t('Refunded')} v={<span className="green">{t('{amt} to wallet', { amt: money(b.refund) })}</span>} />}
+          {b.status === 'cancelled' && b.cancel_reason && <Row k={t('Cancel reason')} v={b.cancel_reason} />}
         </div>
 
         {/* your feedback */}
         {(b.rating || b.review) && (
           <div className="ord-block">
-            <div className="ord-block-h">Your Feedback</div>
-            {b.rating ? <Row k="Rating" v={<span className="ord-rate">{b.rating}<Star size={11} className="ord-star" /></span>} /> : null}
-            {b.review ? <Row k="Review" v={b.review} /> : null}
+            <div className="ord-block-h">{t('Your Feedback')}</div>
+            {b.rating ? <Row k={t('Rating')} v={<span className="ord-rate">{b.rating}<Star size={11} className="ord-star" /></span>} /> : null}
+            {b.review ? <Row k={t('Review')} v={b.review} /> : null}
           </div>
         )}
 
         {b.work_photo && (
           <div className="ord-block">
-            <div className="ord-block-h">Proof of Work</div>
-            <img src={b.work_photo} alt="Proof of work" className="bd-photo" />
+            <div className="ord-block-h">{t('Proof of Work')}</div>
+            <img src={b.work_photo} alt={t('Proof of Work')} className="bd-photo" />
           </div>
         )}
 
         {/* secondary actions — unchanged behaviour, restyled */}
         <div className="bd-acts">
-          {b.status === 'completed' && !b.rating && <button className="bd-act" onClick={() => nav(`/rate/${b.id}`)}>⭐ Rate</button>}
-          {(b.status === 'completed' || b.status === 'cancelled') && <button className="bd-act" onClick={() => nav(`/rebook/${b.id}`)}>🔁 Rebook</button>}
-          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/tip/${b.id}`)}>💜 Tip</button>}
-          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/complaint/${b.id}`)}>⚠️ Report</button>}
+          {b.status === 'completed' && !b.rating && <button className="bd-act" onClick={() => nav(`/rate/${b.id}`)}>⭐ {t('Rate')}</button>}
+          {(b.status === 'completed' || b.status === 'cancelled') && <button className="bd-act" onClick={() => nav(`/rebook/${b.id}`)}>🔁 {t('Rebook')}</button>}
+          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/tip/${b.id}`)}>💜 {t('Tip')}</button>}
+          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/complaint/${b.id}`)}>⚠️ {t('Report')}</button>}
         </div>
 
         {/* primary CTA sits in the page, as in the design — not a fixed footer bar */}
         <div className="bd-cta">
-          {live && <button className="btn" onClick={() => nav(`/job/${b.id}`)}>Track Booking</button>}
-          {b.status === 'completed' && <button className="btn" onClick={() => nav(`/invoice/${b.id}`)}>View Invoice</button>}
+          {live && <button className="btn" onClick={() => nav(`/job/${b.id}`)}>{t('Track Booking')}</button>}
+          {b.status === 'completed' && <button className="btn" onClick={() => nav(`/invoice/${b.id}`)}>{t('View Invoice')}</button>}
         </div>
       </div>
 
