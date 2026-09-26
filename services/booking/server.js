@@ -168,6 +168,10 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extras_total INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS plan_id INTEGER`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notified_status TEXT`,
+    // Promo credit spent on the booking, and how much of it has gone back — refunded as promo, never
+    // as withdrawable cash.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS wallet_promo_paid INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS refund_promo INTEGER NOT NULL DEFAULT 0`,
     // Tasks the expert adds during the job: priced, approved (and paid) by the customer, then billed.
     `CREATE TABLE IF NOT EXISTS booking_extras (id SERIAL PRIMARY KEY, booking_id INTEGER NOT NULL, name TEXT NOT NULL,
        price INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', paid_via TEXT, payment_ref TEXT,
@@ -853,8 +857,9 @@ app.post('/api/bookings', auth, async (req, res) => {
   const onlinePart = isCash ? 0 : priced.total - walletPart
   let paymentRef = null
   if (onlinePart > 0 && !body.paymentId) return res.status(402).json({ error: 'Payment not received. Please pay to confirm the booking.' })
+  let promoPart = 0
   if (walletPart > 0) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'debit', title: `Booking Payment`, amount: walletPart }) }
+    try { promoPart = (await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'debit', title: `Booking Payment`, amount: walletPart })).fromPromo || 0 }
     catch (e) { return res.status(402).json({ error: e.message || 'Insufficient wallet balance' }) }
   }
   if (onlinePart > 0) {
@@ -862,7 +867,10 @@ app.post('/api/bookings', auth, async (req, res) => {
       const c = await internalPost(PAYMENT_URL, '/api/internal/payment/claim', { paymentId: body.paymentId, customerId: req.user.id, amount: onlinePart, purpose: 'booking' })
       paymentRef = c.paymentId
     } catch (e) {
-      if (walletPart > 0) await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: 'Booking not placed — wallet restored', amount: walletPart }).catch(() => {})
+      if (walletPart > 0) {
+        if (promoPart) await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', balance: 'promo', kind: 'REFUND', title: 'Booking not placed — wallet restored', amount: promoPart }).catch(() => {})
+        if (walletPart - promoPart) await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: 'Booking not placed — wallet restored', amount: walletPart - promoPart }).catch(() => {})
+      }
       return res.status(402).json({ error: e.message || 'Payment not received. Please pay again.' })
     }
   }
@@ -874,12 +882,12 @@ app.post('/api/bookings', auth, async (req, res) => {
   const ins = await pool.query(
     `INSERT INTO bookings (ref,user_id,type,freq,note,date,time,address,payment,payment_status,items,duration,
        subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created,address_id,
-       payment_ref,online_paid,wallet_paid)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
+       payment_ref,online_paid,wallet_paid,wallet_promo_paid)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
     [ref(), req.user.id, body.type || 'instant', body.freq ?? null, body.note ?? null, body.date ?? null, body.time ?? null,
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
-      custLat, custLng, pincode || null, zoneId, nowIso(), addressId ?? null, paymentRef, onlinePart, walletPart])
+      custLat, custLng, pincode || null, zoneId, nowIso(), addressId ?? null, paymentRef, onlinePart, walletPart, promoPart])
   let booking = rowTo(ins.rows[0])
   if (paymentRef) internalPost(PAYMENT_URL, '/api/internal/payment/attach', { paymentId: paymentRef, ref: `booking:${booking.id}` }).catch(() => {})
 
@@ -1038,11 +1046,14 @@ async function refundBooking(b, amount, title) {
       toSource = r.amount || 0; left -= toSource
     } catch (e) { console.error('[booking] gateway refund failed for', b.ref, e.message, '— crediting wallet instead') }
   }
-  if (left > 0) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title, amount: left, ref: b.ref }) }
-    catch (e) { console.error('[booking] wallet refund failed for', b.ref, e.message); status = 'failed' }
-  }
-  await pool.query('UPDATE bookings SET refund_to_source=refund_to_source+$2, refund_status=$3 WHERE id=$1', [b.id, toSource, status])
+  // Promo credit that paid for the booking goes back as promo (not withdrawable cash); the rest as cash.
+  const promo = Math.min(left, Math.max(0, (b.wallet_promo_paid || 0) - (b.refund_promo || 0)))
+  let promoBack = 0
+  try {
+    if (promo > 0) { await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`, { type: 'credit', balance: 'promo', kind: 'REFUND', title, amount: promo, ref: b.ref }); promoBack = promo }
+    if (left - promo > 0) await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title, amount: left - promo, ref: b.ref })
+  } catch (e) { console.error('[booking] wallet refund failed for', b.ref, e.message); status = 'failed' }
+  await pool.query('UPDATE bookings SET refund_to_source=refund_to_source+$2, refund_status=$3, refund_promo=refund_promo+$4 WHERE id=$1', [b.id, toSource, status, promoBack])
   return status
 }
 
@@ -1453,7 +1464,10 @@ app.get('/api/admin/bookings/:id/activity', adminAuth, async (req, res) => {
   const total = b.total || 0
   const method = b.payment === 'wallet' ? 'Wallet' : (b.payment || 'Razorpay')
   push(b.created, 'customer', custName, 'Bookings', 'Create', 'Booking created from Customer App')
-  push(b.created, 'system', method === 'Wallet' ? 'Wallet' : 'Razorpay', 'Payments', 'Payment', `Payment of ₹${total} received via ${method}`)
+  const paidNow = b.payment_status === 'paid' || b.payment_status === 'refunded'
+  if (paidNow) push(b.payment === 'cash' ? (b.completed_at || b.created) : b.created, 'system', method === 'Wallet' ? 'Wallet' : method === 'cash' ? 'Cash' : 'Razorpay', 'Payments', 'Payment', `Payment of ₹${total} received via ${method}`)
+  else push(b.created, 'system', 'System', 'Payments', 'Payment Due', b.payment === 'cash' ? `₹${total} to be collected in cash after the service` : `Payment of ₹${total} pending (${method})`)
+  if (b.payment_status === 'refunded' || b.refund_status === 'refunded') push(b.cancel_time || b.completed_at || b.created, 'system', 'System', 'Payments', 'Refund', `Refund of ₹${b.refund || total} issued`)
   if (b.pro_name) push(b.created, 'auto', 'Auto Dispatch', 'Dispatch', 'Assignment', `Job assigned to ${b.pro_name}`)
   if (b.started_at) push(b.started_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Started service after OTP verification${b.service_otp ? ` · Start OTP ${b.service_otp}` : ''}`)
   if (ev.after_at) push(ev.after_at, 'worker', b.pro_name || 'Worker', 'Jobs', 'Status Update', `Ended job and uploaded after-service photos${(ev.after_photos || []).length ? ` · ${ev.after_photos.length} photos` : ''}`)
@@ -1474,6 +1488,13 @@ app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const body = req.body || {}
+  // Each kind of edit needs its own permission (a view-only admin can't change anything).
+  const holds = (p) => req.admin?.role === 'super' || (req.admin?.permissions || []).includes(p)
+  const needs = new Set()
+  if (body.status) needs.add(String(body.status) === 'cancelled' ? 'bookings.cancel' : 'bookings.update_status')
+  if (body.date !== undefined || body.time !== undefined || body.adminNote !== undefined || body.escalated !== undefined) needs.add('bookings.update_status')
+  if (body.unassign || body.workerId) needs.add('bookings.assign')
+  for (const p of needs) if (!holds(p)) return res.status(403).json({ error: 'Insufficient permissions' })
   const u = {}
   if (body.status) u.status = String(body.status)
   if (body.date !== undefined) u.date = body.date || null
@@ -1492,6 +1513,14 @@ app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   if (cols.length) {
     await pool.query(`UPDATE bookings SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')} WHERE id=$${cols.length + 1}`, [...cols.map((c) => u[c]), b.id])
     await emitBookingUpdate(b.id)
+    const what = []
+    if (u.status && u.status !== b.status) what.push(`status → ${u.status}`)
+    if ('date' in u || 'time' in u) what.push(`rescheduled to ${u.date ?? b.date} ${u.time ?? b.time}`)
+    if (body.unassign) what.push('unassigned the expert')
+    else if (u.worker_id) what.push(`assigned ${u.pro_name || `worker #${u.worker_id}`}`)
+    if ('escalated' in u) what.push(u.escalated ? `escalated${u.escalate_reason ? `: ${u.escalate_reason}` : ''}` : 'de-escalated')
+    if ('admin_note' in u) what.push('note updated')
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorId: req.admin?.id, actorName: req.admin?.name || req.admin?.email, action: 'booking.admin_edit', entityType: 'booking', entityId: b.id, ref: b.ref, detail: what.join(' · ') || 'Booking edited' })
   }
   res.json(await getBooking(b.id))
 })
@@ -1609,11 +1638,17 @@ app.post('/api/internal/bookings/:id/decline', internalOnly, async (req, res) =>
 app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b) return res.status(404).json({ error: 'Not found' })
-  if (b.refund_status === 'refunded' && b.payment_status === 'refunded') return res.json({ ok: true, duplicate: true })
+  // A live booking is cancelled first (which refunds per policy); refunding it here as well would
+  // pay twice — the customer could still cancel and get the money again.
+  if (!['cancelled', 'completed'].includes(b.status)) return res.status(409).json({ ok: false, error: 'Cancel the booking before refunding it.' })
   const paid = b.payment === 'cash' && b.payment_status !== 'paid' ? 0 : (b.total || 0)
-  const amount = Math.min(paid, Number(req.body?.amount) || b.refund || paid)
+  if (!paid) return res.status(409).json({ ok: false, error: 'Nothing was paid for this booking.' })
+  const already = b.refund_status === 'refunded' ? (b.refund || 0) : 0
+  const leftToRefund = paid - already
+  if (leftToRefund <= 0) return res.status(409).json({ ok: false, error: 'This booking has already been fully refunded.' })
+  const amount = Math.min(leftToRefund, Number(req.body?.amount) || leftToRefund)
   const status = await refundBooking(b, amount, `Refund ${b.ref}`)
-  await pool.query("UPDATE bookings SET payment_status=CASE WHEN $2='refunded' THEN 'refunded' ELSE payment_status END, refund=$3 WHERE id=$1", [b.id, status, amount])
+  await pool.query("UPDATE bookings SET payment_status=CASE WHEN $2='refunded' THEN 'refunded' ELSE payment_status END, refund=$3 WHERE id=$1", [b.id, status, already + (status === 'refunded' ? amount : 0)])
   await emitBookingUpdate(b.id)
   res.json({ ok: status === 'refunded', status, amount })
 })

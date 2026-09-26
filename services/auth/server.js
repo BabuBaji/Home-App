@@ -29,7 +29,6 @@ const GOOGLE_CLIENT_IDS = String(process.env.GOOGLE_CLIENT_ID || '').split(',').
  * was ON by default: two requests against any phone number minted a session for it, and
  * findOrCreateUser would create the account. Leave UNSET in production. */
 const DEV_OTP = process.env.DEV_OTP || ''
-const WELCOME_BONUS = 1240
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_MAX_ATTEMPTS = 5
 const OTP_MAX_PER_HOUR = 5
@@ -51,7 +50,7 @@ async function init() {
       phone TEXT, name TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '',
       provider TEXT NOT NULL DEFAULT 'phone', avatar TEXT,
       country TEXT, city TEXT, location TEXT,
-      wallet INTEGER NOT NULL DEFAULT ${WELCOME_BONUS}, rating REAL NOT NULL DEFAULT 5.0,
+      wallet INTEGER NOT NULL DEFAULT 0, rating REAL NOT NULL DEFAULT 5.0,
       status TEXT NOT NULL DEFAULT 'active', created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `CREATE TABLE IF NOT EXISTS addresses (
@@ -84,6 +83,8 @@ async function init() {
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS acs INTEGER NOT NULL DEFAULT 0`,
     // Archived addresses stay on record (for order history) but are hidden from active pickers.
     `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`,
+    // A placeholder "Home" seeded from the profile location; replaced by the first real address.
+    `ALTER TABLE addresses ADD COLUMN IF NOT EXISTS auto_seeded BOOLEAN NOT NULL DEFAULT false`,
     // Three-balance wallet: `wallet` is the Cash balance; add Promo + Reward Points and a status.
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_balance INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS reward_points INTEGER NOT NULL DEFAULT 0`,
@@ -187,6 +188,7 @@ async function init() {
     `UPDATE transactions SET kind='REFUND' WHERE kind IS NULL AND title LIKE 'Refund %'`,
     `UPDATE transactions SET kind='ADD_MONEY' WHERE kind IS NULL AND title='Added to wallet'`,
     `UPDATE transactions SET kind='WELCOME_BONUS' WHERE kind IS NULL AND title='Welcome bonus'`,
+    `ALTER TABLE users ALTER COLUMN wallet SET DEFAULT 0`,
     // Profile: gender + preferred language (captured/edited from the admin profile page).
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT`,
@@ -281,11 +283,16 @@ async function ensureReferralCode(uid) {
   return null
 }
 
+// New customers get the admin-configured welcome credit (setting welcome_bonus) as PROMO balance —
+// spendable on bookings, never cash. Previously every sign-up got a hard-coded ₹1,240 of cash.
 async function provisionExtras(uid) {
   await ensureReferralCode(uid)
+  const bonus = Math.max(0, Math.round(Number(await getSetting(ADMIN_URL, 'welcome_bonus', '100')) || 0))
+  if (!bonus) return
+  await pool.query('UPDATE users SET promo_balance=promo_balance+$1 WHERE id=$2', [bonus, uid])
   await pool.query(
-    'INSERT INTO transactions (user_id,type,title,amount,balance,created,kind) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [uid, 'credit', 'Welcome bonus', WELCOME_BONUS, WELCOME_BONUS, nowIso(), 'WELCOME_BONUS'])
+    'INSERT INTO transactions (user_id,type,title,amount,balance,created,kind,balance_type) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [uid, 'credit', 'Welcome bonus', bonus, bonus, nowIso(), 'WELCOME_BONUS', 'promo'])
 }
 
 async function findOrCreateUser(phone) {
@@ -319,7 +326,7 @@ async function ensureDefaultAddressFromLocation(uid, city, location, pincode) {
     // First address: seed "Home" from a human-readable value only (never raw coordinates).
     const line = looksLikeCoords(location) ? city : (location || city)
     if (!line) return
-    await pool.query('INSERT INTO addresses (user_id,label,line,city,pincode,is_default) VALUES ($1,$2,$3,$4,$5,true)',
+    await pool.query('INSERT INTO addresses (user_id,label,line,city,pincode,is_default,auto_seeded) VALUES ($1,$2,$3,$4,$5,true,true)',
       [uid, 'Home', line, city || null, pin])
     return
   }
@@ -396,7 +403,8 @@ async function walletSpend(uid, amount, { title, ref, kind = 'BOOKING_PAYMENT' }
   if (fromPromo > 0) await walletMutate(uid, { balanceType: 'promo', type: 'debit', kind: kind === 'BOOKING_PAYMENT' && amt > fromPromo ? 'PARTIAL_PAYMENT' : kind, title, amount: fromPromo, ref })
   if (amt - fromPromo > 0) await walletMutate(uid, { balanceType: 'cash', type: 'debit', kind, title, amount: amt - fromPromo, ref })
   const nu = await getUser(uid)
-  return { balance: nu.wallet, promo: nu.promo_balance, total: (nu.wallet || 0) + (nu.promo_balance || 0) }
+  // fromPromo/fromCash let the caller refund each part back to the balance it came from.
+  return { balance: nu.wallet, promo: nu.promo_balance, total: (nu.wallet || 0) + (nu.promo_balance || 0), fromPromo, fromCash: amt - fromPromo }
 }
 // Back-compat cash credit/debit used by existing callers.
 async function addTransaction(uid, type, title, amount, ref, kind) {
@@ -579,6 +587,9 @@ app.post('/api/addresses', auth, async (req, res) => {
   // Human-readable one-liner: flat/floor/building first, then the map locality + pincode.
   const line = a.line || [a.house, a.floor && `Floor ${a.floor}`, a.apartment, a.street, a.landmark, a.city, a.pincode].filter(Boolean).join(', ')
   const receiverPhone = a.receiver_phone ?? a.receiverPhone ?? null
+  // The first real address replaces the placeholder seeded from the profile location, so the
+  // customer doesn't end up with two "Home" entries.
+  await pool.query('DELETE FROM addresses WHERE user_id=$1 AND auto_seeded', [req.user.id])
   // First address (or an explicit makeDefault) becomes the default → drives the customer's zone/pricing.
   const existing = (await pool.query('SELECT count(*)::int n FROM addresses WHERE user_id=$1', [req.user.id])).rows[0].n
   const makeDefault = a.makeDefault === true || existing === 0
@@ -596,6 +607,7 @@ app.patch('/api/addresses/:id', auth, async (req, res) => {
   const a = req.body || {}
   const cur = (await pool.query('SELECT * FROM addresses WHERE id=$1 AND user_id=$2', [id, req.user.id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Not found' })
+  if (cur.auto_seeded) await pool.query('UPDATE addresses SET auto_seeded=false WHERE id=$1', [id]) // the customer made it theirs
   const m = { ...cur, ...a }
   const receiverPhone = a.receiver_phone ?? a.receiverPhone ?? cur.receiver_phone
   const line = a.line || [m.house, m.floor && `Floor ${m.floor}`, m.apartment, m.street, m.landmark, m.city, m.pincode].filter(Boolean).join(', ')

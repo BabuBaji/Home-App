@@ -86,6 +86,8 @@ const DEFAULT_SETTINGS = {
   // withdrawal request, and payout_frequency/payout_day drive the estimated next-payout date
   // shown to workers and admins. 'on_demand' frequency = no schedule, so no estimate is shown.
   payout_frequency: 'weekly', payout_day: '4', min_payout_limit: '500',
+  // Promo credit a new customer gets on sign-up (spendable on bookings, never withdrawable). 0 = none.
+  welcome_bonus: '100',
 }
 const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key', 'fcm_service_account', 'exotel_api_token',
   'razorpay_webhook_secret', 'payment_webhook_secret', 'payout_webhook_secret']
@@ -608,7 +610,9 @@ const ACTIONS = {
     perm: 'refunds.approve',
     amountOf: async (p) => { const b = await tryGet(U.booking, `/api/internal/bookings/${p.bookingId}`, null); return b ? (b.refund ?? b.total ?? 0) : 0 },
     summarize: (p, amt) => `Refund booking #${p.bookingId} — ₹${amt}`,
-    execute: async (p) => { await internalPost(U.booking, `/api/internal/bookings/${p.bookingId}/refund`, {}); return { ok: true } },
+    // Throws (non-2xx) when the refund can't happen — the approval then reports the failure instead
+    // of "executed".
+    execute: async (p) => internalPost(U.booking, `/api/internal/bookings/${p.bookingId}/refund`, {}),
   },
   'worker.pay_change': {
     label: 'Worker pay change',
@@ -724,6 +728,7 @@ app.post('/api/admin/approvals/:id/approve', admin, requirePerm('approvals.revie
     await pool.query("UPDATE approval_requests SET status='executed', approvals=$1::jsonb, decided_by=$2, decided_at=now(), result=$3::jsonb WHERE id=$4",
       [JSON.stringify(approvals), who, JSON.stringify(result || {}), r.id])
     await logAudit(req.admin.email, 'approval.execute', r.summary)
+    await logAudit(req.admin.email, r.action, r.summary)
     publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'approval.approve', entityType: 'approval', entityId: r.id, detail: `Approved & executed: ${r.summary}` })
     res.json({ ok: true, request: requestDto((await pool.query('SELECT * FROM approval_requests WHERE id=$1', [r.id])).rows[0], rule) })
   } catch (e) {
@@ -968,6 +973,14 @@ app.get('/api/admin/control-tower', admin, async (req, res) => {
   res.json({ jobs, pros, generatedAt: nowIso() })
 })
 
+// A booking's city for the "by city" charts: its zone's city, else the address's last part that
+// isn't a pincode (addresses end "…, Hyderabad, 500032" — grouping on the tail gave pincodes).
+function bookingCity(b, zonesById) {
+  const zc = b.zone_id != null ? zonesById.get(Number(b.zone_id))?.city : ''
+  if (zc) return String(zc).trim()
+  const parts = String(b.address || '').split(',').map((x) => x.trim()).filter((x) => x && !/^\d[\d\s-]*$/.test(x))
+  return parts.pop() || 'Unknown'
+}
 app.get('/api/admin/dashboard', admin, async (req, res) => {
   const [customersAll, bookingsAll, workersResp] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
@@ -1006,8 +1019,9 @@ app.get('/api/admin/dashboard', admin, async (req, res) => {
   }
 
   // bookings grouped by city (from the address tail)
+  const zonesById = new Map((await getZonesSnapshot()).map((z) => [Number(z.id), z]))
   const cityCount = {}
-  for (const b of bookings) { const c = (b.address || '').split(',').pop().trim() || 'Unknown'; cityCount[c] = (cityCount[c] || 0) + 1 }
+  for (const b of bookings) { const c = bookingCity(b, zonesById); cityCount[c] = (cityCount[c] || 0) + 1 }
   const cityRows = Object.entries(cityCount).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([city, n]) => ({ city, n }))
 
   // most-booked services (by line-item name)
@@ -1114,7 +1128,8 @@ app.get('/api/admin/insights', admin, async (req, res) => {
   const revenueByPayment = Object.entries(payRev).map(([label, value]) => ({ label, value: Math.round(value) }))
 
   const cityRev = {}, cityBk = {}
-  for (const b of bookings) { const c = (b.address || '').split(',').pop().trim() || 'Unknown'; cityBk[c] = (cityBk[c] || 0) + 1; if (isPaid(b)) cityRev[c] = (cityRev[c] || 0) + (b.total || 0) }
+  const zonesById = new Map((await getZonesSnapshot()).map((z) => [Number(z.id), z]))
+  for (const b of bookings) { const c = bookingCity(b, zonesById); cityBk[c] = (cityBk[c] || 0) + 1; if (isPaid(b)) cityRev[c] = (cityRev[c] || 0) + (b.total || 0) }
   const topCitiesByRevenue = Object.entries(cityRev).map(([label, value]) => ({ label, value: Math.round(value) })).sort((a, b) => b.value - a.value).slice(0, 6)
   const topCitiesByBookings = Object.entries(cityBk).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 6)
 
@@ -1275,7 +1290,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
     const patch = {}
     for (const k of ['name', 'email', 'city']) if (req.body?.[k] != null) patch[k] = req.body[k]
     if (Object.keys(patch).length) await internalPatch(U.auth, `/api/internal/users/${user.id}`, patch)
-    await logAudit(req.admin?.name || 'admin', 'customer.create', String(user.id), req)
+    await logAudit(req.admin?.name || 'admin', 'customer.create', `#${user.id}`, req)
     res.json({ ok: true, id: user.id })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
@@ -1442,9 +1457,14 @@ app.post('/api/admin/customers/:id/wallet', admin, scopeCustomer, async (req, re
   return submitAction('customer.wallet_adjust', { userId: Number(req.params.id), amount: amt, balance, title }, req, res)
 })
 // Admin sets wallet status: active / frozen / blocked / inactive.
-app.post('/api/admin/customers/:id/wallet/status', admin, scopeCustomer, async (req, res) => {
-  try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet-status`, { status: req.body?.status })) }
-  catch (e) { res.status(500).json({ error: e.message }) }
+app.post('/api/admin/customers/:id/wallet/status', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
+  const status = String(req.body?.status || '')
+  if (!['active', 'frozen', 'blocked', 'inactive'].includes(status)) return res.status(400).json({ error: 'Status must be active, frozen, blocked or inactive' })
+  try {
+    const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet-status`, { status })
+    await logAudit(req.admin?.name || 'admin', 'customer.wallet_status', `#${req.params.id} → ${status}`, req)
+    res.json(r)
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 
 /* ---------- internal: config for other services ---------- */

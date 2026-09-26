@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
   makePool, migrate, makeAdminAuth, requireRole, requirePerm, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
-  inScope,
+  inScope, publishEvent,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep. Catalog only reads
 // the id (browsing stays anonymous), but it must read it from a SIGNED token — otherwise anyone
@@ -26,7 +26,7 @@ import {
 import {
   loadActiveCampaigns, loadUsage, recordUsage, resolvePricing, rawDiscount, withinWindow, customerEligible,
 } from './pricing-engine.js'
-import { startWeatherPoller, getSurgeForZone, setManualSurge, surgeSnapshot } from './weather.js'
+import { startWeatherPoller, getSurgeForZone, setManualSurge, surgeSnapshot, refreshZones } from './weather.js'
 import { ensurePublicBucket, storageConfigured, sniffType, storageKey, putPublicObject, getObjectStream } from '@homehelp/shared/storage.js'
 import multer from 'multer'
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }) // 5 MB banner images
@@ -590,6 +590,25 @@ async function validateCouponDb(code, subtotal) {
 
 const app = express()
 app.use(express.json())
+// Every successful admin change to the catalogue (services, packages, banners, campaigns, zones,
+// stores, membership plans, pricing, surge) lands in the activity log with who did it.
+const CATALOG_NOUN = { services: 'service', packages: 'package', banners: 'banner', campaigns: 'campaign', zones: 'zone', stores: 'store',
+  'membership-plans': 'membership plan', 'extension-rules': 'extension rule', 'pricing-rules': 'pricing rule', surge: 'surge' }
+app.use((req, res, next) => {
+  const m = req.path.match(/^\/api\/admin\/([a-z-]+)(?:\/([^/]+))?/)
+  if (!m || !CATALOG_NOUN[m[1]] || !['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return next()
+  res.on('finish', () => {
+    if (res.statusCode >= 400 || !req.admin) return
+    const b = req.body || {}
+    const verb = req.method === 'POST' ? 'create' : req.method === 'DELETE' ? 'delete' : 'update'
+    const noun = CATALOG_NOUN[m[1]]
+    const name = b.name || b.title || b.code || b.label || (m[1] === 'surge' ? `${b.pct ?? 0}% on zone ${b.zoneId}` : '')
+    const Verb = { create: 'Created', update: 'Updated', delete: 'Deleted' }[verb]
+    publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorId: req.admin.id, actorName: req.admin.name || req.admin.email, action: `${noun.replace(/ /g, '_')}.${verb}`,
+      entityType: noun.replace(/ /g, '_'), entityId: m[2] || null, detail: `${Verb} ${noun}${name ? ` ${name}` : m[2] ? ` #${m[2]}` : ''}` })
+  })
+  next()
+})
 // Serve the service images (bundled from services/catalog/public/services). Reached via the
 // gateway because the path starts with /api/services, which routes here.
 app.use('/api/services-media', express.static(path.join(__dirname, 'public/services'), { maxAge: '7d' }))
@@ -1271,6 +1290,9 @@ app.patch('/api/admin/services/:id', adminAuth, requirePerm('services.edit'), as
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
   if (!cur.rowCount) return res.status(404).json({ error: 'Not found' })
   const s = cur.rows[0]
+  if (b.price != null && !(Number(b.price) >= 0)) return res.status(400).json({ error: 'Price cannot be negative' })
+  if (b.gst_pct != null && !(Number(b.gst_pct) >= 0)) return res.status(400).json({ error: 'GST cannot be negative' })
+  if (b.duration_min != null && !(Number(b.duration_min) >= 5)) return res.status(400).json({ error: 'Duration must be at least 5 minutes' })
   await pool.query('UPDATE services SET name=$1, icon=$2, price=$3, category=$4, available=$5, duration_min=COALESCE($6,duration_min), gst_pct=COALESCE($7,gst_pct) WHERE id=$8', [
     b.name ?? s.name, b.icon ?? s.icon, b.price ?? s.price, b.category ?? s.category,
     b.available === undefined ? s.available : !!b.available, b.duration_min ?? null, b.gst_pct ?? null, req.params.id,
@@ -1294,6 +1316,7 @@ app.get('/api/admin/zones', adminAuth, async (req, res) => {
 // Current surge per live zone: the weather signal, the derived %, and whether it's automatic or a
 // manual override. Enriched with the zone name for display.
 app.get('/api/admin/surge', adminAuth, async (req, res) => {
+  await refreshZones(pool)
   const snap = surgeSnapshot().filter((s) => zoneInScope(req, s.zoneId))
   const names = new Map((await pool.query('SELECT id, name FROM zones')).rows.map((r) => [r.id, r.name]))
   res.json(snap.map((s) => ({ ...s, zone: names.get(s.zoneId) || `Zone ${s.zoneId}` })).sort((a, b) => (b.pct - a.pct) || a.zone.localeCompare(b.zone)))
@@ -1307,6 +1330,7 @@ app.post('/api/admin/surge', adminAuth, requirePerm('pricing.edit'), async (req,
   if (!zonesWritable(req, scope === '*' ? [] : [scope])) return res.status(403).json(OUT_OF_SCOPE)
   const pct = Math.max(0, Math.min(50, Number(b.pct) || 0))
   const minutes = b.minutes != null ? Math.max(0, Number(b.minutes)) : 120
+  await refreshZones(pool)
   setManualSurge(scope, pct, minutes)
   res.json({ ok: true, scope: scope === '*' ? 'all' : scope, pct, minutes })
 })

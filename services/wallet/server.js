@@ -38,6 +38,8 @@ async function init() {
   await migrate(pool, [
     `CREATE TABLE IF NOT EXISTS worker_income (id SERIAL PRIMARY KEY, worker_id INTEGER, category TEXT, label TEXT, amount INTEGER, ref_id TEXT, bucket TEXT DEFAULT 'available', created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_deductions (id SERIAL PRIMARY KEY, worker_id INTEGER, category TEXT, label TEXT, amount INTEGER, created TIMESTAMPTZ DEFAULT now())`,
+    // Admin wallet holds: +amount places a hold, -amount releases it. The running sum is what's held.
+    `CREATE TABLE IF NOT EXISTS worker_holds (id SERIAL PRIMARY KEY, worker_id INTEGER, amount INTEGER NOT NULL, label TEXT, source TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_withdrawals (id SERIAL PRIMARY KEY, worker_id INTEGER, amount INTEGER, method TEXT, status TEXT DEFAULT 'Pending', reference TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_advances (id SERIAL PRIMARY KEY, worker_id INTEGER, amount INTEGER, outstanding INTEGER, status TEXT DEFAULT 'Pending', created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS worker_payslips (id SERIAL PRIMARY KEY, worker_id INTEGER, month TEXT, gross INTEGER, deductions INTEGER, net INTEGER, created TIMESTAMPTZ DEFAULT now())`,
@@ -328,7 +330,10 @@ async function summary(wid) {
   const totalWithdrawn = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status='Paid'")
   // Held = awaiting admin approval (Pending) or a payout in flight (Processing). Both reduce
   // the withdrawable balance so a worker can't request the same money twice before it lands.
-  const hold = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status IN ('Pending','Processing')")
+  const payoutHold = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status IN ('Pending','Processing')")
+  // Plus any amount an admin has put on hold (dispute, investigation) and not yet released.
+  const adminHold = Math.max(0, await s('SELECT COALESCE(SUM(amount),0)::int s FROM worker_holds WHERE worker_id=$1'))
+  const hold = payoutHold + adminHold
   const ded = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_deductions WHERE worker_id=$1")
   const advanceOutstanding = await s("SELECT COALESCE(SUM(outstanding),0)::int s FROM worker_advances WHERE worker_id=$1 AND status='Approved'")
   // An approved advance is money in hand (withdrawable); it comes back as 'Advance recovery'
@@ -346,7 +351,7 @@ async function summary(wid) {
   const lastWeekEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '14 days' AND created <= now()-interval '7 days'")
   const lastMonthEarnings = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_income WHERE worker_id=$1 AND created > now()-interval '60 days' AND created <= now()-interval '30 days'")
   return {
-    available, pending: 0, hold, onHold: hold,
+    available, pending: 0, hold, onHold: hold, adminHold,
     totalEarned: earned, totalWithdrawn, withdrawn: totalWithdrawn,
     advanceOutstanding, todayEarnings, weekEarnings, monthEarnings,
     yesterdayEarnings, lastWeekEarnings, lastMonthEarnings,
@@ -824,10 +829,49 @@ app.post('/api/admin/workers/:id/wallet/release-pending', adminAuth, requirePerm
 app.post('/api/admin/workers/:id/wallet/payslip', adminAuth, async (req, res) => res.json(await savePayslip(Number(req.params.id), req.body?.month)))
 app.get('/api/admin/workers/:id/wallet', adminAuth, async (req, res) => res.json(await walletState(Number(req.params.id))))
 // A manually granted bonus records the admin who granted it; everything else is credited by 'System'.
-app.post('/api/admin/workers/:id/wallet/bonus', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,bucket,source) VALUES ($1,'Bonus',$2,$3,'available',$4)", [wid, req.body?.label || 'Admin bonus', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: amt, earnings: amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/penalty', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_deductions (worker_id,category,label,amount,source) VALUES ($1,'Penalty',$2,$3,$4)", [wid, req.body?.label || 'Admin penalty', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: -amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: -amt, hold: amt }); res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: amt, hold: -amt }); res.json(await walletState(wid)) })
+// Manual wallet adjustments. Each needs a positive whole-rupee amount, and each is logged to the
+// activity feed so it is clear who moved a worker's money and why.
+const adjAmount = (req, res) => {
+  const amt = Number(req.body?.amount)
+  if (!Number.isInteger(amt) || amt <= 0) { res.status(400).json({ error: 'Enter an amount greater than ₹0.' }); return 0 }
+  return amt
+}
+const logAdj = (req, wid, action, detail, amount) => publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorId: req.admin?.id, actorName: req.admin?.name || req.admin?.email, action, entityType: 'worker', entityId: wid, detail, meta: { amount } })
+const adminHeld = async (wid) => Math.max(0, (await pool.query('SELECT COALESCE(SUM(amount),0)::int s FROM worker_holds WHERE worker_id=$1', [wid])).rows[0].s)
+app.post('/api/admin/workers/:id/wallet/bonus', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  const wid = Number(req.params.id), amt = adjAmount(req, res); if (!amt) return
+  const label = String(req.body?.label || 'Admin bonus')
+  await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,bucket,source) VALUES ($1,'Bonus',$2,$3,'available',$4)", [wid, label, amt, req.admin?.name || req.admin?.email || 'Admin'])
+  await adjustBalance(wid, { balance: amt, earnings: amt })
+  logAdj(req, wid, 'wallet.bonus', `Bonus ₹${amt} · ${label}`, amt)
+  res.json(await walletState(wid))
+})
+app.post('/api/admin/workers/:id/wallet/penalty', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  const wid = Number(req.params.id), amt = adjAmount(req, res); if (!amt) return
+  const label = String(req.body?.label || 'Admin penalty')
+  await pool.query("INSERT INTO worker_deductions (worker_id,category,label,amount,source) VALUES ($1,'Penalty',$2,$3,$4)", [wid, label, amt, req.admin?.name || req.admin?.email || 'Admin'])
+  await adjustBalance(wid, { balance: -amt })
+  logAdj(req, wid, 'wallet.penalty', `Penalty ₹${amt} · ${label}`, amt)
+  res.json(await walletState(wid))
+})
+app.post('/api/admin/workers/:id/wallet/hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  const wid = Number(req.params.id), amt = adjAmount(req, res); if (!amt) return
+  const avail = (await summary(wid)).available
+  if (amt > avail) return res.status(409).json({ error: `Only ₹${avail} is available to hold.` })
+  await pool.query('INSERT INTO worker_holds (worker_id,amount,label,source) VALUES ($1,$2,$3,$4)', [wid, amt, String(req.body?.label || req.body?.reason || 'Admin hold'), req.admin?.name || req.admin?.email || 'Admin'])
+  await adjustBalance(wid, { balance: -amt, hold: amt })
+  logAdj(req, wid, 'wallet.hold', `Put ₹${amt} on hold`, amt)
+  res.json(await walletState(wid))
+})
+app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  const wid = Number(req.params.id), amt = adjAmount(req, res); if (!amt) return
+  const held = await adminHeld(wid)
+  if (amt > held) return res.status(409).json({ error: held ? `Only ₹${held} is on hold.` : 'Nothing is on hold for this worker.' })
+  await pool.query('INSERT INTO worker_holds (worker_id,amount,label,source) VALUES ($1,$2,$3,$4)', [wid, -amt, 'Released', req.admin?.name || req.admin?.email || 'Admin'])
+  await adjustBalance(wid, { balance: amt, hold: -amt })
+  logAdj(req, wid, 'wallet.release_hold', `Released ₹${amt} from hold`, amt)
+  res.json(await walletState(wid))
+})
 // Approve → trigger the real payout (money is already held from the request). Status becomes
 // 'Processing'; the payout.completed/failed event finalizes it. Do NOT mark Paid directly here.
 app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })

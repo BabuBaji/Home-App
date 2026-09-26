@@ -106,6 +106,7 @@ export default function SettingsScreen() {
           <Field label="Registered Address (invoice)"><input disabled={!editable} value={s.company_address || ''} onChange={(e) => set('company_address', e.target.value)} placeholder="Street, City, State, PIN" /></Field>
           <Field label="State — Place of Supply"><input disabled={!editable} value={s.company_state || ''} onChange={(e) => set('company_state', e.target.value)} placeholder="Telangana" /></Field>
           <Field label="Service SAC Code"><input disabled={!editable} value={s.service_sac || ''} onChange={(e) => set('service_sac', e.target.value)} placeholder="9987" /></Field>
+          <Field label="New-customer welcome credit (₹, promo — 0 = none)"><input disabled={!editable} type="number" min={0} value={s.welcome_bonus ?? ''} onChange={(e) => set('welcome_bonus', e.target.value)} placeholder="100" /></Field>
         </div>
 
         {/* Default Currency & Time */}

@@ -9,7 +9,7 @@
 // them, so the admin Activity Monitor and booking timeline work without any service calling it.
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet, publishEvent, sendPush, inScope, internalPost,
+  makePool, migrate, nowIso, makeAdminAuth, requirePerm, internalOnly, subscribeEvents, tryGet, publishEvent, sendPush, inScope, internalPost,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
@@ -269,7 +269,7 @@ app.get('/api/admin/tickets/:id', adminAuth, async (req, res) => {
   const msgs = (await pool.query('SELECT * FROM ticket_messages WHERE ticket_id=$1 ORDER BY id', [id])).rows
   res.json({ ...t, messages: msgs.filter((m) => !m.internal), notes: msgs.filter((m) => m.internal) })
 })
-app.post('/api/admin/tickets/:id/messages', adminAuth, async (req, res) => {
+app.post('/api/admin/tickets/:id/messages', adminAuth, requirePerm('tickets.resolve'), async (req, res) => {
   const id = Number(req.params.id), b = req.body || {}
   if (!b.body || !String(b.body).trim()) return res.status(400).json({ error: 'Message is required' })
   const internal = !!b.internal
@@ -278,7 +278,7 @@ app.post('/api/admin/tickets/:id/messages', adminAuth, async (req, res) => {
     [id, internal ? 'admin' : (b.senderType || 'admin'), b.senderName || req.admin?.name || 'Admin', String(b.body).trim(), b.source || 'admin', internal])
   res.status(201).json(rows[0])
 })
-app.patch('/api/admin/tickets/:id', adminAuth, async (req, res) => {
+app.patch('/api/admin/tickets/:id', adminAuth, requirePerm('tickets.resolve'), async (req, res) => {
   const b = req.body || {}, id = Number(req.params.id)
   const cur = (await pool.query('SELECT * FROM tickets WHERE id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Not found' })
@@ -295,7 +295,7 @@ app.patch('/api/admin/tickets/:id', adminAuth, async (req, res) => {
   res.json((await pool.query('SELECT * FROM tickets WHERE id=$1', [id])).rows[0])
 })
 // Admin-raised complaint tied to a booking.
-app.post('/api/admin/tickets', adminAuth, async (req, res) => {
+app.post('/api/admin/tickets', adminAuth, requirePerm('complaints.resolve'), async (req, res) => {
   const b = req.body || {}
   const ref = '#SUP-' + Math.floor(1000 + Math.random() * 8999)
   const { rows } = await pool.query(
@@ -315,14 +315,14 @@ app.get('/api/admin/complaints', adminAuth, async (req, res) => {
   if (req.query.priority && req.query.priority !== 'all') rows = rows.filter((c) => c.priority === req.query.priority)
   res.json(rows)
 })
-app.post('/api/admin/complaints', adminAuth, async (req, res) => {
+app.post('/api/admin/complaints', adminAuth, requirePerm('complaints.resolve'), async (req, res) => {
   const c = req.body || {}
   const ref = '#CMP' + Math.floor(1000 + Math.random() * 8999)
   const { rows } = await pool.query('INSERT INTO complaints (ref,customer,against,booking_ref,category,message,priority,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
     [ref, c.customer || 'Customer', c.against || null, c.booking_ref || null, c.category || 'General', c.message || '', c.priority || 'medium', 'open'])
   res.status(201).json(rows[0])
 })
-app.patch('/api/admin/complaints/:id', adminAuth, async (req, res) => {
+app.patch('/api/admin/complaints/:id', adminAuth, requirePerm('complaints.resolve'), async (req, res) => {
   const cur = (await pool.query('SELECT * FROM complaints WHERE id=$1', [Number(req.params.id)])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Not found' })
   await pool.query('UPDATE complaints SET status=$1, priority=$2 WHERE id=$3', [req.body?.status ?? cur.status, req.body?.priority ?? cur.priority, cur.id])
@@ -424,7 +424,7 @@ app.post('/api/internal/push', internalOnly, async (req, res) => {
 })
 
 app.get('/api/admin/notifications', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))
-app.post('/api/admin/notifications/broadcast', adminAuth, async (req, res) => {
+app.post('/api/admin/notifications/broadcast', adminAuth, requirePerm('notifications.send'), async (req, res) => {
   const b = req.body || {}
   if (!b.title) return res.status(400).json({ error: 'Title required' })
   const { isPromo, sent, suppressed, recipientIds, audienceKind } = await resolveRecipients(b)

@@ -422,8 +422,14 @@ async function main() {
     check('Record criminal check = clear reads back', clr.ok && crim?.ok && crim.reference === `E2E-${RUN}` && !!crim.checkedBy, JSON.stringify(crim).slice(0, 150))
     const ba = await api('POST', A(`/workers/${S.wt}/bank/approve`), { token: SUP })
     w = await detail(S.wt)
-    check('Bank approve → bank_status Verified', ba.ok && w.bank_status === 'Verified', w.bank_status)
-    check('Bank approve is refused when the worker never submitted bank details', !ba.ok, `worker has profile.bank=${JSON.stringify(w.profile?.bank || null)} but approve returned ${ba.status}`)
+    check('Bank approve is refused when the worker never submitted bank details', !ba.ok && w.bank_status !== 'Verified', `worker has profile.bank=${JSON.stringify(w.profile?.bank || null)} but approve returned ${ba.status}`)
+    // The active test worker submits bank details from the app, then approval goes through.
+    const wo = await must('w otp', api('POST', '/api/worker/auth/request-otp', { body: { phone: wPhone } }))
+    const WTOK = (await must('w login', api('POST', '/api/worker/auth/verify', { body: { phone: wPhone, otp: wo.devOtp || '1234' } }))).token
+    await must('w bank', api('PUT', '/api/worker/bank', { token: WTOK, body: { bankHolder: `E2E Worker ${RUN}`, bankName: 'HDFC Bank', bankAccount: '50100123456789', bankIfsc: 'HDFC0000001' } }))
+    const ba2 = await api('POST', A(`/workers/${S.worker}/bank/approve`), { token: SUP })
+    const wv = await detail(S.worker)
+    check('Bank approve (details on file) → bank_status Verified', ba2.ok && wv.bank_status === 'Verified', `${brief(ba2)} → ${wv.bank_status}`)
     const br = await api('POST', A(`/workers/${S.wt}/bank/reject`), { token: SUP, body: { reason: 'E2E' } })
     w = await detail(S.wt)
     check('Bank reject → bank_status Rejected', br.ok && w.bank_status === 'Rejected', w.bank_status)

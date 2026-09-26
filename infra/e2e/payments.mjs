@@ -75,12 +75,12 @@ async function main() {
   check('The same payment cannot pay twice', r.status === 402, `HTTP ${r.status}`)
 
   // Wallet top-up only against a payment, once.
-  const w0 = (await wallet(A.tok)).balance ?? (await wallet(A.tok)).cash
+  const w0 = (await wallet(A.tok)).total
   const tp = await pay(A.tok, 100)
   const t1 = await api('POST', '/api/payment/wallet/topup', { token: A.tok, body: { paymentId: tp, amount: 100 } })
   const t2 = await api('POST', '/api/payment/wallet/topup', { token: A.tok, body: { paymentId: tp, amount: 100 } })
   const t3 = await api('POST', '/api/payment/wallet/topup', { token: A.tok, body: { paymentId: tp, amount: 500 } })
-  const w1 = (await wallet(A.tok)).balance ?? (await wallet(A.tok)).cash
+  const w1 = (await wallet(A.tok)).total
   check('Top-up credits once, replay does not double it', t1.ok && w1 - w0 === 100, `before ₹${w0}, after ₹${w1}, replay ${t2.status}/${t3.status}`)
 
   // Split: part wallet, part online.
@@ -89,7 +89,7 @@ async function main() {
   const walletAmount = Math.min(50, total2 - 1)
   const rest = await pay(A.tok, total2 - walletAmount)
   r = await book(A, { paymentId: rest, walletAmount })
-  const w2 = (await wallet(A.tok)).balance ?? (await wallet(A.tok)).cash
+  const w2 = (await wallet(A.tok)).total
   check('Split payment debits the wallet slice', r.status === 201 && w1 - w2 === walletAmount, `HTTP ${r.status} ${r.ok ? '' : JSON.stringify(r.json).slice(0, 90)}, wallet ₹${w1} → ₹${w2}`)
   const splitId = r.json?.id
 
@@ -97,7 +97,7 @@ async function main() {
   if (splitId) {
     await api('POST', `/api/bookings/${splitId}/cancel`, { token: A.tok, body: { reason: 'test' } })
     const b = (await api('GET', `/api/admin/bookings/${splitId}`, { token: sup })).json
-    const w3 = (await wallet(A.tok)).balance ?? (await wallet(A.tok)).cash
+    const w3 = (await wallet(A.tok)).total
     check('Cancel refunds online part to the card/UPI', b.refund_to_source === total2 - walletAmount, `to source ₹${b.refund_to_source}, status ${b.refund_status}`)
     check('…and the wallet part to the wallet', w3 - w2 === walletAmount, `wallet ₹${w2} → ₹${w3}`)
   }

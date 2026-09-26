@@ -67,9 +67,15 @@ export function surgeSnapshot() {
   return out
 }
 
-async function pollOnce(pool) {
+/** Reload the live zone list (cheap) so a zone created since the last weather poll shows up. */
+export async function refreshZones(pool) {
   const { rows } = await pool.query("SELECT id, lower(trim(city)) AS city FROM zones WHERE status='live' AND city <> ''")
   zoneCity = new Map(rows.map((r) => [r.id, r.city]))
+  return rows
+}
+
+async function pollOnce(pool) {
+  const rows = await refreshZones(pool)
   const cities = [...new Set(rows.map((r) => r.city))].filter((c) => CITY_COORDS[c])
   for (const city of cities) {
     const [lat, lng] = CITY_COORDS[city]

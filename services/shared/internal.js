@@ -7,6 +7,13 @@ export function internalOnly(req, res, next) {
   res.status(403).json({ error: 'forbidden' })
 }
 
+// Carries a 4xx upstream status (a refused request, not an outage) so callers can pass it on.
+function upstreamError(message, status) {
+  const e = new Error(message)
+  if (status >= 400 && status < 500) e.status = status
+  return e
+}
+
 export async function internalGet(baseUrl, path) {
   const r = await fetch(`${baseUrl}${path}`, { headers: { 'x-internal-key': INTERNAL_KEY } })
   if (!r.ok) throw new Error(`GET ${path} → ${r.status}`)
@@ -19,7 +26,7 @@ export async function internalPost(baseUrl, path, body) {
     headers: { 'Content-Type': 'application/json', 'x-internal-key': INTERNAL_KEY },
     body: JSON.stringify(body || {}),
   })
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `POST ${path} → ${r.status}`) }
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw upstreamError(e.error || `POST ${path} → ${r.status}`, r.status) }
   return r.json()
 }
 
@@ -29,7 +36,7 @@ export async function internalPatch(baseUrl, path, body) {
     headers: { 'Content-Type': 'application/json', 'x-internal-key': INTERNAL_KEY },
     body: JSON.stringify(body || {}),
   })
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `PATCH ${path} → ${r.status}`) }
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw upstreamError(e.error || `PATCH ${path} → ${r.status}`, r.status) }
   return r.json()
 }
 
