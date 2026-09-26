@@ -34,16 +34,21 @@ object Session {
         get() = prefs?.getString("language", "English") ?: "English"
         set(v) { prefs?.edit()?.putString("language", v)?.apply() }
 
-    /** UI language code: "en" (default) or "hi". Drives [I18n] / [tr]. Survives logout. */
+    /** UI language code ("en", "hi", "ta", …). Drives [I18n] / [tr]. Survives logout. */
     var lang: String
         get() = prefs?.getString("lang", "en") ?: "en"
-        set(v) { prefs?.edit()?.putString("lang", v)?.apply() }
+        set(v) { prefs?.edit()?.putString("lang", v)?.putBoolean("lang_chosen", true)?.apply() }
+
+    /** Has the worker picked a language yet? (The login screen asks on first launch.) */
+    var langChosen: Boolean
+        get() = prefs?.getBoolean("lang_chosen", false) ?: false
+        set(v) { prefs?.edit()?.putBoolean("lang_chosen", v)?.apply() }
 
     val isLoggedIn: Boolean get() = !token.isNullOrBlank()
 
     fun clear() {
         // Keep the worker's language choice across logout so the Login screen stays in their language.
         val keepLang = lang
-        prefs?.edit()?.clear()?.putString("lang", keepLang)?.apply()
+        prefs?.edit()?.clear()?.putString("lang", keepLang)?.putBoolean("lang_chosen", true)?.apply()
     }
 }

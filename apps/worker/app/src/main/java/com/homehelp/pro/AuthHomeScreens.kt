@@ -114,6 +114,9 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
     var phone by remember { mutableStateOf("") }
     var otp by remember { mutableStateOf("") }
     var otpSent by remember { mutableStateOf(false) }
+    // First launch (no language chosen yet): ask right away, before any English text matters.
+    var showLang by remember { mutableStateOf(!Session.langChosen) }
+    if (showLang) LanguagePickerDialog { Session.langChosen = true; showLang = false }
 
     // Filled, soft-bordered field styling — shared by both inputs (enterprise form spec).
     val fieldColors = OutlinedTextFieldDefaults.colors(
@@ -143,6 +146,8 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 .background(Color.White.copy(alpha = 0.08f), CircleShape))
             Box(Modifier.align(Alignment.BottomStart).offset(x = (-50).dp, y = 40.dp).size(150.dp)
                 .background(Color.White.copy(alpha = 0.06f), CircleShape))
+            // Change language before signing in.
+            LanguageChip({ showLang = true }, Modifier.align(Alignment.TopEnd).padding(top = 40.dp, end = Space.l))
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = Space.xxl).padding(top = 64.dp, bottom = 76.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
