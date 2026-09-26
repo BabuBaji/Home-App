@@ -41,6 +41,7 @@ import Refunds from './screens/Refunds'
 import Complaints from './screens/Complaints'
 import Notifications from './screens/Notifications'
 import Tickets from './screens/Tickets'
+import Packages from './screens/Packages'
 import Reports from './screens/Reports'
 import Analytics from './screens/Analytics'
 import Activity from './screens/Activity'
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="/campaigns" element={<Page perm="campaigns.view"><Campaigns /></Page>} />
           <Route path="/membership" element={<Page perm="pricing.view"><MembershipPlans /></Page>} />
           <Route path="/home-banners" element={<Page perm="campaigns.view"><HomeBanners /></Page>} />
+          <Route path="/packages" element={<Page perm="campaigns.view"><Packages /></Page>} />
           <Route path="/service-areas" element={<Page perm="zones.view"><ServiceAreas /></Page>} />
           <Route path="/zones" element={<Page perm="zones.view"><ZoneOnboarding /></Page>} />
           <Route path="/zones/cities" element={<Page perm="zones.view"><CitiesPage /></Page>} />

@@ -740,6 +740,31 @@ app.post('/api/admin/actions/payroll-approve', admin, async (req, res) =>
 
 /* ================= BFF aggregation (reads other services over internal HTTP) ================= */
 // Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).
+/* Live map for the control tower: experts where they are right now (online / on a job / offline,
+   by their last GPS heartbeat) and open + active jobs at the customer's location. Zone-scoped. */
+app.get('/api/admin/live-map', admin, async (req, res) => {
+  const scope = req.admin?.scope
+  const [zonesAll, locs, opsAll] = await Promise.all([
+    tryGet(U.catalog, '/api/internal/zones', []),
+    tryGet(U.worker, '/internal/workers/locations', []),
+    tryGet(U.booking, '/api/internal/ops', []),
+  ])
+  const busy = new Set((opsAll || []).filter((b) => b.worker_id && b.status !== 'confirmed').map((b) => b.worker_id))
+  const STALE_MS = 30 * 60000
+  const workers = (locs || []).filter((w) => w.last_lat != null && inScope(scope, { zoneId: w.zone_id, city: w.city })).map((w) => ({
+    id: w.id, name: w.name, phone: w.phone, zoneId: w.zone_id, lat: Number(w.last_lat), lng: Number(w.last_lng), seenAt: w.location_at,
+    state: busy.has(w.id) ? 'busy' : w.available ? 'online' : 'offline',
+    stale: !w.location_at || Date.now() - new Date(w.location_at).getTime() > STALE_MS,
+  }))
+  const jobs = (opsAll || []).filter((b) => b.cust_lat != null && inScope(scope, { zoneId: b.zone_id })).map((b) => {
+    let items = []; try { items = typeof b.items === 'string' ? JSON.parse(b.items) : (b.items || []) } catch { /* ignore */ }
+    return { id: b.id, ref: b.ref, status: b.status, zoneId: b.zone_id, lat: Number(b.cust_lat), lng: Number(b.cust_lng), workerId: b.worker_id, pro: b.pro_name || '', service: items.map((i) => i.name).join(', ') }
+  })
+  const zones = (zonesAll || []).filter((z) => inScope(scope, { zoneId: z.id, city: z.city }))
+    .map((z) => ({ id: z.id, name: z.name, polygon: z.polygon || null, coverage: z.config?.coverage || null }))
+  res.json({ workers, jobs, zones, at: new Date().toISOString() })
+})
+
 app.get('/api/admin/live-ops', admin, async (req, res) => {
   const ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
   const [zonesAll, wres, opsAll] = await Promise.all([

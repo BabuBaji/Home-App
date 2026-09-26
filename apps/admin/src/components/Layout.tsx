@@ -25,6 +25,7 @@ const NAV: NavGroup[] = [
     { to: '/campaigns', label: 'Campaigns & Offers', Icon: Ticket, chev: true, perm: 'campaigns.view' },
     { to: '/membership', label: 'Membership', Icon: Crown, chev: true, perm: 'pricing.view' },
     { to: '/home-banners', label: 'Home Banners', Icon: Images, perm: 'campaigns.view' },
+    { to: '/packages', label: 'Service Packages', Icon: Images, perm: 'campaigns.view' },
     { to: '/payments', label: 'Payments', Icon: CreditCard, chev: true, perm: 'payments.view' },
     { to: '/refunds', label: 'Refunds', Icon: RotateCcw, chev: true, perm: 'refunds.view' },
   ] },
@@ -74,7 +75,7 @@ const NAV: NavGroup[] = [
 
 const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
-  services: 'Services', campaigns: 'Campaigns & Offers', payments: 'Payments', refunds: 'Refunds',
+  services: 'Services', campaigns: 'Campaigns & Offers', packages: 'Service Packages', payments: 'Payments', refunds: 'Refunds',
   zones: 'Zone Operations', 'command-center': 'Operations Command Center', 'control-tower': 'Control Tower', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', 'compensation-rules': 'Compensation Rules', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals',
 }

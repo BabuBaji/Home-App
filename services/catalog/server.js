@@ -188,6 +188,12 @@ async function init() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_ccu_cust_camp ON customer_campaign_usage (customer_id, campaign_id)`,
     // Scheduled Home hero banners (festival wishes / promos) shown in the rotating hero carousel.
+    // Packages: a fixed bundle of services (id + duration each) sold at a discount, optionally only
+    // in some zones (empty zone_ids = everywhere).
+    `CREATE TABLE IF NOT EXISTS packages (id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
+       items JSONB NOT NULL, discount_type TEXT NOT NULL DEFAULT 'flat', discount_value INTEGER NOT NULL DEFAULT 0,
+       zone_ids INTEGER[] NOT NULL DEFAULT '{}', active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 50,
+       created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS home_banners (
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -479,10 +485,24 @@ async function pricingRules() {
 }
 const invalidatePricingRules = () => { _rulesCache = { at: 0, val: null } }
 
-async function quote({ items, coupon, pincode, lat, lng, zoneId: givenZone, customerId = null, at = null }) {
+/* A package applies only when the cart is exactly its bundle (same services, same durations), it is
+ * active and it is sold in this zone. Returns the discount on top of the cart's own offers. */
+const cartKey = (items) => (items || []).map((i) => `${i.id}:${i.durationId || ''}`).sort().join('|')
+async function packageDiscount(packageId, items, zoneId, subtotal, already) {
+  if (!packageId) return null
+  const p = (await pool.query('SELECT * FROM packages WHERE id=$1 AND active', [Number(packageId)])).rows[0]
+  if (!p || cartKey(p.items) !== cartKey(items)) return null
+  if (p.zone_ids?.length && !p.zone_ids.includes(Number(zoneId))) return null
+  const raw = p.discount_type === 'percent' ? Math.round(subtotal * Math.min(90, p.discount_value) / 100) : p.discount_value
+  return { id: p.id, name: p.name, amount: Math.max(0, Math.min(raw, subtotal - already)) }
+}
+
+async function quote({ items, coupon, pincode, lat, lng, zoneId: givenZone, customerId = null, at = null, packageId = null }) {
   const zoneId = givenZone ? Number(givenZone) : await zoneIdForPincode(pincode, lat, lng)
   const q = await priceCart({ items, coupon, zoneId, customerId, applyCoupons: true })
   if (q.error) return { status: 409, body: q }
+  const pkg = await packageDiscount(packageId, items, zoneId, q.subtotal, q.discount)
+  if (pkg) { q.discount += pkg.amount; q.savings = (q.savings || 0) + pkg.amount }
   const cfg = await zoneConfigJson(zoneId)
   // Peak-hour surcharge: a % uplift on the subtotal when the requested slot (`at`, HH:MM/ISO) is in a peak window.
   const pk = cfg && cfg.peakHours
@@ -546,6 +566,7 @@ async function quote({ items, coupon, pincode, lat, lng, zoneId: givenZone, cust
       surgePct, surgeAmount: surgeSurcharge, surgeReason: surgeSurcharge ? surge.reason : '',
       memberDiscount, memberPlan: memberDiscount > 0 ? (member.planName || '') : '', memberRemaining: member.remaining ?? null,
       fee, tax, gstPct, gstIncluded, total, savings: q.savings, appliedCampaignIds: q.appliedCampaignIds,
+      packageId: pkg ? pkg.id : null, packageName: pkg ? pkg.name : '', packageDiscount: pkg ? pkg.amount : 0,
     },
   }
 }
@@ -1160,6 +1181,63 @@ app.get('/api/eta', async (req, res) => {
 /* ---------- internal (service-to-service) ---------- */
 // Booking service prices bookings authoritatively through here (body may carry `customerId` so
 // per-customer campaign eligibility resolves).
+/* ---------- packages ---------- */
+// Customer: packages sold where they are, each with its bundle price (quoted like a real cart).
+app.get('/api/packages', async (req, res) => {
+  const zoneId = await zoneIdForPincode(...locOf(req.query))
+  const { rows } = await pool.query('SELECT * FROM packages WHERE active ORDER BY sort, id')
+  const out = []
+  for (const p of rows.filter((x) => !x.zone_ids?.length || (zoneId && x.zone_ids.includes(zoneId)))) {
+    const q = await quote({ items: p.items, zoneId, packageId: p.id })
+    if (q.status !== 200 || !q.body.packageId) continue // a service in it isn't sold here
+    out.push({ id: p.id, name: p.name, description: p.description, items: q.body.items, services: q.body.items.map((i) => i.name),
+      price: q.body.total, was: q.body.total + q.body.packageDiscount, save: q.body.packageDiscount })
+  }
+  res.json(out)
+})
+const PK_COLS = ['name', 'description', 'items', 'discount_type', 'discount_value', 'zone_ids', 'active', 'sort']
+function pkClean(b) {
+  const o = {}
+  if (b.name !== undefined) o.name = String(b.name).trim()
+  if (b.description !== undefined) o.description = String(b.description || '')
+  if (b.items !== undefined) o.items = JSON.stringify((Array.isArray(b.items) ? b.items : []).map((i) => ({ id: String(i.id), durationId: String(i.durationId || '') })))
+  if (b.discount_type !== undefined) o.discount_type = b.discount_type === 'percent' ? 'percent' : 'flat'
+  if (b.discount_value !== undefined) o.discount_value = Math.max(0, Math.round(Number(b.discount_value) || 0))
+  if (b.zone_ids !== undefined) o.zone_ids = (Array.isArray(b.zone_ids) ? b.zone_ids : []).map(Number).filter(Number.isFinite)
+  if (b.active !== undefined) o.active = !!b.active
+  if (b.sort !== undefined) o.sort = Math.round(Number(b.sort) || 50)
+  return o
+}
+app.get('/api/admin/packages', adminAuth, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM packages ORDER BY sort, id')
+  res.json(rows.filter((p) => !scoped(req) || !p.zone_ids.length || p.zone_ids.some((z) => zoneInScope(req, z)))
+    .map((p) => (scoped(req) ? { ...p, readOnly: !zonesWritable(req, p.zone_ids) } : p)))
+})
+app.post('/api/admin/packages', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
+  const b = pkClean(req.body || {})
+  if (!b.name) return res.status(400).json({ error: 'Name is required' })
+  if (!b.items || JSON.parse(b.items).length < 2) return res.status(400).json({ error: 'A package needs at least two services' })
+  if (!zonesWritable(req, b.zone_ids || [])) return res.status(403).json(OUT_OF_SCOPE)
+  const cols = PK_COLS.filter((c) => b[c] !== undefined)
+  const { rows } = await pool.query(`INSERT INTO packages (${cols.join(',')}) VALUES (${cols.map((c, i) => c === 'items' ? `$${i + 1}::jsonb` : `$${i + 1}`).join(',')}) RETURNING *`, cols.map((c) => b[c]))
+  res.status(201).json(rows[0])
+})
+app.patch('/api/admin/packages/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
+  const cur = (await pool.query('SELECT * FROM packages WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (!cur) return res.status(404).json({ error: 'Not found' })
+  const b = pkClean(req.body || {})
+  if (!zonesWritable(req, cur.zone_ids) || (b.zone_ids && !zonesWritable(req, b.zone_ids))) return res.status(403).json(OUT_OF_SCOPE)
+  const cols = PK_COLS.filter((c) => b[c] !== undefined)
+  if (cols.length) await pool.query(`UPDATE packages SET ${cols.map((c, i) => `${c}=$${i + 1}${c === 'items' ? '::jsonb' : ''}`).join(',')} WHERE id=$${cols.length + 1}`, [...cols.map((c) => b[c]), cur.id])
+  res.json((await pool.query('SELECT * FROM packages WHERE id=$1', [cur.id])).rows[0])
+})
+app.delete('/api/admin/packages/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
+  const cur = (await pool.query('SELECT * FROM packages WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (cur && !zonesWritable(req, cur.zone_ids)) return res.status(403).json(OUT_OF_SCOPE)
+  await pool.query('DELETE FROM packages WHERE id=$1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
+
 app.post('/api/internal/price', internalOnly, async (req, res) => { const r = await quote(req.body || {}); res.status(r.status).json(r.body) })
 // Booking service records campaign redemptions here after a booking is created.
 app.post('/api/internal/campaign-usage', internalOnly, async (req, res) => {

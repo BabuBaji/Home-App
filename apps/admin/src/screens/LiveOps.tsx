@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Radio, Users, Zap, MapPin } from 'lucide-react'
 import { fetchLiveOps, type LiveOps as LiveOpsData, type LiveOpsZone } from '../api'
 import { StatCard, Card, Badge, Loading, ErrorState } from '../components/UI'
+import LiveMap from '../components/LiveMap'
 
 const HEALTH: Record<string, { tone: 'green' | 'amber' | 'red' | 'gray'; label: string; color: string }> = {
   healthy: { tone: 'green', label: 'Healthy', color: '#16a34a' },
@@ -35,6 +36,8 @@ export default function LiveOps() {
         <StatCard icon={<Users size={22} />} tint="#16a34a" label="Online Experts" value={`${t.onlineWorkers} / ${t.activeWorkers}`} sub="online / active" />
         <StatCard icon={<MapPin size={22} />} tint="#2e90fa" label="Live Zones" value={`${t.zonesLive} / ${t.zonesTotal}`} sub="live / total" />
       </div>
+
+      <LiveMap />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--muted)', fontSize: 13 }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#16a34a', display: 'inline-block', boxShadow: '0 0 0 3px rgba(22,163,74,.18)' }} />

@@ -497,3 +497,15 @@ export function getSocket(): Socket {
   if (!socket) socket = API_BASE ? io(API_BASE, { transports: ['websocket', 'polling'] }) : io({ path: '/socket.io', transports: ['websocket', 'polling'] })
   return socket
 }
+
+/* Live map (control tower): experts' last GPS position + open/active jobs, zone-scoped. */
+export interface LiveMapWorker { id: number; name: string; phone?: string; zoneId: number | null; lat: number; lng: number; seenAt: string | null; state: 'online' | 'busy' | 'offline'; stale: boolean }
+export interface LiveMapJob { id: number; ref: string; status: string; zoneId: number | null; lat: number; lng: number; workerId: number | null; pro: string; service: string }
+export interface LiveMapData { workers: LiveMapWorker[]; jobs: LiveMapJob[]; zones: { id: number; name: string; polygon: [number, number][] | null; coverage: { lat: number; lng: number; radiusKm: number } | null }[]; at: string }
+export const fetchLiveMap = () => req<LiveMapData>('/live-map')
+
+/* Packages: fixed bundles of services sold at a discount (zone_ids empty = all zones). */
+export interface AdminPackage { id: number; name: string; description: string; items: { id: string; durationId: string }[]; discount_type: 'flat' | 'percent'; discount_value: number; zone_ids: number[]; active: boolean; sort: number; readOnly?: boolean }
+export const fetchPackages = () => req<AdminPackage[]>('/packages')
+export const savePackage = (p: Partial<AdminPackage>) => (p.id ? req<AdminPackage>(`/packages/${p.id}`, patch(p)) : req<AdminPackage>('/packages', post('', p)))
+export const deletePackage = (id: number) => req<{ ok: boolean }>(`/packages/${id}`, { method: 'DELETE' })

@@ -504,6 +504,7 @@ async function init() {
       window_started TIMESTAMPTZ NOT NULL DEFAULT now(), created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS site_id INTEGER`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS location_at TIMESTAMPTZ`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_name TEXT`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_lat REAL`,
@@ -1194,7 +1195,7 @@ app.post('/api/worker/heartbeat', auth, async (req, res) => {
   if (b.battery != null) device.battery = Math.max(0, Math.min(100, Math.round(Number(b.battery))))
   if (b.network) device.network = String(b.network).slice(0, 12)
   await mergeProfile(req.worker.id, { device })
-  if (b.lat != null && b.lng != null) await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2 WHERE id=$3', [Number(b.lat), Number(b.lng), req.worker.id])
+  if (b.lat != null && b.lng != null) await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2, location_at=now() WHERE id=$3', [Number(b.lat), Number(b.lng), req.worker.id])
   res.json({ ok: true })
 })
 
@@ -4995,6 +4996,12 @@ app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
   res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: !!w.available, lat: w.last_lat, lng: w.last_lng })))
 })
+// Live map: every worker's last known position and state (for the admin control tower).
+app.get('/internal/workers/locations', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query(`SELECT id, name, phone, zone_id, city, status, available, offered_booking, last_lat, last_lng, location_at
+    FROM workers WHERE status='active'`)
+  res.json(rows)
+})
 app.get('/internal/workers/:id', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
 app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
@@ -5045,7 +5052,7 @@ app.post('/internal/workers/:id/offer-outcome', internalOnly, async (req, res) =
   ).catch((e) => console.error('[worker] offer-outcome:', e?.message || e))
   res.json({ ok: true })
 })
-app.post('/internal/workers/:id/location', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2 WHERE id=$3', [req.body?.lat, req.body?.lng, Number(req.params.id)]); res.json({ ok: true }) })
+app.post('/internal/workers/:id/location', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2, location_at=now() WHERE id=$3', [req.body?.lat, req.body?.lng, Number(req.params.id)]); res.json({ ok: true }) })
 app.get('/internal/workers/:id/public-profile', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json(w ? { id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, phone: w.phone, avatar: w.avatar, verified: !!w.verified, city: w.city, services: Array.isArray(w.services) ? w.services : [] } : null) })
 app.patch('/internal/workers/:id', internalOnly, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 // Wallet service adjusts the balance snapshot (deltas) after ledger changes.

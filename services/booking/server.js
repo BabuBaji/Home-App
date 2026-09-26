@@ -792,7 +792,7 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Authoritative pricing from the catalog service, for the resolved zone.
   let priced
-  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode, lat: custLat, lng: custLng, zoneId, customerId: req.user.id, at: body.at }) }
+  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode, lat: custLat, lng: custLng, zoneId, customerId: req.user.id, at: body.at, packageId: body.packageId || null }) }
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
@@ -1574,7 +1574,7 @@ app.get('/api/internal/pool', internalOnly, async (_q, res) => {
 // Live-ops: open + in-progress bookings (lightweight) for the admin control tower.
 app.get('/api/internal/ops', internalOnly, async (_q, res) => {
   const { rows } = await pool.query(
-    `SELECT id, ref, status, zone_id, pincode, worker_id, total, created FROM bookings
+    `SELECT id, ref, status, zone_id, pincode, worker_id, pro_name, total, created, cust_lat, cust_lng, items FROM bookings
      WHERE status = ANY($1) ORDER BY created DESC LIMIT 500`, [ACTIVE_STATES])
   res.json(rows)
 })
