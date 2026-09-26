@@ -72,6 +72,10 @@ function measure(phone) {
     if (getComputedStyle(c).overflowX !== 'visible') continue
     for (const e of c.querySelectorAll('*')) {
       if (!vis(e) || e.closest('.tablewrap, .menu, [class*=dropdown], [class*=popover], .leaflet-container')) continue
+      // inside something that scrolls/clips on purpose (a tab strip, a carousel) — not a spill
+      let a = e.parentElement, scrolled = false
+      while (a && a !== c) { if (getComputedStyle(a).overflowX !== 'visible') { scrolled = true; break } a = a.parentElement }
+      if (scrolled) continue
       const r = e.getBoundingClientRect()
       if (r.right > cr.right + 3 && r.width < cr.width * 3) { if (spills++ < 3) out.push(`SPILLS OUT OF CARD: "${label(e)}" by ${Math.round(r.right - cr.right)}px`); break }
     }
@@ -111,7 +115,7 @@ function measure(phone) {
 async function main() {
   const sup = await api('POST', '/api/admin/login', { body: { email: 'admin@homehelp.in', password: process.env.ADMIN_PW || 'Admin@12345' } })
   const browser = await puppeteer.launch({ executablePath: CHROME, args: ['--no-sandbox'] })
-  const page = await browser.newPage()
+  let page = await browser.newPage()
   let pages, ids = {}
   if (ADMIN) {
     ids = { cid: first(await api('GET', '/api/admin/customers', { token: sup.token }))?.id, wid: first(await api('GET', '/api/admin/workers', { token: sup.token }))?.id, bid: first(await api('GET', '/api/admin/bookings', { token: sup.token }))?.id }
@@ -131,10 +135,22 @@ async function main() {
     for (const tmpl of pages) {
       const path = tmpl.replace(/:(\w+)/g, (_, k) => ids[k] ?? 1)
       if (ONLY && !ONLY.some((o) => path === o || path.startsWith(o + '/'))) continue
-      await page.goto(APP + path, { waitUntil: 'networkidle0', timeout: 25000 }).catch(() => {})
+      // A page that reloads or replaces its frame kills the tab's handle; carry on in a fresh tab
+      // (same browser, so the login in localStorage is still there).
+      if (page.isClosed() || page.mainFrame().detached) { page = await browser.newPage() }
+      await page.setViewport(ADMIN ? { width: w, height: 900 } : { width: w, height: 780, isMobile: true, hasTouch: true })
+      await page.goto(APP + path, { waitUntil: 'networkidle0', timeout: 25000 }).catch(async () => { page = await browser.newPage(); await page.setViewport(ADMIN ? { width: w, height: 900 } : { width: w, height: 780, isMobile: true, hasTouch: true }); await page.goto(APP + path, { waitUntil: 'networkidle0', timeout: 25000 }).catch(() => {}) })
       await sleep(ADMIN ? 900 : 3200) // the customer app shows its launch poster for ~2s on every fresh load
-      const issues = await page.evaluate(measure, !ADMIN).catch((e) => [`AUDIT FAILED: ${e.message}`])
+      let issues = await page.evaluate(measure, !ADMIN).catch((e) => e)
+      if (issues instanceof Error) { // frame went away mid-measure: one retry in a fresh tab
+        page = await browser.newPage(); await page.setViewport(ADMIN ? { width: w, height: 900 } : { width: w, height: 780, isMobile: true, hasTouch: true })
+        await page.goto(APP + path, { waitUntil: 'networkidle0', timeout: 25000 }).catch(() => {}); await sleep(ADMIN ? 900 : 3200)
+        issues = await page.evaluate(measure, !ADMIN).catch((e) => [`AUDIT FAILED: ${e.message}`])
+      }
       const file = `${OUT}/${w}_${path.replace(/[/:?=]/g, '_').replace(/^_/, '') || 'root'}.png`
+      // The customer app scrolls inside its own frame: let it grow for the capture so the screenshot
+      // shows the whole screen, then put it back.
+      if (!ADMIN) await page.addStyleTag({ content: '.device,.screen,.content,#root{height:auto!important;max-height:none!important;overflow:visible!important}' }).then(() => sleep(300)).catch(() => {})
       await page.screenshot({ path: file, fullPage: true }).catch(() => {})
       report.push({ width: w, path, issues, shot: file })
       console.log(`${issues.length ? '✗' : '✓'} ${w} ${path}`); issues.forEach((i) => console.log(`     ${i}`))

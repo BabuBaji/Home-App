@@ -18,7 +18,7 @@
 .zo-seg { display: inline-flex; background: #fff; border: 1px solid var(--zline); border-radius: 12px; padding: 4px; gap: 3px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
 .zo-seg button { border: none; background: transparent; padding: 8px 15px; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--zmut); cursor: pointer; transition: .15s; }
 .zo-seg button.on { background: var(--zg); color: #fff; box-shadow: 0 6px 14px rgba(79,70,229,.32); }
-.zo-btn { display: inline-flex; align-items: center; gap: 8px; border: none; background: var(--zg); color: #fff; padding: 11px 18px; border-radius: 12px; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 10px 22px rgba(79,70,229,.32); transition: .15s; }
+.zo-btn { white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; border: none; background: var(--zg); color: #fff; padding: 11px 18px; border-radius: 12px; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 10px 22px rgba(79,70,229,.32); transition: .15s; }
 .zo-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(79,70,229,.4); }
 .zo-btn.ghost { background: #fff; color: var(--zi); border: 1.5px solid #E7E5FB; box-shadow: none; }
 .zo-btn.ghost:hover { background: #F5F3FF; transform: none; }

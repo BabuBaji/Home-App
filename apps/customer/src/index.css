@@ -433,7 +433,7 @@ button.card.off { opacity: .6; filter: grayscale(.35); cursor: not-allowed; }
 .ra-t { font-size: 15px; font-weight: 600; color: var(--ink); }
 .ra-d { font-size: 12.5px; color: var(--muted); margin: 4px 0 12px; line-height: 1.45; }
 .ra-row { display: flex; gap: 10px; align-items: stretch; }
-.ra-input { flex: 1 1 auto; margin: 0; height: 48px; }
+.ra-input { flex: 1 1 auto; min-width: 0; margin: 0; height: 48px; }
 .ra-input input { text-transform: uppercase; letter-spacing: .5px; font-size: 15px; }
 .ra-btn { flex: 0 0 auto; width: auto; height: 48px; padding: 0 22px; margin: 0; font-size: 14px; }
 
@@ -2043,6 +2043,8 @@ body { line-height: 1.45; }
   box-shadow: 0 16px 30px rgba(46,42,107,.34); overflow: hidden; }
 .rain-sky .hd-hero { margin: 0 -18px; border-radius: 0; min-height: 200px; padding-bottom: 24px; }
 .rain-sky .hd-hero-img { height: 172px; }
+/* keep the greeting clear of the photo on the right (it ran into it on 360px phones) */
+.rain-sky .hd-hero-txt { max-width: calc(100% - 124px); }
 .rain-sky .hd-hero-emoji { font-size: 88px; }
 
 /* white diagonal rain filling the hero (clipped to it) */

@@ -148,7 +148,7 @@ export default function ZoneAdminDashboard({ zones, onCreate, onOpenZone, onView
           <BarChart data={revBars} valueKey="rev" labelKey="d" height={180} />
         </Card>
         <Card title="Quick Actions">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(128px, 1fr))', gap: 8 }}>
             {[['New Zone', <Plus size={15} key="a" />, onCreate], ['Add Worker', <UserPlus size={15} key="b" />, () => nav('/workers/new')], ['Bulk Assign', <Zap size={15} key="c" />, () => nav('/command-center')], ['Inventory', <Package size={15} key="d" />, () => nav('/zones/inventory')], ['Reports', <BarChart3 size={15} key="e" />, () => nav('/reports')], ['Booking', <CalendarDays size={15} key="f" />, () => nav('/bookings')]].map((x, i) => (
               <button key={i} className="zo-btn line" style={{ justifyContent: 'flex-start' }} onClick={x[2] as (() => void) | undefined}>{x[1] as ReactNode} {x[0] as string}</button>
             ))}

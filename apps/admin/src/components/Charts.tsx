@@ -1,4 +1,21 @@
 // Dependency-free SVG charts (line, bar, donut) tuned for the admin theme.
+import { useEffect, useRef, useState } from 'react'
+
+// Draw at the card's real width. The charts used a fixed 640-wide canvas scaled to fit, so in a
+// narrow card (~260px) they shrank to 40%: an 80px-tall chart with unreadable axis labels.
+function useWidth(fallback = 640) {
+  const ref = useRef<SVGSVGElement>(null)
+  const [w, setW] = useState(fallback)
+  useEffect(() => {
+    const el = ref.current?.parentElement
+    if (!el) return
+    const set = () => { const cs = getComputedStyle(el); const cw = Math.round(el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)); if (cw > 40) setW(cw) }
+    set()
+    const ro = new ResizeObserver(set); ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, w] as const
+}
 
 const VIOLET = '#5b51e8'
 const GREEN = '#16a34a'
@@ -24,12 +41,13 @@ function smooth(pts: [number, number][]) {
 export function LineChart({ data, keys = ['total', 'completed'], colors = [VIOLET, GREEN], height = 200 }: {
   data: Record<string, number>[]; keys?: string[]; colors?: string[]; height?: number
 }) {
-  const w = 640, h = height, pad = 28
+  const [ref, w] = useWidth()
+  const h = height, pad = 28
   const max = Math.max(1, ...data.flatMap((d) => keys.map((k) => d[k] || 0)))
   const x = (i: number) => pad + (i * (w - pad * 2)) / Math.max(1, data.length - 1)
   const y = (v: number) => h - pad - (v / max) * (h - pad * 2)
   return (
-    <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    <svg ref={ref} className="chart" viewBox={`0 0 ${w} ${h}`} height={h}>
       <defs>
         {keys.map((k, ki) => (
           <linearGradient key={k} id={`lg-${ki}-${colors[ki].slice(1)}`} x1="0" y1="0" x2="0" y2="1">
@@ -54,7 +72,7 @@ export function LineChart({ data, keys = ['total', 'completed'], colors = [VIOLE
         )
       })}
       {data.map((d, i) => {
-        const step = Math.ceil(data.length / 8)
+        const step = Math.ceil(data.length / Math.max(2, Math.floor(w / 80)))
         if (i % step !== 0 && i !== data.length - 1) return null
         return <text key={i} x={x(i)} y={h - 8} textAnchor="middle" className="axis">{d.day ?? d.date ?? ''}</text>
       })}
@@ -65,11 +83,12 @@ export function LineChart({ data, keys = ['total', 'completed'], colors = [VIOLE
 export function BarChart({ data, valueKey = 'revenue', labelKey = 'day', color = VIOLET, height = 200 }: {
   data: Record<string, any>[]; valueKey?: string; labelKey?: string; color?: string; height?: number
 }) {
-  const w = 640, h = height, pad = 28
+  const [ref, w] = useWidth()
+  const h = height, pad = 28
   const max = Math.max(1, ...data.map((d) => d[valueKey] || 0))
-  const bw = (w - pad * 2) / data.length
+  const bw = (w - pad * 2) / Math.max(1, data.length)
   return (
-    <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    <svg ref={ref} className="chart" viewBox={`0 0 ${w} ${h}`} height={h}>
       <defs>
         <linearGradient id="bargrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#7c6df7" />
@@ -84,7 +103,7 @@ export function BarChart({ data, valueKey = 'revenue', labelKey = 'day', color =
         return (
           <g key={i}>
             <rect x={pad + i * bw + bw * 0.22} y={h - pad - bh} width={bw * 0.56} height={Math.max(0, bh)} rx={6} fill="url(#bargrad)" />
-            {(i % Math.ceil(data.length / 8) === 0 || i === data.length - 1) && <text x={pad + i * bw + bw * 0.5} y={h - 8} textAnchor="middle" className="axis">{d[labelKey]}</text>}
+            {(i % Math.ceil(data.length / Math.max(2, Math.floor(w / 80))) === 0 || i === data.length - 1) && <text x={pad + i * bw + bw * 0.5} y={h - 8} textAnchor="middle" className="axis">{d[labelKey]}</text>}
           </g>
         )
       })}
