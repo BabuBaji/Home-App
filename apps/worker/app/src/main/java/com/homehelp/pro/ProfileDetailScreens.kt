@@ -2366,23 +2366,29 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             Spacer(Modifier.height(Space.m))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                listOf(I18n.EN to "English", I18n.HI to "हिंदी").forEach { (code, l) ->
-                    val sel = I18n.lang == code
-                    Box(
-                        Modifier.weight(1f).clip(RoundedCornerShape(Radius.pill))
-                            .background(if (sel) Purple else FieldFill)
-                            .clickable {
-                                if (!sel) {
-                                    I18n.setLanguage(code)
-                                    toast(ctx, tr("Language changed"))
+            // Every language, shown in its own script (plus the English name) so a worker can find
+            // theirs without reading English. Two per row.
+            I18n.LANGUAGES.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth().padding(bottom = Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    pair.forEach { l ->
+                        val sel = I18n.lang == l.code
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(Radius.field))
+                                .background(if (sel) Purple else FieldFill)
+                                .clickable {
+                                    if (!sel) {
+                                        I18n.setLanguage(l.code)
+                                        toast(ctx, tr("Language changed"))
+                                    }
                                 }
-                            }
-                            .padding(vertical = Space.m),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(l, color = if (sel) Color.White else TextGray, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                .padding(vertical = Space.s),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(l.native, color = if (sel) Color.White else TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(l.name, color = if (sel) Color.White.copy(alpha = 0.8f) else TextGray, fontSize = 11.sp)
+                        }
                     }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }

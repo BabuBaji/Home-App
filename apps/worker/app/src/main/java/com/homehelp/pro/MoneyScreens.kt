@@ -914,7 +914,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 ProfileRowDivider()
                 ProfileMenuRow(Icons.Filled.Inventory2, TextGray, tr("My Equipment"), tr("Kit issued to you")) { nav.navigate(Routes.P_EQUIPMENT) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Language, Purple, "Language / भाषा", if (I18n.isHindi) "हिंदी" else "English") { nav.navigate(Routes.SETTINGS) }
+                ProfileMenuRow(Icons.Filled.Language, Purple, "Language / भाषा", I18n.current.native) { nav.navigate(Routes.SETTINGS) }
                 ProfileRowDivider()
                 ProfileMenuRow(Icons.Filled.Settings, TextGray, tr("Settings"), tr("Language, notifications, preferences")) { nav.navigate(Routes.SETTINGS) }
             }

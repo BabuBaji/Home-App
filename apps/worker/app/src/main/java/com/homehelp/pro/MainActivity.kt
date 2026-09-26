@@ -92,7 +92,11 @@ class MainActivity : ComponentActivity() {
         org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
         setContent {
             HomeHelpTheme {
-                AppRoot()
+                // Urdu reads right-to-left: flip the whole layout when it is chosen.
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalLayoutDirection provides
+                        if (I18n.isRtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr,
+                ) { AppRoot() }
             }
         }
     }
