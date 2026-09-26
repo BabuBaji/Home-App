@@ -5,7 +5,7 @@ import {
   createTrainingQuestion, updateTrainingQuestion, deleteTrainingQuestion,
 } from '../api'
 import type { TrainingAdminState, TrainingModule, TrainingQuestion } from '../types'
-import { StatCard, Card, Badge, Loading, ErrorState, Empty, Modal, Field, Dropdown, useToast, useConfirm } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Empty, Modal, Field, Dropdown, useToast, useConfirm } from '../components/UI'
 
 /* Training & assessment authoring.
  *
@@ -96,12 +96,6 @@ export default function Training() {
 
   return (
     <>
-      <div className="stat-row">
-        <StatCard icon={<BookOpen size={18} />} tint="#eef0ff" label="Modules" value={data.modules.length} sub={`${published.length} live · ${drafts.length} draft`} />
-        <StatCard icon={<CheckCircle2 size={18} />} tint="#e7f7ee" label="Published" value={published.length} sub="Visible to workers" />
-        <StatCard icon={<HelpCircle size={18} />} tint="#fff6e6" label="Question bank" value={data.bank} sub={`${data.quizSize} needed per paper`} down={bankShort > 0} />
-        <StatCard icon={<FileText size={18} />} tint="#e8eefe" label="Pass mark" value={`${data.passPct}%`} sub={`${data.quizSize} questions, drawn at random`} />
-      </div>
 
       {/* Why the quiz isn't takeable yet — stated plainly rather than left to be discovered. */}
       {bankShort > 0 && (

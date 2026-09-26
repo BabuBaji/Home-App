@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MapPin, CheckCircle2, Clock, Hash, Plus, Pencil, Trash2, Play, Pause } from 'lucide-react'
 import { fetchZones, createZone, updateZone, deleteZone, fetchLiveOps, type Zone, type LiveOpsZone } from '../api'
-import { StatCard, Card, Badge, SearchBox, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
+import { Card, Badge, SearchBox, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
 import { CITIES, stateForCity } from '../cities'
 
 const HEALTH_TONE: Record<string, 'green' | 'amber' | 'red' | 'gray'> = { healthy: 'green', short: 'amber', critical: 'red', idle: 'gray', off: 'gray' }
@@ -77,12 +77,6 @@ export default function ServiceAreas() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<MapPin size={22} />} tint="#5b51e8" label="Total Zones" value={rows.length.toLocaleString('en-IN')} sub="areas" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Live Zones" value={liveCount.toLocaleString('en-IN')} sub="serviceable now" />
-        <StatCard icon={<Clock size={22} />} tint="#f59e0b" label="Planned / Paused" value={plannedCount.toLocaleString('en-IN')} sub="not live" />
-        <StatCard icon={<Hash size={22} />} tint="#2e90fa" label="Pincodes" value={pinTotal.toLocaleString('en-IN')} sub="covered" />
-      </div>
 
       <Card>
         <div style={{ padding: '2px 4px 12px', color: 'var(--muted)', fontSize: 13, lineHeight: 1.55 }}>

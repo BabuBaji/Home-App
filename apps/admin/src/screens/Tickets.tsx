@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Headphones, Mail, Loader, CheckCircle2, XCircle, Funnel, Download, Eye, MoreVertical } from 'lucide-react'
 import { fetchTickets, updateTicket } from '../api'
 import type { Ticket } from '../types'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, SumBars, shortDate, Modal, Field, useToast } from '../components/UI'
+import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, SumBars, shortDate, Modal, Field, useToast } from '../components/UI'
 import { Donut } from '../components/Charts'
 
 const titleCase = (s: string) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -93,13 +93,6 @@ export default function Tickets() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<Headphones size={22} />} tint="#5b51e8" label="Total Tickets" value={rows.length.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Mail size={22} />} tint="#f59e0b" label="Open" value={open.toLocaleString('en-IN')} sub="awaiting action" />
-        <StatCard icon={<Loader size={22} />} tint="#2e90fa" label="In Progress" value={inProgress.toLocaleString('en-IN')} sub="being handled" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Resolved" value={resolved.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<XCircle size={22} />} tint="#98a2b3" label="Closed" value={closed.toLocaleString('en-IN')} sub="all time" />
-      </div>
 
       <div className="cols">
         <Card>

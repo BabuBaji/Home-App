@@ -4,7 +4,7 @@ import {
   BellRing, OctagonAlert, History, Clock,
 } from 'lucide-react'
 import { fetchNotifications, broadcast } from '../api'
-import { Card, StatCard, Badge, Field, Modal, Loading, ErrorState, useToast, shortDate, SearchBox } from '../components/UI'
+import { Card, Badge, Field, Modal, Loading, ErrorState, useToast, shortDate, SearchBox } from '../components/UI'
 import { Donut, BarChart } from '../components/Charts'
 
 const TABS = ['All', 'System', 'Booking', 'Payment', 'Promotions', 'Reminders', 'Alerts', 'Custom']
@@ -129,13 +129,6 @@ export default function Notifications() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<Bell size={22} />} tint="#5b51e8" label="Total Notifications" value={rows.length.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Send size={22} />} tint="#16a34a" label="Sent" value={totalSent.toLocaleString('en-IN')} sub="recipients reached" />
-        <StatCard icon={<FileText size={22} />} tint="#f59e0b" label="Delivered" value={totalSent.toLocaleString('en-IN')} sub="recipients reached" />
-        <StatCard icon={<OctagonAlert size={22} />} tint="#f04438" label="Failed" value="0" down sub="all time" />
-        <StatCard icon={<Eye size={22} />} tint="#2e90fa" label="Read Rate" value="—" sub="not tracked" />
-      </div>
 
       <div className="cols">
         <Card>

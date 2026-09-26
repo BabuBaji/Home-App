@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Activity as ActivityIcon, Users, HardHat, UserCog, Cpu, Funnel, Download } from 'lucide-react'
 import { fetchActivity, fetchActivityStats } from '../api'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Empty, SumBars, shortDate } from '../components/UI'
+import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Empty, SumBars, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
 
 type Evt = {
@@ -74,13 +74,6 @@ export default function Activity() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<ActivityIcon size={22} />} tint="#5b51e8" label="Total Events" value={(stats?.total ?? rows.length).toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Users size={22} />} tint="#2e90fa" label="Customer App" value={actorCount('customer').toLocaleString('en-IN')} sub="last 7 days" />
-        <StatCard icon={<HardHat size={22} />} tint="#5b51e8" label="Worker App" value={actorCount('worker').toLocaleString('en-IN')} sub="last 7 days" />
-        <StatCard icon={<UserCog size={22} />} tint="#f59e0b" label="Admin Panel" value={actorCount('admin').toLocaleString('en-IN')} sub="last 7 days" />
-        <StatCard icon={<Cpu size={22} />} tint="#98a2b3" label="System" value={actorCount('system').toLocaleString('en-IN')} sub="last 7 days" />
-      </div>
 
       <div className="cols">
         <Card>

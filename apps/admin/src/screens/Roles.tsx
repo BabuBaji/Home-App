@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   ShieldCheck, ShieldHalf, Lock, Users2, Plus, Pencil, Trash2, ChevronLeft, Check, Search, Copy, Info,
 } from 'lucide-react'
-import { Card, StatCard, Badge, Loading, ErrorState, Field, useToast, useConfirm } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Field, useToast, useConfirm } from '../components/UI'
 import { fetchRoles, fetchPermissionCatalog, createRole, updateRole, deleteRole } from '../api'
 import type { Role, PermGroup } from '../types'
 import { useStore, has } from '../store'
@@ -149,12 +149,6 @@ export default function Roles() {
   /* ---------------- LIST + DETAIL ---------------- */
   return (
     <div className="grid" style={{ gap: 18 }}>
-      <div className="stat-row">
-        <StatCard icon={<ShieldCheck size={22} />} tint="#5b51e8" label="Total Roles" value={roles.length} sub={`${customRoles} custom`} />
-        <StatCard icon={<ShieldHalf size={22} />} tint="#16a34a" label="Active Roles" value={activeRoles} sub="assignable" />
-        <StatCard icon={<Users2 size={22} />} tint="#f59e0b" label="Permissions" value={totalPerms} sub="across modules" />
-        <StatCard icon={<Lock size={22} />} tint="#2e90fa" label="System Roles" value={roles.filter((r) => r.isSystem).length} sub="built-in" />
-      </div>
 
       <div className="grid" style={{ gridTemplateColumns: '320px 1fr', gap: 16, alignItems: 'start' }}>
         {/* roles list */}

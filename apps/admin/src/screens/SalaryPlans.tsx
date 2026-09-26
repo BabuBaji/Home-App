@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { IndianRupee, Users, Plus, Pencil, Trash2, Eye, EyeOff } from 'lucide-react'
 import { fetchSalaryPlans, createSalaryPlan, updateSalaryPlan, deleteSalaryPlan } from '../api'
 import type { SalaryPlan, SalaryPlansState } from '../types'
-import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast, useConfirm } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast, useConfirm } from '../components/UI'
 
 /* Salary plans — named pay structures, assigned instead of typed per worker.
  *
@@ -77,11 +77,6 @@ export default function SalaryPlans() {
 
   return (
     <>
-      <div className="stat-row">
-        <StatCard icon={<IndianRupee size={18} />} tint="#eef0ff" label="Plans" value={active.length} sub={`${monthly} monthly · ${active.length - monthly} per-job`} />
-        <StatCard icon={<Users size={18} />} tint="#e7f7ee" label="Workers on a plan" value={assigned} sub="The rest use the platform rate" />
-        <StatCard icon={<IndianRupee size={18} />} tint="#fff6e6" label="Platform default" value={`${d.platformCommissionPercent}%`} sub="Applies when no plan is set" />
-      </div>
 
       {d.plans.length === 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 14, borderLeft: '3px solid #6366f1' }}>

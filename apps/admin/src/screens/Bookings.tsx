@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical, UserX, AlertTriangle } from 'lucide-react'
 import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones } from '../api'
 import type { AdminBooking } from '../types'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
+import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng, TabPill } from '../components/UI'
 import { useStore, has } from '../store'
 
 // Mutually-exclusive lifecycle buckets, so the KPI cards actually sum to Total:
@@ -23,17 +23,6 @@ const attentionReason = (b: AdminBooking): string => {
   if (pay === 'pending') return 'Payment pending'
   if ((b as any).escalated) return 'Escalated'
   return ''
-}
-
-function TabPill({ n, active, alert }: { n: number; active: boolean; alert?: boolean }) {
-  const hot = alert && n > 0
-  return (
-    <span style={{
-      marginLeft: 8, padding: '1px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-      background: hot ? '#fdecec' : active ? '#eef0ff' : '#eeeef5',
-      color: hot ? '#d92d20' : active ? '#5b51e8' : '#6b7090',
-    }}>{n.toLocaleString('en-IN')}</span>
-  )
 }
 
 const paymentTone = (p: string): string => {
@@ -164,46 +153,38 @@ export default function Bookings() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<CalendarCheck size={22} />} tint="#5b51e8" label="Total Bookings" value={counts.all.toLocaleString('en-IN')} sub="all bookings" />
-        <StatCard icon={<UserX size={22} />} tint="#f04438" label="Unassigned" value={counts.unassigned.toLocaleString('en-IN')} sub="need a worker" />
-        <StatCard icon={<Clock size={22} />} tint="#2e90fa" label="On Going" value={counts.ongoing.toLocaleString('en-IN')} sub="in service now" />
-        <StatCard icon={<CalendarClock size={22} />} tint="#f59e0b" label="Upcoming" value={counts.upcoming.toLocaleString('en-IN')} sub="scheduled" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Completed" value={counts.completed.toLocaleString('en-IN')} sub="finished" />
-        <StatCard icon={<XCircle size={22} />} tint="#98a2b3" label="Cancelled" value={counts.cancelled.toLocaleString('en-IN')} sub="cancelled" />
-        <StatCard icon={<AlertTriangle size={22} />} tint="#f04438" label="Needs Attention" value={counts.attention.toLocaleString('en-IN')} sub="action required" />
-      </div>
 
       <Card>
-        <div className="toolbar">
-          <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by Booking ID, Customer, Worker or Service..." />
-          <select className="select flt" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
-            <option value="all">All Status</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-          </select>
-          <select className="select flt" value={service} onChange={(e) => { setService(e.target.value); setPage(1) }}>
-            <option value="all">All Services</option>
-            {services.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className="select flt" value={worker} onChange={(e) => { setWorker(e.target.value); setPage(1) }}>
-            <option value="all">All Workers</option>
-            {workers.map((w) => <option key={w} value={w}>{w}</option>)}
-          </select>
-          <select className="select flt" value={zone} onChange={(e) => { setZone(e.target.value); setPage(1) }}>
-            <option value="all">All Zones</option>
-            {zoneIds.map((z) => <option key={z} value={String(z)}>{zoneLabel(z)}</option>)}
-          </select>
-          <div className="tb-spacer" />
-          <button className="btn line"><Funnel size={16} /> Filters</button>
-          <button className="btn line" onClick={exportCsv}><Download size={16} /> Export</button>
+        <div className="card-head lg">
+          <h3>All bookings<span className="count">{TABS[tab].count.toLocaleString('en-IN')} {TABS[tab].label === 'All' ? '' : `· ${TABS[tab].label.toLowerCase()}`}</span></h3>
+          <div className="head-actions">
+            <button className="btn line" onClick={exportCsv}><Download size={15} /> Export</button>
+          </div>
         </div>
 
-        <div className="tabs">
+        {/* status lives in the tabs (a separate status dropdown duplicated them) */}
+        <div className="tabs" style={{ marginBottom: 14 }}>
           {TABS.map((t, i) => (
             <button key={t.label} className={'tab' + (tab === i ? ' active' : '')} onClick={() => { setTab(i); setPage(1) }}>
               {t.label}<TabPill n={t.count} active={tab === i} alert={t.alert} />
             </button>
           ))}
+        </div>
+
+        <div className="toolbar">
+          <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search booking ID, customer, worker or service" />
+          <select className="select flt" value={service} onChange={(e) => { setService(e.target.value); setPage(1) }}>
+            <option value="all">All services</option>
+            {services.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select className="select flt" value={worker} onChange={(e) => { setWorker(e.target.value); setPage(1) }}>
+            <option value="all">All workers</option>
+            {workers.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
+          <select className="select flt" value={zone} onChange={(e) => { setZone(e.target.value); setPage(1) }}>
+            <option value="all">All zones</option>
+            {zoneIds.map((z) => <option key={z} value={String(z)}>{zoneLabel(z)}</option>)}
+          </select>
         </div>
 
         <div className="tablewrap">

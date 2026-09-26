@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ChangeEvent } from 'react'
 import { Plus, ImageIcon, CalendarClock, Pencil, Trash2 } from 'lucide-react'
-import { Card, StatCard, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Field, Dropdown, useToast } from '../components/UI'
 import { fetchBanners, createBanner, updateBanner, deleteBanner, fetchZones, uploadBannerImage, mediaUrl, type Zone } from '../api'
 import type { HomeBanner } from '../types'
 import { useStore, has } from '../store'
@@ -98,11 +98,6 @@ export default function HomeBanners() {
         {canEdit && <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={openNew}><Plus size={14} /> New banner</button>}
       </div>
 
-      <div className="stat-row">
-        <StatCard icon={<ImageIcon size={18} />} tint="#eef0ff" label="Total banners" value={rows.length} sub="scheduled slides" />
-        <StatCard icon={<ImageIcon size={18} />} tint={liveCount ? '#e7f7ee' : '#eef0ff'} label="Live now" value={liveCount} sub="showing in app" />
-        <StatCard icon={<CalendarClock size={18} />} tint={scheduled ? '#fff4e5' : '#eef0ff'} label="Upcoming" value={scheduled} sub="future start" />
-      </div>
 
       <Card title="Scheduled banners" right={<span className="muted" style={{ fontSize: 12 }}>{rows.length} total{!canEdit && ' · view only'}</span>}>
         {rows.length === 0 ? (

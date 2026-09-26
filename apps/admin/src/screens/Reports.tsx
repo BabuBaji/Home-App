@@ -5,7 +5,7 @@ import {
   FileBarChart2, FileText, UserCheck, BriefcaseBusiness, ChevronRight,
 } from 'lucide-react'
 import { fetchInsights, type Insights } from '../api'
-import { Card, StatCard, Loading, ErrorState, SumBars, Pagination, money, useToast } from '../components/UI'
+import { Card, Loading, ErrorState, SumBars, Pagination, money, useToast } from '../components/UI'
 import { LineChart, BarChart, Donut } from '../components/Charts'
 
 const COLORS = ['#5b51e8', '#16a34a', '#f59e0b', '#2e90fa', '#ff7a59', '#8085a3', '#f04438']
@@ -65,14 +65,6 @@ export default function Reports() {
   return (
     <div className="grid" style={{ gap: 18 }}>
       {/* KPI row */}
-      <div className="stat-row">
-        <StatCard icon={<IndianRupee size={22} />} tint="#5b51e8" label="Total Revenue" value={money(t.revenue)} delta={dval(dl.revenue)} down={(dl.revenue ?? 0) < 0} sub="vs previous 15 days" />
-        <StatCard icon={<CalendarCheck size={22} />} tint="#2e90fa" label="Total Bookings" value={t.bookings.toLocaleString('en-IN')} delta={dval(dl.bookings)} down={(dl.bookings ?? 0) < 0} sub="vs previous 15 days" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Completed Bookings" value={t.completed.toLocaleString('en-IN')} delta={dval(dl.completed)} down={(dl.completed ?? 0) < 0} sub="vs previous 15 days" />
-        <StatCard icon={<Users size={22} />} tint="#f59e0b" label="Active Customers" value={t.activeCustomers.toLocaleString('en-IN')} delta={dval(dl.newCustomers)} down={(dl.newCustomers ?? 0) < 0} sub="vs previous 15 days" />
-        <StatCard icon={<UserCog size={22} />} tint="#7c6df7" label="Active Workers" value={t.activeWorkers.toLocaleString('en-IN')} sub="vs previous 15 days" />
-        <StatCard icon={<XCircle size={22} />} tint="#f04438" label="Cancellation Rate" value={`${t.cancellationRate}%`} delta={dval(dl.cancelRate)} down={(dl.cancelRate ?? 0) <= 0} sub="vs previous 15 days" />
-      </div>
 
       {/* filter toolbar */}
       <div className="toolbar">

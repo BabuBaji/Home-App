@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Package, ShieldCheck, Plus, Trash2, Eye, EyeOff } from 'lucide-react'
 import { fetchEquipmentTypes, createEquipmentType, updateEquipmentType, deleteEquipmentType } from '../api'
 import type { EquipmentType } from '../types'
-import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
 
 /* Phase 9 — the kit catalogue.
  *
@@ -47,11 +47,6 @@ export default function Equipment() {
 
   return (
     <>
-      <div className="stat-row">
-        <StatCard icon={<Package size={18} />} tint="#eef0ff" label="Items" value={active.length} sub={`${types.length - active.length} retired`} />
-        <StatCard icon={<ShieldCheck size={18} />} tint="#e7f7ee" label="Required to go live" value={required.length} sub={required.length ? required.map((t) => t.name).join(', ') : 'None — check not enforced'} />
-        <StatCard icon={<Package size={18} />} tint="#fff6e6" label="Currently issued" value={issuedTotal} sub="Held by workers now" />
-      </div>
 
       {required.length === 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 14, borderLeft: '3px solid #6366f1' }}>

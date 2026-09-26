@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { fetchCustomers, fetchCustomer, createCustomer, updateCustomer, adjustWallet, setWalletStatus, addCustomerNote } from '../api'
 import type { Customer } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, MiniMap, parseLatLng } from '../components/UI'
+import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, money, shortDate, MiniMap, parseLatLng, FilterTabs } from '../components/UI'
 
 type AddDraft = { name: string; phone: string; email: string; city: string }
 const EMPTY_ADD: AddDraft = { name: '', phone: '', email: '', city: '' }
@@ -42,6 +42,7 @@ export default function Customers() {
   const [city, setCity] = useState('all')
   const [zone, setZone] = useState('all')
   const [segment, setSegment] = useState('all')
+  const [view, setView] = useState<'all' | 'new' | 'repeat' | 'inactive'>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [sel, setSel] = useState<Set<number>>(new Set())
@@ -81,10 +82,13 @@ export default function Customers() {
     if (city !== 'all' && (c.city || '') !== city) return false
     if (zone !== 'all' && (c.zone || '') !== zone) return false
     if (segment !== 'all' && (c.segment || '') !== segment) return false
+    if (view === 'new' && (c.segment || (c.bookings === 0 ? 'New' : '')) !== 'New') return false
+    if (view === 'repeat' && !(c.bookings >= 2)) return false
+    if (view === 'inactive' && (c.status || 'active') === 'active') return false
     return true
-  }), [rows, city, zone, segment])
+  }), [rows, city, zone, segment, view])
 
-  useEffect(() => { setPage(1) }, [city, zone, segment, q, status, pageSize])
+  useEffect(() => { setPage(1) }, [city, zone, segment, q, status, pageSize, view])
 
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!rows) return <Loading />
@@ -189,14 +193,6 @@ export default function Customers() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<Users size={22} />} tint="#5b51e8" label="Total Customers" value={total.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<UserCheck size={22} />} tint="#16a34a" label="Active Customers" value={active.toLocaleString('en-IN')} sub="status active" />
-        <StatCard icon={<UserPlus size={22} />} tint="#2e90fa" label="New Customers" value={newCount.toLocaleString('en-IN')} sub="no repeat yet" />
-        <StatCard icon={<Repeat2 size={22} />} tint="#f59e0b" label="Repeat Customers" value={repeat.toLocaleString('en-IN')} sub="2+ bookings" />
-        <StatCard icon={<UserX size={22} />} tint="#e5484d" label="Inactive Customers" value={inactive.toLocaleString('en-IN')} sub="not active" />
-        <StatCard icon={<Star size={22} />} tint="#f59e0b" label="Avg. Rating" value={avgRating} sub="across rated" />
-      </div>
 
       <Card>
         {/* header: what this list is + page actions on one line */}
@@ -208,6 +204,13 @@ export default function Customers() {
             <button className="btn" onClick={() => { setAddDraft(EMPTY_ADD); setAddOpen(true) }}><Plus size={16} /> Add customer</button>
           </div>
         </div>
+
+        <FilterTabs value={view} onChange={setView} tabs={[
+          { key: 'all', label: 'All', count: total },
+          { key: 'new', label: 'New', count: newCount },
+          { key: 'repeat', label: 'Repeat', count: repeat },
+          { key: 'inactive', label: 'Blocked / inactive', count: inactive, alert: true },
+        ]} />
 
         {/* filters — or, while rows are selected, what you can do with them */}
         {sel.size > 0 ? (

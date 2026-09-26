@@ -6,7 +6,7 @@ import {
 } from '../api'
 import type { RuleMeta, IncentiveRule, RuleVersion, RuleCondition, RuleSlab, AdminService } from '../types'
 import { CITIES } from '../cities'
-import { StatCard, Card, Badge, Loading, ErrorState, Field, Dropdown, useToast, shortDate } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Field, Dropdown, useToast, shortDate } from '../components/UI'
 
 /* Compensation Rule Engine — the authoring UI.
  *
@@ -178,10 +178,6 @@ export default function CompensationRules() {
     const spent = rules.reduce((n, r) => n + (r.spentThisMonth || 0), 0)
     return (
       <>
-        <div className="stat-row">
-          <StatCard icon={<Sparkles size={18} />} tint="#eef0ff" label="Rules" value={rules.length} sub={`${active} active`} />
-          <StatCard icon={<Sparkles size={18} />} tint="#e7f7ee" label="Paid this month" value={rupee(spent)} sub="Across all rules" />
-        </div>
 
         <div className="card" style={{ padding: 14, marginBottom: 14, borderLeft: '3px solid #6366f1' }}>
           <strong>Author any incentive as config.</strong> Pick who it applies to, when it fires, who qualifies, and what it pays —

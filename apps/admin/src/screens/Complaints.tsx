@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { fetchComplaints, updateComplaint } from '../api'
 import type { Complaint } from '../types'
-import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, SumBars, shortDate, Modal, Field, useToast } from '../components/UI'
+import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, SumBars, shortDate, Modal, Field, useToast } from '../components/UI'
 import { Donut } from '../components/Charts'
 
 type Cat = { label: string; icon: typeof Star; color: string }
@@ -103,13 +103,6 @@ export default function Complaints() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<MessageSquare size={22} />} tint="#5b51e8" label="Total Complaints" value={rows.length.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Clock size={22} />} tint="#f59e0b" label="Open" value={open.toLocaleString('en-IN')} sub="awaiting action" />
-        <StatCard icon={<AlertTriangle size={22} />} tint="#2e90fa" label="In Progress" value={inProgress.toLocaleString('en-IN')} sub="being handled" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Resolved" value={resolved.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<ChevronRight size={22} />} tint="#98a2b3" label="Closed" value={closed.toLocaleString('en-IN')} sub="all time" />
-      </div>
 
       <div className="cols">
         <Card>

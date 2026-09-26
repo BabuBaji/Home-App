@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { UserCog, UserCheck, UserX, ShieldCheck, Pencil, MoreVertical, Filter, Plus, UserPlus, KeyRound } from 'lucide-react'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, useConfirm, shortDate } from '../components/UI'
+import { Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, useConfirm, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
 import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit, fetchRoles, fetchZones, fetchStores, type Zone, type Store } from '../api'
 import type { Admin, Role } from '../types'
@@ -159,12 +159,6 @@ export default function Admins() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<UserCog size={22} />} tint="#5b51e8" label="Total Admin Users" value={total} sub="all time" />
-        <StatCard icon={<UserCheck size={22} />} tint="#16a34a" label="Active Users" value={activeCount} sub="all time" />
-        <StatCard icon={<UserX size={22} />} tint="#f59e0b" label="Inactive Users" value={inactiveCount} sub="all time" />
-        <StatCard icon={<ShieldCheck size={22} />} tint="#2e90fa" label="Super Admins" value={superCount} sub="all time" />
-      </div>
 
       <div className="cols">
         <Card>

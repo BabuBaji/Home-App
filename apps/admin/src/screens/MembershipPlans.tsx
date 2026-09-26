@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Crown, Plus, Pencil, Trash2, Star, RefreshCw, ShieldCheck } from 'lucide-react'
-import { Card, StatCard, Badge, Loading, ErrorState, Modal, Dropdown, useToast } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Dropdown, useToast } from '../components/UI'
 import { fetchMembershipPlans, createMembershipPlan, updateMembershipPlan, deleteMembershipPlan, fetchPricingRules, savePricingRules } from '../api'
 import type { MembershipPlan, PricingRules } from '../types'
 import { useStore, has } from '../store'
@@ -101,11 +101,6 @@ export default function MembershipPlans() {
         </div>
       </div>
 
-      <div className="stat-row">
-        <StatCard icon={<Crown size={18} />} tint="#f1ecfe" label="Total plans" value={rows.length} sub="in catalog" />
-        <StatCard icon={<Star size={18} />} tint="#e7f7ee" label="Published" value={published} sub="live to customers" />
-        <StatCard icon={<Crown size={18} />} tint="#eef0ff" label="Cheapest" value={rows.length ? money(Math.min(...rows.map((r) => r.price))) : '—'} sub="entry price" />
-      </div>
 
       <Card title="Membership plans" right={<span className="muted" style={{ fontSize: 12 }}>{rows.length} plan{rows.length === 1 ? '' : 's'}{!canEdit && ' · view only'}</span>}>
         {rows.length === 0 ? (

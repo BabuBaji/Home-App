@@ -102,11 +102,10 @@ export default function Refunds() {
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div className="stat-row">
-        <StatCard icon={<Download size={22} />} tint="#5b51e8" label="Total Refunds" value={money(totalRefunds)} sub="all time" />
-        <StatCard icon={<CreditCard size={22} />} tint="#16a34a" label="Successful Refunds" value={money(successful)} sub="all time" />
-        <StatCard icon={<Calendar size={22} />} tint="#f59e0b" label="Pending Refunds" value={money(pending)} sub="all time" />
-        <StatCard icon={<Smartphone size={22} />} tint="#f04438" label="Failed Refunds" value={money(failed)} sub="all time" />
-        <StatCard icon={<Wallet size={22} />} tint="#2e90fa" label="Refunds This Month" value={money(thisMonth)} sub="Monthly Total" />
+        {/* only the amounts someone has to act on, plus this month for context */}
+        <StatCard icon={<Calendar size={22} />} tint="#f59e0b" label="Pending refunds" value={money(pending)} sub="waiting to be paid back" />
+        <StatCard icon={<Smartphone size={22} />} tint="#f04438" label="Failed refunds" value={money(failed)} sub="need a retry or manual payout" />
+        <StatCard icon={<Wallet size={22} />} tint="#2e90fa" label="Refunded this month" value={money(thisMonth)} sub={`${money(totalRefunds)} all time`} />
       </div>
 
       <Card title="Refunds & Cancellations">

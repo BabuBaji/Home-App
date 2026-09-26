@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Users, UserCheck, UserPlus, UserX, Star, Funnel, Plus, MoreVertical } from 'lucide-react'
 import { fetchWorkers, updateWorker, deleteWorker, inviteWorker, fetchServices } from '../api'
 import type { Worker } from '../types'
-import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, useToast, useConfirm, shortDate } from '../components/UI'
+import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, useToast, useConfirm, shortDate, FilterTabs } from '../components/UI'
 import { useStore, has } from '../store'
 import { CITIES } from '../cities'
 
@@ -17,6 +17,7 @@ export default function Workers() {
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
+  const [view, setView] = useState<'all' | 'active' | 'onboarding' | 'pending' | 'inactive'>('all')
   const [city, setCity] = useState('all')
   const [service, setService] = useState('all')
   const [page, setPage] = useState(1)
@@ -41,10 +42,11 @@ export default function Workers() {
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!data) return <Loading />
 
-  const stats = data.stats || { total: 0, active: 0, pending: 0, inactive: 0 }
+  const stats: { total: number; active: number; onboarding: number; pending: number; inactive: number } = Object.assign({ total: 0, active: 0, onboarding: 0, pending: 0, inactive: 0 }, data.stats)
   const sl = service.toLowerCase()
+  const inView = (st: string) => view === 'all' || (view === 'inactive' ? st === 'inactive' || st === 'suspended' : st === view)
   const filtered = data.workers.filter((w) =>
-    service === 'all' || (w.services || []).some((s) => s.toLowerCase() === sl))
+    inView(w.status || '') && (service === 'all' || (w.services || []).some((s) => s.toLowerCase() === sl)))
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
   const rated = data.workers.filter((w) => w.rating > 0)
   const avgRating = rated.length ? (rated.reduce((a, w) => a + w.rating, 0) / rated.length).toFixed(1) : '—'
@@ -76,23 +78,18 @@ export default function Workers() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<Users size={22} />} tint="#5b51e8" label="Total Workers" value={stats.total.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<UserCheck size={22} />} tint="#16a34a" label="Active Workers" value={stats.active.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<UserPlus size={22} />} tint="#2e90fa" label="Pending Workers" value={stats.pending.toLocaleString('en-IN')} sub="awaiting approval" />
-        <StatCard icon={<UserX size={22} />} tint="#f59e0b" label="Inactive Workers" value={stats.inactive.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Star size={22} />} tint="#f59e0b" label="Avg. Rating" value={avgRating} sub="across workers" />
-      </div>
 
       <Card>
+        <FilterTabs value={view} onChange={(v) => { setView(v); setPage(1) }} tabs={[
+          { key: 'all', label: 'All', count: stats.total },
+          { key: 'active', label: 'Active', count: stats.active },
+          { key: 'onboarding', label: 'Onboarding', count: stats.onboarding },
+          { key: 'pending', label: 'Awaiting approval', count: stats.pending, alert: true },
+          { key: 'inactive', label: 'Inactive / suspended', count: stats.inactive },
+        ]} />
         <div className="toolbar">
           <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search worker by name, email or mobile…" />
           <div className="tb-spacer" />
-          <select className="select flt" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
           <select className="select flt" value={city} onChange={(e) => { setCity(e.target.value); setPage(1) }}>
             <option value="all">All Cities</option>
             {CITIES.map((c) => <option key={c.city} value={c.city}>{c.city}</option>)}

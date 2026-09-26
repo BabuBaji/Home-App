@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Clock, CheckCircle2, PauseCircle } from 'lucide-react'
 import { fetchExtensionRules, updateExtensionRule, type ExtensionRule, type ExtensionBlock } from '../api'
-import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, useToast } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Field, useToast } from '../components/UI'
 
 // Service Management → Time & Extension Rules.
 // Governs what happens when a service runs past its booked duration: which extra-time blocks the
@@ -70,11 +70,6 @@ export default function ExtensionRules() {
 
   return (
     <>
-      <div className="stat-row">
-        <StatCard icon={<Clock size={22} />} tint="#5b51e8" label="Services" value={String(rows.length)} sub="in the catalogue" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Extension enabled" value={String(enabledCount)} sub="can be extended" />
-        <StatCard icon={<PauseCircle size={22} />} tint="#2e90fa" label="Not extendable" value={String(rows.length - enabledCount)} sub="fixed duration" />
-      </div>
 
       <Card>
         <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>

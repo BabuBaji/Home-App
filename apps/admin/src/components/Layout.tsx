@@ -175,8 +175,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               : <span className="crumb">Dashboard <ChevronRight size={13} /> {title}</span>}
           </div>
           <div className="spacer" />
-          <span className="daterange only-desktop"><Calendar size={15} /> Last 7 days <ChevronDown size={14} /></span>
-          <div className="citysel only-desktop">All Cities <ChevronDown size={15} /></div>
+          {/* (no global "Last 7 days / All Cities" pills: they were fixed labels that filtered nothing,
+              so every number on the page contradicted them. Analytics has its own working filters.) */}
           <button className="iconbtn"><Bell size={20} />{alerts > 0 && <span className="bell-count">{alerts}</span>}</button>
           <div className="me">
             <Avatar name={admin?.name || 'Admin'} src={admin?.avatar} size={36} />

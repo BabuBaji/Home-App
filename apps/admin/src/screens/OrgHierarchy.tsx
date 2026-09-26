@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Network, Users2, GitBranch, Layers, UserCog, ChevronDown, ChevronRight, MapPin, Pencil, CornerDownRight, Building2,
 } from 'lucide-react'
-import { Card, StatCard, Badge, Avatar, Loading, ErrorState, Dropdown, useToast } from '../components/UI'
+import { Card, Badge, Avatar, Loading, ErrorState, Dropdown, useToast } from '../components/UI'
 import { fetchAdmins, fetchRoles, fetchZones, updateAdminUser, type Zone } from '../api'
 import type { Admin, Role } from '../types'
 import { useStore, has } from '../store'
@@ -139,13 +139,6 @@ export default function OrgHierarchy() {
 
   return (
     <div className="grid" style={{ gap: 18 }}>
-      <div className="stat-row">
-        <StatCard icon={<Users2 size={20} />} tint="#eef0ff" label="Admins" value={admins.length} sub="in the org" />
-        <StatCard icon={<Building2 size={20} />} tint="#e7f7ee" label="Top level" value={roots.length} sub="no manager" />
-        <StatCard icon={<UserCog size={20} />} tint="#fff4e5" label="Managers" value={managers} sub="have reports" />
-        <StatCard icon={<Layers size={20} />} tint="#eaf3ff" label="Deepest chain" value={maxDepth} sub="levels" />
-        <StatCard icon={<GitBranch size={20} />} tint="#f3eefe" label="Team leads" value={teamLeads} sub="roll-up scope" />
-      </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 16, alignItems: 'start' }}>
         <Card title="Reporting structure" right={

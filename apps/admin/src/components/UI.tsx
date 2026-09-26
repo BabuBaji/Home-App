@@ -291,3 +291,28 @@ export function MiniMap({ lat, lng, height = 200, label }: { lat: number; lng: n
     </div>
   )
 }
+
+/* ---------- filter tabs with counts ----------
+   A list's segments as clickable tabs ("All 61 · New 22 · Repeat 39"): the count is shown where
+   clicking it filters the list — instead of a row of summary cards that don't. */
+export function TabPill({ n, active, alert }: { n: number; active: boolean; alert?: boolean }) {
+  const hot = alert && n > 0
+  return (
+    <span style={{
+      marginLeft: 8, padding: '1px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700,
+      background: hot ? '#fdecec' : active ? '#eef0ff' : '#eeeef5',
+      color: hot ? '#d92d20' : active ? '#5b51e8' : '#6b7090',
+    }}>{n.toLocaleString('en-IN')}</span>
+  )
+}
+export function FilterTabs<K extends string>({ tabs, value, onChange }: { tabs: { key: K; label: string; count: number; alert?: boolean }[]; value: K; onChange: (k: K) => void }) {
+  return (
+    <div className="tabs" style={{ marginBottom: 14 }}>
+      {tabs.map((t) => (
+        <button key={t.key} className={'tab' + (value === t.key ? ' active' : '')} onClick={() => onChange(t.key)}>
+          {t.label}<TabPill n={t.count} active={value === t.key} alert={t.alert} />
+        </button>
+      ))}
+    </div>
+  )
+}

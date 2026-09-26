@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Gift, Users, Plus, Pencil, Trash2, Eye, EyeOff, CheckCircle2 } from 'lucide-react'
 import { fetchIncentivePlans, createIncentivePlan, updateIncentivePlan, deleteIncentivePlan } from '../api'
 import type { IncentivePlan, AttendanceTier } from '../types'
-import { StatCard, Card, Badge, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
+import { Card, Badge, Loading, ErrorState, Modal, Field, useToast, useConfirm } from '../components/UI'
 
 /* Incentive plans — each component a rule the admin sets. None is a named policy that does nothing:
  * per-job fires on the booking that credits earnings; the attendance tiers (Sitara/Shakti, folded
@@ -104,10 +104,6 @@ export default function IncentivePlans() {
 
   return (
     <>
-      <div className="stat-row">
-        <StatCard icon={<Gift size={18} />} tint="#eef0ff" label="Plans" value={active.length} sub={`${plans.length - active.length} retired`} />
-        <StatCard icon={<Users size={18} />} tint="#e7f7ee" label="Workers on a plan" value={assigned} sub="Earning incentives" />
-      </div>
 
       {plans.length === 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 14, borderLeft: '3px solid #6366f1' }}>

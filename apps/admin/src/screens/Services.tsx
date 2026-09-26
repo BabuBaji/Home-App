@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { LayoutGrid, CheckCircle2, PauseCircle, Tag, Funnel, Plus, Eye, Pencil, Trash2 } from 'lucide-react'
 import { fetchServices, createService, updateService, deleteService } from '../api'
 import type { AdminService } from '../types'
-import { StatCard, Card, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money } from '../components/UI'
+import { Card, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money } from '../components/UI'
 
 type Tone = 'green' | 'amber' | 'red' | 'blue' | 'violet' | 'gray'
 
@@ -77,12 +77,6 @@ export default function Services() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="stat-row">
-        <StatCard icon={<LayoutGrid size={22} />} tint="#5b51e8" label="Total Services" value={total.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<CheckCircle2 size={22} />} tint="#16a34a" label="Active Services" value={activeCount.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<PauseCircle size={22} />} tint="#2e90fa" label="Inactive Services" value={inactiveCount.toLocaleString('en-IN')} sub="all time" />
-        <StatCard icon={<Tag size={22} />} tint="#f59e0b" label="Categories" value={categories.toLocaleString('en-IN')} sub="all time" />
-      </div>
 
       <Card>
         <div className="toolbar">
