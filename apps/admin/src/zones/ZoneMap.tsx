@@ -25,8 +25,9 @@ export function ZoneMap({ zones }: { zones: Zone[] }) {
     mapRef.current = map
     layerRef.current = L.layerGroup().addTo(map)
     // Leaflet needs a size recalc once its container has real dimensions.
-    setTimeout(() => map.invalidateSize(), 200)
-    return () => { map.remove(); mapRef.current = null; layerRef.current = null }
+    // Cancelled on unmount: resizing a map that was already removed crashes Leaflet.
+    const resize = setTimeout(() => map.invalidateSize(), 200)
+    return () => { clearTimeout(resize); map.remove(); mapRef.current = null; layerRef.current = null }
   }, [])
 
   useEffect(() => {

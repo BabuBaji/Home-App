@@ -179,8 +179,9 @@ function ZonesMap({ zones, per }: { zones: BZone[]; per: { z: BZone; m: ReturnTy
       L.marker([cov.lat, cov.lng], { icon }).bindTooltip(z.name).addTo(map)
     })
     if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.4))
-    setTimeout(() => map.invalidateSize(), 200)
-    return () => { map.remove(); mapRef.current = null }
+    // Cancelled on unmount: resizing a map that was already removed crashes Leaflet.
+    const resize = setTimeout(() => map.invalidateSize(), 200)
+    return () => { clearTimeout(resize); map.remove(); mapRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   void zones

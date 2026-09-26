@@ -252,8 +252,9 @@ function StoreMap({ lat, lng, radiusKm, nearby, onMove }: { lat: number; lng: nu
     marker.on('move', (e) => circle.setLatLng((e as unknown as { latlng: L.LatLng }).latlng))
     marker.on('dragend', () => { const ll = marker.getLatLng(); onMoveRef.current(+ll.lat.toFixed(5), +ll.lng.toFixed(5)) })
     mapRef.current = map; markerRef.current = marker; circleRef.current = circle; layerRef.current = L.layerGroup().addTo(map)
-    setTimeout(() => map.invalidateSize(), 150)
-    return () => { map.remove(); mapRef.current = null }
+    // Cancelled on unmount: resizing a map that was already removed crashes Leaflet.
+    const resize = setTimeout(() => map.invalidateSize(), 150)
+    return () => { clearTimeout(resize); map.remove(); mapRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => {

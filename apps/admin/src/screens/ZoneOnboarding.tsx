@@ -1194,8 +1194,9 @@ function CoverageMap({ cov, onChange }: { cov: NonNullable<ZoneConfig['coverage'
     marker.on('dragend', () => { const ll = marker.getLatLng(); onChangeRef.current({ ...covRef.current, lat: +ll.lat.toFixed(5), lng: +ll.lng.toFixed(5) }) })
     mapRef.current = map; markerRef.current = marker; circleRef.current = circle
     pinLayerRef.current = L.layerGroup().addTo(map)
-    setTimeout(() => map.invalidateSize(), 200)
-    return () => { map.remove(); mapRef.current = null }
+    // Cancelled on unmount: resizing a map that was already removed crashes Leaflet.
+    const resize = setTimeout(() => map.invalidateSize(), 200)
+    return () => { clearTimeout(resize); map.remove(); mapRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // Radius mode: keep the draggable marker + circle in sync with lat/lng/radius.

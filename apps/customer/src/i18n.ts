@@ -135,9 +135,25 @@ export function tEn(en: string, vars?: Record<string, string | number>): string 
 // Locales whose CLDR default digits are not Latin; keep Latin digits so dates match ₹ amounts.
 const LATN = new Set(['mr', 'bn', 'as', 'ur'])
 /** Locale for toLocaleDateString/toLocaleTimeString on display-only dates (e.g. 'ta-IN'). */
+// Some WebViews ship without date data for a language (e.g. Odia/Assamese), or give a raw
+// pattern such as "2026 M09 26" (Punjabi). Check once per language; fall back to en-IN.
+const localeOk = new Map<string, boolean>()
+function formatsWell(tag: string): boolean {
+  let ok = localeOk.get(tag)
+  if (ok === undefined) {
+    try {
+      const s = new Date(2020, 8, 15).toLocaleDateString(tag, { month: 'short', day: 'numeric' })
+      ok = Intl.DateTimeFormat.supportedLocalesOf([tag]).length > 0 && !/M0?9|Sep/.test(s)
+    } catch { ok = false }
+    localeOk.set(tag, ok)
+  }
+  return ok
+}
+
 export function dateLocale(): string {
   if (current === 'en') return 'en-IN'
-  return LATN.has(current) ? `${current}-IN-u-nu-latn` : `${current}-IN`
+  const tag = LATN.has(current) ? `${current}-IN-u-nu-latn` : `${current}-IN`
+  return formatsWell(tag) ? tag : 'en-IN'
 }
 
 /** A duration label from the catalog ("30 min", "2 hrs", "2.5 hrs", "1 hr") in the current language. */

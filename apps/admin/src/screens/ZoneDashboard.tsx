@@ -208,8 +208,9 @@ function WorkerMap({ zone, online }: { zone: BZone; online: number }) {
       const color = i % 4 === 0 ? '#F59E0B' : '#22C55E'
       L.circleMarker([cov.lat + Math.sin(ang) * rad, cov.lng + Math.cos(ang) * rad], { radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(map)
     }
-    setTimeout(() => map.invalidateSize(), 200)
-    return () => { map.remove(); mapRef.current = null }
+    // Cancelled on unmount: resizing a map that was already removed crashes Leaflet.
+    const resize = setTimeout(() => map.invalidateSize(), 200)
+    return () => { clearTimeout(resize); map.remove(); mapRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return <div ref={ref} style={{ height: 320, width: '100%', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line)', background: '#eef0f4' }} />

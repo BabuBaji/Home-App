@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes, GraduationCap,
-  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain, Crown, Images, Clock,
+  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain, Crown, Images, Clock, Siren,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, has } from '../store'
@@ -41,6 +41,8 @@ const NAV: NavGroup[] = [
     { to: '/zones/inventory', label: 'Inventory', Icon: Package, perm: 'zones.view' },
   ] },
   { section: 'Operations', items: [
+    // The SOS queue + phone-first field app (opens full screen). Managers are first responders.
+    { to: '/field/sos', label: 'SOS & Field App', Icon: Siren, perm: 'safety.view' },
     { to: '/command-center', label: 'Command Center', Icon: Gauge, perm: 'liveops.view' },
     { to: '/control-tower', label: 'Control Tower', Icon: RadioTower, perm: 'liveops.view' },
     { to: '/live-ops', label: 'Live Ops', Icon: Radio, perm: 'liveops.view' },
