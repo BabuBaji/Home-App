@@ -22,7 +22,7 @@ export default function Renewal() {
   useEffect(() => {
     fetchMembership().then((m) => {
       setMem(m)
-      if (!m.active && !m.plan) nav('/membership/plans', { replace: true })
+      if (!m.active && !m.plan) nav('/membership', { replace: true })
       else if (m.cycle) setCycle(m.cycle)
     }).catch(() => setMem({ active: false }))
   }, [nav])

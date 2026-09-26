@@ -35,7 +35,7 @@ export default function ActivePlan() {
         {head}
         <div className="content">
           <div className="state"><div className="ico">👑</div><h3>No active membership</h3><p>Join a plan to start saving on every booking.</p></div>
-          <button className="btn full" style={{ margin: '0 16px', width: 'calc(100% - 32px)' }} onClick={() => nav('/membership/plans')}>View Plans</button>
+          <button className="btn full" style={{ margin: '0 16px', width: 'calc(100% - 32px)' }} onClick={() => nav('/membership')}>View Plans</button>
         </div>
       </div>
     )

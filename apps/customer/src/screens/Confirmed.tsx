@@ -29,7 +29,7 @@ export default function Confirmed() {
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav('/home', { replace: true })} aria-label={t('Home')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav('/home', { replace: true })} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <span /><span style={{ width: 42 }} />
       </div>
       <div className="content bc-body">

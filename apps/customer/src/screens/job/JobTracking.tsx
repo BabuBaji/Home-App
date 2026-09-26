@@ -118,10 +118,11 @@ export default function JobTracking() {
             <WorkerAvatar b={b} size={66} />
             {assigned && <span className="jt-hero-check"><Check size={14} strokeWidth={3} /></span>}
           </div>
-          <h2>{assigned ? t('Worker Assigned!') : t('Confirming your expert…')}</h2>
-          <p>{assigned
-            ? t('Great! {name} has been assigned to your service.', { name: proName(b).split(' ')[0] })
-            : t('Your booking is confirmed. We are assigning the best expert near you — this usually takes a moment.')}</p>
+          {/* Headline follows the live status, so an in-progress job doesn't still read "Worker Assigned!". */}
+          <h2>{!assigned ? t('Confirming your expert…') : b.status === 'worker_assigned' || !arr ? t('Worker Assigned!') : arr.title}</h2>
+          <p>{!assigned
+            ? t('Your booking is confirmed. We are assigning the best expert near you — this usually takes a moment.')
+            : b.status === 'worker_assigned' || !arr ? t('Great! {name} has been assigned to your service.', { name: proName(b).split(' ')[0] }) : arr.sub}</p>
           <span className="jt-badge-confirm"><ShieldCheck size={15} /> {t('Your booking is confirmed')}</span>
         </div>
 

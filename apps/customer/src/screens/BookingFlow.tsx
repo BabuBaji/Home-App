@@ -61,14 +61,15 @@ export default function BookingFlow() {
   const cartMode = id === 'cart'
   const flowKey = cartMode ? 'cart' : String(id)
 
-  const saved: Saved | null = useMemo(() => {
+  // Read once (no side effects here — StrictMode calls initialisers twice); cleared after mount.
+  const [saved] = useState<Saved | null>(() => {
     try {
       const raw = sessionStorage.getItem(RESUME_KEY)
       const v = raw ? JSON.parse(raw) as Saved : null
-      sessionStorage.removeItem(RESUME_KEY)
       return v && v.key === flowKey ? v : null
     } catch { return null }
-  }, [flowKey])
+  })
+  useEffect(() => { try { sessionStorage.removeItem(RESUME_KEY) } catch { /* ignore */ } }, [])
 
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [dur, setDur] = useState<Duration | null>(null)
@@ -357,7 +358,7 @@ export default function BookingFlow() {
           {addrs == null ? <Loading /> : addr ? (
             <div className="bf-worker on" style={{ cursor: 'default' }}>
               <span className="bf-wava"><MapPin size={18} /></span>
-              <div className="grow"><b>{addr.label}</b><small style={{ whiteSpace: 'normal' }}>{[addr.house, addr.line].filter(Boolean).join(', ')}{addr.pincode && !(addr.line || '').includes(addr.pincode) ? `, ${addr.pincode}` : ''}</small></div>
+              <div className="grow"><b>{addr.label}</b><small style={{ whiteSpace: 'normal' }}>{addr.house && !(addr.line || '').includes(addr.house) ? `${addr.house}, ${addr.line}` : addr.line}{addr.pincode && !(addr.line || '').includes(addr.pincode) ? `, ${addr.pincode}` : ''}</small></div>
               <button className="au-link" onClick={() => setAddrSheet(true)}>{t('Change')}</button>
             </div>
           ) : (

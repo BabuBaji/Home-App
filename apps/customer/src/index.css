@@ -3996,3 +3996,4 @@ body { line-height: 1.45; }
 .cw-call { width: 76px; height: 76px; border-radius: 50%; border: 0; background: #16a34a; color: #fff; display: grid; place-items: center; box-shadow: 0 10px 24px rgba(22,163,74,.35); margin-top: 18px; }
 .cw-call:disabled { opacity: .6; }
 .cw-note { background: var(--primary-50); color: var(--primary); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; max-width: 320px; }
+.m2 .au-link, .screen.jt .au-link { color: var(--av, var(--v)); background: none; border: 0; padding: 0; }
