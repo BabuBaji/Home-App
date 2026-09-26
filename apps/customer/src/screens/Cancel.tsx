@@ -69,7 +69,12 @@ export default function Cancel() {
               <div className="kv"><span className="k">{t('Amount paid')}</span><span className="v">₹{quote.paid}</span></div>
               <div className="kv"><span className="k">{t('Cancellation fee')}</span><span className="v">₹{quote.fee}</span></div>
               <div className="divider" />
-              <div className="kv total"><span className="k">{t('Refund to wallet')}</span><span className="v" style={{ color: 'var(--green)' }}>₹{quote.refund}</span></div>
+              <div className="kv total"><span className="k">{t('Total refund')}</span><span className="v" style={{ color: 'var(--green)' }}>₹{quote.refund}</span></div>
+              {(quote.toSource ?? 0) > 0 && <div className="kv"><span className="k">{t('To your UPI / card')}</span><span className="v">₹{quote.toSource}</span></div>}
+              {(quote.toWallet ?? 0) > 0 && (quote.toSource ?? 0) > 0 && <div className="kv"><span className="k">{t('To HomeHelp wallet')}</span><span className="v">₹{quote.toWallet}</span></div>}
+              {quote.refund > 0 && <p className="muted sm" style={{ marginTop: 6 }}>{(quote.toSource ?? 0) > 0
+                ? t('The UPI / card part usually reaches you in 5–7 working days. Anything paid from your wallet goes back to your wallet instantly.')
+                : t('The refund goes to your HomeHelp wallet instantly.')}</p>}
               {quote.paid === 0 && <p className="muted sm" style={{ marginTop: 6 }}>{t('This was a cash booking, so there’s nothing to refund.')}</p>}
             </div>
           </>

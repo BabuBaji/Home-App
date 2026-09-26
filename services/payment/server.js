@@ -67,6 +67,12 @@ async function init() {
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_payment_id ON payments(payment_id) WHERE payment_id IS NOT NULL AND status IN ('VERIFIED','CLAIMED')`,
     `CREATE INDEX IF NOT EXISTS ix_pay_order ON payments(order_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_settle_booking ON settlements(booking_id)`,
+    // Failed checkout attempts (status FAILED) keep why they failed, for the customer and admin.
+    `ALTER TABLE payments ADD COLUMN IF NOT EXISTS failure_reason TEXT`,
+    // One row per gateway refund. Razorpay accepts a refund at once but settles it later, so the
+    // status moves pending → processed | failed from the refund.* webhooks.
+    `CREATE TABLE IF NOT EXISTS payment_refunds (id SERIAL PRIMARY KEY, payment_id TEXT NOT NULL, refund_id TEXT UNIQUE, amount INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reason TEXT, created TIMESTAMPTZ DEFAULT now(), updated TIMESTAMPTZ DEFAULT now())`,
+    `CREATE INDEX IF NOT EXISTS ix_refund_payment ON payment_refunds(payment_id)`,
   ])
   console.log('[payment] Postgres ready (payments, settlements, payouts, wallet_ledger, webhook_events)')
 }
@@ -326,12 +332,50 @@ app.post('/api/payment/order', auth, async (req, res) => {
 })
 // Mark the customer's own order as paid-and-verified. Returns the payment id to hand to whatever
 // the money is for; that id can then be claimed exactly once, for at most the order's amount.
+// A FAILED order can still be paid: Razorpay lets the customer retry the same order after a failed attempt.
 async function markVerified(customerId, orderId, paymentId) {
   const { rows } = await pool.query(
-    `UPDATE payments SET payment_id=$3, status='VERIFIED' WHERE order_id=$1 AND customer_id=$2 AND status='CREATED' RETURNING *`,
+    `UPDATE payments SET payment_id=$3, status='VERIFIED', failure_reason=NULL WHERE order_id=$1 AND customer_id=$2 AND status IN ('CREATED','FAILED') RETURNING *`,
     [orderId, customerId, paymentId])
   return rows[0] || null
 }
+// Record a failed/abandoned checkout attempt. Only an unpaid order can fail — a verified or claimed
+// payment is never downgraded by a late failure report.
+async function markFailed(orderId, reason, { customerId, paymentId } = {}) {
+  const { rows } = await pool.query(
+    // Once failed, a later report without a gateway payment id (e.g. the customer closing the
+    // checkout after the failure) keeps the gateway's more specific reason.
+    `UPDATE payments SET status='FAILED', payment_id=COALESCE($4, payment_id),
+       failure_reason=CASE WHEN status='FAILED' AND failure_reason IS NOT NULL AND $4::text IS NULL THEN failure_reason ELSE $2 END
+      WHERE order_id=$1 AND status IN ('CREATED','FAILED') AND ($3::int IS NULL OR customer_id=$3) RETURNING *`,
+    [String(orderId), String(reason || 'Payment failed').slice(0, 200), customerId ?? null, paymentId || null])
+  return rows[0] || null
+}
+// The app reports a checkout that failed or was closed, so the attempt shows up as failed rather
+// than sitting at CREATED forever.
+app.post('/api/payment/failed', auth, async (req, res) => {
+  const orderId = String(req.body?.orderId || '')
+  if (!orderId) return res.status(400).json({ error: 'Missing orderId' })
+  const row = await markFailed(orderId, req.body?.reason, { customerId: req.user.id, paymentId: req.body?.paymentId ? String(req.body.paymentId) : null })
+  res.json({ ok: !!row })
+})
+// The customer's own online payments, newest first, with any refunds against each — the
+// "transaction details" the app shows. Orders never paid or reported are left out.
+app.get('/api/payment/transactions', auth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, order_id, payment_id, amount, gateway, status, purpose, claimed_ref, failure_reason, refunded_amount, created
+       FROM payments WHERE customer_id=$1 AND status IN ('VERIFIED','CLAIMED','FAILED') ORDER BY id DESC LIMIT 200`, [req.user.id])
+  const ids = rows.map((r) => r.payment_id).filter(Boolean)
+  const refunds = ids.length ? (await pool.query(
+    'SELECT payment_id, refund_id, amount, status, created, updated FROM payment_refunds WHERE payment_id = ANY($1) ORDER BY id', [ids])).rows : []
+  res.json(rows.map((r) => ({
+    id: r.id, orderId: r.order_id, paymentId: r.payment_id, amount: r.amount, gateway: r.gateway,
+    status: r.status === 'FAILED' ? 'failed' : 'paid', purpose: r.purpose || null,
+    bookingId: Number(/^booking:(\d+)$/.exec(r.claimed_ref || '')?.[1]) || null,
+    failureReason: r.failure_reason || null, refunded: r.refunded_amount || 0, created: r.created,
+    refunds: refunds.filter((f) => f.payment_id === r.payment_id).map((f) => ({ id: f.refund_id, amount: f.amount, status: f.status, created: f.created, updated: f.updated })),
+  })))
+})
 app.post('/api/payment/verify', auth, async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {}
   const r = await rzp()
@@ -392,6 +436,9 @@ app.post('/api/internal/payment/refund', internalOnly, async (req, res) => {
     } catch { return res.status(502).json({ error: 'Could not reach payment gateway' }) }
   } else refundId = 'rfnd_mock_' + crypto.randomBytes(5).toString('hex')
   await pool.query('UPDATE payments SET refunded_amount=COALESCE(refunded_amount,0)+$2, refund_id=$3 WHERE id=$1', [row.id, amount, refundId])
+  // A mock refund has nothing to settle; a gateway refund is pending until refund.processed arrives.
+  await pool.query('INSERT INTO payment_refunds (payment_id, refund_id, amount, status, reason) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (refund_id) DO NOTHING',
+    [paymentId, refundId, amount, row.gateway === 'razorpay' ? 'pending' : 'processed', String(req.body?.reason || '').slice(0, 200) || null])
   res.json({ ok: true, amount, refundId })
 })
 // Verified wallet top-up. Credits the customer wallet ONLY after the gateway payment passed
@@ -458,20 +505,44 @@ app.post('/api/payments/order', auth, async (req, res) => {
 })
 
 /* ---------- signed webhooks ---------- */
+/* Razorpay payment webhook. Signed with the webhook secret set in Admin ▸ Settings — without one
+ * it is refused, since an unsigned body could claim anything. Only the event types below change
+ * state; everything else is acknowledged and ignored.
+ *   payment.captured / order.paid → the order is paid (backs up the app's /verify call if the app
+ *                                   died before it could make it)
+ *   payment.failed                → the attempt is recorded as failed, with Razorpay's reason
+ *   refund.processed              → the refund reached the customer's card/UPI
+ *   refund.failed                 → it bounced; the booking service puts that money in the wallet */
 app.post('/api/payments/webhook', async (req, res) => {
   const secret = await getSetting(ADMIN_URL, 'razorpay_webhook_secret', '') || await getSetting(ADMIN_URL, 'payment_webhook_secret', '')
-  const sig = req.headers['x-razorpay-signature']
-  if (secret) {
-    const expected = crypto.createHmac('sha256', secret).update(req.rawBody || Buffer.from('')).digest('hex')
-    if (sig !== expected) return res.status(400).json({ error: 'bad signature' })
-  }
+  if (!secret) return res.status(503).json({ error: 'Webhook secret not configured' })
+  const expected = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody || Buffer.from('')).digest('hex'))
+  const got = Buffer.from(String(req.headers['x-razorpay-signature'] || ''))
+  if (expected.length !== got.length || !crypto.timingSafeEqual(expected, got)) return res.status(400).json({ error: 'bad signature' })
   const evt = req.body || {}
-  const eventId = evt.id || (evt.payload?.payment?.entity?.id) || crypto.randomBytes(8).toString('hex')
-  const dup = await pool.query('INSERT INTO webhook_events (event_id,type) VALUES ($1,$2) ON CONFLICT (event_id) DO NOTHING RETURNING id', [String(eventId), evt.event || 'payment'])
+  const type = String(evt.event || '')
+  const pay = evt.payload?.payment?.entity || {}
+  const ref = evt.payload?.refund?.entity || {}
+  // Razorpay sends a unique id per event in this header; fall back to event + entity id.
+  const eventId = req.headers['x-razorpay-event-id'] || `${type}:${ref.id || pay.id || crypto.randomBytes(8).toString('hex')}`
+  const dup = await pool.query('INSERT INTO webhook_events (event_id,type) VALUES ($1,$2) ON CONFLICT (event_id) DO NOTHING RETURNING id', [String(eventId), type || 'payment'])
   if (!dup.rowCount) return res.json({ ok: true, duplicate: true })
-  const bookingId = evt.bookingId || evt.payload?.payment?.entity?.notes?.bookingId
-  const amount = evt.amount || Math.round((evt.payload?.payment?.entity?.amount || 0) / 100)
-  if (bookingId) publishEvent(REDIS_URL, 'payment.succeeded', { bookingId: Number(bookingId), amount, mode: 'upi', gateway: 'razorpay' })
+
+  if ((type === 'payment.captured' || type === 'order.paid') && pay.order_id && pay.id) {
+    await pool.query(`UPDATE payments SET payment_id=$2, status='VERIFIED', failure_reason=NULL WHERE order_id=$1 AND status IN ('CREATED','FAILED')`, [pay.order_id, pay.id])
+  } else if (type === 'payment.failed' && pay.order_id) {
+    await markFailed(pay.order_id, pay.error_description || pay.error_reason || 'Payment failed', { paymentId: pay.id || null })
+  } else if (type === 'refund.processed' && ref.id) {
+    await pool.query(`UPDATE payment_refunds SET status='processed', updated=now() WHERE refund_id=$1 AND status='pending'`, [ref.id])
+  } else if (type === 'refund.failed' && ref.id) {
+    // pending → failed happens once, so the money is handed back exactly once.
+    const { rows } = await pool.query(`UPDATE payment_refunds SET status='failed', updated=now() WHERE refund_id=$1 AND status='pending' RETURNING *`, [ref.id])
+    const f = rows[0]
+    if (f) {
+      await pool.query('UPDATE payments SET refunded_amount=GREATEST(0, COALESCE(refunded_amount,0)-$2) WHERE payment_id=$1', [f.payment_id, f.amount])
+      publishEvent(REDIS_URL, 'payment.refund_failed', { paymentId: f.payment_id, refundId: f.refund_id, amount: f.amount })
+    }
+  }
   res.json({ ok: true })
 })
 // RazorpayX payout webhook. Verifies the HMAC signature, then finalizes the payout: a
@@ -535,7 +606,9 @@ app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'walle
     revenue: paid.reduce((s, r) => s + (r.amount || 0), 0),
     successful: paid.length,
     pending: rows.filter((r) => ['CREATED', 'PENDING'].includes(r.status)).length,
-    refunded: rows.filter((r) => r.status === 'REFUNDED').length,
+    // ₹ sent back to customers' cards/UPI (the Refunds Issued card shows it as money).
+    refunded: rows.reduce((s, r) => s + (r.refunded_amount || 0), 0),
+    failed: rows.filter((r) => r.status === 'FAILED').length,
   }
   const methodMap = {}
   for (const r of rows) {
@@ -546,9 +619,11 @@ app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'walle
   }
   const transactions = rows.map((r) => ({
     id: r.id,
-    type: r.status === 'REFUNDED' ? 'refund' : 'credit',
+    type: r.status === 'REFUNDED' ? 'refund' : r.status === 'FAILED' ? 'failed' : 'credit',
     status: r.status,
-    title: `${r.mode || 'Online'} payment`,
+    title: r.status === 'FAILED' ? `${r.mode || 'Online'} payment failed${r.failure_reason ? ' — ' + r.failure_reason : ''}` : `${r.mode || 'Online'} payment`,
+    paymentId: r.payment_id || null,
+    refunded: r.refunded_amount || 0,
     amount: r.amount || 0,
     created: r.created,
     ref: r.booking_id ? `BK${r.booking_id}` : (r.order_id || ''),

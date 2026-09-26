@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
-import { fetchPaymentMethods, createOrder, chargePayment, fetchPaymentConfig, createPaymentsOrder, verifyPayment, mockPay } from '../api'
+import { fetchPaymentMethods, createOrder, chargePayment, fetchPaymentConfig, createPaymentsOrder, verifyPayment, mockPay, reportPaymentFailed } from '../api'
 import { useToast } from './UI'
 import type { PaymentGroup } from '../types'
 import { UPI_APPS, payByUpi, type UpiApp } from '../upi'
@@ -161,11 +161,19 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
       // Native app → Razorpay native SDK fires the real UPI intent (PhonePe/GPay/Paytm open
       // directly) and returns a verifiable payment id. Web falls back to checkout.js.
       if (Capacitor.isNativePlatform()) {
+        let r: Awaited<ReturnType<typeof RazorpayNative.open>>
         try {
-          const r = await RazorpayNative.open({
+          r = await RazorpayNative.open({
             key: order.keyId || keyId || '', orderId: order.orderId, amount: amount * 100, currency: 'INR',
             name: 'HomeHelp', description: 'Service booking',
           })
+        } catch (e) {
+          // Checkout failed or was closed — record the attempt so it shows as failed, not pending.
+          const msg = (e as Error).message || t('Payment cancelled')
+          reportPaymentFailed(order.orderId, msg).catch(() => {})
+          toast(msg); setPhase('select'); return
+        }
+        try {
           await verifyPayment({ razorpay_order_id: r.razorpay_order_id || order.orderId, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })
           setPhase('done'); setTimeout(() => onPaid(method, r.razorpay_payment_id), 650)
         } catch (e) { toast((e as Error).message || t('Payment cancelled')); setPhase('select') }
@@ -183,13 +191,16 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
             setPhase('done'); setTimeout(() => onPaid(method, resp.razorpay_payment_id), 650)
           } catch (e) { toast((e as Error).message); setPhase('select') }
         },
-        modal: { ondismiss: () => setPhase('select') },
+        modal: { ondismiss: () => { reportPaymentFailed(order.orderId, 'Checkout closed').catch(() => {}); setPhase('select') } },
       }
       // UPI-first via prefill.method above. We deliberately do NOT hard-restrict to UPI-only —
       // inside the Android WebView that can yield zero eligible methods ("no appropriate payment
       // method found"). Razorpay renders its eligible methods with UPI preselected.
       const rzp = new (window as any).Razorpay(opts)
-      rzp.on('payment.failed', (r: any) => { toast(r?.error?.description || t('Payment failed')); setPhase('select') })
+      rzp.on('payment.failed', (r: any) => {
+        reportPaymentFailed(order.orderId, r?.error?.description || 'Payment failed', r?.error?.metadata?.payment_id).catch(() => {})
+        toast(r?.error?.description || t('Payment failed')); setPhase('select')
+      })
       rzp.open()
     } catch (e) { toast((e as Error).message); setPhase('select') }
   }

@@ -3,7 +3,11 @@
 //
 //   node infra/e2e/payments.mjs            # BASE=… ADMIN_PW=… PIN=<served pincode> LAT= LNG=
 //
+// WEBHOOK_SECRET=<the Razorpay webhook secret set in Admin ▸ Settings> also runs the signed-webhook
+// checks; without it only "unsigned webhooks are refused" is checked.
+//
 // Every check states what must hold for money to be safe; FAIL means it does not.
+import crypto from 'node:crypto'
 const BASE = process.env.BASE || 'http://localhost:8080'
 const RUN = Date.now().toString().slice(-5)
 const results = []
@@ -95,11 +99,54 @@ async function main() {
 
   // Cancel before an expert is found: online part back to source, wallet part to wallet.
   if (splitId) {
+    const q = (await api('GET', `/api/bookings/${splitId}/cancel-quote`, { token: A.tok })).json
+    check('Cancel quote shows the card/UPI vs wallet split', q.toSource === total2 - walletAmount && q.toWallet === walletAmount, `to source ₹${q.toSource}, to wallet ₹${q.toWallet}`)
     await api('POST', `/api/bookings/${splitId}/cancel`, { token: A.tok, body: { reason: 'test' } })
     const b = (await api('GET', `/api/admin/bookings/${splitId}`, { token: sup })).json
     const w3 = (await wallet(A.tok)).total
     check('Cancel refunds online part to the card/UPI', b.refund_to_source === total2 - walletAmount, `to source ₹${b.refund_to_source}, status ${b.refund_status}`)
     check('…and the wallet part to the wallet', w3 - w2 === walletAmount, `wallet ₹${w2} → ₹${w3}`)
+    const rf = ((await api('GET', '/api/refunds', { token: A.tok })).json || []).find((x) => x.id === splitId)
+    check('Refund history says where the refund went', rf && rf.toSource === total2 - walletAmount && rf.toWallet === walletAmount, JSON.stringify(rf || {}).slice(0, 120))
+    const tx = ((await api('GET', '/api/payment/transactions', { token: A.tok })).json || []).find((x) => x.paymentId === rest)
+    check('Payment details list the refund against the payment', tx && tx.refunded === total2 - walletAmount && tx.refunds.length === 1 && tx.bookingId === splitId, JSON.stringify(tx || {}).slice(0, 140))
+  }
+
+  // Failed checkouts are recorded as failed, and the same order can still be paid afterwards.
+  const fo = (await api('POST', '/api/payment/order', { token: A.tok, body: { amount: 40 } })).json
+  const fx = await api('POST', '/api/payment/failed', { token: B.tok, body: { orderId: fo.orderId, reason: 'x' } })
+  check("A customer can't mark someone else's order failed", fx.ok && fx.json.ok === false, JSON.stringify(fx.json))
+  await api('POST', '/api/payment/failed', { token: A.tok, body: { orderId: fo.orderId, reason: 'Bank declined' } })
+  let failedRow = ((await api('GET', '/api/payment/transactions', { token: A.tok })).json || []).find((x) => x.orderId === fo.orderId)
+  check('Failed payment shows in payment details with its reason', failedRow?.status === 'failed' && failedRow.failureReason === 'Bank declined', JSON.stringify(failedRow || {}).slice(0, 120))
+  const retry = await api('POST', '/api/payment/charge', { token: A.tok, body: { orderId: fo.orderId, method: 'upi', amount: 40 } })
+  failedRow = ((await api('GET', '/api/payment/transactions', { token: A.tok })).json || []).find((x) => x.orderId === fo.orderId)
+  check('A failed order can be retried and paid', retry.ok && failedRow?.status === 'paid' && !failedRow.failureReason, `HTTP ${retry.status}, now ${failedRow?.status}`)
+
+  // Webhooks: unsigned ones never change anything; signed ones record failures.
+  const hook = (body, sig, id) => fetch(BASE + '/api/payments/webhook', { method: 'POST', headers: { 'content-type': 'application/json', ...(sig ? { 'x-razorpay-signature': sig } : {}), ...(id ? { 'x-razorpay-event-id': id } : {}) }, body })
+  const forgedBody = JSON.stringify({ event: 'payment.captured', bookingId: paidId, payload: { payment: { entity: { id: 'pay_forged', order_id: 'order_x', amount: 100 } } } })
+  const u = await hook(forgedBody)
+  check('Unsigned webhook is refused', u.status === 400 || u.status === 503, `HTTP ${u.status}`)
+  if (process.env.WEBHOOK_SECRET) {
+    const sign = (b) => crypto.createHmac('sha256', process.env.WEBHOOK_SECRET).update(b).digest('hex')
+    const bad = await hook(forgedBody, sign(forgedBody + ' '))
+    check('Webhook with a wrong signature is refused', bad.status === 400, `HTTP ${bad.status}`)
+    const wo = (await api('POST', '/api/payment/order', { token: A.tok, body: { amount: 30 } })).json
+    const fb = JSON.stringify({ event: 'payment.failed', payload: { payment: { entity: { id: 'pay_f' + RUN, order_id: wo.orderId, error_description: 'Insufficient funds' } } } })
+    const w = await hook(fb, sign(fb), 'evt_f' + RUN)
+    const wr = ((await api('GET', '/api/payment/transactions', { token: A.tok })).json || []).find((x) => x.orderId === wo.orderId)
+    check('Signed payment.failed webhook records the failure', w.ok && wr?.status === 'failed' && wr.failureReason === 'Insufficient funds', `HTTP ${w.status} ${JSON.stringify(wr || {}).slice(0, 100)}`)
+    // A payment.failed event must never mark a booking paid (it used to be treated as success).
+    const cashBook = await book(A, { payment: 'cash' })
+    if (cashBook.ok) {
+      const cb = JSON.stringify({ event: 'payment.failed', bookingId: cashBook.json.id, payload: { payment: { entity: { id: 'pay_g' + RUN, order_id: 'order_none', notes: { bookingId: cashBook.json.id } } } } })
+      await hook(cb, sign(cb), 'evt_g' + RUN)
+      await new Promise((r) => setTimeout(r, 500))
+      const cbk = (await api('GET', `/api/admin/bookings/${cashBook.json.id}`, { token: sup })).json
+      check('payment.failed webhook does not mark a booking paid', cbk.payment_status !== 'paid', `payment_status ${cbk.payment_status}`)
+      await api('POST', `/api/bookings/${cashBook.json.id}/cancel`, { token: A.tok, body: { reason: 'test' } })
+    }
   }
   if (paidId) await api('POST', `/api/bookings/${paidId}/cancel`, { token: A.tok, body: { reason: 'test' } })
 

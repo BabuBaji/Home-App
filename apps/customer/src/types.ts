@@ -157,6 +157,10 @@ export interface Booking {
   cancel_fee?: number
   cancelled_by?: string
   refund?: number
+  refund_status?: string | null
+  payment_ref?: string | null     // gateway payment id (Razorpay pay_…) when paid online
+  online_paid?: number            // ₹ paid by card/UPI (the rest came from the wallet)
+  refund_to_source?: number       // ₹ of the refund sent back to that card/UPI
   created: string
   dist?: number
   eta?: number

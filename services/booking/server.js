@@ -45,7 +45,7 @@ const SUPPORT_SYSTEM = `You are the in-app support assistant for HomeHelp, an on
 Ground every answer in these HomeHelp policies (never invent others):
 - Cancellation: free until an expert is assigned; a ₹50 fee once the expert is on the way. Cancel from the booking's details screen.
 - Reschedule: free up to 1 hour before the selected slot, from the booking's details screen.
-- Refunds: credited to the HomeHelp wallet, usually instantly (minus any cancellation fee for online payments).
+- Refunds: the part paid online (UPI/card) goes back to that UPI/card, usually in 5–7 working days; the part paid from the HomeHelp wallet goes back to the wallet instantly. Any cancellation fee is deducted first. If the bank rejects a UPI/card refund, the amount is added to the wallet instead.
 - Payments: UPI (GPay/PhonePe), cards, wallet and cash. Online is charged at booking; cash is paid to the expert after the service.
 - Invoice: a tax invoice appears on a booking's details screen once the service is completed (tap Invoice to view/download/share).
 - Tracking: open the booking and tap Track for the expert's live status and location.
@@ -639,7 +639,7 @@ app.get('/api/bookings', auth, async (req, res) => {
 // status: 'completed' (credited) | 'failed' (credit did not go through) | 'pending' (owed, not yet run).
 app.get('/api/refunds', auth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, ref, items, refund, refund_status, cancel_time, cancel_reason, created
+    `SELECT id, ref, items, refund, refund_status, refund_to_source, cancel_time, cancel_reason, created
      FROM bookings WHERE user_id=$1 AND coalesce(refund,0) > 0
      ORDER BY coalesce(cancel_time, created) DESC`, [req.user.id])
   res.json(rows.map((r) => {
@@ -647,6 +647,8 @@ app.get('/api/refunds', auth, async (req, res) => {
     const st = r.refund_status === 'refunded' ? 'completed' : r.refund_status === 'failed' ? 'failed' : 'pending'
     return {
       id: r.id, ref: r.ref, amount: r.refund, status: st,
+      // Where it went: back to the original card/UPI, and the rest to the HomeHelp wallet.
+      toSource: Math.min(r.refund, r.refund_to_source || 0), toWallet: Math.max(0, r.refund - (r.refund_to_source || 0)),
       title: items.map((i) => i.name).join(', ') || 'Booking refund',
       serviceId: items[0]?.id || null,
       reason: r.cancel_reason || null,
@@ -1038,7 +1040,10 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
 app.get('/api/bookings/:id/cancel-quote', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  res.json(quoteCancellation(b, await cancelCfg()))
+  const q = quoteCancellation(b, await cancelCfg())
+  // Same split refundBooking will make: the online part back to card/UPI, the rest to the wallet.
+  const toSource = b.payment_ref ? Math.min(q.refund, Math.max(0, (b.online_paid || 0) - (b.refund_to_source || 0))) : 0
+  res.json({ ...q, toSource, toWallet: q.refund - toSource })
 })
 
 /* Send `amount` of a booking back where it came from: the online part to the original card/UPI via
@@ -1729,6 +1734,23 @@ app.post('/api/internal/bookings/:id/work-photo', internalOnly, async (req, res)
 /* ================= event consumers ================= */
 subscribeEvents(REDIS_URL, 'booking', async (type, data) => {
   if (type === 'settings.updated') return invalidateSettings()
+  // Razorpay could not return a card/UPI refund (the bank rejected it). Don't leave the customer
+  // without their money: credit it to the wallet instead, as refundBooking does when the gateway
+  // refuses up front. The payment service emits this once per failed refund.
+  if (type === 'payment.refund_failed' && data.paymentId) {
+    const b = rowTo((await pool.query('SELECT * FROM bookings WHERE payment_ref=$1', [String(data.paymentId)])).rows[0])
+    const amount = Math.round(Number(data.amount) || 0)
+    if (!b || amount <= 0) return
+    try {
+      await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${b.ref} — bank refund failed, added to wallet`, amount, ref: b.ref })
+      await pool.query('UPDATE bookings SET refund_to_source=GREATEST(0, refund_to_source-$2) WHERE id=$1', [b.id, amount])
+    } catch (e) {
+      console.error('[booking] wallet credit after failed gateway refund failed for', b.ref, e.message)
+      await pool.query("UPDATE bookings SET refund_status='failed' WHERE id=$1", [b.id])
+    }
+    await emitBookingUpdate(b.id)
+    return
+  }
   if (type === 'payment.succeeded' && data.bookingId) {
     await pool.query("UPDATE bookings SET payment_status='paid' WHERE id=$1 AND payment_status<>'paid'", [data.bookingId])
     await emitBookingUpdate(data.bookingId)

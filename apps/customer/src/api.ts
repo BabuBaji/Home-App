@@ -184,6 +184,16 @@ export const fetchPaymentConfig = () => req<{ provider: 'razorpay' | 'mock'; key
 export const createPaymentsOrder = (amount: number, mode: string, bookingId?: number) =>
   req<{ ok: boolean; orderId: string; paymentId: string; amount: number; mode: string; status: string }>('/api/payments/order', { method: 'POST', body: JSON.stringify({ amount, mode, bookingId }) })
 export const createOrder = (amount: number) => req<{ provider: 'razorpay' | 'mock'; orderId: string; amount: number; currency: string; keyId?: string }>('/api/payment/order', { method: 'POST', body: JSON.stringify({ amount }) })
+// Tell the server a checkout failed or was closed, so the attempt is recorded as failed.
+export const reportPaymentFailed = (orderId: string, reason?: string, paymentId?: string) =>
+  req<{ ok: boolean }>('/api/payment/failed', { method: 'POST', body: JSON.stringify({ orderId, reason, paymentId }) })
+export interface PaymentRefund { id: string; amount: number; status: 'pending' | 'processed' | 'failed'; created: string; updated: string }
+export interface PaymentTxn {
+  id: number; orderId: string; paymentId: string | null; amount: number; gateway: string
+  status: 'paid' | 'failed'; purpose: string | null; bookingId: number | null
+  failureReason: string | null; refunded: number; created: string; refunds: PaymentRefund[]
+}
+export const fetchPaymentTransactions = () => req<PaymentTxn[]>('/api/payment/transactions')
 export const verifyPayment = (p: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => req<{ ok: boolean; txnId: string }>('/api/payment/verify', { method: 'POST', body: JSON.stringify(p) })
 export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
 /** Test mode (no Razorpay keys): complete a server-side mock order and return its payment id, which
@@ -222,7 +232,7 @@ export const fetchGiftCards = () => req<GiftCardInfo>('/api/wallet/gift-cards')
 export const redeemGiftCard = (code: string) => req<{ ok: boolean; card: GiftCard }>('/api/wallet/gift-cards', { method: 'POST', body: JSON.stringify({ code }) })
 
 /* wallet · refund history (booking side of a refund; the ledger has the money side) */
-export interface RefundEntry { id: number; ref: string; amount: number; status: 'completed' | 'pending' | 'failed'; title: string; serviceId: string | null; reason: string | null; created: string }
+export interface RefundEntry { id: number; ref: string; amount: number; toSource: number; toWallet: number; status: 'completed' | 'pending' | 'failed'; title: string; serviceId: string | null; reason: string | null; created: string }
 export const fetchRefunds = () => req<RefundEntry[]>('/api/refunds')
 
 /* wallet · settings */
@@ -380,6 +390,7 @@ export const rescheduleBookingApi = (id: number, date: string, time: string) => 
 export interface CancelQuote {
   allowed: boolean; model: 'instant' | 'scheduled'; stage: string; title: string; note: string
   paid: number; refund: number; fee: number; refundPct: number; workerComp: number
+  toSource: number; toWallet: number // how `refund` splits: back to the card/UPI vs to the wallet
 }
 export const fetchCancelQuote = (id: number) => req<CancelQuote>(`/api/bookings/${id}/cancel-quote`)
 export interface CancellationPolicy {

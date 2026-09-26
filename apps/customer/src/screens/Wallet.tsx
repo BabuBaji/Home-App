@@ -3,7 +3,7 @@
 // existing PaymentSheet + walletTopup. The referral-code apply card is kept.
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Receipt, Gift, Settings, Wallet as WalletIcon, HelpCircle, Users, RotateCcw, ChevronRight, Eye, ArrowLeft } from 'lucide-react'
+import { Plus, Receipt, Gift, Settings, Wallet as WalletIcon, HelpCircle, Users, RotateCcw, CreditCard, ChevronRight, Eye, ArrowLeft } from 'lucide-react'
 import { Loading, useToast } from '../components/UI'
 import { fetchWallet, fetchCashback, fetchReferralEarnings, fetchRefunds, applyReferral } from '../api'
 import { useStore } from '../store'
@@ -69,6 +69,7 @@ export default function Wallet() {
     { k: 'Cashback', icon: <Gift size={15} />, cls: 'cb', v: cashback, to: '/wallet/cashback' },
     { k: 'Referral Earnings', icon: <Users size={15} />, cls: 'rf', v: referral, to: '/wallet/referrals' },
     { k: 'Pending Refunds', icon: <RotateCcw size={15} />, cls: 'rd', v: pendingRefunds, to: '/wallet/refunds' },
+    { k: 'UPI & Card Payments', icon: <CreditCard size={15} />, cls: 'rf', v: undefined, to: '/wallet/payments' },
   ]
 
   return (
@@ -115,7 +116,7 @@ export default function Wallet() {
             <button key={o.k} className="w-ov" onClick={() => nav(o.to)}>
               <span className={`w-ov-ico ${o.cls}`}>{o.icon}</span>
               <span className="w-ov-k">{t(o.k)}</span>
-              <span className="w-ov-v">{o.v === null ? '—' : money(o.v)}</span>
+              {o.v !== undefined && <span className="w-ov-v">{o.v === null ? '—' : money(o.v)}</span>}
               <ChevronRight size={15} className="ws-chev" />
             </button>
           ))}

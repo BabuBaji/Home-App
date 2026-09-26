@@ -58,6 +58,9 @@ export default function RefundHistory() {
                   <div className="wt-main">
                     <div className="wt-title">{r.title}</div>
                     <div className="wt-when">{stamp(r.created)}</div>
+                    <div className="wt-when">
+                      {[r.toSource > 0 && t('{amt} to UPI / card', { amt: money2(r.toSource) }), r.toWallet > 0 && t('{amt} to wallet', { amt: money2(r.toWallet) })].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
                   <div className="wt-right">
                     <div className={`wt-amt ${r.status === 'failed' ? 'debit' : 'credit'}`}>+ {money2(r.amount)}</div>

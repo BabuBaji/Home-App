@@ -44,6 +44,7 @@ import Cashback from './screens/wallet/Cashback'
 import ReferralEarnings from './screens/wallet/ReferralEarnings'
 import GiftCards from './screens/wallet/GiftCards'
 import RefundHistory from './screens/wallet/RefundHistory'
+import PaymentHistory from './screens/wallet/PaymentHistory'
 import WalletSettings from './screens/wallet/WalletSettings'
 import MyProfile from './screens/profile/MyProfile'
 import FamilyMembers from './screens/profile/FamilyMembers'
@@ -375,6 +376,7 @@ export default function App() {
               <Route path="/wallet/referrals" element={<ReferralEarnings />} />
               <Route path="/wallet/gift-cards" element={<GiftCards />} />
               <Route path="/wallet/refunds" element={<RefundHistory />} />
+              <Route path="/wallet/payments" element={<PaymentHistory />} />
               <Route path="/wallet/settings" element={<WalletSettings />} />
               {/* Module 12 — Profile (88-96) */}
               <Route path="/profile" element={<MyProfile />} />

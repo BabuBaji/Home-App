@@ -203,8 +203,20 @@ export default function BookingDetail() {
             </>
           )}
           <Row k={t('Method')} v={`${(b.payment || '').toUpperCase()} · ${b.payment_status}`} />
-          {b.status === 'completed' && <Row k={t('Transaction ID')} v={txnRef(b)} />}
-          {b.status === 'cancelled' && (b.refund ?? 0) > 0 && <Row k={t('Refunded')} v={<span className="green">{t('{amt} to wallet', { amt: money(b.refund) })}</span>} />}
+          {/* The real gateway payment id when paid online — the id Razorpay and support look up. */}
+          {b.payment_ref
+            ? <Row k={t('Transaction ID')} v={b.payment_ref} />
+            : b.status === 'completed' && <Row k={t('Transaction ID')} v={txnRef(b)} />}
+          {(b.refund ?? 0) > 0 && (() => {
+            const toSource = Math.min(b.refund || 0, b.refund_to_source || 0), toWallet = (b.refund || 0) - toSource
+            return (
+              <>
+                {toSource > 0 && <Row k={t('Refunded')} v={<span className="green">{t('{amt} to your UPI / card', { amt: money(toSource) })}</span>} />}
+                {toWallet > 0 && <Row k={toSource > 0 ? '' : t('Refunded')} v={<span className="green">{t('{amt} to wallet', { amt: money(toWallet) })}</span>} />}
+                {b.refund_status === 'failed' && <Row k={t('Refund status')} v={<span style={{ color: 'var(--red)' }}>{t('Failed — please contact support')}</span>} />}
+              </>
+            )
+          })()}
           {b.status === 'cancelled' && b.cancel_reason && <Row k={t('Cancel reason')} v={b.cancel_reason} />}
         </div>
 

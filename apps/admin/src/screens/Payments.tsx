@@ -4,9 +4,9 @@ import { fetchPayments, runShaktiSettlement } from '../api'
 import { Card, StatCard, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, money, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
 
-type Txn = { id: number; type: string; title: string; amount: number; created: string; ref?: string; customer: string }
+type Txn = { id: number; type: string; status?: string; title: string; amount: number; created: string; ref?: string; customer: string; paymentId?: string | null; refunded?: number }
 type Method = { method: string; n: number; amount: number }
-type Summary = { revenue: number; successful: number; pending: number; refunded: number }
+type Summary = { revenue: number; successful: number; pending: number; refunded: number; failed?: number }
 type PaymentsData = { summary: Summary; methods: Method[]; transactions: Txn[] }
 
 const METHOD_COLORS = ['#16a34a', '#2e90fa', '#f59e0b', '#7c6df7', '#9aa0b4']
@@ -14,6 +14,7 @@ const txnTone = (t: string): string => {
   const s = (t || '').toLowerCase()
   if (s === 'credit' || s === 'refund') return 'blue'
   if (s === 'debit') return 'green'
+  if (s === 'failed') return 'red'
   return 'gray'
 }
 
@@ -206,6 +207,9 @@ export default function Payments() {
           <Field label="Type"><div><Badge tone={txnTone(active.type)}>{active.type}</Badge></div></Field>
           <Field label="Title"><input className="input" value={active.title} readOnly /></Field>
           <Field label="Amount"><input className="input" value={money(active.amount)} readOnly /></Field>
+          <Field label="Status"><input className="input" value={active.status || '—'} readOnly /></Field>
+          <Field label="Gateway Payment ID"><input className="input" value={active.paymentId || '—'} readOnly /></Field>
+          {(active.refunded ?? 0) > 0 && <Field label="Refunded to card/UPI"><input className="input" value={money(active.refunded || 0)} readOnly /></Field>}
           <Field label="Customer"><input className="input" value={active.customer || '—'} readOnly /></Field>
           <Field label="Booking Ref"><input className="input" value={active.ref || '—'} readOnly /></Field>
           <Field label="Created"><input className="input" value={shortDate(active.created)} readOnly /></Field>
