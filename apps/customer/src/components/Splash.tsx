@@ -1,7 +1,7 @@
 /* Launch / splash screen (Module-1 #1). Full-bleed brand poster shown as an overlay
    while the app boots, with a short launch chime. The poster already carries the
    Home Help wordmark / tagline, so no text is overlaid. Boot timing lives in App.tsx. */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export default function Splash({ visible }: { visible: boolean }) {
   const played = useRef(false)
@@ -21,6 +21,16 @@ export default function Splash({ visible }: { visible: boolean }) {
       window.addEventListener('click', kick, { once: true })
     })
   }, [])
+
+  // Once the fade-out (0.5s) has finished, leave the page entirely: the hidden poster is scaled to
+  // 106% for the fade, so kept in the DOM it sat over the app 6% wider than the screen.
+  const [gone, setGone] = useState(false)
+  useEffect(() => {
+    if (visible) { setGone(false); return }
+    const t = setTimeout(() => setGone(true), 600)
+    return () => clearTimeout(t)
+  }, [visible])
+  if (gone) return null
 
   return (
     <div className={`splashx splashx--launch ${visible ? '' : 'splashx--hide'}`}>

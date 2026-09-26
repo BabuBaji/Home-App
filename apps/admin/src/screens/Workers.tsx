@@ -143,9 +143,9 @@ export default function Workers() {
                     <td><Badge tone={w.designation === 'Zone Manager' ? 'violet' : w.designation === 'Team Leader' ? 'green' : 'gray'} dot={false}>{w.designation || 'Worker'}</Badge></td>
                     <td>
                       {svcCount === 0 ? <span className="muted">—</span> : (
-                        <span className="row" style={{ gap: 5 }}>
-                          {(w.services || []).slice(0, 2).map((s) => <Badge key={s} tone="blue" dot={false}>{s}</Badge>)}
-                          {svcCount > 2 && <span style={{ color: '#2e90fa', fontSize: 12, fontWeight: 700 }}>+{svcCount - 2}</span>}
+                        <span className="row" style={{ gap: 5, flexWrap: 'wrap' }} title={(w.services || []).join(', ')}>
+                          {(w.services || []).slice(0, 1).map((s) => <Badge key={s} tone="blue" dot={false}>{s}</Badge>)}
+                          {svcCount > 1 && <span style={{ color: '#2e90fa', fontSize: 12, fontWeight: 700 }}>+{svcCount - 1}</span>}
                         </span>
                       )}
                     </td>

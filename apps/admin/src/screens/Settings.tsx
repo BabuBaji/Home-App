@@ -63,7 +63,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: '232px 1fr 318px', gap: 16, alignItems: 'start' }}>
+    <div className="settings-layout">
       {/* ---- left vertical nav ---- */}
       <Card className="settings-nav-card">
         <div className="minilist">

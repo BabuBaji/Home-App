@@ -115,7 +115,7 @@ input, select, textarea { font-family: inherit; }
 .content { padding: 20px 26px 56px; }
 
 /* ============ buttons ============ */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(100deg, var(--violet), var(--violet-2)); color: #fff; border: none; padding: 11px 18px; border-radius: 12px; font-size: 14px; font-weight: 700; box-shadow: 0 8px 18px rgba(91,81,232,.3); transition: .15s; }
+.btn { white-space: nowrap;  display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(100deg, var(--violet), var(--violet-2)); color: #fff; border: none; padding: 11px 18px; border-radius: 12px; font-size: 14px; font-weight: 700; box-shadow: 0 8px 18px rgba(91,81,232,.3); transition: .15s; }
 .btn:hover { transform: translateY(-1px); box-shadow: 0 11px 24px rgba(91,81,232,.42); }
 .btn:disabled { opacity: .55; cursor: default; transform: none; box-shadow: none; }
 .btn.ghost { background: #fff; color: var(--violet); border: 1.5px solid var(--violet-100); box-shadow: none; }
@@ -144,8 +144,9 @@ input, select, textarea { font-family: inherit; }
 /* let grid/flex children shrink below their content width so tables & charts scroll
    inside their cards instead of blowing the whole page wider than the viewport */
 .grid > *, .cols > *, .stat-row > * { min-width: 0; }
-.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.stat { position: relative; display: flex; align-items: center; gap: 11px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(26,23,38,.04); padding: 11px 13px; overflow: hidden; transition: box-shadow .18s; }
+/* 132px min so a row of 7 summary cards still fits on one line at laptop width (no orphan card) */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 12px; }
+.stat { position: relative; display: flex; align-items: center; gap: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(26,23,38,.04); padding: 11px 12px; overflow: hidden; transition: box-shadow .18s; }
 .stat:hover { box-shadow: var(--shadow); transform: none; }
 .card.hoverable:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
 .stat-ico { width: 33px; height: 33px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; position: relative; z-index: 1; }
@@ -160,18 +161,26 @@ input, select, textarea { font-family: inherit; }
 
 /* ============ tables ============ */
 .tablewrap { overflow-x: auto; border-radius: 12px; }
-table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
-.tbl thead th { text-align: left; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 0 10px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+/* no fixed min-width: small tables in side cards (Dashboard) were forced to 620px inside ~360px */
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl thead th { text-align: left; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 0 10px 10px; border-bottom: 1px solid var(--line); white-space: normal; }
+.tbl thead th.num, .tbl thead th:first-child { white-space: nowrap; }
 /* keep every table cell on a single line (the .tablewrap scrolls horizontally if needed) */
-.tbl tbody td { padding: 10px; border-bottom: 1px solid var(--line-2); vertical-align: middle; white-space: nowrap; }
+/* Long text (names, subjects, services, notes) may wrap inside its cell so a table fits its card
+   instead of hiding right-hand columns behind a sideways scroll. Numbers, amounts, badges and dates
+   stay on one line. */
+.tbl tbody td { padding: 10px; border-bottom: 1px solid var(--line-2); vertical-align: middle; white-space: normal; overflow-wrap: break-word; }
+.tbl tbody td.num, .tbl tbody td .badge, .tbl tbody td time, .tbl tbody td .nowrap { white-space: nowrap; overflow-wrap: normal; }
+.tbl tbody td:first-child { overflow-wrap: normal; }
 .tbl tbody tr { transition: background .12s; }
 .tbl tbody tr:hover { background: var(--violet-50); }
 .tbl tbody tr:last-child td { border-bottom: none; }
 .rank { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
 .cell-user { display: flex; align-items: center; gap: 9px; }
 .cell-user > div { min-width: 0; }
-.cell-user strong { font-weight: 600; font-size: 13.5px; display: block; white-space: nowrap; }
-.cell-user small { color: var(--muted); font-size: 12px; display: block; white-space: nowrap; }
+.cell-user > :first-child { flex-shrink: 0; }
+.cell-user strong { font-weight: 600; font-size: 13.5px; display: block; }
+.cell-user small { color: var(--muted); font-size: 12px; display: block; }
 .num { font-variant-numeric: tabular-nums; }
 
 /* ============ badges ============ */
@@ -197,6 +206,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 /* last column (row actions) stays in view while a wide table scrolls sideways */
 .tbl .sticky-end { position: sticky; right: 0; background: var(--card); box-shadow: -8px 0 8px -8px rgba(26,23,38,.12); }
 .tbl tbody tr:hover .sticky-end { background: var(--violet-50); }
+/* Any table whose last column is a row-actions (⋮) menu keeps it pinned the same way. */
+.tbl:has(tbody td:last-child > .actions) tr > :last-child { position: sticky; right: 0; background: var(--card); box-shadow: -8px 0 8px -8px rgba(26,23,38,.12); }
+.tbl:has(tbody td:last-child > .actions) tbody tr:hover > :last-child { background: var(--violet-50); }
 /* compact variant — matches .dd-trigger's metrics so a search sits flush beside a Dropdown */
 .searchbox.sm { padding: 8px 10px; border-radius: 9px; gap: 7px; flex: 0 1 250px; min-width: 150px; }
 .searchbox.sm input { font-size: 12.5px; }
@@ -210,6 +222,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 .chip.active { background: linear-gradient(100deg, var(--violet), var(--violet-2)); color: #fff; border-color: transparent; box-shadow: 0 8px 16px rgba(91,81,232,.3); }
 /* toolbar: push trailing action buttons to the right */
 .tb-spacer { flex: 1 1 auto; min-width: 0; }
+/* toolbar search takes the free width itself; a spacer right after it would only squeeze it */
+.toolbar > .searchbox { flex: 1 1 240px; }
+.toolbar > .searchbox + .tb-spacer { display: none; }
+.toolbar .btn { white-space: nowrap; }
 .select.flt { font-weight: 600; color: var(--ink-2); min-width: 120px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23868aa6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; padding-right: 32px; -webkit-appearance: none; appearance: none; }
 
 /* ============ pagination footer ============ */
@@ -259,7 +275,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 .field input, .field select, .field textarea { border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; outline: none; background: #fcfcff; transition: .15s; color: var(--ink); }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(91,81,232,.13); background: #fff; }
 .field textarea { resize: vertical; min-height: 88px; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+/* minmax(0,…): a long value/select can't push its column (and the field) past the card edge */
+.form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
+.field input, .field select, .field textarea { min-width: 0; max-width: 100%; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(26,20,55,.45); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 100; padding: 20px; }
 .modal { background: #fff; border-radius: 20px; width: 470px; max-width: 100%; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(26,20,55,.4); animation: pop .2s ease; }
 .modal.wide { width: 680px; }
@@ -320,7 +338,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 
 /* ============ settings tabs / toggles ============ */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 24px; overflow-x: auto; }
-.tab { padding: 12px 16px; font-size: 14px; font-weight: 700; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; background: none; border-top: none; border-left: none; border-right: none; }
+.tab { padding: 12px 13px; font-size: 14px; font-weight: 700; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; background: none; border-top: none; border-left: none; border-right: none; }
 .tab.active { color: var(--violet); border-bottom-color: var(--violet); }
 .toggle { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--line); }
 .toggle:last-child { border-bottom: none; }
@@ -361,4 +379,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 @media (max-width: 560px) {
   .page-title { font-size: 18px; }
   .stat-value { font-size: 17px; }
+}
+
+/* Settings: nav · form · summary rail. Below 1500px the rail moves under the form so the form
+   keeps a readable width (fields and toggles were wrapping and spilling at laptop sizes). */
+.settings-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.settings-navitem { white-space: nowrap; }
+.settings-navitem svg { flex-shrink: 0; }
+@media (max-width: 1500px) {
+  .settings-layout { grid-template-columns: 236px minmax(0, 1fr); }
+  .settings-layout > .col-rail { grid-column: 2; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 }

@@ -128,12 +128,11 @@ async function main() {
   const report = []
   for (const w of WIDTHS) {
     await page.setViewport(ADMIN ? { width: w, height: 900 } : { width: w, height: 780, isMobile: true, hasTouch: true })
-    let fresh = true
     for (const tmpl of pages) {
       const path = tmpl.replace(/:(\w+)/g, (_, k) => ids[k] ?? 1)
       if (ONLY && !ONLY.some((o) => path === o || path.startsWith(o + '/'))) continue
       await page.goto(APP + path, { waitUntil: 'networkidle0', timeout: 25000 }).catch(() => {})
-      await sleep(fresh && !ADMIN ? 3000 : 900); fresh = false
+      await sleep(ADMIN ? 900 : 3200) // the customer app shows its launch poster for ~2s on every fresh load
       const issues = await page.evaluate(measure, !ADMIN).catch((e) => [`AUDIT FAILED: ${e.message}`])
       const file = `${OUT}/${w}_${path.replace(/[/:?=]/g, '_').replace(/^_/, '') || 'root'}.png`
       await page.screenshot({ path: file, fullPage: true }).catch(() => {})
