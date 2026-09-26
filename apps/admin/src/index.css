@@ -414,3 +414,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stat-row:has(> :nth-child(6)) .stat { flex-direction: column; align-items: flex-start; gap: 7px; }
 .stat-row:has(> :nth-child(6)) .stat-label, .stat-row:has(> :nth-child(6)) .stat-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .stat-body { max-width: 100%; }
+/* A row of exactly 7 (Bookings, Cancellations): cards may go to 112px so all 7 stay on one line
+   even with a wider side menu or browser zoom (the 7th dropped onto its own row) */
+/* …and when 7 don't fit, 4 + 3 rather than 6 + a lone card: the minimum is 112px while the row is
+   ≥ 844px wide (7 × 112 + gaps), otherwise a quarter of the row. */
+.stat-row:has(> :nth-child(7):last-child) { grid-template-columns: repeat(auto-fit, minmax(clamp(112px, (844px - 100%) * 999, calc(25% - 8px)), 1fr)); gap: 10px; }
