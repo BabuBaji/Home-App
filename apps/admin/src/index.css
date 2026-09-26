@@ -471,3 +471,17 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* icon + label stay on one line; a label too long for its column ends in "…" */
 .stat-row > .stat { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-row .stat-line, .stat-row .stat-sub { white-space: nowrap; }
+
+/* ---- Support tickets ---- */
+.sos-banner { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: var(--r-ctl);
+  background: var(--red-bg); border: 1px solid #f9c9c5; color: #b42318; font-size: 13px; }
+.sos-banner > svg { flex: none; }
+.sos-banner .tb-spacer { flex: 1; }
+.sos-banner .btn.line { height: 30px; font-size: 12.5px; background: #fff; }
+.cell-link { display: block; max-width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.cell-link strong { display: block; font-size: 13px; }
+.cell-link:hover strong { color: var(--violet); }
+.cell-link small { display: block; margin-top: 2px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clamp1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req-tag { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: var(--line-2); color: var(--muted); border: 1px solid var(--line); }
+.req-tag.expert { background: var(--violet-50); color: var(--violet); border-color: var(--violet-100); }

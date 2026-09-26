@@ -481,6 +481,8 @@ export interface Complaint {
 export interface Ticket {
   id: number; user_id: number; customer: string; category: string
   message: string; status: string; ref?: string; created: string
+  subject?: string; priority?: string; requester?: string; response?: string; sos_kind?: string | null
+  acknowledged_at?: string | null; review_at?: string | null; resolved_at?: string | null
 }
 
 export interface Transaction {
