@@ -149,21 +149,56 @@ async function notify(wid, title, body) { await pool.query('INSERT INTO worker_n
 const serviceOf = (b) => (Array.isArray(b?.items) && b.items[0]?.name) || b?.type || ''
 
 // Credit a worker's earnings for a completed booking (idempotent on ref_id).
-/* Refer & earn for experts: whoever referred this worker is paid once the new worker completes
- * REFERRAL_JOBS jobs (a signup alone earns nothing). Idempotent on the referred worker's id. */
-const REFERRAL_BONUS = Number(process.env.REFERRAL_BONUS || 1500)
-const REFERRAL_JOBS = Number(process.env.REFERRAL_JOBS || 10)
-async function referralBonus(wid) {
-  const w = await workerSnapshot(wid)
-  const by = Number(w?.profile?.referred_by)
-  if (!by || (w.jobs || 0) < REFERRAL_JOBS) return
+/* Worker bonuses, paid automatically from the job ledger (all amounts are admin settings; 0 = off).
+ *  - Joining bonus: a new worker who completes worker_joining_jobs jobs within worker_joining_days
+ *    of joining gets worker_joining_bonus.
+ *  - Refer & earn: when a referred worker completes worker_referral_jobs jobs, the referrer gets
+ *    worker_referral_bonus and the new worker gets worker_referee_bonus. A signup alone earns nothing.
+ * Each is one ledger row with a fixed ref_id, so a retried event can never pay twice. */
+const JOB_CATS = "('Job Earnings','Job Completed')"
+async function bonusConfig() {
+  const n = async (k, d) => Math.max(0, await getSettingInt(ADMIN_URL, k, d))
+  return {
+    joiningBonus: await n('worker_joining_bonus', 500), joiningJobs: Math.max(1, await n('worker_joining_jobs', 5)), joiningDays: Math.max(1, await n('worker_joining_days', 30)),
+    referralBonus: await n('worker_referral_bonus', 1500), refereeBonus: await n('worker_referee_bonus', 500), referralJobs: Math.max(1, await n('worker_referral_jobs', 10)),
+  }
+}
+const jobsDone = async (wid, before = null) => (await pool.query(
+  `SELECT count(*)::int n FROM worker_income WHERE worker_id=$1 AND category IN ${JOB_CATS}${before ? ' AND created <= $2' : ''}`,
+  before ? [wid, before] : [wid])).rows[0].n
+const joinedAt = (w) => new Date(w?.joining_date || w?.joined || Date.now())
+async function payBonus(wid, category, label, amount, ref, title, body) {
+  if (!amount) return false
   const ins = await pool.query(
-    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Referral',$2,$3,$4,'available')
-     ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
-    [by, `Referral bonus · ${w.name || 'Worker #' + wid} completed ${REFERRAL_JOBS} jobs`, REFERRAL_BONUS, `referral:${wid}`])
-  if (!ins.rowCount) return
-  await adjustBalance(by, { balance: REFERRAL_BONUS, earnings: REFERRAL_BONUS })
-  publishEvent(REDIS_URL, 'worker.notify', { workerId: by, title: 'Referral bonus earned', body: `₹${REFERRAL_BONUS} — ${w.name || 'your referral'} completed ${REFERRAL_JOBS} jobs.` })
+    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,$2,$3,$4,$5,'available')
+     ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`, [wid, category, label, amount, ref])
+  if (!ins.rowCount) return false
+  await adjustBalance(wid, { balance: amount, earnings: amount })
+  publishEvent(REDIS_URL, 'worker.notify', { workerId: wid, title, body })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Bonuses', action: 'worker.bonus', entityType: 'worker', entityId: wid, detail: `${label} · ₹${amount}`, meta: { amount } })
+  return true
+}
+async function workerBonuses(wid) {
+  const w = await workerSnapshot(wid)
+  if (!w?.id) return
+  const cfg = await bonusConfig()
+  const done = await jobsDone(wid)
+  // Joining bonus — only jobs finished inside the window count.
+  if (cfg.joiningBonus && done >= cfg.joiningJobs) {
+    const deadline = new Date(joinedAt(w).getTime() + cfg.joiningDays * 86400e3)
+    if (await jobsDone(wid, deadline.toISOString()) >= cfg.joiningJobs) {
+      await payBonus(wid, 'Joining Bonus', `Joining bonus · first ${cfg.joiningJobs} jobs`, cfg.joiningBonus, `joining:${wid}`,
+        'Joining bonus earned', `₹${cfg.joiningBonus} — you completed your first ${cfg.joiningJobs} jobs. Welcome aboard!`)
+    }
+  }
+  // Refer & earn — both sides, once the new worker reaches the milestone.
+  const by = Number(w?.profile?.referred_by)
+  if (by && done >= cfg.referralJobs) {
+    await payBonus(by, 'Referral', `Referral bonus · ${w.name || 'Worker #' + wid} completed ${cfg.referralJobs} jobs`, cfg.referralBonus, `referral:${wid}`,
+      'Referral bonus earned', `₹${cfg.referralBonus} — ${w.name || 'your referral'} completed ${cfg.referralJobs} jobs.`)
+    await payBonus(wid, 'Referral', `Referral welcome bonus · ${cfg.referralJobs} jobs done`, cfg.refereeBonus, `referred:${wid}`,
+      'Referral bonus earned', `₹${cfg.refereeBonus} — you completed ${cfg.referralJobs} jobs after joining with a friend's code.`)
+  }
 }
 
 /* Recover an outstanding advance from a job's earnings: advance_recovery_percent (default 30%) of
@@ -210,7 +245,7 @@ async function settleBooking(b) {
   if (!ins.rowCount) return // already settled
   await adjustBalance(b.worker_id, { balance: share, earnings: share, jobs: 1 })
   await recoverAdvance(b.worker_id, share, ref).catch((e) => console.error('[wallet] advance recovery:', e.message))
-  await referralBonus(b.worker_id).catch((e) => console.error('[wallet] referral bonus:', e.message))
+  await workerBonuses(b.worker_id).catch((e) => console.error('[wallet] worker bonuses:', e.message))
 
   // Per Job Incentive — a flat amount from the worker's incentive plan, on top of any share.
   // Idempotent on its own ref so it can't double-credit with the share.
@@ -529,6 +564,29 @@ function auth(req, res, next) {
 // the same real balance as the Wallet screen).
 app.get('/internal/summary/:wid', internalOnly, async (req, res) => res.json(await summary(Number(req.params.wid))))
 // Referral earnings total (worker_income rows of category 'Referral') for the worker service.
+// Bonus progress for the worker app: the rules, this worker's joining-bonus progress, and how far
+// each friend they referred has got. body: { workerId, joinedAt, friends: [workerId…] }
+app.post('/internal/bonus-status', internalOnly, async (req, res) => {
+  const wid = Number(req.body?.workerId)
+  const cfg = await bonusConfig()
+  const joined = new Date(req.body?.joinedAt || Date.now())
+  const deadline = new Date(joined.getTime() + cfg.joiningDays * 86400e3)
+  const paid = async (w, ref) => (await pool.query('SELECT 1 FROM worker_income WHERE worker_id=$1 AND ref_id=$2', [w, ref])).rowCount > 0
+  const joiningPaid = await paid(wid, `joining:${wid}`)
+  const inWindow = await jobsDone(wid, deadline.toISOString())
+  const friends = []
+  for (const f of (Array.isArray(req.body?.friends) ? req.body.friends : []).map(Number).filter(Boolean).slice(0, 200)) {
+    friends.push({ id: f, jobs: Math.min(await jobsDone(f), cfg.referralJobs), paid: await paid(wid, `referral:${f}`) })
+  }
+  res.json({
+    ...cfg,
+    joining: { amount: cfg.joiningBonus, jobsNeeded: cfg.joiningJobs, jobsDone: Math.min(inWindow, cfg.joiningJobs), deadline: deadline.toISOString(),
+      paid: joiningPaid, expired: !joiningPaid && Date.now() > deadline.getTime(), active: cfg.joiningBonus > 0 },
+    myJobs: await jobsDone(wid),
+    refereePaid: await paid(wid, `referred:${wid}`),
+    friends,
+  })
+})
 app.get('/internal/referral-total/:wid', internalOnly, async (req, res) => {
   const wid = Number(req.params.wid)
   const rows = (await pool.query("SELECT amount, label, created FROM worker_income WHERE worker_id=$1 AND category='Referral' ORDER BY id DESC", [wid])).rows
@@ -552,6 +610,17 @@ async function rewardsDto(wid) {
 
 /* ---------- worker wallet ---------- */
 app.get('/api/worker/wallet/summary', auth, async (req, res) => res.json(await summary(req.wid)))
+// The worker's real rate card: their share, bonuses and payout rules, all from live settings.
+app.get('/api/worker/wallet/rate-card', auth, async (req, res) => {
+  const { pct, paysPerJob, perJobIncentive } = await payConfig(req.wid)
+  const cfg = await bonusConfig()
+  res.json({
+    sharePct: paysPerJob ? 100 - pct : 0, platformPct: pct, paysPerJob, perJobIncentive,
+    startBonus: await startBonus(), minPayout: await minPayoutLimit(),
+    autoApproveBelow: await getSettingInt(ADMIN_URL, 'auto_approve_withdrawal_below', 2000),
+    ...cfg,
+  })
+})
 app.get('/api/worker/wallet/state', auth, async (req, res) => res.json(await walletState(req.wid)))
 app.get('/api/worker/wallet/analytics', auth, async (req, res) => res.json({
   ok: true,

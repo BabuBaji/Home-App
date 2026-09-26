@@ -615,12 +615,47 @@ data class WalletOpResponse(
 
 /* ---------- Refer & Earn / Insurance / Merch / Rewards ---------- */
 data class ReferralItem(val amount: Int = 0, val label: String = "", val date: String = "")
+data class ReferralFriend(val name: String = "", val jobs: Int = 0, val jobsNeeded: Int = 0, val paid: Boolean = false)
 data class ReferralDto(
     val code: String = "",
     val bonus: Int = 0,
+    val refereeBonus: Int = 0,
+    val jobsNeeded: Int = 10,
     val lifetimeEarnings: Int = 0,
     val referrals: List<ReferralItem> = emptyList(),
+    val friends: List<ReferralFriend> = emptyList(),
+    val joinedCount: Int = 0,
+    val referredBy: String? = null,
+    val myJobs: Int = 0,
+    val refereePaid: Boolean = false,
+    val canApplyCode: Boolean = true,
     val shareMessage: String = "",
+)
+/** New-worker joining bonus progress (GET api/worker/joining-bonus). */
+data class JoiningBonusDto(
+    val active: Boolean = false,
+    val amount: Int = 0,
+    val jobsNeeded: Int = 0,
+    val jobsDone: Int = 0,
+    val deadline: String? = null,
+    val paid: Boolean = false,
+    val expired: Boolean = false,
+)
+/** The worker's live rate card (GET api/worker/wallet/rate-card) — every number from settings. */
+data class RateCardDto(
+    val sharePct: Int = 80,
+    val platformPct: Int = 20,
+    val paysPerJob: Boolean = true,
+    val perJobIncentive: Int = 0,
+    val startBonus: Int = 0,
+    val minPayout: Int = 0,
+    val autoApproveBelow: Int = 0,
+    val joiningBonus: Int = 0,
+    val joiningJobs: Int = 0,
+    val joiningDays: Int = 0,
+    val referralBonus: Int = 0,
+    val refereeBonus: Int = 0,
+    val referralJobs: Int = 0,
 )
 data class InsuranceDto(
     val activated: Boolean = false,

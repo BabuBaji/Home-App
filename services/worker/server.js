@@ -1792,12 +1792,15 @@ app.post('/api/worker/referral/apply', auth, async (req, res) => {
   const w = await getWorker(req.worker.id)
   const p = w.profile || {}
   if (p.referred_by) return res.status(409).json({ ok: false, error: 'You have already used a referral code.' })
-  if (w.created && Date.now() - new Date(w.created).getTime() > 14 * 86400e3) return res.status(409).json({ ok: false, error: 'Referral codes can only be used in your first 14 days.' })
+  if (w.joined && Date.now() - new Date(w.joined).getTime() > 14 * 86400e3) return res.status(409).json({ ok: false, error: 'Referral codes can only be used in your first 14 days.' })
   const m = /^HHP(\d+)$/i.exec(String(req.body?.code || '').trim())
   const by = m ? Number(m[1]) - 1000 : NaN
   const ref = Number.isFinite(by) && by !== w.id ? await getWorker(by) : null
   if (!ref) return res.status(404).json({ ok: false, error: 'That code is not valid.' })
+  if (Number(ref.profile?.referred_by) === w.id) return res.status(409).json({ ok: false, error: 'You referred this person, so you can’t use their code.' })
   await pool.query("UPDATE workers SET profile = COALESCE(profile,'{}'::jsonb) || $1::jsonb WHERE id=$2", [JSON.stringify({ referred_by: ref.id }), w.id])
+  publishEvent(REDIS_URL, 'worker.notify', { workerId: ref.id, title: 'A friend used your code', body: `${w.name || 'A new Pro'} joined with your referral code. You earn when they finish their first jobs.` })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: w.id, actorName: w.name, action: 'referral.apply', entityType: 'worker', entityId: w.id, detail: `Joined with ${ref.name}'s referral code` })
   res.json({ ok: true, referrer: ref.name })
 })
 
@@ -1838,22 +1841,43 @@ async function safetySweep() {
 }
 setInterval(safetySweep, 60_000)
 
-/* ---------- Refer & Earn ---------- */
-const REFERRAL_BONUS = Number(process.env.REFERRAL_BONUS || 1500)
+/* ---------- Refer & Earn + joining bonus ----------
+   Amounts and milestones are admin settings, owned and paid by the wallet service. */
 const referralCode = (w) => `HHP${String(1000 + Number(w.id))}`
+async function bonusStatus(w) {
+  const friends = (await pool.query("SELECT id, name FROM workers WHERE profile->>'referred_by' = $1::text ORDER BY id DESC", [w.id])).rows
+  const st = await internalPost(WALLET_URL, '/internal/bonus-status', { workerId: w.id, joinedAt: w.joining_date || w.joined, friends: friends.map((f) => f.id) })
+    .catch(() => null)
+  return { st, friends }
+}
 app.get('/api/worker/referral', auth, async (req, res) => {
-  const w = req.worker
+  const w = await getWorker(req.worker.id)
   const code = referralCode(w)
-  // Referrals credited as wallet income of category 'Referral' (kept in the wallet ledger).
   const lifetime = await tryGet(WALLET_URL, `/internal/referral-total/${w.id}`, { total: 0, items: [] })
+  const { st, friends } = await bonusStatus(w)
+  const by = Number(w.profile?.referred_by) || null
+  const referrer = by ? await getWorker(by) : null
+  const prog = new Map((st?.friends || []).map((f) => [f.id, f]))
+  const bonus = st?.referralBonus ?? 1500, refereeBonus = st?.refereeBonus ?? 0, jobsNeeded = st?.referralJobs ?? 10
   res.json({
     code,
-    bonus: REFERRAL_BONUS,
+    bonus, refereeBonus, jobsNeeded,
     lifetimeEarnings: lifetime.total || 0,
     referrals: lifetime.items || [],
-    // The referrer earns the bonus once the new worker completes their first jobs (wallet service).
-    shareMessage: `Join me as a HomeHelp Pro! Enter my referral code ${code} in the app after you sign up. Download: https://homehelp.in/pro`,
+    // Everyone who joined with this worker's code, and how far each has got.
+    friends: friends.map((f) => ({ name: f.name || 'New Pro', jobs: prog.get(f.id)?.jobs || 0, jobsNeeded, paid: !!prog.get(f.id)?.paid })),
+    joinedCount: friends.length,
+    referredBy: referrer ? referrer.name : null,
+    myJobs: st?.myJobs ?? 0,
+    refereePaid: !!st?.refereePaid,
+    canApplyCode: !by && !(w.joined && Date.now() - new Date(w.joined).getTime() > 14 * 86400e3),
+    shareMessage: `Join me as a HomeHelp Pro! Enter my referral code ${code} in the app after you sign up${refereeBonus ? ` — you get ₹${refereeBonus} after your first ${jobsNeeded} jobs` : ''}. Download: https://homehelp.in/pro`,
   })
+})
+app.get('/api/worker/joining-bonus', auth, async (req, res) => {
+  const w = await getWorker(req.worker.id)
+  const { st } = await bonusStatus(w)
+  res.json(st?.joining || { active: false, amount: 0, jobsNeeded: 0, jobsDone: 0, deadline: null, paid: false, expired: false })
 })
 
 /* ---------- Claim Insurance / Health Card ---------- */

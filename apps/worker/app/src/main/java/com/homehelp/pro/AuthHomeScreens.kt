@@ -355,6 +355,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadShaktiBonus() }
     // Pull notifications so the bell badge + Announcements card show real items.
     LaunchedEffect(Unit) { vm.refreshNotifications() }
+    // Joining-bonus progress for a new worker (card hidden once paid, expired or switched off).
+    LaunchedEffect(Unit) { vm.loadJoiningBonus() }
 
     // Ask for notification permission (Android 13+) so background job alerts can show.
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -684,6 +686,12 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 onViewAll = { nav.navigateApp(Routes.EARNINGS) },
                 onEditTarget = { showGoalDialog = true },
             )
+
+            vm.joiningBonus?.let { jb ->
+                if (jb.active && !jb.paid && !jb.expired && jb.amount > 0) {
+                    JoiningBonusCard(jb, onClick = { nav.navigate(Routes.RATE_CARD) })
+                }
+            }
 
             // ─── Upcoming services ─── the jobs queued AFTER the hero's. Dropping the hero job
             // keeps the two sections from showing the same booking twice. Shown only when there

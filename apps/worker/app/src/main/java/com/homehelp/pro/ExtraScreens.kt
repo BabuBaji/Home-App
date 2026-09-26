@@ -151,6 +151,11 @@ private fun RateTableHeader(left: String, right: String) {
 /* ============================ RATE CARD ============================ */
 @Composable
 fun RateCardScreen(vm: AppViewModel, nav: NavHostController) {
+    LaunchedEffect(Unit) { vm.loadRateCard() }
+    // Every number below comes from the live settings (GET api/worker/wallet/rate-card).
+    val rc = vm.rateCard ?: com.homehelp.pro.network.RateCardDto()
+    fun f(template: String, vararg pairs: Pair<String, Any>): String =
+        pairs.fold(tr(template)) { acc, (k, v) -> acc.replace("{$k}", v.toString()) }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(tr("Rate Card"), onBack = { nav.popBackStack() })
         Column(
@@ -165,37 +170,51 @@ fun RateCardScreen(vm: AppViewModel, nav: NavHostController) {
             Card {
                 SectionTitle(tr("Per-Job Earnings"))
                 Text(
-                    tr("You keep 80% of every completed booking. HomeHelp charges a 20% platform fee."),
+                    if (rc.paysPerJob) f("You keep {share}% of every completed booking. HomeHelp charges a {fee}% platform fee.", "share" to rc.sharePct, "fee" to rc.platformPct)
+                    else tr("You are on a fixed monthly salary, paid through payroll. Completed jobs count towards your attendance and bonuses."),
                     fontSize = 13.sp, color = TextGray, lineHeight = 18.sp,
                 )
-                Spacer(Modifier.height(Space.m))
-                RateTableHeader(tr("Service"), tr("Your share"))
-                RateRow(tr("Bathroom Cleaning (₹199)"), "You earn ₹159")
-                HairlineDivider()
-                RateRow(tr("Kitchen Cleaning (₹249)"), "You earn ₹199")
-                HairlineDivider()
-                RateRow(tr("Full Home Cleaning (₹499)"), "You earn ₹399")
+                if (rc.paysPerJob) {
+                    Spacer(Modifier.height(Space.m))
+                    RateTableHeader(tr("Booking amount"), tr("Your share"))
+                    listOf(199, 299, 499).forEach { amt ->
+                        RateRow(rupee(amt), f("You earn {amount}", "amount" to rupee(amt * rc.sharePct / 100)))
+                        if (amt != 499) HairlineDivider()
+                    }
+                }
             }
             Card {
                 SectionTitle(tr("Bonuses"))
                 Spacer(Modifier.height(Space.s))
                 RateTableHeader(tr("Reward"), tr("Amount"))
-                RateRow(tr("On-time start bonus"), "+ ₹15", GreenSuccess, pill = true)
-                HairlineDivider()
-                RateRow(tr("Referral bonus"), "+ ₹1,500", GreenSuccess, pill = true)
+                val rows = buildList {
+                    if (rc.startBonus > 0) add(tr("Job start bonus (every job)") to rc.startBonus)
+                    if (rc.perJobIncentive > 0) add(tr("Per-job incentive") to rc.perJobIncentive)
+                    if (rc.joiningBonus > 0) add(f("Joining bonus — first {jobs} jobs in {days} days", "jobs" to rc.joiningJobs, "days" to rc.joiningDays) to rc.joiningBonus)
+                    if (rc.referralBonus > 0) add(f("Referral bonus — friend completes {jobs} jobs", "jobs" to rc.referralJobs) to rc.referralBonus)
+                    if (rc.refereeBonus > 0) add(f("Joined with a friend's code — after {jobs} jobs", "jobs" to rc.referralJobs) to rc.refereeBonus)
+                }
+                if (rows.isEmpty()) Text(tr("No bonuses are running right now."), color = TextGray, fontSize = 13.sp)
+                rows.forEachIndexed { i, (label, amt) ->
+                    RateRow(label, "+ ${rupee(amt)}", GreenSuccess, pill = true)
+                    if (i < rows.lastIndex) HairlineDivider()
+                }
             }
             Card {
                 SectionTitle(tr("Penalties"))
-                Spacer(Modifier.height(Space.s))
-                RateTableHeader(tr("Penalty"), tr("Amount"))
-                RateRow(tr("Late start (OTP not entered in 15 min)"), "− ₹15", RedCancel, pill = true)
+                Spacer(Modifier.height(Space.xs))
+                Text(tr("Late or out-of-zone penalties apply only if your shift plan sets them — see My Shift Plan. Every deduction is listed in your wallet with its reason."),
+                    color = TextGray, fontSize = 13.sp, lineHeight = 18.sp)
             }
             Card {
                 SectionTitle(tr("FAQs"))
                 Spacer(Modifier.height(Space.xs))
-                Faq(tr("When do I get paid?"), tr("Your 80% share is credited to your wallet the moment you complete a job."))
-                Faq(tr("How do I withdraw?"), tr("Use Wallet → Withdraw. Amounts up to ₹2,000 are auto-approved instantly."))
-                Faq(tr("What is the on-time bonus?"), tr("Start a job (enter the customer OTP) within 15 minutes of accepting to earn +₹15."))
+                Faq(tr("When do I get paid?"), if (rc.paysPerJob) f("Your {share}% share is credited to your wallet the moment you complete a job.", "share" to rc.sharePct) else tr("Your salary is paid monthly through payroll."))
+                Faq(tr("How do I withdraw?"),
+                    if (rc.autoApproveBelow > 0) f("Use Wallet → Withdraw (minimum {min}). Amounts up to {auto} are approved instantly.", "min" to rupee(rc.minPayout), "auto" to rupee(rc.autoApproveBelow))
+                    else f("Use Wallet → Withdraw (minimum {min}). Your manager approves each request.", "min" to rupee(rc.minPayout)))
+                if (rc.joiningBonus > 0) Faq(tr("How does the joining bonus work?"),
+                    f("Complete your first {jobs} jobs within {days} days of joining and {amount} is added to your wallet automatically.", "jobs" to rc.joiningJobs, "days" to rc.joiningDays, "amount" to rupee(rc.joiningBonus)))
             }
         }
     }
@@ -229,17 +248,20 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { vm.loadReferral() }
     val r = vm.referral
-    val bonus = r?.bonus ?: 1500
-    val joined = r?.referrals?.size ?: 0
+    val bonus = r?.bonus ?: 0
+    val refereeBonus = r?.refereeBonus ?: 0
+    val need = r?.jobsNeeded ?: 10
     val msg = r?.shareMessage ?: ""
     val pink = Color(0xFFEC4899)
+    fun f(template: String, vararg pairs: Pair<String, Any>): String =
+        pairs.fold(tr(template)) { acc, (k, v) -> acc.replace("{$k}", v.toString()) }
     Column(Modifier.fillMaxSize().background(Color.White)) {
         WhiteTopBar(tr("Refer & Earn")) { nav.popBackStack() }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            // ── Hero: white card with a coloured gift chip ──
+            // ── Hero: what each side really gets, and when ──
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(60.dp).clip(CircleShape).background(pink.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
@@ -247,9 +269,13 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text(tr("Refer a friend, both earn"), color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold)
+                        Text(if (refereeBonus > 0) tr("Refer a friend, both earn") else tr("Refer a friend and earn"), color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(3.dp))
-                        Text("Get ${rupee(bonus)} for every friend who joins and finishes their first shift.", color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp)
+                        Text(
+                            if (refereeBonus > 0) f("You get {bonus} and your friend gets {friend} when they complete their first {jobs} jobs.", "bonus" to rupee(bonus), "friend" to rupee(refereeBonus), "jobs" to need)
+                            else f("You get {bonus} when your friend completes their first {jobs} jobs.", "bonus" to rupee(bonus), "jobs" to need),
+                            color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
+                        )
                     }
                 }
             }
@@ -266,7 +292,7 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(Space.m))
                     Box(
                         Modifier.size(50.dp).clip(RoundedCornerShape(Radius.field)).background(PurpleLight)
-                            .clickable { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } },
+                            .clickable { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, tr("Code copied")) } },
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.ContentCopy, "Copy", tint = Purple, modifier = Modifier.size(22.dp)) }
                 }
@@ -276,14 +302,14 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(Modifier.fillMaxWidth()) {
                     ShareChip(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, tr("WhatsApp"), Color(0xFF25D366)) { shareWhatsApp(ctx, msg) }
                     ShareChip(Modifier.weight(1f), Icons.Filled.Sms, tr("SMS"), Color(0xFF3B82F6)) { shareSms(ctx, msg) }
-                    ShareChip(Modifier.weight(1f), Icons.Filled.ContentCopy, tr("Copy"), Purple) { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.ContentCopy, tr("Copy"), Purple) { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, tr("Code copied")) } }
                     ShareChip(Modifier.weight(1f), Icons.Filled.Share, tr("More"), TextGray) { shareText(ctx, msg) }
                 }
             }
 
-            // ── Stats: friends joined · reward each · total earned ──
+            // ── Stats: friends joined with the code · paid out ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Group, "$joined", tr("Joined"), Purple, PurpleLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Group, "${r?.joinedCount ?: 0}", tr("Joined"), Purple, PurpleLight)
                 MiniStatCard(Modifier.weight(1f), Icons.Filled.Redeem, rupee(bonus), tr("Per Friend"), pink, pink.copy(alpha = 0.12f))
                 MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, rupee(r?.lifetimeEarnings ?: 0), tr("Earned"), GreenSuccess, GreenLight)
             }
@@ -293,43 +319,62 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionTitle(tr("How it works"))
                 Spacer(Modifier.height(Space.xs))
                 StepRow(1, tr("Share your code"), tr("Send your code to friends who want to become a HomeHelp Pro."))
-                StepRow(2, tr("They join & work"), tr("They enter your code in the app and complete their first 10 jobs."))
-                StepRow(3, tr("You earn"), "${rupee(bonus)} is credited to your wallet.")
+                StepRow(2, tr("They join & work"), f("They enter your code in the app within 14 days of joining and complete their first {jobs} jobs.", "jobs" to need))
+                StepRow(3, tr("You earn"), if (refereeBonus > 0) f("{bonus} goes to your wallet and {friend} to theirs — automatically.", "bonus" to rupee(bonus), "friend" to rupee(refereeBonus)) else f("{bonus} goes to your wallet automatically.", "bonus" to rupee(bonus)))
             }
 
-            // ── Were you referred? (new workers, once) ──
-            Card {
-                SectionTitle(tr("Were you referred?"))
-                Spacer(Modifier.height(Space.xs))
-                var code by remember { mutableStateOf("") }
-                var busy by remember { mutableStateOf(false) }
-                androidx.compose.material3.OutlinedTextField(
-                    value = code, onValueChange = { code = it.uppercase().take(12) }, singleLine = true,
-                    placeholder = { Text(tr("Friend's code, e.g. HHP1042")) }, modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(Space.s))
-                PrimaryButton(if (busy) tr("Applying…") else tr("Apply code"), enabled = code.length >= 4 && !busy, loading = busy) {
-                    busy = true
-                    vm.applyReferral(code) { err -> busy = false; toast(ctx, err ?: "Code applied — your friend earns when you complete your first jobs") }
+            // ── Friends who joined with the code, and their progress ──
+            val friends = r?.friends ?: emptyList()
+            if (friends.isNotEmpty()) {
+                SectionTitle(tr("Friends who joined"))
+                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                    friends.forEach { fr ->
+                        StatusListRow(
+                            icon = if (fr.paid) Icons.Filled.Check else Icons.Filled.Group,
+                            iconTint = if (fr.paid) GreenSuccess else Purple,
+                            iconBg = if (fr.paid) GreenLight else PurpleLight,
+                            title = fr.name,
+                            subtitle = if (fr.paid) tr("Bonus paid") else f("{done} of {need} jobs done", "done" to fr.jobs, "need" to fr.jobsNeeded),
+                            subtitleColor = TextMuted,
+                            value = if (fr.paid) "+ ${rupee(bonus)}" else tr("In progress"),
+                            valueColor = if (fr.paid) GreenSuccess else TextMuted,
+                        )
+                    }
                 }
             }
 
-            // ── Referral history ──
-            val history = r?.referrals ?: emptyList()
-            if (history.isNotEmpty()) {
-                SectionTitle(tr("Your referrals"))
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    history.forEach { item ->
-                        StatusListRow(
-                            icon = Icons.Filled.Check,
-                            iconTint = GreenSuccess,
-                            iconBg = GreenLight,
-                            title = item.label.ifBlank { tr("Referral") },
-                            subtitle = item.date,
-                            subtitleColor = TextMuted,
-                            value = "+ ${rupee(item.amount)}",
-                            valueColor = GreenSuccess,
-                        )
+            // ── Were you referred? ──
+            if (r?.referredBy != null) {
+                Card {
+                    SectionTitle(tr("You joined with a friend's code"))
+                    Spacer(Modifier.height(Space.xs))
+                    Text(
+                        when {
+                            refereeBonus <= 0 -> f("Referred by {name}.", "name" to r.referredBy)
+                            r.refereePaid -> f("Referred by {name}. Your {amount} bonus has been paid.", "name" to r.referredBy, "amount" to rupee(refereeBonus))
+                            else -> f("Referred by {name}. {done} of {need} jobs done — {amount} is yours when you reach {need}.", "name" to r.referredBy, "done" to minOf(r.myJobs, need), "need" to need, "amount" to rupee(refereeBonus))
+                        },
+                        color = TextGray, fontSize = 13.sp, lineHeight = 18.sp,
+                    )
+                }
+            } else if (r?.canApplyCode != false) {
+                Card {
+                    SectionTitle(tr("Were you referred?"))
+                    if (refereeBonus > 0) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(f("Enter your friend's code to get {amount} after your first {jobs} jobs.", "amount" to rupee(refereeBonus), "jobs" to need), color = TextGray, fontSize = 12.5.sp)
+                    }
+                    Spacer(Modifier.height(Space.xs))
+                    var code by remember { mutableStateOf("") }
+                    var busy by remember { mutableStateOf(false) }
+                    androidx.compose.material3.OutlinedTextField(
+                        value = code, onValueChange = { code = it.uppercase().take(12) }, singleLine = true,
+                        placeholder = { Text(tr("Friend's code, e.g. HHP1042")) }, modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(Space.s))
+                    PrimaryButton(if (busy) tr("Applying…") else tr("Apply code"), enabled = code.length >= 4 && !busy, loading = busy) {
+                        busy = true
+                        vm.applyReferral(code) { err -> busy = false; toast(ctx, err ?: tr("Code applied — you both earn when you complete your first jobs")) }
                     }
                 }
             }
@@ -877,3 +922,38 @@ private fun TncRow(emoji: String, tint: Color, title: String, body: String) {
  * TncRow). Removed now-unused private RewardChip/RewardItemRow (replaced by the
  * shared MiniStatCard/StatusListRow). No functionality, logic or flow changed.
  * ───────────────────────────────────────────────────────────────────────────── */
+
+/** Home card: progress toward the new-worker joining bonus ("3 of 5 jobs · 18 days left"). */
+@Composable
+fun JoiningBonusCard(jb: com.homehelp.pro.network.JoiningBonusDto, onClick: () -> Unit) {
+    val daysLeft = jb.deadline?.let { d ->
+        runCatching {
+            // minSdk 24: no java.time without desugaring, so parse the ISO instant by hand.
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            val ms = fmt.parse(d.take(19))!!.time
+            ((ms - System.currentTimeMillis()) / 86_400_000L).toInt().coerceAtLeast(0)
+        }.getOrNull()
+    }
+    val need = jb.jobsNeeded.coerceAtLeast(1)
+    val done = jb.jobsDone.coerceIn(0, need)
+    Card(Modifier.clickable { onClick() }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(GreenLight), contentAlignment = Alignment.Center) { Text("🎉", fontSize = 22.sp) }
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text(tr("Joining bonus").plus(" · ").plus(rupee(jb.amount)), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    tr("{done} of {need} jobs done").replace("{done}", "$done").replace("{need}", "$need") +
+                        (daysLeft?.let { " · " + tr("{days} days left").replace("{days}", "$it") } ?: ""),
+                    color = TextGray, fontSize = 12.5.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(Space.s))
+        androidx.compose.material3.LinearProgressIndicator(
+            progress = { done.toFloat() / need },
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+            color = GreenSuccess, trackColor = GreenLight,
+        )
+    }
+}

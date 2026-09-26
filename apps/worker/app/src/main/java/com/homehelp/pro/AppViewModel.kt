@@ -1474,7 +1474,7 @@ class AppViewModel : ViewModel() {
 
     fun applyReferral(code: String, onResult: (String?) -> Unit) {
         viewModelScope.launch {
-            try { api.applyReferral(ReferralApplyBody(code.trim())); onResult(null) }
+            try { api.applyReferral(ReferralApplyBody(code.trim())); onResult(null); runCatching { referral = api.referral() } }
             catch (e: retrofit2.HttpException) { onResult(httpErrorMessage(e)) }
             catch (e: Exception) { onResult("Network error — please retry") }
         }
@@ -1498,6 +1498,14 @@ class AppViewModel : ViewModel() {
     var referral by mutableStateOf<ReferralDto?>(null)
         private set
     fun loadReferral() = sync { referral = api.referral() }
+
+    var joiningBonus by mutableStateOf<com.homehelp.pro.network.JoiningBonusDto?>(null)
+        private set
+    fun loadJoiningBonus() = sync { joiningBonus = api.joiningBonus() }
+
+    var rateCard by mutableStateOf<com.homehelp.pro.network.RateCardDto?>(null)
+        private set
+    fun loadRateCard() = sync { rateCard = api.rateCard() }
 
     var insurance by mutableStateOf<InsuranceDto?>(null)
         private set

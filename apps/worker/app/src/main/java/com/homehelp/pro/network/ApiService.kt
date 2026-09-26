@@ -351,6 +351,12 @@ interface ApiService {
     @GET("api/worker/referral")
     suspend fun referral(): ReferralDto
 
+    @GET("api/worker/joining-bonus")
+    suspend fun joiningBonus(): JoiningBonusDto
+
+    @GET("api/worker/wallet/rate-card")
+    suspend fun rateCard(): RateCardDto
+
     @GET("api/worker/insurance")
     suspend fun insurance(): InsuranceDto
 

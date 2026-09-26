@@ -88,6 +88,9 @@ const DEFAULT_SETTINGS = {
   payout_frequency: 'weekly', payout_day: '4', min_payout_limit: '500',
   // Promo credit a new customer gets on sign-up (spendable on bookings, never withdrawable). 0 = none.
   welcome_bonus: '100',
+  // Worker bonuses (paid automatically by the wallet service; 0 = off).
+  worker_joining_bonus: '500', worker_joining_jobs: '5', worker_joining_days: '30',
+  worker_referral_bonus: '1500', worker_referee_bonus: '500', worker_referral_jobs: '10',
 }
 const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key', 'fcm_service_account', 'exotel_api_token',
   'razorpay_webhook_secret', 'payment_webhook_secret', 'payout_webhook_secret']

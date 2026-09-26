@@ -152,6 +152,18 @@ export default function SettingsScreen() {
           <ToggleRow label="Show GST-inclusive prices to customers" on={s.gst_inclusive !== 'false'} onClick={() => toggle('gst_inclusive')} disabled={!editable} />
         </div>
 
+        {/* Worker bonuses — paid automatically by the wallet service when a worker hits the milestone.
+            0 turns a bonus off. */}
+        <h4 style={{ fontSize: 14.5, fontWeight: 800, margin: '20px 0 12px' }}>Worker Joining &amp; Referral Bonus</h4>
+        <div className="form-grid">
+          <Field label="Joining bonus (₹, 0 = off)"><input disabled={!editable} type="number" min={0} value={s.worker_joining_bonus ?? ''} onChange={(e) => set('worker_joining_bonus', e.target.value)} placeholder="500" /></Field>
+          <Field label="…paid after this many jobs"><input disabled={!editable} type="number" min={0} value={s.worker_joining_jobs ?? ''} onChange={(e) => set('worker_joining_jobs', e.target.value)} placeholder="5" /></Field>
+          <Field label="…completed within days of joining"><input disabled={!editable} type="number" min={0} value={s.worker_joining_days ?? ''} onChange={(e) => set('worker_joining_days', e.target.value)} placeholder="30" /></Field>
+          <Field label="Referral bonus to the referrer (₹)"><input disabled={!editable} type="number" min={0} value={s.worker_referral_bonus ?? ''} onChange={(e) => set('worker_referral_bonus', e.target.value)} placeholder="1500" /></Field>
+          <Field label="Referral bonus to the new worker (₹)"><input disabled={!editable} type="number" min={0} value={s.worker_referee_bonus ?? ''} onChange={(e) => set('worker_referee_bonus', e.target.value)} placeholder="500" /></Field>
+          <Field label="…paid when the new worker completes jobs"><input disabled={!editable} type="number" min={0} value={s.worker_referral_jobs ?? ''} onChange={(e) => set('worker_referral_jobs', e.target.value)} placeholder="10" /></Field>
+        </div>
+
         {/* Worker Payout Policy — read by the wallet service. min_payout_limit is enforced on every
             withdrawal request; frequency/day only drive the estimated next-payout date shown to
             workers and admins. Nothing pays automatically — payouts stay worker-requested and
