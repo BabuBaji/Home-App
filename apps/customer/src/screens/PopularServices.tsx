@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ShoppingCart, Star } from 'lucide-react'
-import { BottomNav, Loading } from '../components/UI'
+import { ArrowLeft, Star } from 'lucide-react'
+import { Loading } from '../components/UI'
 import { useStore } from '../store'
 import { fetchServices } from '../api'
 import type { Service } from '../types'
@@ -29,11 +29,11 @@ export default function PopularServices() {
   }, [pincode])
 
   return (
-    <div className="screen has-nav m2">
+    <div className="screen m2">
       <div className="ps-top">
         <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Popular Services')}</b>
-        <button className="au-back" onClick={() => nav('/cart')} aria-label={t('Cart')}><ShoppingCart size={20} /></button>
+        <span style={{ width: 42 }} />
       </div>
 
       {!services ? <Loading /> : (
@@ -58,7 +58,6 @@ export default function PopularServices() {
           </div>
         </div>
       )}
-      <BottomNav />
     </div>
   )
 }

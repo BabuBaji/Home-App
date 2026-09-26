@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, RotateCw, Star, MapPin } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import { Loading, useBack } from '../../components/UI'
 import LiveMap from '../../components/LiveMap'
 import { useJob, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
@@ -11,6 +11,7 @@ import { t } from '../../i18n'
 export default function LiveTrack() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack(`/job/${id}`)
   const { b, setB } = useJob(id)
 
   if (!b) return <div className="screen jt"><Loading /></div>
@@ -18,7 +19,7 @@ export default function LiveTrack() {
   return (
     <div className="screen jt jt-map-screen">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Track Live')}</b>
         <button className="jt-ic" onClick={() => setB(null)} aria-label={t('Refresh')}><RotateCw size={18} /></button>
       </div>

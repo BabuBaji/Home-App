@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MapPin, ChevronDown, Bell, CalendarPlus, Tag, Sparkles, ClipboardList, User, Wallet as WalletIcon, Headset, Crown } from 'lucide-react'
+import { MapPin, ChevronDown, Bell, User, Wallet as WalletIcon, Search, X } from 'lucide-react'
 import { BottomNav, useToast } from '../components/UI'
 import AddressSheet from '../components/AddressSheet'
 import { useStore } from '../store'
@@ -32,8 +32,11 @@ function greeting() {
 export default function Home() {
   const nav = useNavigate()
   const toast = useToast()
-  const { user, setBookingType, pincode, serviceable } = useStore()
+  const { user, pincode, serviceable } = useStore()
   const [services, setServices] = useState<Service[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  const [cat, setCat] = useState('')          // '' = all categories
+  const [query, setQuery] = useState('')
   const [bookings, setBookings] = useState<Booking[]>([])
   const [addr, setAddr] = useState<Address | null>(null)
   const [notifCount, setNotifCount] = useState(0)
@@ -50,7 +53,7 @@ export default function Home() {
     fetchWallet().then((w) => setWalletBal(typeof w?.available === 'number' ? w.available : null)).catch(() => {})
   }, [])
   useEffect(() => {
-    fetchServices(pincode || undefined).then((c) => setServices(c.services)).catch(() => {})
+    fetchServices(pincode || undefined).then((c) => { setServices(c.services); setCategories(c.categories || []) }).catch(() => {})
     // Dynamic hero slides — festival/promo banners + live offers + weather surge, for this zone.
     fetchHomeBanners(pincode || undefined).then(setBanners).catch(() => setBanners([]))
   }, [pincode])
@@ -70,7 +73,10 @@ export default function Home() {
   const firstName = (user?.name || 'there').split(' ')[0]
   // Show every service, but order the ones offered in this zone first; the rest are rendered as
   // "Coming Soon" (not bookable) so the customer sees what will arrive rather than a blank gap.
-  const svcList = useMemo(() => [...services].sort((a, b) => Number(b.available) - Number(a.available)), [services])
+  const svcList = useMemo(() => [...services].filter((s) => !cat || s.category === cat).sort((a, b) => Number(b.available) - Number(a.available)), [services, cat])
+  // Search by service name (or category), against the same catalog list.
+  const q = query.trim().toLowerCase()
+  const results = useMemo(() => (q ? services.filter((s) => s.name.toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q)).slice(0, 8) : []), [services, q])
   // Only a genuinely live booking counts as "Continue Booking": an active status that hasn't gone
   // stale (see isContinuable — a job whose slot is >1 day past is abandoned, not continuable). Once
   // it's completed/cancelled or stale it drops out; future-scheduled bookings still show.
@@ -112,17 +118,11 @@ export default function Home() {
     if (serviceable === false) { toast(t("We're not in your area yet — coming soon! 🚧")); return false }
     return true
   }
-  function bookNow() { if (guardServiceable()) { setBookingType('schedule'); nav('/popular-services') } }
-  function openService(s: Service) { if (guardServiceable()) nav(`/service/${s.id}`) }
-
-  const QUICK = [
-    { key: 'book', label: t('Book Now'), Icon: CalendarPlus, on: bookNow },
-    { key: 'offers', label: t('Offers'), Icon: Tag, on: () => nav('/offers') },
-    { key: 'ai', label: t('AI Insights'), Icon: Sparkles, on: () => nav('/ai-home') },
-    { key: 'membership', label: t('Membership'), Icon: Crown, on: () => nav('/membership') },
-    { key: 'mybk', label: t('My Bookings'), Icon: ClipboardList, on: () => nav('/bookings') },
-    { key: 'help', label: t('Help'), Icon: Headset, on: () => nav('/support') },
-  ]
+  function openService(s: Service) {
+    if (!guardServiceable()) return
+    if (!s.available) return toast(t('{name} is coming soon to your area 🚧', { name: s.name }))
+    nav(`/service/${s.id}`)
+  }
 
   return (
     <div className="screen has-nav m2 rain-sky">
@@ -201,13 +201,31 @@ export default function Home() {
             )}
           </div>
 
+          {/* search the catalog by name */}
+          <div className="hd-search" role="search">
+            <Search size={18} color="var(--muted)" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search services')} aria-label={t('Search services')} />
+            {query && <button onClick={() => setQuery('')} aria-label={t('Clear search')}><X size={16} /></button>}
+          </div>
+          {q && (
+            <div className="hd-search-res">
+              {results.map((s) => (
+                <button key={s.id} className="hd-search-row" onClick={() => openService(s)}>
+                  <img src={s.image || `/services/${s.id}.jpg`} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+                  <span className="grow"><b>{s.name}</b><small>{s.available ? t('From ₹{price}', { price: s.price }) : t('Not available yet')}</small></span>
+                </button>
+              ))}
+              {results.length === 0 && <div className="hd-search-row"><small>{t('No services match "{q}"', { q: query.trim() })}</small></div>}
+            </div>
+          )}
+
           {/* continue booking — shown here (in place of Quick Actions), only if one is in progress.
               The card is one live booking, so it goes straight to that job's tracking screen rather
               than via the list — `cont` is continuable by definition, which is the same branch the
               list's Continue button takes. */}
           {cont && (<>
             <div className="hd-sec-head"><h3>{t('Continue Booking')}</h3></div>
-            <button className="hd-cont" onClick={() => nav(`/track/${cont.id}`)}>
+            <button className="hd-cont" onClick={() => nav(`/job/${cont.id}`)}>
               <span className="hd-cont-img">
                 <img src={`/services/${cont.items[0]?.id}.jpg`} alt=""
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
@@ -224,10 +242,16 @@ export default function Home() {
 
           {/* all services */}
           <div className="hd-sec-head"><h3>{t('All Services')}</h3></div>
+          {categories.length > 1 && (
+            <div className="hd-cats ord-chips">
+              <button className={`ord-chip ${cat === '' ? 'active' : ''}`} onClick={() => setCat('')}>{t('All')}</button>
+              {categories.map((c) => <button key={c} className={`ord-chip ${cat === c ? 'active' : ''}`} onClick={() => setCat(c)}>{c}</button>)}
+            </div>
+          )}
           <div className="hd-pop hd-pop-all">
             {svcList.map((s) => (
               <button key={s.id} className={`hd-pop-card${s.available ? '' : ' soon'}`}
-                onClick={() => s.available ? openService(s) : toast(t('{name} is coming soon to your area 🚧', { name: s.name }))}>
+                onClick={() => openService(s)}>
                 <span className="hd-pop-img">
                   <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />

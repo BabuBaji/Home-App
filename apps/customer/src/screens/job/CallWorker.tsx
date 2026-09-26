@@ -1,65 +1,66 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { Mic, MicOff, Grid3x3, Volume2, PhoneOff, Phone } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import { useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { ArrowLeft, Phone, BadgeCheck, ShieldCheck } from 'lucide-react'
+import { Loading, useBack } from '../../components/UI'
 import { useJob, proName } from './useJob'
 import { WorkerAvatar } from './parts'
 import { callExpert } from '../../api'
 import { t } from '../../i18n'
 
-// Module 6 · #47 — Call Worker. Asks the server to connect the call: with masked calling on, our
-// number rings the customer and bridges them to the expert (neither sees the other's number);
-// otherwise it dials the expert's number directly (tel:).
+// Call your expert. One honest action: ask the server to connect the call. With masked calling on
+// ('bridge') our number rings the customer's phone and connects them to the expert — neither side
+// sees the other's number. Otherwise ('direct') the phone's own dialer opens with the expert's
+// number. The call itself happens in the phone app; nothing here pretends to be an in-app call,
+// and the expert's number is never printed on screen.
 export default function CallWorker() {
   const { id } = useParams()
-  const nav = useNavigate()
+  const back = useBack(`/job/${id}`)
   const { b } = useJob(id, false)
-  const [muted, setMuted] = useState(false)
-  const [speaker, setSpeaker] = useState(false)
-  const [secs, setSecs] = useState(0)
+  const [state, setState] = useState<'idle' | 'calling' | 'bridging' | 'dialer' | 'failed'>('idle')
 
-  const [phone, setPhone] = useState<string | null>(null)
-  const [state, setState] = useState<'idle' | 'bridging' | 'failed'>('idle')
-  useEffect(() => { if (b?.pro?.phone) setPhone(b.pro.phone) }, [b?.pro?.phone])
-
-  useEffect(() => { const i = setInterval(() => setSecs((s) => s + 1), 1000); return () => clearInterval(i) }, [])
-
-  async function dial() {
-    if (!b) return
+  async function call() {
+    if (!b || state === 'calling') return
+    setState('calling')
     try {
       const r = await callExpert(b.id)
       if (r.mode === 'bridge') { setState('bridging'); return }
-      if (r.phone) { setPhone(r.phone); window.location.href = `tel:${r.phone}` }
+      if (r.phone) { setState('dialer'); window.location.href = `tel:${r.phone}`; return }
+      setState('failed')
     } catch { setState('failed') }
   }
 
-  if (!b) return <div className="screen jt"><Loading /></div>
-  const mmss = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
+  const top = (
+    <div className="jt-top">
+      <button className="jt-ic" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+      <b>{t('Call your expert')}</b><span style={{ width: 40 }} />
+    </div>
+  )
+  if (!b) return <div className="screen jt">{top}<Loading /></div>
+
+  const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
+  const status = state === 'calling' ? t('Connecting…')
+    : state === 'bridging' ? t('Your phone will ring in a moment — pick up to be connected to {name}.', { name: proName(b).split(' ')[0] })
+      : state === 'dialer' ? t('Opening your phone dialer…')
+        : state === 'failed' ? t('Could not connect the call. Please try again, or message your expert in chat.')
+          : ''
 
   return (
-    <div className="jt-call">
-      <div className="jt-call-top">
-        <WorkerAvatar b={b} size={120} />
-        <h2>{proName(b)}</h2>
-        <div className="jt-call-num">{state === 'bridging' ? t('Your phone will ring — pick up to be connected') : phone || t('Private number')}</div>
-        <div className="jt-call-state">{state === 'failed' ? t('Could not connect the call') : state === 'bridging' ? `${t('Connecting…')} ${mmss}` : t('Tap the green button to call')}</div>
-      </div>
-
-      <div className="jt-call-ctrls">
-        <button className={`jt-call-btn ${muted ? 'on' : ''}`} onClick={() => setMuted((m) => !m)}>
-          {muted ? <MicOff size={22} /> : <Mic size={22} />}<span>{t('Mute')}</span>
+    <div className="screen jt">
+      {top}
+      <div className="content cw-body">
+        <WorkerAvatar b={b} size={110} />
+        <h2>{assigned ? proName(b) : t('Expert not assigned yet')}</h2>
+        {b.pro?.verified && <span className="jt-wp-badge"><BadgeCheck size={13} /> {t('Verified Partner')}</span>}
+        <p>{assigned ? t('Tap the button to call your expert about this booking.') : t('You can call once an expert has been assigned to your booking.')}</p>
+        <button className="cw-call" onClick={call} disabled={!assigned || state === 'calling'} aria-label={t('Call {name}', { name: proName(b).split(' ')[0] })}>
+          <Phone size={32} />
         </button>
-        <button className="jt-call-btn" onClick={dial}>
-          <Grid3x3 size={22} /><span>{t('Keypad')}</span>
-        </button>
-        <button className={`jt-call-btn ${speaker ? 'on' : ''}`} onClick={() => setSpeaker((s) => !s)}>
-          <Volume2 size={22} /><span>{t('Speaker')}</span>
-        </button>
-      </div>
-
-      <div className="jt-call-actions">
-        <button className="jt-call-dial" onClick={dial} aria-label={t('Dial')}><Phone size={26} /></button>
-        <button className="jt-call-end" onClick={() => nav(-1)} aria-label={t('End call')}><PhoneOff size={26} /></button>
+        {status && <p role="status" style={{ color: state === 'failed' ? 'var(--red)' : 'var(--ink)' }}>{status}</p>}
+        {state === 'bridging' && (
+          <div className="cw-note"><ShieldCheck size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+            {t('This is a masked call — HomeHelp connects you, so neither of you sees the other\'s phone number.')}
+          </div>
+        )}
       </div>
     </div>
   )

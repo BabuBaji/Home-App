@@ -18,6 +18,9 @@ export const isLive = (s: BookingStatus) => (LIVE_STATUSES as string[]).includes
 export const isActive = (s: BookingStatus) => isLive(s) && s !== 'confirmed'
 export const isUpcoming = (s: BookingStatus) => s === 'confirmed'
 
+/** The one screen for a booking: a live one opens the live hub, a finished/cancelled one its receipt-style details. */
+export const bookingPath = (b: Pick<Booking, 'id' | 'status'>) => isLive(b.status) ? `/job/${b.id}` : `/booking-details/${b.id}`
+
 // What the customer is told each live status means — the same vocabulary Track.tsx uses.
 export const LIVE_LABEL: Record<string, string> = {
   confirmed: 'Confirmed', worker_assigned: 'Assigned', on_the_way: 'On the Way',

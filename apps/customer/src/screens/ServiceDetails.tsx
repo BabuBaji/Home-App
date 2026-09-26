@@ -3,7 +3,6 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { ArrowLeft, Share2, Star, Check, X } from 'lucide-react'
 import { Share } from '@capacitor/share'
 import { Loading, useToast } from '../components/UI'
-import { isZoneOpenNow, todayHoursLabel } from '../components/Calendar'
 import { useStore } from '../store'
 import { fetchService, fetchServices } from '../api'
 import { ServiceHeroImg } from '../serviceArt'
@@ -18,7 +17,7 @@ export default function ServiceDetails() {
   const nav = useNavigate()
   const loc = useLocation()
   const toast = useToast()
-  const { pincode, setBookingType, zoneHours } = useStore()
+  const { pincode } = useStore()
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [siblings, setSiblings] = useState<Service[]>([])
 
@@ -30,14 +29,6 @@ export default function ServiceDetails() {
   }, [s?.category, pincode])
 
   const goBack = () => { if (loc.key === 'default') nav('/home'); else nav(-1) }
-  const book = (type: 'instant' | 'schedule') => { setBookingType(type); nav(`/book/${s!.id}`) }
-
-  // Instant needs an expert on shift NOW, so it follows the serving zone's working hours — each
-  // zone sets its own shift in admin. Outside that window the CTA is disabled here rather than on
-  // the next screen, so "not available" is known before tapping through. Unconfigured zone / no
-  // pincode → open (isZoneOpenNow), matching the booking service, which only gates known zones.
-  const instantOpen = isZoneOpenNow(zoneHours)
-  const shiftLabel = todayHoursLabel(zoneHours)
 
   // Share the service. Capacitor's sheet on the phone; the Web Share API in a browser;
   // clipboard as the last resort so the button is never a dead end.
@@ -133,22 +124,9 @@ export default function ServiceDetails() {
         </div>
       </div>
 
+      {/* One way to book: the unified flow picks duration, time (now or later), address and expert. */}
       <div className="au-foot wi-foot">
-        {!instantOpen && (
-          <div className="wi-closed-note">
-            🌙 {t('Instant slots are not available right now')}{shiftLabel ? ` · ${shiftLabel}` : ''} — {t('use Schedule to book for later.')}
-          </div>
-        )}
-        <button className="wi-schedule" onClick={() => book('schedule')}>{t('Schedule')}</button>
-        {/* aria-disabled, not `disabled`: a disabled button swallows the tap, so a customer who
-            taps anyway gets no feedback at all. This keeps the tap and explains it in a toast. */}
-        <button
-          className={`wi-instant ${instantOpen ? '' : 'off'}`}
-          aria-disabled={!instantOpen}
-          onClick={() => (instantOpen ? book('instant') : toast(t('Instant slots are not available right now — please Schedule for later')))}
-        >
-          {instantOpen ? t('Book Instant') : t('Slots Unavailable')}
-        </button>
+        <button className="wi-instant" style={{ flex: 1 }} onClick={() => nav(`/booking/${s.id}`)}>{t('Book Now')}</button>
       </div>
     </div>
   )

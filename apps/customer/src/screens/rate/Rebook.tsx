@@ -37,7 +37,7 @@ export default function Rebook() {
       </div>
 
       <div className="jt-foot col">
-        <button className="jt-btn" onClick={() => sid ? nav(`/booking/${sid}`) : nav('/home')}>{t('Rebook Same Service')}</button>
+        <button className="jt-btn" onClick={() => sid ? nav(`/booking/${sid}`, { state: { durationId: b.items[0].durationId } }) : nav('/home')}>{t('Rebook Same Service')}</button>
         <button className="jt-btn ghost" onClick={() => nav('/home')}>{t('Choose Another Service')}</button>
         <button className="jt-btn text" onClick={() => nav('/home')}>{t('Back to Home')}</button>
       </div>

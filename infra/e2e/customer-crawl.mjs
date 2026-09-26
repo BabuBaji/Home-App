@@ -55,19 +55,29 @@ async function setup() {
   return { SUP, C, user: me, done: done.id, live: live.id, zone: zone.id, pin, lat, lng, W }
 }
 
-const ROUTES = ['/home', '/popular-services', '/continue-booking', '/service/mopping', '/configure/mopping', '/booking/mopping', '/book/mopping', '/confirmed/:done',
-  '/notifications', '/cart', '/address', '/schedule', '/summary', '/payment', '/tracking/:live', '/track/:live', '/reschedule/:live', '/cancel/:live',
+const ROUTES = ['/home', '/popular-services', '/continue-booking', '/service/mopping', '/booking/mopping', '/booking/cart', '/confirmed/:done',
+  '/notifications', '/cart', '/reschedule/:live', '/cancel/:live',
   '/job/:live', '/job/:live/worker', '/job/:live/otw', '/job/:live/map', '/job/:live/chat', '/job/:live/call', '/job/:live/otp', '/job/:live/started',
   '/job/:live/extend', '/job/:live/progress', '/job/:done/completed', '/rate/:done', '/rate/:done/photos', '/complaint/:done', '/tip/:done', '/rebook/:done',
-  '/offers', '/offers/applied', '/offers/zone', '/offers/scratch', '/offers/loyalty', '/refer', '/bookings', '/bookings/active', '/bookings/completed',
+  '/offers', '/offers/applied', '/offers/zone', '/refer', '/bookings', '/bookings/active', '/bookings/upcoming', '/bookings/completed',
   '/booking-details/:done', '/invoice/:done', '/receipt/:done', '/history', '/wallet', '/wallet/transactions', '/wallet/add', '/wallet/cashback',
   '/wallet/referrals', '/wallet/gift-cards', '/wallet/refunds', '/wallet/settings', '/profile', '/profile/repeat', '/profile/family',
   '/profile/payment-methods', '/profile/notifications', '/profile/language', '/profile/privacy', '/profile/about', '/profile/help', '/profile/logout',
   '/quick-actions', '/membership', '/membership/compare', '/membership/subscribe', '/membership/active', '/membership/manage', '/membership/usage',
-  '/membership/renewal', '/membership/cancel', '/membership/benefits', '/ai-home', '/ai/recommendations', '/ai/planner', '/ai/calendar', '/ai/water',
-  '/ai/garbage', '/ai/pest', '/ai/festival', '/ai/budget', '/ai/timeline', '/support', '/support/ticket', '/support/chat', '/support/emergency',
+  '/membership/renewal', '/membership/cancel', '/membership/benefits', '/ai/recommendations', '/ai/timeline', '/support', '/support/ticket', '/support/chat', '/support/emergency',
   '/support/refund-status', '/support/cancellation', '/support/escalation', '/support/faqs', '/addresses', '/addresses/add', '/addresses/saved',
   '/addresses/default', '/cancellation-policy', '/personal', '/terms', '/locations', '/address-details', '/coming-soon']
+
+// Retired routes: each must land on its replacement (old links, notifications and app builds keep working).
+const REDIRECTS = [
+  ['/configure/mopping', '/booking/mopping'], ['/book/mopping', '/booking/mopping'],
+  ['/address', '/cart'], ['/schedule', '/cart'], ['/summary', '/cart'], ['/payment', '/cart'],
+  ['/tracking/:live', '/job/:live'], ['/track/:live', '/job/:live'], ['/booking-details/:live', '/job/:live'],
+  ['/job/:done', '/job/:done/completed'],
+  ['/offers/scratch', '/offers'], ['/offers/loyalty', '/offers'],
+  ['/ai-home', '/home'], ['/ai/planner', '/profile/repeat'], ['/ai/calendar', '/home'], ['/ai/water', '/home'], ['/ai/garbage', '/home'],
+  ['/ai/pest', '/home'], ['/ai/festival', '/home'], ['/ai/budget', '/home'], ['/profile/legacy', '/profile'], ['/support/legacy', '/support'],
+]
 
 async function main() {
   const d = await setup()
@@ -103,6 +113,15 @@ async function main() {
     if (!info.back && !info.nav && info.url === path) add('DEAD-END', 'no Back button and no bottom tab bar')
     await page.screenshot({ path: `${OUT}/${path.replace(/[/:]/g, '_').replace(/^_/, '') || 'root'}.png` }).catch(() => {})
     rows.push({ path, title: info.title, issues: [...new Set(issues[path] || [])] })
+  }
+  for (const [from, to] of REDIRECTS) {
+    const f = from.replace(':done', d.done).replace(':live', d.live), want = to.replace(':done', d.done).replace(':live', d.live)
+    cur = f
+    await page.goto(APP + f, { waitUntil: 'networkidle0', timeout: 25000 }).catch((e) => add('NAV', e.message))
+    await sleep(2800)
+    const got = await page.evaluate(() => location.pathname)
+    if (got !== want) add('REDIRECT', `expected ${want}, got ${got}`)
+    rows.push({ path: `${f} → ${want}`, title: 'redirect', issues: [...new Set(issues[f] || [])] })
   }
   await browser.close()
   fs.writeFileSync(`${OUT}/report.json`, JSON.stringify({ setup: { done: d.done, live: d.live }, rows }, null, 2))

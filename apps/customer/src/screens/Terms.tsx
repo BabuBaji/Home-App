@@ -13,7 +13,7 @@ const SECTIONS: { t: string; d: string }[] = [
   { t: '9. Liability', d: 'HomeHelp facilitates bookings and is liable only to the extent permitted by law. We’re not responsible for indirect or incidental losses. Nothing here limits rights you have under applicable consumer law.' },
   { t: '10. Privacy', d: 'We collect only the information needed to provide the service — such as your name, contact number and address — and use it to fulfil bookings and improve the app. We don’t sell your personal data.' },
   { t: '11. Changes to these terms', d: 'We may update these terms as the service evolves. Continued use of the app after an update means you accept the revised terms.' },
-  { t: '12. Contact us', d: 'Questions about these terms? Reach us any time at support@homehelp.in or through Profile → Help & Support.' },
+  { t: '12. Contact us', d: 'Questions about these terms? Reach us any time through Profile → Help & Support.' },
 ]
 
 export default function Terms() {

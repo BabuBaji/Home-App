@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Bell, Search, CalendarCheck, Wallet, UserCircle, BadgePercent, RotateCcw, Wrench, ChevronRight, Ticket, MessageCircle, Phone, XCircle, ArrowUpCircle, HelpCircle } from 'lucide-react'
-import { BottomNav } from '../../components/UI'
 import { useStore } from '../../store'
 import { t } from '../../i18n'
 
@@ -28,7 +27,7 @@ export default function HelpCenter() {
   const first = (user?.name || '').trim().split(' ')[0] || t('there')
 
   return (
-    <div className="screen has-nav">
+    <div className="screen">
       <header className="appbar ord-appbar">
         <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
         <div className="titles"><h1>{t('Help Center')}</h1></div>
@@ -89,7 +88,6 @@ export default function HelpCenter() {
           <Phone size={18} /> {t('Emergency Support — 24/7')}
         </button>
       </div>
-      <BottomNav />
     </div>
   )
 }

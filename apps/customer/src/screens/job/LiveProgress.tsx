@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Phone, MessageCircle, Star, BadgeCheck, MapPin, Sparkles, CheckCircle2 } from 'lucide-react'
-import { Loading, useToast } from '../../components/UI'
-import { fetchExtensions, completeBooking, type ExtensionState } from '../../api'
-import { useJob, proName, proRating } from './useJob'
+import { ArrowLeft, Phone, MessageCircle, Star, BadgeCheck, MapPin, Sparkles, CheckCircle2, Headset } from 'lucide-react'
+import { Loading, useBack } from '../../components/UI'
+import { fetchExtensions, type ExtensionState } from '../../api'
+import { useJob, useAutoAdvance, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
 import ExtrasPrompt from '../../components/ExtrasPrompt'
 import { t } from '../../i18n'
@@ -16,11 +16,11 @@ const DUR_MIN: Record<string, number> = { '30m': 30, '60m': 60, '90m': 90, '2h':
 export default function LiveProgress() {
   const { id } = useParams()
   const nav = useNavigate()
-  const toast = useToast()
+  const goBack = useBack(`/job/${id}`)
   const { b } = useJob(id)
+  // The expert ended the job → show the completion screen (rate / tip) once.
+  useAutoAdvance(b, 'completed', (bid) => `/job/${bid}/completed`)
   const [, tick] = useState(0)
-  const [ending, setEnding] = useState(false)     // confirm sheet open
-  const [busy, setBusy] = useState(false)
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(i) }, [])
 
   // Extension state: a pending ask needs answering, and approved minutes lengthen the timer below.
@@ -71,21 +71,8 @@ export default function LiveProgress() {
   const jobs = b.pro?.jobs ?? b.pro?.servicesDone ?? 0
   const verified = !!b.pro?.verified
   const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
-  const call = () => { const ph = b.pro?.phone; if (ph) window.location.href = `tel:${ph}`; else nav(`/job/${b.id}/call`) }
+  const call = () => nav(`/job/${b.id}/call`)
   const chat = () => nav(`/job/${b.id}/chat`)
-
-  // Customer-side finish: the same /complete endpoint the Track screen uses, so it settles the
-  // booking (payout + cashback) exactly as a worker-ended job does. Confirmed first — it closes
-  // the job for both sides and can't be undone from here.
-  async function endService() {
-    if (busy) return
-    setBusy(true)
-    try {
-      await completeBooking(b!.id)
-      setEnding(false)
-      nav(`/rate/${b!.id}`, { replace: true })
-    } catch (e) { toast((e as Error).message); setBusy(false) }
-  }
 
   const addr = b.addr
   const flat = addr ? [addr.house, addr.apartment, addr.floor && t('Floor {n}', { n: addr.floor })].filter(Boolean).join(', ') : ''
@@ -94,7 +81,7 @@ export default function LiveProgress() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Live Progress')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -209,30 +196,13 @@ export default function LiveProgress() {
         {done ? (
           <button className="jt-btn" onClick={() => nav(`/job/${b.id}/completed`)}>{t('View Summary')}</button>
         ) : (<>
-          <button className="jt-btn ghost" onClick={() => nav(`/job/${b.id}`)}>{t('Booking Details')}</button>
-          {/* The customer can close the job themselves — useful when the expert has finished but
-              hasn't ended it on their app. */}
-          <button className="jt-btn" onClick={() => setEnding(true)}><CheckCircle2 size={16} /> {t('End Service')}</button>
+          {/* The expert ends the service from their app (the customer used to have an "End Service"
+              button here that closed and settled the job outright — there is no customer-confirmation
+              step in the backend, so it is gone). */}
+          <button className="jt-btn ghost" onClick={() => nav('/support')}><Headset size={16} /> {t('Need help?')}</button>
+          <button className="jt-btn" onClick={() => nav(`/job/${b.id}`)}>{t('Booking Details')}</button>
         </>)}
       </div>
-
-      {ending && (
-        <div className="cf-backdrop" onClick={() => !busy && setEnding(false)}>
-          <div className="cf-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="cf-title">{t('End this service?')}</div>
-            <div className="cf-text">
-              {timeUp
-                ? t('The booked time is over.')
-                : t('{left} of the booked {n} min is still left.', { left: mmss(remaining), n: bookedMin })}{' '}
-              {t("Ending marks the job complete for {name} and finalises payment. You'll be asked to rate it next.", { name: proName(b) })}
-            </div>
-            <div className="cf-btns">
-              <button className="cf-cancel" onClick={() => setEnding(false)} disabled={busy}>{t('Not yet')}</button>
-              <button className="cf-del" onClick={endService} disabled={busy}>{busy ? t('Ending…') : t('End Service')}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

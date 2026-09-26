@@ -52,7 +52,7 @@ export default function Notifications() {
             const m = ICONS[n.type] || ICONS.offer
             const isRead = read.has(n.id)
             return (
-              <button key={n.id} className={`nt2-row ${isRead ? 'read' : ''}`} onClick={() => n.bookingId && nav(`/track/${n.bookingId}`)}>
+              <button key={n.id} className={`nt2-row ${isRead ? 'read' : ''}`} onClick={() => n.bookingId && nav(`/job/${n.bookingId}`)}>
                 <span className={`nt2-ic ${m.cls}`}><m.Icon size={20} /></span>
                 <span className="nt2-main">
                   <span className="nt2-title">{n.title}{!isRead && <i className="nt2-dot" />}</span>

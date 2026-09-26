@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Share2, MoreVertical, Check, Phone, Star, ChevronRight, MessageCircle,
@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { Share } from '@capacitor/share'
-import { Loading, useToast } from '../../components/UI'
+import { Loading, useToast, useBack } from '../../components/UI'
 import { pushBackHandler } from '../../backStack'
 import { useJob, useAutoAdvance, proName, proRating, serviceNames, fmtDateTime } from './useJob'
 import { WorkerAvatar } from './parts'
@@ -21,6 +21,7 @@ import { t } from '../../i18n'
 export default function JobTracking() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack('/bookings')
   const toast = useToast()
   const { b } = useJob(id)
   const [menu, setMenu] = useState(false)
@@ -32,7 +33,22 @@ export default function JobTracking() {
   // Android hardware back closes the menu instead of leaving the screen.
   useEffect(() => { if (menu) return pushBackHandler(() => setMenu(false)) }, [menu])
 
-  if (!b) return <div className="screen jt"><Loading /></div>
+  // This is the screen for a LIVE booking. A finished one shows its completion screen the first time
+  // (rate / tip), and its receipt-style details after that; a cancelled one goes to its details.
+  const redirected = useRef(false)   // StrictMode runs effects twice; decide once
+  useEffect(() => {
+    if (!b || redirected.current || isLive(b.status)) return
+    redirected.current = true
+    if (b.status === 'cancelled') nav(`/booking-details/${b.id}`, { replace: true })
+    else if (b.status === 'completed') {
+      const key = `hh_adv_${b.id}_completed`
+      let seen = true
+      try { seen = !!sessionStorage.getItem(key); if (!seen) sessionStorage.setItem(key, '1') } catch { /* private mode */ }
+      nav(seen ? `/booking-details/${b.id}` : `/job/${b.id}/completed`, { replace: true })
+    }
+  }, [b?.id, b?.status])
+
+  if (!b || !isLive(b.status)) return <div className="screen jt"><Loading /></div>
 
   const jobs = b.pro?.jobs ?? b.pro?.servicesDone ?? 0
   const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
@@ -41,9 +57,9 @@ export default function JobTracking() {
   const started = b.status === 'in_progress'   // service running now
   // Cancel is only valid BEFORE the service starts — once the worker begins, you can't cancel it.
   const cancellable = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived'].includes(b.status)
-  // Tapping Call opens the device dialer with the worker's real number; falls back to the in-app
-  // call screen when no number is on file yet (not assigned).
-  const call = () => { const ph = b.pro?.phone; if (ph) window.location.href = `tel:${ph}`; else nav(`/job/${b.id}/call`) }
+  // Calls go through the Call screen (masked bridge when set up, else the phone's dialer) — the
+  // expert's number is never shown in the app.
+  const call = () => nav(`/job/${b.id}/call`)
   const chat = () => nav(`/job/${b.id}/chat`)
   const go = (to: string) => { setMenu(false); nav(to) }
 
@@ -69,8 +85,8 @@ export default function JobTracking() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
-        <b>{t('Booking Details')}</b>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <b>{t('Track Booking')}</b>
         <div className="jt-top-r">
           <button className="jt-ic round" onClick={share} aria-label={t('Share booking')}><Share2 size={18} /></button>
           <button className="jt-ic round" onClick={() => setMenu(true)} aria-label={t('More options')}><MoreVertical size={18} /></button>
@@ -183,7 +199,7 @@ export default function JobTracking() {
         <div className="jt-safety">
           <div className="jt-safety-head"><ShieldCheck size={15} /> {t('Your safety is our priority')}</div>
           <div className="jt-safety-items">
-            <span><BadgeCheck size={13} /> {t('Background Verified')}</span>
+            {verified && <span><BadgeCheck size={13} /> {t('Background Verified')}</span>}
             <span><Headset size={13} /> {t('Support Available')}</span>
             <span><ShieldCheck size={13} /> {t('Quality Assured')}</span>
           </div>

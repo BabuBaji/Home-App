@@ -6,7 +6,7 @@ import { Bell, Headset } from 'lucide-react'
 import { BottomNav, Loading } from '../components/UI'
 import OrderCard from '../components/OrderCard'
 import { fetchBookings } from '../api'
-import { isActive, isUpcoming } from '../orders'
+import { isActive, isUpcoming, bookingPath } from '../orders'
 import type { Booking } from '../types'
 import { t } from '../i18n'
 
@@ -65,7 +65,7 @@ export default function Bookings() {
             </div>
             <div className="ord-list">
               {list.slice(0, PREVIEW).map((b) => (
-                <OrderCard key={b.id} b={b} onClick={() => nav(`/booking-details/${b.id}`)} />
+                <OrderCard key={b.id} b={b} onClick={() => nav(bookingPath(b))} />
               ))}
             </div>
           </section>

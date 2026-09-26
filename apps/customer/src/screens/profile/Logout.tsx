@@ -1,7 +1,7 @@
 // 96 · Logout — confirmation, then real sign-out (clears token/user) and back to login.
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, LogOut } from 'lucide-react'
-import { BottomNav, useToast } from '../../components/UI'
+import { useToast } from '../../components/UI'
 import { useStore } from '../../store'
 import { t } from '../../i18n'
 
@@ -13,7 +13,7 @@ export default function Logout() {
   function doLogout() { signOut(); toast(t('Logged out')); nav('/login', { replace: true }) }
 
   return (
-    <div className="screen has-nav">
+    <div className="screen">
       <header className="appbar ord-appbar">
         <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
         <div className="titles"><h1>{t('Logout')}</h1></div>
@@ -29,7 +29,6 @@ export default function Logout() {
           <button className="btn ghost full" onClick={() => nav(-1)}>{t('Cancel')}</button>
         </div>
       </div>
-      <BottomNav />
     </div>
   )
 }

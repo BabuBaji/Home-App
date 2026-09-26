@@ -21,7 +21,7 @@ export default function Reschedule() {
   async function confirm() {
     if (slot === null) return toast(t('Please pick a time slot'))
     setBusy(true)
-    try { await rescheduleBookingApi(Number(id), fmtDate(selDate), slotLabel(slot)); toast(t('Booking rescheduled')); setTimeout(() => nav(`/track/${id}`, { replace: true }), 600) }
+    try { await rescheduleBookingApi(Number(id), fmtDate(selDate), slotLabel(slot)); toast(t('Booking rescheduled')); setTimeout(() => nav(`/job/${id}`, { replace: true }), 600) }
     catch (e) { toast((e as Error).message); setBusy(false) }
   }
 

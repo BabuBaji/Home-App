@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, MapPin, Clock, Phone, Bell, Navigation } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import { ArrowLeft, MapPin, Clock, Bell, Navigation } from 'lucide-react'
+import { Loading, useBack } from '../../components/UI'
 import { useJob, proName } from './useJob'
 import { t } from '../../i18n'
 
@@ -10,16 +10,16 @@ export default function OnTheWay() {
   const { id } = useParams()
   const nav = useNavigate()
   const { b } = useJob(id)
+  const back = useBack(`/job/${id}`)
 
   if (!b) return <div className="screen jt"><Loading /></div>
 
   const first = proName(b).split(' ')[0]
-  const phone = b.pro?.phone
 
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('On The Way')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -31,7 +31,6 @@ export default function OnTheWay() {
         <div className="jt-card jt-otw-rows">
           <div className="jt-otw-line"><span className="jt-otw-ic"><MapPin size={17} /></span><span className="grow">{t('Distance')}</span><b>{b.dist != null ? t('{km} km away', { km: b.dist }) : t('Calculating…')}</b></div>
           <div className="jt-otw-line"><span className="jt-otw-ic"><Clock size={17} /></span><span className="grow">{t('ETA')}</span><b>{b.eta != null ? t('{n} mins', { n: b.eta }) : '—'}</b></div>
-          {phone && <div className="jt-otw-line"><span className="jt-otw-ic"><Phone size={17} /></span><span className="grow">{t('Phone')}</span><b>{phone}</b></div>}
         </div>
 
         <button className="jt-map-link" onClick={() => nav(`/job/${b.id}/map`)}><Navigation size={15} /> {t('View live on map')}</button>
@@ -41,7 +40,7 @@ export default function OnTheWay() {
 
       <div className="jt-foot">
         <button className="jt-btn ghost" onClick={() => nav(`/job/${b.id}/chat`)}>{t('Chat')}</button>
-        <button className="jt-btn" onClick={() => { if (phone) window.location.href = `tel:${phone}`; else nav(`/job/${b.id}/call`) }}>{t('Call')}</button>
+        <button className="jt-btn" onClick={() => nav(`/job/${b.id}/call`)}>{t('Call')}</button>
       </div>
     </div>
   )

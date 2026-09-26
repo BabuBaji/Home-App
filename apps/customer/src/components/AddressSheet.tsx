@@ -11,10 +11,12 @@ import { t } from '../i18n'
 // only carries a short "flat, city" summary, so the full text has to be one tap away without
 // losing the screen underneath. Picking a row makes it the default address, which is what the
 // rest of the app reads (pincode -> zone pricing + the serviceability gate).
-export default function AddressSheet({ open, onClose, onSelect }: {
+export default function AddressSheet({ open, onClose, onSelect, onAdd }: {
   open: boolean
   onClose: () => void
   onSelect: (a: Address) => void
+  /** Override "Add address" (the booking flow adds one and comes straight back). */
+  onAdd?: () => void
 }) {
   const nav = useNavigate()
   const toast = useToast()
@@ -58,7 +60,7 @@ export default function AddressSheet({ open, onClose, onSelect }: {
         <span className="as-grab" aria-hidden />
         <div className="as-head">
           <b>{t('Saved Address')}</b>
-          <button className="as-add" onClick={() => { onClose(); nav('/onboarding/location') }}>
+          <button className="as-add" onClick={() => { onClose(); if (onAdd) onAdd(); else nav('/onboarding/location') }}>
             <Plus size={15} /> {t('Add address')}
           </button>
         </div>

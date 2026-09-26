@@ -7,6 +7,7 @@ import { ArrowLeft, CheckCircle2, Gift } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
 import { fetchOffers } from '../../api'
 import { useStore } from '../../store'
+import { t } from '../../i18n'
 import type { Offer } from '../../types'
 
 // Numeric value from an offer badge ("₹120 OFF" / "20% OFF") for ranking the best one.
@@ -91,7 +92,7 @@ export default function AutoOffers() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" onClick={() => nav('/cart')}>Continue to Booking</button>
+        <button className="btn full" onClick={() => nav('/home')}>{t('Browse services')}</button>
       </div>
     </div>
   )

@@ -2,7 +2,7 @@
 // and family. Rows route to the Module-12 sub-screens. Bottom nav kept (Profile is a tab).
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Pencil, MapPin, CreditCard, Users, Bell, Globe, Shield, HelpCircle, Info, ChevronRight, LogOut, Zap, Repeat } from 'lucide-react'
+import { Pencil, MapPin, CreditCard, Users, Bell, Globe, Shield, HelpCircle, Info, ChevronRight, LogOut, Zap, Repeat, Wallet, History, Crown, Gift, Clock3, RotateCcw } from 'lucide-react'
 import { BottomNav, Loading } from '../../components/UI'
 import { fetchMe, fetchSavedMethods, fetchFamily } from '../../api'
 import { useStore } from '../../store'
@@ -31,6 +31,12 @@ export default function MyProfile() {
   if (!user) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
 
   const ROWS = [
+    { icon: <Wallet size={17} />, t: 'Wallet', to: '/wallet' },
+    { icon: <History size={17} />, t: 'Booking history', to: '/history' },
+    { icon: <RotateCcw size={17} />, t: 'Book again', to: '/ai/recommendations' },
+    { icon: <Clock3 size={17} />, t: 'Activity timeline', to: '/ai/timeline' },
+    { icon: <Crown size={17} />, t: 'Membership', to: '/membership' },
+    { icon: <Gift size={17} />, t: 'Refer & Earn', to: '/refer' },
     { icon: <Zap size={17} />, t: 'Quick Actions', to: '/quick-actions' },
     { icon: <Pencil size={17} />, t: 'Edit Profile', to: '/personal' },
     { icon: <MapPin size={17} />, t: 'Addresses', sub: t('{n} Saved', { n: counts.addr }), to: '/addresses' },

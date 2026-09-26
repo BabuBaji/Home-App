@@ -1,4 +1,4 @@
-// 59 · Upcoming Bookings   61 · Completed Bookings   62 · Cancelled Bookings
+// 59 · Upcoming   60 · Active   61 · Completed   62 · Cancelled bookings
 // One list screen, month-grouped, driven by the :status route param.
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -7,19 +7,19 @@ import { Loading } from '../components/UI'
 import OrderCard from '../components/OrderCard'
 import { pushBackHandler } from '../backStack'
 import { fetchBookings } from '../api'
-import { byMonth, isUpcoming } from '../orders'
+import { byMonth, isUpcoming, isActive, bookingPath } from '../orders'
 import type { Booking } from '../types'
 import { t } from '../i18n'
 
-type Kind = 'upcoming' | 'completed' | 'cancelled'
+type Kind = 'upcoming' | 'active' | 'completed' | 'cancelled'
 const TITLE: Record<Kind, string> = {
-  upcoming: 'Upcoming Bookings', completed: 'Completed Bookings', cancelled: 'Cancelled Bookings',
+  upcoming: 'Upcoming Bookings', active: 'Active Bookings', completed: 'Completed Bookings', cancelled: 'Cancelled Bookings',
 }
 const EMPTY: Record<Kind, string> = {
-  upcoming: 'No upcoming bookings', completed: 'No completed bookings', cancelled: 'No cancelled bookings',
+  upcoming: 'No upcoming bookings', active: 'No active bookings', completed: 'No completed bookings', cancelled: 'No cancelled bookings',
 }
 const belongs = (b: Booking, k: Kind) =>
-  k === 'completed' ? b.status === 'completed' : k === 'cancelled' ? b.status === 'cancelled' : isUpcoming(b.status)
+  k === 'completed' ? b.status === 'completed' : k === 'cancelled' ? b.status === 'cancelled' : k === 'active' ? isActive(b.status) : isUpcoming(b.status)
 
 // Newest first, by the date each group is actually keyed on.
 const when = (b: Booking) => new Date(b.completed_at || b.scheduled_at || b.created).getTime()
@@ -27,7 +27,7 @@ const when = (b: Booking) => new Date(b.completed_at || b.scheduled_at || b.crea
 export default function OrdersList() {
   const { status } = useParams()
   const nav = useNavigate()
-  const kind: Kind = status === 'completed' ? 'completed' : status === 'cancelled' ? 'cancelled' : 'upcoming'
+  const kind: Kind = status === 'completed' ? 'completed' : status === 'cancelled' ? 'cancelled' : status === 'active' ? 'active' : 'upcoming'
   const [items, setItems] = useState<Booking[] | null>(null)
   const [sort, setSort] = useState<'new' | 'old'>('new')
   const [showSort, setShowSort] = useState(false)
@@ -44,7 +44,7 @@ export default function OrdersList() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => (window.history.state?.idx > 0 ? nav(-1) : nav('/bookings'))} aria-label={t('Back')}><ArrowLeft size={18} /></button>
       <div className="titles"><h1>{t(TITLE[kind])}</h1></div>
       <button className="iconbtn" onClick={() => setShowSort(true)} aria-label={t('Sort')}><SlidersHorizontal size={18} /></button>
     </header>
@@ -64,7 +64,7 @@ export default function OrdersList() {
             <h2 className="ord-month-h">{g.label}</h2>
             <div className="ord-list">
               {g.items.map((b) => (
-                <OrderCard key={b.id} b={b} onClick={() => nav(`/booking-details/${b.id}`)} />
+                <OrderCard key={b.id} b={b} onClick={() => nav(bookingPath(b))} />
               ))}
             </div>
           </section>

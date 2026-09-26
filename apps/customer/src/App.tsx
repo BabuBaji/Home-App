@@ -24,24 +24,16 @@ import Home from './screens/Home'
 import PopularServices from './screens/PopularServices'
 import ContinueBooking from './screens/ContinueBooking'
 import ServiceDetails from './screens/ServiceDetails'
-import ServiceFlow from './screens/ServiceFlow'
 import BookingFlow from './screens/BookingFlow'
-import Book from './screens/Book'
 import Confirmed from './screens/Confirmed'
 import Notifications from './screens/Notifications'
 import Cart from './screens/Cart'
-import AddressSelect from './screens/AddressSelect'
-import Schedule from './screens/Schedule'
-import Summary from './screens/Summary'
-import Payment from './screens/Payment'
-import BookingTracking from './screens/BookingTracking'
 import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
 import Bookings from './screens/Bookings'
 import History from './screens/History'
 import BookingDetail from './screens/BookingDetail'
 import OrdersList from './screens/OrdersList'
-import ActiveBooking from './screens/ActiveBooking'
 import Invoice from './screens/Invoice'
 import Receipt from './screens/Receipt'
 import Wallet from './screens/Wallet'
@@ -52,7 +44,6 @@ import ReferralEarnings from './screens/wallet/ReferralEarnings'
 import GiftCards from './screens/wallet/GiftCards'
 import RefundHistory from './screens/wallet/RefundHistory'
 import WalletSettings from './screens/wallet/WalletSettings'
-import Profile from './screens/Profile'
 import MyProfile from './screens/profile/MyProfile'
 import FamilyMembers from './screens/profile/FamilyMembers'
 import PaymentMethods from './screens/profile/PaymentMethods'
@@ -70,14 +61,8 @@ import RefundStatus from './screens/support/RefundStatus'
 import Cancellation from './screens/support/Cancellation'
 import Escalation from './screens/support/Escalation'
 import FAQs from './screens/support/FAQs'
-import HomeHealthScore from './screens/ai/HomeHealthScore'
 import AIRecommendations from './screens/ai/AIRecommendations'
-import RecurringPlanner from './screens/ai/RecurringPlanner'
-import MaintenanceCalendar from './screens/ai/MaintenanceCalendar'
-import FestivalCleaning from './screens/ai/FestivalCleaning'
-import AIBudgetPlanner from './screens/ai/AIBudgetPlanner'
 import HomeTimeline from './screens/ai/HomeTimeline'
-import { WaterCanReminder, GarbageReminder, PestControlReminder } from './screens/ai/reminders'
 import AllQuickActions from './screens/AllQuickActions'
 import MembershipPlans from './screens/membership/MembershipPlans'
 import ComparePlans from './screens/membership/ComparePlans'
@@ -87,7 +72,6 @@ import MembershipUsage from './screens/membership/MembershipUsage'
 import Renewal from './screens/membership/Renewal'
 import CancelMembership from './screens/membership/CancelMembership'
 import Benefits from './screens/membership/Benefits'
-import Support from './screens/Support'
 import Addresses from './screens/Addresses'
 import AddAddress from './screens/address/AddAddress'
 import SavedAddresses from './screens/SavedAddresses'
@@ -118,8 +102,6 @@ import Coupons from './screens/offers/Coupons'
 import AutoOffers from './screens/offers/AutoOffers'
 import Referral from './screens/offers/Referral'
 import ZoneOffers from './screens/offers/ZoneOffers'
-import ScratchCards from './screens/offers/ScratchCards'
-import Loyalty from './screens/offers/Loyalty'
 
 export default function App() {
   const { user, signIn, setUser } = useStore()
@@ -162,7 +144,7 @@ export default function App() {
         for (const b of bs) {
           if (b.status === 'cancelled' && b.cancelled_by === 'system' && !seen.has(b.id)) {
             seen.add(b.id); changed = true
-            if (!first) fireLocalNotification('No expert available', `Booking ${b.ref} was cancelled — ₹${b.refund ?? b.total ?? 0} refunded to your wallet.`)
+            if (!first) fireLocalNotification('No expert available', `Booking ${b.ref} was cancelled — ₹${b.refund ?? b.total ?? 0} refunded to your wallet.`, undefined, { route: `/booking-details/${b.id}` })
           }
         }
         if (changed || first) localStorage.setItem(KEY, JSON.stringify([...seen]))
@@ -196,6 +178,7 @@ export default function App() {
             pending.price > 0
               ? `The current service may need more time — ₹${pending.price}. Tap to approve or decline.`
               : 'The current service may need more time. Tap to review.',
+            undefined, { route: `/job/${b.id}/extend` },
           )
         }
       } catch { /* offline — retry next tick */ }
@@ -236,7 +219,7 @@ export default function App() {
             const k = `soon:${b.id}:${total}`
             if (endMs && msLeft > 0 && msLeft <= 5 * 60000 && !seen.has(k)) {
               mark(k)
-              fireLocalNotification('Service ending soon', `Your ${svc} service will finish in about 5 minutes.`)
+              fireLocalNotification('Service ending soon', `Your ${svc} service will finish in about 5 minutes.`, undefined, { route: `/job/${b.id}` })
               speak(`Your ${svc} service will be completed in about 5 minutes. If you need more time, you can request an extension.`)
             }
             // Time's up: the booked (+extended) duration has elapsed but the worker hasn't ended the
@@ -246,7 +229,7 @@ export default function App() {
             const kUp = `up:${b.id}:${total}`
             if (endMs && msLeft <= 0 && msLeft > -120000 && !seen.has(kUp)) {
               mark(kUp)
-              fireLocalNotification('Service time is up', `Your ${svc} service time has ended.`)
+              fireLocalNotification('Service time is up', `Your ${svc} service time has ended.`, undefined, { route: `/job/${b.id}` })
               speak(`Your ${svc} service time is up. If the work is done, your expert will complete the service. If you need more time, you can request an extension.`)
             }
           }
@@ -261,6 +244,7 @@ export default function App() {
                 fireLocalNotification(
                   `${who} has arrived`,
                   otp ? `Share your start OTP ${otp} to begin the service.` : 'Your expert has reached your location.',
+                  undefined, { route: `/job/${b.id}/otp` },
                 )
                 speak(otp ? `Your expert has arrived. Your start O T P is ${otp.split('').join(' ')}.` : 'Your expert has arrived at your location.')
               }
@@ -271,13 +255,13 @@ export default function App() {
             if (!seen.has(k)) {
               mark(k)
               if (!first) {
-                fireLocalNotification('Service completed', 'Your service is complete. Tap to rate or extend.')
+                fireLocalNotification('Service completed', 'Your service is complete. Tap to rate it.', undefined, { route: `/job/${b.id}/completed` })
                 // Announce completion aloud the moment it happens — the same voice the customer would
                 // hear on the ServiceCompleted screen, so they get it even while on the tracking
                 // screen. speakOnce dedupes with that screen, so it plays exactly once per booking.
                 if (speakOnce(b.id)) {
                   const name = user?.name?.split(' ')[0] || 'there'
-                  speak(`Hi ${name}, your ${serviceNames(b)} service has completed. Do you want to extend any service? If yes, open the app and tap yes.`)
+                  speak(`Hi ${name}, your ${serviceNames(b)} service has completed. Please rate your experience in the app.`)
                 }
               }
             }
@@ -317,20 +301,23 @@ export default function App() {
               <Route path="/popular-services" element={<PopularServices />} />
               <Route path="/continue-booking" element={<ContinueBooking />} />
               <Route path="/service/:id" element={<ServiceDetails />} />
-              <Route path="/configure/:id" element={<ServiceFlow />} />
+              {/* ONE booking flow. The older entry routes (service configurator, Book Instant) land in it
+                  with the same service, so saved links and old app builds keep working. */}
               <Route path="/booking/:id" element={<BookingFlow />} />
-              <Route path="/book/:id" element={<Book />} />
+              <Route path="/configure/:id" element={<ParamRedirect to={(id) => `/booking/${id}`} />} />
+              <Route path="/book/:id" element={<ParamRedirect to={(id) => `/booking/${id}`} />} />
               <Route path="/confirmed/:id" element={<Confirmed />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/cart" element={<Cart />} />
-              <Route path="/address" element={<AddressSelect />} />
-              <Route path="/schedule" element={<Schedule />} />
-              <Route path="/summary" element={<Summary />} />
-              <Route path="/payment" element={<Payment />} />
-              <Route path="/tracking/:id" element={<BookingTracking />} />
-              {/* Old "Track Your Expert" screen is superseded by the redesigned /job/:id flow — send
-                  every track entry point (Continue Booking, notifications, post-cancel/reschedule) there. */}
-              <Route path="/track/:id" element={<TrackRedirect />} />
+              {/* The cart's old address → schedule → summary → payment pages are now steps of the
+                  booking flow; the cart screen shows its contents (or an empty state) and continues there. */}
+              <Route path="/address" element={<Navigate to="/cart" replace />} />
+              <Route path="/schedule" element={<Navigate to="/cart" replace />} />
+              <Route path="/summary" element={<Navigate to="/cart" replace />} />
+              <Route path="/payment" element={<Navigate to="/cart" replace />} />
+              {/* One screen per live booking: /job/:id. The old tracking screens redirect there. */}
+              <Route path="/tracking/:id" element={<ParamRedirect to={(id) => `/job/${id}`} />} />
+              <Route path="/track/:id" element={<ParamRedirect to={(id) => `/job/${id}`} />} />
               <Route path="/reschedule/:id" element={<Reschedule />} />
               <Route path="/cancel/:id" element={<Cancel />} />
               {/* Module 6 — Live Job Tracking */}
@@ -355,18 +342,16 @@ export default function App() {
               <Route path="/offers" element={<Coupons />} />
               <Route path="/offers/applied" element={<AutoOffers />} />
               <Route path="/offers/zone" element={<ZoneOffers />} />
-              <Route path="/offers/scratch" element={<ScratchCards />} />
-              <Route path="/offers/loyalty" element={<Loyalty />} />
+              <Route path="/offers/scratch" element={<Navigate to="/offers" replace />} />
+              <Route path="/offers/loyalty" element={<Navigate to="/offers" replace />} />
               <Route path="/refer" element={<Referral />} />
               {/* Module 8 — Orders (58-65) */}
               <Route path="/bookings" element={<Bookings />} />
-              <Route path="/bookings/active" element={<ActiveBooking />} />
               <Route path="/bookings/:status" element={<OrdersList />} />
               <Route path="/booking-details/:id" element={<BookingDetail />} />
               <Route path="/invoice/:id" element={<Invoice />} />
               <Route path="/receipt/:id" element={<Receipt />} />
               <Route path="/history" element={<History />} />
-              <Route path="/booking/:id" element={<BookingDetail />} />
               {/* Module 9 — Wallet (66-73) */}
               <Route path="/wallet" element={<Wallet />} />
               <Route path="/wallet/transactions" element={<WalletTransactions />} />
@@ -387,7 +372,7 @@ export default function App() {
               <Route path="/profile/about" element={<About />} />
               <Route path="/profile/help" element={<Help />} />
               <Route path="/profile/logout" element={<Logout />} />
-              <Route path="/profile/legacy" element={<Profile />} />
+              <Route path="/profile/legacy" element={<Navigate to="/profile" replace />} />
               <Route path="/quick-actions" element={<AllQuickActions />} />
 
               {/* Module 10 — Subscription (74-81) */}
@@ -402,16 +387,13 @@ export default function App() {
               <Route path="/membership/benefits" element={<Benefits />} />
 
               {/* Module 13 — AI Home (97-106) */}
-              <Route path="/ai-home" element={<HomeHealthScore />} />
+              {/* Only the tools built on the customer's real bookings/transactions remain. The rest
+                  (health score, reminders, calendar, budget, festival picks) showed invented data. */}
               <Route path="/ai/recommendations" element={<AIRecommendations />} />
-              <Route path="/ai/planner" element={<RecurringPlanner />} />
-              <Route path="/ai/calendar" element={<MaintenanceCalendar />} />
-              <Route path="/ai/water" element={<WaterCanReminder />} />
-              <Route path="/ai/garbage" element={<GarbageReminder />} />
-              <Route path="/ai/pest" element={<PestControlReminder />} />
-              <Route path="/ai/festival" element={<FestivalCleaning />} />
-              <Route path="/ai/budget" element={<AIBudgetPlanner />} />
               <Route path="/ai/timeline" element={<HomeTimeline />} />
+              <Route path="/ai/planner" element={<Navigate to="/profile/repeat" replace />} />
+              <Route path="/ai-home" element={<Navigate to="/home" replace />} />
+              <Route path="/ai/*" element={<Navigate to="/home" replace />} />
 
               {/* Module 14 — Support (107-114) */}
               <Route path="/support" element={<HelpCenter />} />
@@ -423,7 +405,7 @@ export default function App() {
               <Route path="/support/cancellation" element={<Cancellation />} />
               <Route path="/support/escalation" element={<Escalation />} />
               <Route path="/support/faqs" element={<FAQs />} />
-              <Route path="/support/legacy" element={<Support />} />
+              <Route path="/support/legacy" element={<Navigate to="/support" replace />} />
               <Route path="/addresses" element={<Addresses />} />
               <Route path="/addresses/add" element={<AddAddress />} />
               <Route path="/addresses/saved" element={<SavedAddresses />} />
@@ -529,11 +511,11 @@ function Guard({ authed }: { authed: boolean }) {
   return <Outlet />
 }
 
-// The old "Track Your Expert" screen (Track.tsx) is replaced by the redesigned /job/:id flow.
-// Redirect the legacy /track/:id route so every entry point shows the new Booking Details UI.
-function TrackRedirect() {
+// Redirect an old route with an :id to its replacement, keeping any navigation state.
+function ParamRedirect({ to }: { to: (id: string) => string }) {
   const { id } = useParams()
-  return <Navigate to={`/job/${id}`} replace />
+  const loc = useLocation()
+  return <Navigate to={to(id || '')} replace state={loc.state} />
 }
 
 // Gate for the main app: an authenticated user must have picked a city (location)

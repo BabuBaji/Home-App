@@ -1,17 +1,19 @@
-// 98 · AI Recommendations — services that are due, computed from the customer's booking history +
-// the live catalog (aiHome.recommendations). Book Now opens the real booking flow for that service.
+// Book again — the services this customer has actually had done, from their completed bookings
+// ("You booked X 12 days ago"). Book opens the booking flow with the same duration preselected.
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Bell, Bot } from 'lucide-react'
-import { BottomNav, Loading } from '../../components/UI'
+import { ArrowLeft, RotateCcw } from 'lucide-react'
+import { Loading, useBack } from '../../components/UI'
 import { ServiceThumb } from '../../serviceArt'
 import { fetchBookings, fetchServices } from '../../api'
 import { useStore } from '../../store'
-import { recommendations } from '../../aiHome'
+import { bookAgain } from '../../aiHome'
 import type { Booking, Service } from '../../types'
+import { t } from '../../i18n'
 
 export default function AIRecommendations() {
   const nav = useNavigate()
+  const back = useBack('/profile')
   const { pincode } = useStore()
   const [bookings, setBookings] = useState<Booking[] | null>(null)
   const [services, setServices] = useState<Service[] | null>(null)
@@ -21,45 +23,45 @@ export default function AIRecommendations() {
     fetchServices(pincode || undefined).then((c) => setServices(c.services)).catch(() => setServices([]))
   }, [pincode])
 
-  const recs = useMemo(() => (bookings && services) ? recommendations(bookings, services) : null, [bookings, services])
+  const list = useMemo(() => (bookings && services) ? bookAgain(bookings, services) : null, [bookings, services])
+  const ago = (d: number) => d <= 0 ? t('today') : d === 1 ? t('yesterday') : t('{n} days ago', { n: d })
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>AI Recommendations</h1></div>
-      <button className="iconbtn" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell size={18} /></button>
+      <button className="iconbtn" onClick={back} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <div className="titles"><h1>{t('Book again')}</h1></div>
+      <span className="iconbtn ghost" />
     </header>
   )
-  if (!recs) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
+  if (!list) return <div className="screen">{head}<Loading /></div>
 
   return (
-    <div className="screen has-nav">
+    <div className="screen">
       {head}
       <div className="content">
-        <div className="air-hero">
-          <div><div className="air-hero-t">AI says</div><div className="air-hero-b">Your home can be even better!</div><div className="air-hero-d">We found {recs.length} smart recommendations for you.</div></div>
-          <span className="air-hero-bot"><Bot size={26} /></span>
-        </div>
-
-        <div className="hhs-tiles-h">Recommended for You</div>
-        {recs.length === 0 ? (
-          <div className="state"><div className="ico">✨</div><h3>You're all caught up</h3><p>No services are due right now.</p></div>
+        {list.length === 0 ? (
+          <div className="state"><div className="ico"><RotateCcw size={40} /></div><h3>{t('Nothing to rebook yet')}</h3><p>{t('Services you have had done will appear here, so you can book them again in a tap.')}</p>
+            <button className="btn" style={{ maxWidth: 220 }} onClick={() => nav('/home')}>{t('Browse services')}</button></div>
         ) : (
           <div className="air-list">
-            {recs.map((r) => (
+            {list.map((r) => (
               <div key={r.service.id} className="air-card">
                 <span className="air-thumb"><ServiceThumb service={{ id: r.service.id, name: r.service.name, image: `/services/${r.service.id}.jpg` }} medallion={30} /></span>
                 <div className="air-main">
                   <div className="air-name">{r.service.name}</div>
-                  <div className="air-note">{r.note}</div>
+                  <div className="air-note">
+                    {t('You booked this {when}', { when: ago(r.days) })}{r.times > 1 ? ` · ${t('{n} times', { n: r.times })}` : ''}
+                  </div>
                 </div>
-                <button className="air-book" onClick={() => nav(`/service/${r.service.id}`)}>Book Now</button>
+                <button className="air-book" disabled={!r.service.available}
+                  onClick={() => nav(`/booking/${r.service.id}`, { state: { durationId: r.durationId } })}>
+                  {r.service.available ? t('Book') : t('Not available')}
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
-      <BottomNav />
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Phone, Send } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import { Loading, useBack } from '../../components/UI'
 import { fetchJobMessages, sendJobMessage, type JobMessage } from '../../api'
 import { useJob, proName } from './useJob'
 import { WorkerAvatar } from './parts'
@@ -20,6 +20,7 @@ type Pending = JobMessage & { pending: true }
 export default function Chat() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack(`/job/${id}`)
   const { b } = useJob(id, false)
   const bid = Number(id)
   const [msgs, setMsgs] = useState<JobMessage[]>([])
@@ -66,19 +67,16 @@ export default function Chat() {
   }
 
   if (!b) return <div className="screen jt"><Loading /></div>
-  const phone = b.pro?.phone
 
   return (
     <div className="screen jt">
       <div className="jt-top jt-chat-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <div className="jt-chat-who">
           <WorkerAvatar b={b} size={36} />
           <div><div className="jt-chat-name">{proName(b)}</div><div className="jt-chat-status">{t('Assigned to your job')}</div></div>
         </div>
-        {phone
-          ? <a className="jt-ic" href={`tel:${phone}`} aria-label={t('Call')}><Phone size={19} /></a>
-          : <button className="jt-ic" onClick={() => nav(`/job/${bid}/call`)} aria-label={t('Call')}><Phone size={19} /></button>}
+        <button className="jt-ic" onClick={() => nav(`/job/${bid}/call`)} aria-label={t('Call')}><Phone size={19} /></button>
       </div>
 
       <div className="content jt-chat-body">

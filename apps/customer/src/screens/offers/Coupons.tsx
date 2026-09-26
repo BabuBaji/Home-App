@@ -2,8 +2,9 @@
 // "Valid" (never expires) and the Expired tab is genuinely empty rather than faked.
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, HelpCircle, MapPin, Users, Gift, Star, Sparkles } from 'lucide-react'
-import { Loading, useToast } from '../../components/UI'
+import { HelpCircle, MapPin, Users, Sparkles } from 'lucide-react'
+import { BottomNav, Loading, useToast } from '../../components/UI'
+import { t } from '../../i18n'
 import { fetchCoupons } from '../../api'
 import type { Coupon } from '../../types'
 
@@ -28,12 +29,12 @@ export default function Coupons() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={18} /></button>
-      <div className="titles"><h1>Coupons</h1></div>
-      <button className="iconbtn" onClick={() => toast('Apply a coupon at checkout to save on your booking.')} aria-label="Help"><HelpCircle size={18} /></button>
+      <span className="iconbtn ghost" />
+      <div className="titles"><h1>{t('Offers')}</h1></div>
+      <button className="iconbtn" onClick={() => toast(t('Apply a coupon at checkout to save on your booking.'))} aria-label={t('Help')}><HelpCircle size={18} /></button>
     </header>
   )
-  if (!coupons) return <div className="screen">{head}<Loading /></div>
+  if (!coupons) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
 
   function apply(c: string) {
     const v = c.trim().toUpperCase()
@@ -46,7 +47,7 @@ export default function Coupons() {
   const counts = { all: coupons.length, valid: coupons.length, expired: 0 }
 
   return (
-    <div className="screen">
+    <div className="screen has-nav">
       {head}
       <div className="content">
         <div className="cp-entry">
@@ -55,9 +56,9 @@ export default function Coupons() {
         </div>
 
         <div className="cp-tabs">
-          {(['All', 'Valid', 'Expired'] as Tab[]).map((t) => (
-            <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-              {t} ({t === 'All' ? counts.all : t === 'Valid' ? counts.valid : counts.expired})
+          {(['All', 'Valid', 'Expired'] as Tab[]).map((tb) => (
+            <button key={tb} className={tab === tb ? 'active' : ''} onClick={() => setTab(tb)}>
+              {t(tb)} ({tb === 'All' ? counts.all : tb === 'Valid' ? counts.valid : counts.expired})
             </button>
           ))}
         </div>
@@ -81,22 +82,21 @@ export default function Coupons() {
           ))}
         </div>
 
-        <div className="cp-more-h">More ways to save</div>
+        <div className="cp-more-h">{t('More ways to save')}</div>
         <div className="cp-more">
           {[
             { icon: <MapPin size={18} />, label: 'Zone Offers', to: '/offers/zone' },
             { icon: <Users size={18} />, label: 'Refer & Earn', to: '/refer' },
-            { icon: <Gift size={18} />, label: 'Scratch & Win', to: '/offers/scratch' },
-            { icon: <Star size={18} />, label: 'Loyalty Points', to: '/offers/loyalty' },
             { icon: <Sparkles size={18} />, label: 'Auto Offers', to: '/offers/applied' },
           ].map((s) => (
             <button key={s.to} className="cp-more-tile" onClick={() => nav(s.to)}>
               <span className="cp-more-ico">{s.icon}</span>
-              <span className="cp-more-label">{s.label}</span>
+              <span className="cp-more-label">{t(s.label)}</span>
             </button>
           ))}
         </div>
       </div>
+      <BottomNav />
     </div>
   )
 }

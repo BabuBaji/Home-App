@@ -20,7 +20,8 @@ export async function startPush(onOpen: (route: string) => void): Promise<void> 
       const d = (a.notification?.data || {}) as Record<string, string>
       const id = d.bookingId
       if (d.type === 'chat' && id) onOpen(`/job/${id}/chat`)
-      else if (id) onOpen(`/track/${id}`)
+      // /job/:id is the one booking screen; it sends a finished or cancelled booking on to its details.
+      else if (id) onOpen(`/job/${id}`)
       else onOpen('/notifications')
     })
     await PushNotifications.createChannel?.({ id: 'updates', name: 'Booking updates', importance: 4 }).catch(() => {})

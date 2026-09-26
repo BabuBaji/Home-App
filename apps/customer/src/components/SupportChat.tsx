@@ -31,7 +31,7 @@ const INTENTS: Intent[] = [
   { keys: ['coupon', 'offer', 'discount', 'promo', 'refer', 'referral', 'code'], reply: 'Apply coupons at checkout. You can also earn ₹150 for every friend you refer — find your referral code under Profile.' },
   { keys: ['account', 'profile', 'login', 'log in', 'logout', 'sign out', 'change number', 'change name', 'delete account'], reply: 'Manage your details from the Profile screen (top-right of Home) — addresses, payment methods, notifications and support all live there.' },
   { keys: ['history', 'past', 'previous', 'my bookings', 'order history'], reply: 'Tap “History” in the bottom bar to see all your past services, or “Bookings” for upcoming and completed ones.' },
-  { keys: ['human', 'agent', 'talk to', 'contact', 'call', 'phone', 'complaint', 'complain', 'executive', 'customer care'], reply: 'I can connect you to our team. Reach us at support@homehelp.in, or tap below to raise a support request and we’ll get back to you.', escalate: true },
+  { keys: ['human', 'agent', 'talk to', 'contact', 'call', 'phone', 'complaint', 'complain', 'executive', 'customer care'], reply: 'I can connect you to our team. Tap below to raise a support request and we’ll get back to you.', escalate: true },
 ]
 const GREETING = 'Hi! 👋 I’m the HomeHelp assistant. How can I help with your booking today? You can ask me anything about your services, or tap a topic below.'
 const CHIPS = ['Cancel a booking', 'Refund', 'Reschedule', 'Payment', 'Invoice', 'Track order', 'Talk to a human']

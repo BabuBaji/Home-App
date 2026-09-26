@@ -14,7 +14,8 @@ import LandmarkSelect from './LandmarkSelect'
 export default function AddAddress() {
   const nav = useNavigate()
   const toast = useToast()
-  const edit = ((useLocation().state || {}) as { edit?: Address }).edit
+  const navState = (useLocation().state || {}) as { edit?: Address; back?: boolean; makeDefault?: boolean }
+  const edit = navState.edit
 
   const [label, setLabel] = useState(edit?.label || 'Home')
   const [full, setFull] = useState(edit?.line || '')
@@ -25,7 +26,7 @@ export default function AddAddress() {
   const [city, setCity] = useState(edit?.city || '')
   const [lat, setLat] = useState<number | undefined>(edit?.lat)
   const [lng, setLng] = useState<number | undefined>(edit?.lng)
-  const [makeDefault, setMakeDefault] = useState(!!edit?.is_default)
+  const [makeDefault, setMakeDefault] = useState(!!edit?.is_default || !!navState.makeDefault)
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState<null | 'map' | 'apartment' | 'landmark'>(null)
 
@@ -47,7 +48,8 @@ export default function AddAddress() {
         await addAddressApi({ ...body, makeDefault })
       }
       toast(edit ? 'Address updated' : 'Address saved')
-      nav('/addresses', { replace: true })
+      // Opened from the booking flow → go straight back to it; otherwise to the address list.
+      if (navState.back) nav(-1); else nav('/addresses', { replace: true })
     } catch (e) { toast((e as Error).message); setSaving(false) }
   }
 

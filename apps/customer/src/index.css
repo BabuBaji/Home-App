@@ -1310,16 +1310,6 @@ button.card { background: #fff; }
 .bottomnav a.active::after { background: var(--primary); }
 .add-money, .hb-btn, .sn-refer-btn { background: var(--grad); color: #fff; }
 
-/* footer "History" pill — prominent brand button on the right (opens service history) */
-.bottomnav a.bn-history {
-  flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; align-self: center;
-  margin-left: 6px; padding: 9px 16px; border-radius: 999px;
-  background: var(--grad); color: #fff; font-size: 13px; font-weight: 600;
-  box-shadow: 0 8px 18px rgba(91,81,232,.34);
-}
-.bottomnav a.bn-history.active { color: #fff; }
-.bottomnav a.bn-history .ni, .bottomnav a.bn-history.active::after { display: none; }
-
 /* Service History — clean flat list of past services */
 .hist-list { display: flex; flex-direction: column; gap: 10px; padding: 6px 0 8px; }
 .hist-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
@@ -3978,3 +3968,31 @@ body { line-height: 1.45; }
 .paybar .pay-name { max-width: 150px; }
 .paybar .pay-now { flex: 1 0 150px; white-space: nowrap; }
 .paybar .pay-now b, .paybar .pay-now span { white-space: nowrap; }
+
+/* unified booking flow — step progress under the title */
+.bf-progress { display: flex; gap: 4px; padding: 0 16px 8px; }
+.bf-progress span { flex: 1; height: 3px; border-radius: 2px; background: var(--line); }
+.bf-progress span.on { background: var(--primary); }
+.bf-wtoggle .bf-wic { margin-right: 10px; }
+.bf-sumrow b .au-link { margin-left: 6px; font-size: 12.5px; }
+
+/* Home search */
+.hd-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin: 14px 0 6px; }
+.hd-search input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 14.5px; color: var(--ink); min-width: 0; }
+.hd-search button { border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; padding: 0; }
+.hd-search-res { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 8px; }
+.hd-search-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 10px 12px; }
+.hd-search-row:last-child { border-bottom: 0; }
+.hd-search-row img { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; background: var(--primary-50); }
+.hd-search-row .grow { flex: 1; min-width: 0; }
+.hd-search-row b { display: block; font-size: 14px; color: var(--ink); }
+.hd-search-row small { color: var(--muted); font-size: 12px; }
+.hd-cats { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 2px; }
+
+/* Call your expert */
+.cw-body { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 28px 20px; gap: 10px; }
+.cw-body h2 { font-size: 20px; margin: 8px 0 0; color: var(--ink); }
+.cw-body p { color: var(--muted); font-size: 13.5px; margin: 0; max-width: 300px; }
+.cw-call { width: 76px; height: 76px; border-radius: 50%; border: 0; background: #16a34a; color: #fff; display: grid; place-items: center; box-shadow: 0 10px 24px rgba(22,163,74,.35); margin-top: 18px; }
+.cw-call:disabled { opacity: .6; }
+.cw-note { background: var(--primary-50); color: var(--primary); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; max-width: 320px; }

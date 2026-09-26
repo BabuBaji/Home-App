@@ -6,7 +6,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Share2, Phone, Star, MoreVertical, CalendarClock, XCircle, FileText, ShieldQuestion, Headset, RotateCcw } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { Share } from '@capacitor/share'
-import { Loading, useToast } from '../components/UI'
+import { Loading, useToast, useBack } from '../components/UI'
 import { WorkerAvatar } from '../components/OrderCard'
 import { ServiceThumb } from '../serviceArt'
 import { pushBackHandler } from '../backStack'
@@ -19,18 +19,22 @@ import { t } from '../i18n'
 export default function BookingDetail() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack('/bookings')
   const toast = useToast()
   const [b, setB] = useState<Booking | null>(null)
   const [err, setErr] = useState(false)
   const [menu, setMenu] = useState(false)
 
-  useEffect(() => { fetchBooking(Number(id)).then(setB).catch(() => setErr(true)) }, [id])
+  // Receipt-style details are for finished/cancelled bookings; a live one belongs on /job/:id.
+  useEffect(() => {
+    fetchBooking(Number(id)).then((d) => { if (isLive(d.status)) nav(`/job/${d.id}`, { replace: true }); else setB(d) }).catch(() => setErr(true))
+  }, [id])
   // Android hardware back closes the menu instead of leaving the screen.
   useEffect(() => { if (menu) return pushBackHandler(() => setMenu(false)) }, [menu])
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={18} /></button>
       {/* spacer: balances the two icons on the right so the title stays centred */}
       {b && <span className="iconbtn ghost" />}
       <div className="titles"><h1>{t('Booking Details')}</h1></div>

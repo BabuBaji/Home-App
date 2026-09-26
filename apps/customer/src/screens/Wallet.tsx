@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Receipt, Gift, Settings, Wallet as WalletIcon, HelpCircle, Users, RotateCcw, ChevronRight, Eye, ArrowLeft } from 'lucide-react'
-import { BottomNav, Loading, useToast } from '../components/UI'
+import { Loading, useToast } from '../components/UI'
 import { fetchWallet, fetchCashback, fetchReferralEarnings, fetchRefunds, applyReferral } from '../api'
 import { useStore } from '../store'
 import { money, money2 } from '../wallet'
@@ -54,7 +54,7 @@ export default function Wallet() {
       <button className="iconbtn" onClick={() => nav('/support')} aria-label={t('Help')}><HelpCircle size={18} /></button>
     </header>
   )
-  if (!w) return <div className="screen has-nav">{head}<Loading /><BottomNav /></div>
+  if (!w) return <div className="screen">{head}<Loading /></div>
 
   const hidden = w.hideBalance && !reveal
   const show = (n: number) => (hidden ? '••••••' : money2(n))
@@ -72,7 +72,7 @@ export default function Wallet() {
   ]
 
   return (
-    <div className="screen has-nav">
+    <div className="screen">
       {head}
       <div className="content">
         <div className="w-hero">
@@ -148,7 +148,6 @@ export default function Wallet() {
           <div className="grow"><div className="bt">{t('100% Secure Transactions')}</div><div className="bd">{t('Wallet is credited only after your payment is verified.')}</div></div>
         </div>
       </div>
-      <BottomNav />
     </div>
   )
 }

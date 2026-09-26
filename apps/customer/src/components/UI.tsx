@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { ChevronLeft, House, CalendarDays, History, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, House, CalendarDays, Tag, UserRound, AlertTriangle } from 'lucide-react'
 import { t } from '../i18n'
 
 /* ---------- Toast ---------- */
@@ -23,14 +23,25 @@ export function ToastHost({ children }: { children: ReactNode }) {
   )
 }
 
+/* ---------- Back ---------- */
+/** Go back one screen — or Home when the screen was opened directly (deep link, notification tap),
+ *  where there is no in-app history to return to. */
+export function useBack(fallback = '/home') {
+  const nav = useNavigate()
+  return useCallback(() => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+    if (idx > 0) nav(-1); else nav(fallback, { replace: true })
+  }, [nav, fallback])
+}
+
 /* ---------- Header ---------- */
 export function Header({ title, subtitle, right, back = true }: {
   title: string; subtitle?: string; right?: ReactNode; back?: boolean
 }) {
-  const nav = useNavigate()
+  const goBack = useBack()
   return (
     <header className="appbar">
-      {back ? <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ChevronLeft size={24} /></button> : <span className="iconbtn ghost" />}
+      {back ? <button className="iconbtn" onClick={goBack} aria-label={t('Back')}><ChevronLeft size={24} /></button> : <span className="iconbtn ghost" />}
       <div className="titles">
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
@@ -41,25 +52,27 @@ export function Header({ title, subtitle, right, back = true }: {
 }
 
 /* ---------- Bottom nav ---------- */
+// The four top-level tabs. Shown only on each tab's own root screen (Home, the Bookings list,
+// Offers, Profile); deeper screens and flows carry a Back button instead. `match` lists the
+// paths that light a tab up.
 const NAV = [
-  { to: '/home', label: 'Home', Icon: House },
-  { to: '/bookings', label: 'Bookings', Icon: CalendarDays },
+  { to: '/home', label: 'Home', Icon: House, match: ['/home'] },
+  { to: '/bookings', label: 'Bookings', Icon: CalendarDays, match: ['/bookings', '/history'] },
+  { to: '/offers', label: 'Offers', Icon: Tag, match: ['/offers'] },
+  { to: '/profile', label: 'Profile', Icon: UserRound, match: ['/profile'] },
 ]
 export function BottomNav() {
   const { pathname } = useLocation()
   return (
-    <nav className="bottomnav">
+    <nav className="bottomnav" aria-label={t('Main')}>
       {NAV.map((n) => {
-        const active = pathname.startsWith(n.to)
+        const active = n.match.some((m) => pathname === m || pathname.startsWith(m + '/'))
         return (
-          <Link key={n.to} to={n.to} className={active ? 'active' : ''}>
+          <Link key={n.to} to={n.to} className={active ? 'active' : ''} aria-current={active ? 'page' : undefined}>
             <span className="ni"><n.Icon size={22} strokeWidth={active ? 2.4 : 2} /></span>{t(n.label)}
           </Link>
         )
       })}
-      <Link to="/history" className={`bn-history ${pathname.startsWith('/history') ? 'active' : ''}`}>
-        <History size={20} strokeWidth={2.2} /><span>{t('History')}</span>
-      </Link>
     </nav>
   )
 }

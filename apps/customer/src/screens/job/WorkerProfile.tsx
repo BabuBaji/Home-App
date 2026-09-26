@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Star, BadgeCheck, ShieldCheck, MapPin, Wrench, Phone } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import { Loading, useBack } from '../../components/UI'
 import { useJob, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
 import { t } from '../../i18n'
@@ -11,6 +11,7 @@ export default function WorkerProfile() {
   const { id } = useParams()
   const nav = useNavigate()
   const { b } = useJob(id, false)
+  const back = useBack(`/job/${id}`)
 
   if (!b) return <div className="screen jt"><Loading /></div>
 
@@ -23,7 +24,7 @@ export default function WorkerProfile() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Worker Profile')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -57,15 +58,15 @@ export default function WorkerProfile() {
         )}
 
         <div className="jt-wp-sec jt-wp-rows">
-          {p?.phone && <a className="jt-wp-line" href={`tel:${p.phone}`}><Phone size={17} /><span className="grow">{t('Mobile')}</span><b>{p.phone}</b></a>}
           {p?.city && <div className="jt-wp-line"><MapPin size={17} /><span className="grow">{t('Serves in')}</span><b>{p.city}</b></div>}
           <div className="jt-wp-line"><Wrench size={17} /><span className="grow">{t('Services offered')}</span><b>{skills.length}</b></div>
-          <div className="jt-wp-line"><ShieldCheck size={17} /><span className="grow">{t('Background')}</span><b>{p?.verified ? t('ID & Address Verified') : t('In review')}</b></div>
+          {/* Background status is shown only once it's actually verified — never "In review". */}
+          {p?.verified && <div className="jt-wp-line"><ShieldCheck size={17} /><span className="grow">{t('Background')}</span><b>{t('ID & Address Verified')}</b></div>}
         </div>
       </div>
 
       <div className="jt-foot">
-        <button className="jt-btn" onClick={() => { if (p?.phone) window.location.href = `tel:${p.phone}`; else nav(`/job/${b.id}/call`) }}><Phone size={16} /> {t('Call {name}', { name: first })}</button>
+        <button className="jt-btn" onClick={() => nav(`/job/${b.id}/call`)}><Phone size={16} /> {t('Call {name}', { name: first })}</button>
       </div>
     </div>
   )

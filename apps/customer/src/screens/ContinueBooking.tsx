@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, CalendarClock } from 'lucide-react'
-import { BottomNav, Loading } from '../components/UI'
-import { fetchBookings, isContinuable, CONTINUABLE_STATUSES } from '../api'
+import { Loading } from '../components/UI'
+import { fetchBookings, isContinuable } from '../api'
+import { bookingPath } from '../orders'
 import type { Booking } from '../types'
 
 // Module 2 · #12 — Continue Booking. Lists the customer's resumable bookings (real data
@@ -20,10 +21,10 @@ export default function ContinueBooking() {
   useEffect(() => { fetchBookings().then(setItems).catch(() => setItems([])) }, [])
 
   const list = (items || []).filter((b) => isContinuable(b))
-  const resume = (b: Booking) => nav(CONTINUABLE_STATUSES.includes(b.status) ? `/track/${b.id}` : `/booking/${b.id}`)
+  const resume = (b: Booking) => nav(bookingPath(b))
 
   return (
-    <div className="screen has-nav m2">
+    <div className="screen m2">
       <div className="ps-top">
         <button className="au-back" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
         <b>Continue Booking</b>
@@ -55,7 +56,6 @@ export default function ContinueBooking() {
           <button className="cb-all" onClick={() => nav('/bookings')}>View All Bookings</button>
         </div>
       )}
-      <BottomNav />
     </div>
   )
 }

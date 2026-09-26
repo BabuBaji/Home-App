@@ -46,7 +46,7 @@ export default function Cart() {
       <FooterCTA>
         <div className="sumbar">
           <div className="grow"><div className="cnt">₹{subtotal}</div><div className="sub">{cart.length === 1 ? t('1 service') : t('{n} services', { n: cart.length })}</div></div>
-          <button className="btn" onClick={() => nav('/address')}>{t('Select address →')}</button>
+          <button className="btn" onClick={() => nav('/booking/cart')}>{t('Continue →')}</button>
         </div>
       </FooterCTA>
     </div>

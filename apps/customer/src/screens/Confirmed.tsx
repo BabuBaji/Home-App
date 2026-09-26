@@ -24,7 +24,6 @@ export default function Confirmed() {
   if (!b) return <div className="screen m2"><Loading /></div>
 
   const when = b.type === 'instant' ? t('Now') : `${b.date || t('Scheduled')}, ${b.time || ''}`.trim()
-  const paid = b.payment === 'wallet' ? 0 : b.total
   const bookingId = b.ref || `BK${b.id}`
 
   return (
@@ -47,12 +46,12 @@ export default function Confirmed() {
           <div className="bc-row"><span>{t('Date & Time')}</span><b>{when}</b></div>
           <div className="bc-row"><span>{t('Worker')}</span><b>{b.pro_name || t('Being assigned')}</b></div>
           <div className="bc-row"><span>{t('Address')}</span><b className="bc-addr">{b.address || addr?.line || '—'}</b></div>
-          <div className="bc-row"><span>{t('Amount Paid')}</span><b>₹{paid}</b></div>
+          <div className="bc-row"><span>{b.payment === 'cash' ? t('To pay after service') : t('Amount Paid')}</span><b>₹{b.total}</b></div>
         </div>
       </div>
       <div className="au-foot" style={{ display: 'grid', gap: 8 }}>
         <button className="au-btn" onClick={() => nav(`/job/${b.id}`, { replace: true })}>{t('Track Your Booking')}</button>
-        <button className="au-btn ghost" onClick={() => nav(`/tracking/${b.id}`, { replace: true })} style={{ background: 'transparent', color: '#5b51e8', border: '1.5px solid #ddd8fb' }}>{t('Booking Timeline')}</button>
+        <button className="au-btn ghost" onClick={() => nav('/home', { replace: true })} style={{ background: 'transparent', color: '#5b51e8', border: '1.5px solid #ddd8fb' }}>{t('Back to Home')}</button>
       </div>
     </div>
   )

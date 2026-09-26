@@ -27,7 +27,7 @@ export default function Cancel() {
   async function confirm() {
     if (!reason) return toast(t('Please select a reason'))
     setBusy(true)
-    try { await cancelBookingApi(Number(id), reason); toast(t('Booking cancelled')); setTimeout(() => nav(`/track/${id}`, { replace: true }), 600) }
+    try { await cancelBookingApi(Number(id), reason); toast(t('Booking cancelled')); setTimeout(() => nav(`/booking-details/${id}`, { replace: true }), 600) }
     catch (e) { toast((e as Error).message); setBusy(false) }
   }
 

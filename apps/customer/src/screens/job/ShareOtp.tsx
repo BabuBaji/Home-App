@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ShieldCheck, Bell } from 'lucide-react'
-import { Loading, useToast } from '../../components/UI'
+import { Loading, useToast, useBack } from '../../components/UI'
 import { useJob, useAutoAdvance, proName } from './useJob'
 import { t } from '../../i18n'
 
@@ -9,6 +9,7 @@ import { t } from '../../i18n'
 export default function ShareOtp() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack(`/job/${id}`)
   const toast = useToast()
   const { b } = useJob(id)
 
@@ -36,7 +37,7 @@ export default function ShareOtp() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Share OTP')}</b><span style={{ width: 40 }} />
       </div>
 
