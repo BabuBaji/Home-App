@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Push (FCM) needs the Firebase config from the console; builds without it still work (no push).
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
 android {
     namespace = "com.homehelp.pro"
     compileSdk = 34
@@ -44,6 +47,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.firebase:firebase-messaging:24.0.0")
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.0")

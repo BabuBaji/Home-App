@@ -7,7 +7,7 @@
 // booking service's realtime events. Owns only ephemeral per-worker skip state.
 import express from 'express'
 import {
-  makePool, migrate, internalGet, internalPost, tryGet, publishEvent, getSettingInt,
+  makePool, migrate, internalGet, internalPost, tryGet, publishEvent, getSettingInt, callsMasked, bridgeCall,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: it carries the jsonwebtoken dep.
 import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
@@ -200,8 +200,9 @@ async function jobFromBooking(b) {
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   const c = u?.user || {}
   const initials = String(c.name || 'C').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()
+  const masked = await callsMasked(ADMIN_URL) // calls go through the bridge — the app never gets the number
   return {
-    id: b.ref, bookingId: b.id, customerName: c.name || 'Customer', initials, customerAvatar: c.avatar || '', customerPhone: c.phone || '', customerRating: c.rating || 5.0,
+    id: b.ref, bookingId: b.id, customerName: c.name || 'Customer', initials, customerAvatar: c.avatar || '', customerPhone: masked ? '' : (c.phone || ''), customerRating: c.rating || 5.0,
     customerType: b.type || 'Residential', note: b.note || '',
     services: (b.items || []).map((i) => i.name), dateTime: [b.date, b.time].filter(Boolean).join(', ') || new Date(b.created).toLocaleString(),
     durationHours: Math.max(1, parseInt(b.duration, 10) || 2), durationMinutes: bookingDurationMinutes(b), address: b.address, area: (b.address || '').split(',').slice(-2).join(',').trim() || b.address,
@@ -666,7 +667,7 @@ app.post('/api/worker/jobs/messages', auth, async (req, res) => {
   if (!body) return res.status(400).json({ ok: false, error: 'text is required' })
   const q = await pool.query('INSERT INTO job_messages (booking_id, sender, body) VALUES ($1, $2, $3) RETURNING id, sender, body, created', [b.id, 'worker', body])
   // Surfaces to the customer side via the same realtime bus the status changes use.
-  publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: req.worker.id, sender: 'worker', body })
+  publishEvent(REDIS_URL, 'job.message', { bookingId: b.id, ref: b.ref, workerId: req.worker.id, userId: b.user_id, sender: 'worker', body })
   res.json({ ok: true, message: q.rows[0] })
 })
 
@@ -692,6 +693,28 @@ app.get('/api/bookings/:id/messages', customerAuth, async (req, res) => {
   const b = await ownedBookingOr404(req, res); if (!b) return
   const q = await pool.query('SELECT id, sender, body, created FROM job_messages WHERE booking_id=$1 ORDER BY id', [b.id])
   res.json({ ok: true, messages: q.rows })
+})
+
+/* ---------- masked calls ----------
+   With Exotel configured the app never gets the other side's number: it asks for a bridged call,
+   the caller's phone rings, and they're connected through the company number. Without it, the
+   old behaviour stands (the number is returned for a direct dial). */
+async function placeCall(res, fromPhone, toPhone) {
+  if (!(await callsMasked(ADMIN_URL))) return res.json({ ok: true, mode: 'direct', phone: toPhone || null })
+  const r = await bridgeCall(ADMIN_URL, fromPhone, toPhone)
+  if (!r.ok) return res.status(502).json({ ok: false, error: 'Could not connect the call. Please try again.' })
+  res.json({ ok: true, mode: 'bridge' })
+}
+app.post('/api/bookings/:id/call', customerAuth, async (req, res) => {
+  const b = await ownedBookingOr404(req, res); if (!b) return
+  if (!ACTIVE.includes(b.status) || !b.worker_id) return res.status(409).json({ ok: false, error: 'You can call your expert once one is assigned.' })
+  const w = await tryGet(WORKER_URL, `/internal/workers/${b.worker_id}/public-profile`, null)
+  await placeCall(res, req.user.phone, w?.phone)
+})
+app.post('/api/worker/jobs/call', auth, async (req, res) => {
+  const b = await activeOr409(req, res); if (!b) return
+  const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
+  await placeCall(res, req.worker.phone, u?.user?.phone)
 })
 
 app.post('/api/bookings/:id/messages', customerAuth, async (req, res) => {

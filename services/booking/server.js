@@ -8,7 +8,7 @@
 import express from 'express'
 import {
   makePool, migrate, nowIso, makeAdminAuth, inScope, internalOnly,
-  internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings,
+  internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings, callsMasked,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
@@ -25,6 +25,7 @@ const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const PAYMENT_URL = (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, '')
+const NOTIFICATION_URL = (process.env.NOTIFICATION_URL || 'http://localhost:4003').replace(/\/$/, '')
 
 // A single malformed request must never take the service down.
 process.on('unhandledRejection', (e) => console.error('[booking] unhandledRejection:', e?.message || e))
@@ -166,6 +167,7 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS tip_ref TEXT`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extras_total INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS plan_id INTEGER`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notified_status TEXT`,
     // Tasks the expert adds during the job: priced, approved (and paid) by the customer, then billed.
     `CREATE TABLE IF NOT EXISTS booking_extras (id SERIAL PRIMARY KEY, booking_id INTEGER NOT NULL, name TEXT NOT NULL,
        price INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', paid_via TEXT, payment_ref TEXT,
@@ -353,7 +355,15 @@ async function cancelCfg() {
   }
 }
 
-const emitBookingUpdate = async (id) => publishRealtime(REDIS_URL, `booking:${id}`, 'booking:update', await getBooking(id))
+// Every booking change goes out on the live socket; a change of STATUS also goes out as an event
+// (once per status, remembered on the row) so the customer gets a push even with the app closed.
+const emitBookingUpdate = async (id) => {
+  const b = await getBooking(id)
+  publishRealtime(REDIS_URL, `booking:${id}`, 'booking:update', b)
+  if (!b) return
+  const moved = await pool.query('UPDATE bookings SET notified_status=$2 WHERE id=$1 AND notified_status IS DISTINCT FROM $2 RETURNING id', [id, b.status])
+  if (moved.rowCount && b.status !== 'confirmed') publishEvent(REDIS_URL, 'booking.status', { bookingId: b.id, ref: b.ref, userId: b.user_id, workerId: b.worker_id, status: b.status, proName: b.pro_name || '', cancelledBy: b.cancelled_by || null })
+}
 
 /* ═══════════════ Service extensions ═══════════════
  * Extra paid time, bought only with the customer's consent. The worker (or later the customer)
@@ -690,7 +700,8 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
   // screens show live data (jobs done, avatar, verified, phone, skills) instead of placeholders.
   if (pro) {
     const wp = await tryGet(WORKER_URL, `/internal/workers/${b.worker_id}/public-profile`, null)
-    if (wp) pro = { ...pro, name: wp.name || pro.name, rating: wp.rating ?? pro.rating, servicesDone: wp.jobs ?? 0, jobs: wp.jobs ?? 0, avatar: wp.avatar || null, verified: !!wp.verified, phone: wp.phone || null, city: wp.city || null, skills: Array.isArray(wp.services) ? wp.services : [] }
+    // With masked calls on, the customer never receives the expert's number.
+    if (wp) pro = { ...pro, name: wp.name || pro.name, rating: wp.rating ?? pro.rating, servicesDone: wp.jobs ?? 0, jobs: wp.jobs ?? 0, avatar: wp.avatar || null, verified: !!wp.verified, phone: (await callsMasked(ADMIN_URL)) ? null : (wp.phone || null), city: wp.city || null, skills: Array.isArray(wp.services) ? wp.services : [] }
   }
   let travel = {}
   const d = distanceKm(b.worker_lat, b.worker_lng, b.cust_lat, b.cust_lng)
@@ -1271,8 +1282,9 @@ app.get('/api/notifications', auth, async (req, res) => {
   // drops out of the feed automatically, so only live/in-progress bookings show up.
   const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
   const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
-  items.push({ id: 'o1', type: 'offer', title: '20% off this weekend', body: 'Use code CLEAN20 on any service. Limited time!', time: null })
-  items.push({ id: 'o2', type: 'cashback', title: 'Earn ₹150 per friend', body: 'Share code HOMEHELP150 and earn on every referral.', time: null })
+  // Plus the customer's real inbox (announcements and offers the admin broadcast, job updates).
+  const inbox = await tryGet(NOTIFICATION_URL, `/api/internal/inbox/customer/${req.user.id}`, [])
+  for (const m of (Array.isArray(inbox) ? inbox : [])) items.push({ id: 'n' + m.id, type: m.type || 'announcement', title: m.title, body: m.body || '', time: m.created, bookingId: m.booking_id || undefined })
   res.json(items)
 })
 app.get('/api/support/reasons', (_q, res) => res.json({ cancelReasons: ['Booked by mistake', 'Found a better price', 'Service no longer needed', 'Pro is taking too long', 'Want to change date/time', 'Other'] }))

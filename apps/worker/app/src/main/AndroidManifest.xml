@@ -60,6 +60,15 @@
         </activity>
 
         <!-- Keeps the worker online + alerts on new matching jobs even when backgrounded. -->
+        <!-- Server push (FCM): job offers and updates, delivered with the app closed. -->
+        <service
+            android:name=".WorkerMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".JobAlertService"
             android:exported="false"

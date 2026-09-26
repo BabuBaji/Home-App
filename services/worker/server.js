@@ -9,7 +9,7 @@ import express from 'express'
 import multer from 'multer'
 import {
   makePool, migrate, makeAdminAuth, requirePerm, inScope, internalOnly, tryGet, internalPost, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
-  getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms,
+  getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms, callsMasked,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
 // that only the services actually using them install.
@@ -905,6 +905,7 @@ async function bootstrap(wid) {
   const w = await getWorker(wid)
   const mine = await tryGet(BOOKING_URL, `/api/internal/bookings?worker_id=${wid}`, [])
   const active = mine.find((b) => ['worker_assigned', 'on_the_way', 'arrived', 'in_progress'].includes(b.status)) || null
+  const masked = await callsMasked(ADMIN_URL) // masked calls: never hand out the customer's number
   const STATUS_TO_ENUM = { worker_assigned: 'ACCEPTED', on_the_way: 'ON_THE_WAY', arrived: 'ARRIVED', in_progress: 'IN_PROGRESS', completed: 'COMPLETED' }
   // Resolve customer names once per unique user (the worker app's Booking card shows them).
   const uids = [...new Set(mine.map((b) => b.user_id).filter(Boolean))]
@@ -953,7 +954,7 @@ async function bootstrap(wid) {
       const addr = active.address || '—'
       return {
         id: active.ref || `#${active.id}`, bookingId: active.id,
-        customerName: nm, initials, customerPhone: custPhones[active.user_id] || '',
+        customerName: nm, initials, customerPhone: masked ? '' : (custPhones[active.user_id] || ''),
         customerRating: 5.0,
         services: (active.items || []).map((i) => i.name),
         dateTime: [active.date, active.time].filter(Boolean).join(', ') || istClock(active.created),

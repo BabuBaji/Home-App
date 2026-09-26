@@ -210,6 +210,9 @@ fun AppRoot() {
 
     // Resume a saved session once per launch so a logged-in worker isn't sent to Login.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (Session.isLoggedIn) vm.restoreSession() }
+    // Register this phone for push once signed in (no-op without the Firebase config).
+    val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    androidx.compose.runtime.LaunchedEffect(vm.isLoggedIn) { if (vm.isLoggedIn) PushRegistrar.register(appCtx) }
 
     // Deep-link from a notification tap (e.g. a customer message → open the chat). Runs whenever
     // NavIntent.route is set; navigates once the worker is signed in, then clears it.

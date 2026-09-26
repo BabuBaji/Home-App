@@ -9,11 +9,11 @@
 // them, so the admin Activity Monitor and booking timeline work without any service calling it.
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet,
+  makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet, publishEvent, sendPush,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
-import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+import { assertJwtSecret, tokenSubject } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('notification') // refuse to boot without a signing secret rather than trust forgeable tokens
 
@@ -32,6 +32,14 @@ const auth = makeCustomerAuth(AUTH_URL)
 
 async function init() {
   await migrate(pool, [
+    // Phones to push to: one row per app install (FCM registration token).
+    `CREATE TABLE IF NOT EXISTS device_tokens (id SERIAL PRIMARY KEY, kind TEXT NOT NULL, owner_id INTEGER NOT NULL,
+       token TEXT NOT NULL UNIQUE, platform TEXT, updated TIMESTAMPTZ DEFAULT now())`,
+    `CREATE INDEX IF NOT EXISTS ix_device_owner ON device_tokens(kind, owner_id)`,
+    // The customer's in-app inbox (broadcasts, offers, job updates). Workers' inbox lives in wallet.
+    `CREATE TABLE IF NOT EXISTS customer_inbox (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, type TEXT, title TEXT NOT NULL,
+       body TEXT, booking_id INTEGER, created TIMESTAMPTZ DEFAULT now())`,
+    `CREATE INDEX IF NOT EXISTS ix_inbox_user ON customer_inbox(user_id, id DESC)`,
     `CREATE TABLE IF NOT EXISTS activity_log (
       id BIGSERIAL PRIMARY KEY, actor_type TEXT NOT NULL, actor_id BIGINT, actor_name TEXT,
       action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, ref TEXT, detail TEXT, meta JSONB,
@@ -310,11 +318,70 @@ async function resolveRecipients(b) {
   return { isPromo, sent: kept.length, suppressed, recipientIds: kept.map((c) => c.id), audienceKind: 'customers' }
 }
 
+/* ---------- push: device registration + delivery ---------- */
+// Either app registers its FCM token after sign-in; the audience of the bearer token says whose it is.
+function whoIs(req) {
+  const c = tokenSubject(req.headers.authorization, 'customer')
+  if (Number.isFinite(c)) return { kind: 'customer', id: c }
+  const w = tokenSubject(req.headers.authorization, 'worker')
+  if (Number.isFinite(w)) return { kind: 'worker', id: w }
+  return null
+}
+app.post('/api/push/register', async (req, res) => {
+  const who = whoIs(req)
+  if (!who) return res.status(401).json({ error: 'Not authenticated' })
+  const token = String(req.body?.token || '').trim()
+  if (token.length < 20) return res.status(400).json({ error: 'token required' })
+  await pool.query(
+    `INSERT INTO device_tokens (kind,owner_id,token,platform,updated) VALUES ($1,$2,$3,$4,now())
+     ON CONFLICT (token) DO UPDATE SET kind=EXCLUDED.kind, owner_id=EXCLUDED.owner_id, platform=EXCLUDED.platform, updated=now()`,
+    [who.kind, who.id, token, String(req.body?.platform || 'android').slice(0, 20)])
+  res.json({ ok: true })
+})
+app.post('/api/push/unregister', async (req, res) => {
+  const who = whoIs(req)
+  if (!who) return res.status(401).json({ error: 'Not authenticated' })
+  await pool.query('DELETE FROM device_tokens WHERE token=$1 AND kind=$2 AND owner_id=$3', [String(req.body?.token || ''), who.kind, who.id])
+  res.json({ ok: true })
+})
+/** Push to every device of a customer/worker; drops tokens FCM says are gone. A customer message
+ *  also lands in their in-app inbox unless `inbox:false` (so nothing depends on push working). */
+async function pushTo(kind, ownerId, msg) {
+  if (!ownerId) return 0
+  if (kind === 'customer' && msg.inbox !== false) {
+    await pool.query('INSERT INTO customer_inbox (user_id,type,title,body,booking_id) VALUES ($1,$2,$3,$4,$5)', [ownerId, msg.type || 'update', msg.title, msg.body || null, msg.data?.bookingId || null])
+  }
+  const { rows } = await pool.query('SELECT token FROM device_tokens WHERE kind=$1 AND owner_id=$2', [kind, ownerId])
+  let sent = 0
+  for (const r of rows) {
+    const out = await sendPush(ADMIN_URL, r.token, msg)
+    if (out.ok) sent++
+    else if (out.unregistered) await pool.query('DELETE FROM device_tokens WHERE token=$1', [r.token])
+  }
+  return sent
+}
+app.get('/api/internal/inbox/customer/:id', internalOnly, async (req, res) => {
+  res.json((await pool.query('SELECT * FROM customer_inbox WHERE user_id=$1 ORDER BY id DESC LIMIT 30', [Number(req.params.id)])).rows)
+})
+app.post('/api/internal/push', internalOnly, async (req, res) => {
+  const b = req.body || {}
+  res.json({ ok: true, sent: await pushTo(b.kind === 'worker' ? 'worker' : 'customer', Number(b.ownerId), b) })
+})
+
 app.get('/api/admin/notifications', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))
 app.post('/api/admin/notifications/broadcast', adminAuth, async (req, res) => {
   const b = req.body || {}
   if (!b.title) return res.status(400).json({ error: 'Title required' })
-  const { isPromo, sent, suppressed } = await resolveRecipients(b)
+  const { isPromo, sent, suppressed, recipientIds, audienceKind } = await resolveRecipients(b)
+  // Deliver it, not just count it: customers get an inbox row + push, workers an in-app
+  // notification (the wallet service owns that list) + push via worker.notify.
+  const msg = { title: String(b.title), body: b.body ? String(b.body) : '', type: isPromo ? 'offer' : 'announcement', data: { type: 'broadcast' } }
+  ;(async () => {
+    for (const id of recipientIds || []) {
+      if (audienceKind === 'workers') publishEvent(REDIS_URL, 'worker.notify', { workerId: id, title: msg.title, body: msg.body, kind: 'broadcast' })
+      else await pushTo('customer', id, msg).catch(() => {})
+    }
+  })()
   const { rows } = await pool.query(
     'INSERT INTO broadcasts (type,title,body,audience,channel,sent,suppressed,promotional,admin) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
     [b.type || 'announcement', b.title, b.body || null, b.audience || 'all', b.channel || 'in-app', sent, suppressed, isPromo, req.admin?.email || null])
@@ -329,8 +396,39 @@ subscribeEvents(REDIS_URL, 'notification', async (type, data) => {
     if (type === 'activity') await logEvent(data)
     else if (type === 'customer.login') await logEvent({ actorType: 'customer', actorId: data.userId, actorName: data.name, action: 'customer.login', entityType: 'customer', entityId: data.userId, detail: data.detail })
     else if (type === 'admin.action') await logEvent(data)
+    else await eventPush(type, data)
   } catch (e) { console.error('[notification] log failed:', e.message) }
 })
+
+/* Which events reach a phone, and what they say. Job offers are urgent (they must wake the
+   expert's phone); everything else is a normal update. */
+const STATUS_PUSH = {
+  worker_assigned: (d) => [`${d.proName || 'Your expert'} is assigned`, 'They will head over shortly.'],
+  on_the_way: (d) => [`${d.proName || 'Your expert'} is on the way`, 'Track them live in the app.'],
+  arrived: (d) => [`${d.proName || 'Your expert'} has arrived`, 'Share your start code to begin.'],
+  in_progress: () => ['Service started', 'Your service is in progress.'],
+  completed: (d) => ['Service completed', `How was ${d.proName || 'your expert'}? Rate and tip in the app.`],
+  cancelled: (d) => ['Booking cancelled', d.cancelledBy === 'system' ? 'No expert was available — any payment has been refunded.' : `Booking ${d.ref || ''} was cancelled.`],
+}
+async function eventPush(type, d) {
+  if (type === 'booking.status' && STATUS_PUSH[d.status]) {
+    const [title, body] = STATUS_PUSH[d.status](d)
+    await pushTo('customer', d.userId, { title, body, type: 'booking', data: { type: 'booking', bookingId: d.bookingId, status: d.status } })
+  } else if (type === 'booking.offered') {
+    await pushTo('worker', d.workerId, { title: 'New job request', body: `${d.ref || 'A job'} is waiting — tap to accept.`, urgent: true, channel: 'jobs', data: { type: 'job_offer', bookingId: d.bookingId } })
+  } else if (type === 'booking.extra_requested') {
+    await pushTo('customer', d.userId, { title: 'Approve an extra task?', body: `${d.name} · ₹${d.price}`, type: 'booking', data: { type: 'extra', bookingId: d.bookingId } })
+  } else if (type === 'booking.extra_decided') {
+    await pushTo('worker', d.workerId, { title: d.approved ? 'Extra task approved' : 'Extra task declined', body: d.name, data: { type: 'extra', bookingId: d.bookingId } })
+  } else if (type === 'job.message') {
+    if (d.sender === 'worker') await pushTo('customer', d.userId, { title: 'Message from your expert', body: String(d.body || '').slice(0, 120), inbox: false, data: { type: 'chat', bookingId: d.bookingId } })
+    else await pushTo('worker', d.workerId, { title: 'Message from the customer', body: String(d.body || '').slice(0, 120), data: { type: 'chat', bookingId: d.bookingId } })
+  } else if (type === 'recurring.failed') {
+    await pushTo('customer', d.userId, { title: 'A repeat visit could not be booked', body: String(d.error || ''), type: 'booking' })
+  } else if (type === 'worker.notify') {
+    await pushTo('worker', d.workerId, { title: d.title, body: d.body || '', data: { type: d.kind || 'notice' } })
+  }
+}
 
 init()
   .then(() => app.listen(PORT, () => console.log(`[notification] service on http://localhost:${PORT}`)))

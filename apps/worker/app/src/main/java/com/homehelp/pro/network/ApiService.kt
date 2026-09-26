@@ -260,6 +260,13 @@ interface ApiService {
     @POST("api/worker/jobs/extras")
     suspend fun addExtra(@Body body: ExtraBody): JobStateResponse
 
+    @POST("api/push/register")
+    suspend fun registerPush(@Body body: PushTokenBody): Map<String, Any>
+
+    /** Masked call to the active job's customer: "bridge" = our number rings you and connects. */
+    @POST("api/worker/jobs/call")
+    suspend fun callCustomer(): CallResponse
+
     @POST("api/worker/jobs/extras/remove")
     suspend fun removeExtra(@Body body: ExtraRemoveBody): JobStateResponse
 

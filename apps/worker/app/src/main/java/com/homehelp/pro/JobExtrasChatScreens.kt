@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * CHAT / CALL CUSTOMER (module 20) — the in-job message thread with the customer.
@@ -187,14 +188,24 @@ private fun ChatBubble(text: String, mine: Boolean) {
     }
 }
 
-/** Opens the dialer on the customer's number (ACTION_DIAL needs no CALL_PHONE permission). */
+/** Calls the customer. With masked calling on, the server connects the call through the company
+ *  number (the worker's phone rings; neither side sees the other's number). Otherwise it opens the
+ *  dialer on the customer's number (ACTION_DIAL needs no CALL_PHONE permission). */
 fun dialCustomerPhone(ctx: android.content.Context, phone: String) {
-    if (phone.isBlank()) return
-    runCatching {
-        ctx.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:$phone"))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        val r = runCatching { com.homehelp.pro.network.RetrofitClient.api.callCustomer() }.getOrNull()
+        if (r?.mode == "bridge") {
+            android.widget.Toast.makeText(ctx, "Connecting you — your phone will ring", android.widget.Toast.LENGTH_LONG).show()
+            return@launch
+        }
+        val number = r?.phone?.takeIf { it.isNotBlank() } ?: phone
+        if (number.isBlank()) return@launch
+        runCatching {
+            ctx.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:$number"))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 }
 

@@ -414,3 +414,9 @@ export const createRecurring = (p: { items: { id: string; durationId: string }[]
   req<RecurringPlan>('/api/recurring', { method: 'POST', body: JSON.stringify(p) })
 export const fetchRecurring = () => req<RecurringPlan[]>('/api/recurring')
 export const updateRecurring = (id: number, action: 'pause' | 'resume' | 'cancel') => req<RecurringPlan>(`/api/recurring/${id}/${action}`, { method: 'POST' })
+
+/* ---------- push + masked calls ---------- */
+export const registerPushToken = (token: string, platform: string) => req<{ ok: boolean }>('/api/push/register', { method: 'POST', body: JSON.stringify({ token, platform }) })
+/** Ask for a call to the booking's expert. 'bridge' = our number rings you and connects you (no one
+ *  sees the other's number); 'direct' = masking isn't set up, dial the returned number. */
+export const callExpert = (bookingId: number) => req<{ ok: boolean; mode: 'bridge' | 'direct'; phone?: string | null }>(`/api/bookings/${bookingId}/call`, { method: 'POST' })

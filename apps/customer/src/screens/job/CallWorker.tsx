@@ -4,9 +4,11 @@ import { Mic, MicOff, Grid3x3, Volume2, PhoneOff, Phone } from 'lucide-react'
 import { Loading } from '../../components/UI'
 import { useJob, proName } from './useJob'
 import { WorkerAvatar } from './parts'
+import { callExpert } from '../../api'
 
-// Module 6 · #47 — Call Worker. Places a real phone call to the assigned worker's number via the
-// device dialer (tel:). The controls mirror the mock; the number comes from the booking (no fake).
+// Module 6 · #47 — Call Worker. Asks the server to connect the call: with masked calling on, our
+// number rings the customer and bridges them to the expert (neither sees the other's number);
+// otherwise it dials the expert's number directly (tel:).
 export default function CallWorker() {
   const { id } = useParams()
   const nav = useNavigate()
@@ -15,11 +17,20 @@ export default function CallWorker() {
   const [speaker, setSpeaker] = useState(false)
   const [secs, setSecs] = useState(0)
 
-  const phone = b?.pro?.phone
+  const [phone, setPhone] = useState<string | null>(null)
+  const [state, setState] = useState<'idle' | 'bridging' | 'failed'>('idle')
+  useEffect(() => { if (b?.pro?.phone) setPhone(b.pro.phone) }, [b?.pro?.phone])
 
   useEffect(() => { const i = setInterval(() => setSecs((s) => s + 1), 1000); return () => clearInterval(i) }, [])
 
-  function dial() { if (phone) window.location.href = `tel:${phone}` }
+  async function dial() {
+    if (!b) return
+    try {
+      const r = await callExpert(b.id)
+      if (r.mode === 'bridge') { setState('bridging'); return }
+      if (r.phone) { setPhone(r.phone); window.location.href = `tel:${r.phone}` }
+    } catch { setState('failed') }
+  }
 
   if (!b) return <div className="screen jt"><Loading /></div>
   const mmss = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
@@ -29,8 +40,8 @@ export default function CallWorker() {
       <div className="jt-call-top">
         <WorkerAvatar b={b} size={120} />
         <h2>{proName(b)}</h2>
-        {phone ? <div className="jt-call-num">{phone}</div> : <div className="jt-call-num">No number on file</div>}
-        <div className="jt-call-state">{phone ? `Calling… ${mmss}` : 'Cannot place call'}</div>
+        <div className="jt-call-num">{state === 'bridging' ? 'Your phone will ring — pick up to be connected' : phone || 'Private number'}</div>
+        <div className="jt-call-state">{state === 'failed' ? 'Could not connect the call' : state === 'bridging' ? `Connecting… ${mmss}` : 'Tap the green button to call'}</div>
       </div>
 
       <div className="jt-call-ctrls">
@@ -46,7 +57,7 @@ export default function CallWorker() {
       </div>
 
       <div className="jt-call-actions">
-        {phone && <button className="jt-call-dial" onClick={dial} aria-label="Dial"><Phone size={26} /></button>}
+        <button className="jt-call-dial" onClick={dial} aria-label="Dial"><Phone size={26} /></button>
         <button className="jt-call-end" onClick={() => nav(-1)} aria-label="End call"><PhoneOff size={26} /></button>
       </div>
     </div>

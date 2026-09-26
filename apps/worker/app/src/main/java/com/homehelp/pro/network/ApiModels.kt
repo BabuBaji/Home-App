@@ -858,3 +858,7 @@ data class CommDto(
     val push: Boolean = true,
     val promo: Boolean = true,
 )
+
+data class PushTokenBody(val token: String, val platform: String = "android")
+/** mode: "bridge" (masked call placed — your phone rings) or "direct" (dial [phone]). */
+data class CallResponse(val ok: Boolean = false, val mode: String = "direct", val phone: String? = null, val error: String? = null)

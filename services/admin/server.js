@@ -67,6 +67,11 @@ const DEFAULT_SETTINGS = {
   // login flows fall back to disclosing the code (dev only; see DEV_OTP / WORKER_DEV_OTP).
   msg91_otp_template_id: '', msg91_sender_id: '', msg91_invite_template_id: '',
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
+  // Push: the Firebase service-account JSON (FCM HTTP v1). Empty = no push, in-app updates only.
+  fcm_service_account: '',
+  // Masked calls (Exotel): customer and expert talk through a bridged call, never seeing each
+  // other's number. Empty = calls fall back to the direct number.
+  exotel_sid: '', exotel_api_key: '', exotel_api_token: '', exotel_caller_id: '', exotel_subdomain: 'api.exotel.com',
   upi_vpa: '', upi_payee_name: '', upi_mode: 'demo',
   serviceable_pincodes: '', service_cities: '',
   razorpay_webhook_secret: '', payment_webhook_secret: '', payout_webhook_secret: '', payout_provider: '',
@@ -78,7 +83,7 @@ const DEFAULT_SETTINGS = {
   // shown to workers and admins. 'on_demand' frequency = no schedule, so no estimate is shown.
   payout_frequency: 'weekly', payout_day: '4', min_payout_limit: '500',
 }
-const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key',
+const SECRET_KEYS = ['razorpay_key_secret', 'msg91_key', 'firebase_server_key', 'smtp_pass', 'google_maps_key', 'fcm_service_account', 'exotel_api_token',
   'razorpay_webhook_secret', 'payment_webhook_secret', 'payout_webhook_secret']
 
 async function init() {

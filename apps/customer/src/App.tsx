@@ -6,6 +6,7 @@ import Splash from './components/Splash'
 import { useStore } from './store'
 import { fetchMe, getToken, loadUser, captureLocationOnOpen, fetchBookings, fetchExtensions, fetchBooking, fetchJobMessages } from './api'
 import { ensureNotifPermission, fireLocalNotification, speak, speakOnce, onNotificationTap } from './notify'
+import { startPush } from './push'
 import { serviceEndMs, serviceNames } from './screens/job/useJob'
 import { runTopBackHandler } from './backStack'
 
@@ -478,6 +479,8 @@ function ChatNotifier() {
       if (route) nav(route)
     })
   }, [])
+  // Server push (FCM) once signed in — delivers with the app closed.
+  useEffect(() => { if (getToken()) startPush((r) => nav(r)) })
 
   // Poll active jobs for new inbound (worker) messages; alert once per new message, seeding silently
   // on the first pass so a backlog doesn't all fire at once. Suppressed while that chat is on screen
