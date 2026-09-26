@@ -97,11 +97,11 @@ export function Dropdown({ value, options, onChange, width, placeholder, disable
 export function Loading({ label = 'Loading…' }: { label?: string }) {
   return <div className="center" style={{ padding: 60 }}><div className="spinner" /><span className="muted" style={{ marginLeft: 12 }}>{label}</span></div>
 }
-export function ErrorState({ msg, onRetry }: { msg: string; onRetry?: () => void }) {
+export function ErrorState({ msg, onRetry, title = 'Something went wrong' }: { msg: string; onRetry?: () => void; title?: string }) {
   return (
     <div className="state">
       <div className="ico"><AlertTriangle size={40} /></div>
-      <h3>Something went wrong</h3>
+      <h3>{title}</h3>
       <p>{msg}</p>
       {onRetry && <button className="btn" style={{ maxWidth: 180 }} onClick={onRetry}>Retry</button>}
     </div>

@@ -193,7 +193,7 @@ export default function Complaints() {
 
         <div className="col-rail">
           <Card title="Complaints by Status">
-            <Donut size={150} data={DONUT} />
+            <Donut size={150} data={DONUT} legend={false} />
             <div className="minilist" style={{ marginTop: 12 }}>
               {STATUS_LEGEND.map((s) => (
                 <div key={s.label} className="sumrow">

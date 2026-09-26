@@ -223,7 +223,7 @@ export default function Notifications() {
         <div className="col-rail">
           <Card title="Notification Summary" right={<a className="card-link">View Report</a>}>
             <div className="donut-wrap">
-              <Donut data={DONUT} />
+              <Donut data={DONUT} legend={false} />
             </div>
             <div className="legend" style={{ marginTop: 4 }}>
               {DONUT.map((d) => (

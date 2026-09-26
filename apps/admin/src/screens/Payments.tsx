@@ -167,6 +167,7 @@ export default function Payments() {
               <>
                 <Donut
                   size={150}
+                  legend={false}
                   data={methods.map((m) => ({ label: m.label, value: m.value, color: m.color }))}
                 />
                 <div className="minilist" style={{ marginTop: 8 }}>

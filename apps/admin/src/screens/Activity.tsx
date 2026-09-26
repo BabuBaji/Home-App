@@ -139,9 +139,10 @@ export default function Activity() {
         <div className="col-rail">
           <Card title="Events by Source">
             {DONUT.length ? (
-              <div className="row" style={{ alignItems: 'center', gap: 16 }}>
-                <Donut data={DONUT} />
-                <div className="grid" style={{ gap: 8, flex: 1 }}>
+              <div className="row" style={{ alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <Donut data={DONUT} legend={false} />
+                {/* wraps under the ring when the rail is too narrow for both side by side */}
+                <div className="grid" style={{ gap: 8, flex: '1 1 180px' }}>
                   {DONUT.map((d) => (
                     <div key={d.label} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                       <span className="sumbar-label"><i className="bdot" style={{ background: d.color, marginRight: 7 }} />{d.label}</span>

@@ -240,7 +240,7 @@ export default function Admins() {
             <Donut data={[
               { label: 'Active', value: activeCount, color: '#16a34a' },
               { label: 'Inactive', value: inactiveCount, color: '#f04438' },
-            ]} />
+            ]} legend={false} />
             <div className="legend">
               <LegendRow color="#16a34a" label="Active" value={`${activeCount} (${total ? ((activeCount / total) * 100).toFixed(1) : '0.0'}%)`} />
               <LegendRow color="#f04438" label="Inactive" value={`${inactiveCount} (${total ? ((inactiveCount / total) * 100).toFixed(1) : '0.0'}%)`} />

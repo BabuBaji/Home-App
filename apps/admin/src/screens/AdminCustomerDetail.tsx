@@ -133,7 +133,10 @@ export default function AdminCustomerDetail() {
     }
   }, [d])
 
-  if (err) return <ErrorState msg={err} onRetry={load} />
+  // A 404 is not a glitch to retry: the customer doesn't exist, or is outside this admin's zones.
+  if (err) return /not found/i.test(err)
+    ? <ErrorState title="Customer not found" msg="This customer doesn't exist, or isn't in the zones you manage." />
+    : <ErrorState msg={err} onRetry={load} />
   if (!d || !m) return <Loading />
   const { c } = m
   const blocked = (c.status || 'active') !== 'active'

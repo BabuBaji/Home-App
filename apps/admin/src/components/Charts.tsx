@@ -5,12 +5,17 @@ const GREEN = '#16a34a'
 
 // smooth path through points (Catmull-Rom → cubic bezier)
 function smooth(pts: [number, number][]) {
-  if (pts.length < 2) return ''
+  if (!pts.length) return ''
+  // Always start with a move-to: a lone point is still a valid path (the area fill below appends
+  // L … Z to it, which is invalid SVG without one).
   let d = `M ${pts[0][0]},${pts[0][1]}`
+  // Keep each control point's y between the two points it joins, so the curve never overshoots —
+  // otherwise a jump after a flat run bends below the axis and reads as a negative count.
+  const within = (v: number, a: number, b: number) => Math.min(Math.max(v, Math.min(a, b)), Math.max(a, b))
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = within(p1[1] + (p2[1] - p0[1]) / 6, p1[1], p2[1])
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = within(p2[1] - (p3[1] - p1[1]) / 6, p1[1], p2[1])
     d += ` C ${c1x},${c1y} ${c2x},${c2y} ${p2[0]},${p2[1]}`
   }
   return d
@@ -87,7 +92,9 @@ export function BarChart({ data, valueKey = 'revenue', labelKey = 'day', color =
   )
 }
 
-export function Donut({ data, size = 180 }: { data: { label: string; value: number; color: string }[]; size?: number }) {
+// legend=false when the page draws its own legend next to the ring (with percentages etc.) —
+// otherwise the labels show twice and this one overflows the card.
+export function Donut({ data, size = 180, legend = true }: { data: { label: string; value: number; color: string }[]; size?: number; legend?: boolean }) {
   const total = Math.max(1, data.reduce((s, d) => s + d.value, 0))
   const r = size / 2 - 16, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r
   let acc = 0
@@ -106,7 +113,7 @@ export function Donut({ data, size = 180 }: { data: { label: string; value: numb
         <text x={cx} y={cy - 4} textAnchor="middle" className="donut-total">{total.toLocaleString('en-IN')}</text>
         <text x={cx} y={cy + 14} textAnchor="middle" className="donut-cap">Total</text>
       </svg>
-      <div className="legend">
+      {legend && <div className="legend">
         {data.map((d, i) => (
           <div key={i} className="legend-row">
             <span className="dot" style={{ background: d.color }} />
@@ -114,7 +121,7 @@ export function Donut({ data, size = 180 }: { data: { label: string; value: numb
             <span className="legend-val">{d.value.toLocaleString('en-IN')}</span>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   )
 }
