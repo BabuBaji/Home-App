@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Heart } from 'lucide-react'
 import { fetchFavExperts, saveFavExpert, removeFavExpert } from '../../api'
-import { Loading } from '../../components/UI'
+import { Loading, useBack } from '../../components/UI'
 import { useJob, proName, serviceNames } from '../job/useJob'
 import { WorkerAvatar } from '../job/parts'
 import { t } from '../../i18n'
@@ -15,6 +15,7 @@ const QUICK = ['On-time', 'Polite', 'Thorough', 'Professional']
 export default function RateWorker() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack('/home')
   const [sp] = useSearchParams()
   const { b } = useJob(id, false)
   // No star is pre-selected — the customer decides by tapping. (A ?stars= hint from a prior screen
@@ -30,7 +31,7 @@ export default function RateWorker() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav('/home')} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Rate Your Experience')}</b><span style={{ width: 40 }} />
       </div>
 

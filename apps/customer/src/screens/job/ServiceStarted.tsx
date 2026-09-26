@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Play } from 'lucide-react'
-import { Loading } from '../../components/UI'
+import { Loading, useBack } from '../../components/UI'
 import { useJob, proName, serviceNames } from './useJob'
 import { MiniTimeline } from './parts'
 import { t, dateLocale } from '../../i18n'
@@ -9,6 +9,7 @@ import { t, dateLocale } from '../../i18n'
 export default function ServiceStarted() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useBack(`/job/${id}`)
   const { b } = useJob(id)
 
   if (!b) return <div className="screen jt"><Loading /></div>
@@ -17,7 +18,7 @@ export default function ServiceStarted() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav('/home')} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
         <b>{t('Service Started')}</b><span style={{ width: 40 }} />
       </div>
 
