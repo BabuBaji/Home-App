@@ -1777,11 +1777,13 @@ app.post('/api/worker/sos', auth, async (req, res) => {
   const b = req.body || {}
   const w = await getWorker(req.worker.id)
   const loc = (b.lat != null && b.lng != null) ? ` @ ${b.lat},${b.lng}` : ''
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: req.worker.id, detail: `🆘 SOS raised${loc}`, meta: { lat: b.lat ?? null, lng: b.lng ?? null } })
+  // How it was raised: the SOS button, the volume buttons, or an unanswered automatic safety check.
+  const reason = String(b.reason || '').slice(0, 160)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: req.worker.id, detail: `🆘 SOS raised${reason ? ` — ${reason}` : ''}${loc}`, meta: { lat: b.lat ?? null, lng: b.lng ?? null, reason } })
   // Real-time push to the admin control tower (siren + alert modal in the admin panel).
   publishRealtime(REDIS_URL, 'admin', 'sos', {
     kind: 'worker', workerId: req.worker.id, workerName: w?.name || `Worker #${req.worker.id}`, phone: w?.phone || '',
-    lat: b.lat ?? null, lng: b.lng ?? null, at: new Date().toISOString(),
+    lat: b.lat ?? null, lng: b.lng ?? null, at: new Date().toISOString(), ...(reason ? { reason } : {}),
   })
   res.json({ ok: true, message: 'Help is on the way. Our team has been alerted.' })
 })

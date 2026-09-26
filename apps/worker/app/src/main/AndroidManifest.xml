@@ -69,6 +69,11 @@
             </intent-filter>
         </service>
 
+        <!-- "I'm safe" / "Send help" buttons on the automatic safety check. -->
+        <receiver
+            android:name=".SafetyActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".JobAlertService"
             android:exported="false"

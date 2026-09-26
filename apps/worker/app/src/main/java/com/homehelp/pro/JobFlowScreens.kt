@@ -2178,7 +2178,7 @@ fun SafetyCard() {
             Spacer(Modifier.width(Space.m))
             Column {
                 Text(tr("Safety First"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 13.sp)
-                Text(tr("Your safety is our priority. Share live location with family/friends."), fontSize = 11.sp, color = TextGray)
+                Text(tr("At the customer's home, press a volume button 5 times for SOS — even with the phone locked. If a fall or a struggle is detected, we check on you and alert the team if you don't answer."), fontSize = 11.sp, color = TextGray, lineHeight = 15.sp)
             }
         }
     }

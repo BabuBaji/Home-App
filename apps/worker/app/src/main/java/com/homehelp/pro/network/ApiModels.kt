@@ -421,7 +421,7 @@ data class NextDayBody(val coming: Boolean, val note: String? = null)
 data class StatusBody(val state: String)
 data class TicketItem(val id: Int = 0, val subject: String = "", val message: String = "", val status: String = "Open", val created: String = "")
 data class TicketBody(val subject: String, val message: String)
-data class SosBody(val lat: Double? = null, val lng: Double? = null)
+data class SosBody(val lat: Double? = null, val lng: Double? = null, val reason: String? = null)
 data class SosResponse(val ok: Boolean = true, val message: String = "")
 data class LeaveBody(val fromDate: String, val toDate: String, val reason: String)
 data class LeaveItem(

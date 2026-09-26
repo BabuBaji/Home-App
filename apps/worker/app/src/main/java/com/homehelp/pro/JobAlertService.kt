@@ -120,6 +120,8 @@ class JobAlertService : Service() {
 
     private suspend fun pollAssignment() {
         val cur = RetrofitClient.api.currentJob()
+        // Lone-worker safety runs only while the worker is at the customer's home.
+        SafetyMonitor.setOnJob(this, cur.status == "arrived" || cur.status == "in_progress")
         val id = cur.bookingId ?: return          // nothing assigned — leave the watermark alone
         if (id == lastJobId) return               // already announced this one
         lastJobId = id
@@ -146,6 +148,7 @@ class JobAlertService : Service() {
     }
 
     override fun onDestroy() {
+        SafetyMonitor.setOnJob(this, false)
         scope.cancel()
         super.onDestroy()
     }
