@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Users, UserCheck, UserPlus, Repeat2, UserX, Star, StarHalf, Funnel, Plus, MoreVertical, MoreHorizontal,
+  Users, UserCheck, UserPlus, Repeat2, UserX, Star, Funnel, Plus, MoreVertical, MoreHorizontal,
   Phone, Mail, MapPin, Download, Send, User, Pencil, CalendarPlus, MessageCircle, Wallet as WalletIcon,
   StickyNote, Ban, Eye, RefreshCw, X,
 } from 'lucide-react'
@@ -17,18 +17,10 @@ const SEGMENTS = ['New', 'Repeat', 'Loyal', 'VIP', 'At Risk', 'Inactive'] as con
 const SEG_TONE: Record<string, string> = { New: 'blue', Repeat: 'green', Loyal: 'violet', VIP: 'amber', 'At Risk': 'red', Inactive: 'gray' }
 const shortTime = (s?: string | null) => (s ? new Date(s).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '')
 
-function Stars({ rating }: { rating: number }) {
-  const full = Math.floor(rating + 1e-6)
-  const half = rating - full >= 0.5
-  return (
-    <span style={{ display: 'inline-flex', gap: 1, alignItems: 'center' }}>
-      {[0, 1, 2, 3, 4].map((i) =>
-        i < full ? <Star key={i} size={14} fill="#f59e0b" stroke="#f59e0b" />
-          : i === full && half ? <StarHalf key={i} size={14} fill="#f59e0b" stroke="#f59e0b" />
-            : <Star key={i} size={14} fill="none" stroke="#d0d5dd" />)}
-      <span style={{ marginLeft: 5, fontWeight: 600, fontSize: 13, color: rating > 0 ? 'inherit' : '#98a2b3' }}>{rating.toFixed(1)}</span>
-    </span>
-  )
+// Rating cell: one star + the number; unrated shows a dash.
+function RatingCell({ rating }: { rating: number }) {
+  if (!(rating > 0)) return <span className="muted">—</span>
+  return <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontWeight: 600, fontSize: 13 }}><Star size={14} fill="#f59e0b" stroke="#f59e0b" />{rating.toFixed(1)}</span>
 }
 
 function exportCsv(rows: Customer[]) {
@@ -202,14 +194,13 @@ export default function Customers() {
         <StatCard icon={<UserCheck size={22} />} tint="#16a34a" label="Active Customers" value={active.toLocaleString('en-IN')} sub="status active" />
         <StatCard icon={<UserPlus size={22} />} tint="#2e90fa" label="New Customers" value={newCount.toLocaleString('en-IN')} sub="no repeat yet" />
         <StatCard icon={<Repeat2 size={22} />} tint="#f59e0b" label="Repeat Customers" value={repeat.toLocaleString('en-IN')} sub="2+ bookings" />
-        <StatCard icon={<UserX size={22} />} tint="#e5484d" label="Inactive Customers" value={inactive.toLocaleString('en-IN')} sub="blocked / inactive" />
+        <StatCard icon={<UserX size={22} />} tint="#e5484d" label="Inactive Customers" value={inactive.toLocaleString('en-IN')} sub="not active" />
         <StatCard icon={<Star size={22} />} tint="#f59e0b" label="Avg. Rating" value={avgRating} sub="across rated" />
       </div>
 
       <Card>
         <div className="toolbar">
-          <SearchBox value={q} onChange={setQ} placeholder="Search customer by name, mobile or email…" />
-          <div className="tb-spacer" />
+          <SearchBox value={q} onChange={setQ} placeholder="Search customer by name, mobile or email…" className="grow" />
           <select className="select flt" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="all">All Status</option>
             <option value="active">Active</option>
@@ -229,6 +220,8 @@ export default function Customers() {
             {SEGMENTS.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <button className="btn line" onClick={() => toast('More filters coming soon')}><Funnel size={16} /> Filters</button>
+          <button className="btn line" onClick={() => exportCsv(sel.size ? filtered.filter((c) => sel.has(c.id)) : filtered)}><Download size={15} /> Export</button>
+          <button className="btn line" onClick={() => nav('/notifications')}><Send size={15} /> Send Notification</button>
           <button className="btn" onClick={() => { setAddDraft(EMPTY_ADD); setAddOpen(true) }}><Plus size={17} /> Add Customer</button>
         </div>
 
@@ -241,8 +234,6 @@ export default function Customers() {
             {activeChips.length > 0 && <button className="linkbtn" style={{ fontSize: 12, color: '#e5484d', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }} onClick={clearAll}>Clear All</button>}
             <div className="tb-spacer" />
             {sel.size > 0 && <span className="muted" style={{ fontSize: 12 }}>{sel.size} selected</span>}
-            <button className="btn line" onClick={() => exportCsv(sel.size ? filtered.filter((c) => sel.has(c.id)) : filtered)}><Download size={15} /> Export</button>
-            <button className="btn line" onClick={() => nav('/notifications')}><Send size={15} /> Send Notification</button>
             <div style={{ position: 'relative' }}>
               <button className="btn line" onClick={(e) => { e.stopPropagation(); setMoreOpen((v) => !v) }}><MoreHorizontal size={15} /> More Actions</button>
               {moreOpen && (
@@ -255,12 +246,6 @@ export default function Customers() {
             </div>
           </div>
         )}
-        {activeChips.length === 0 && sel.size === 0 && (
-          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginBottom: 12 }}>
-            <button className="btn line" onClick={() => exportCsv(filtered)}><Download size={15} /> Export</button>
-            <button className="btn line" onClick={() => nav('/notifications')}><Send size={15} /> Send Notification</button>
-          </div>
-        )}
 
         <div className="tablewrap">
           <table className="tbl">
@@ -270,14 +255,12 @@ export default function Customers() {
                 <th>Customer</th>
                 <th>Contact</th>
                 <th>Location</th>
-                <th className="num">Bookings</th>
+                <th className="num" title="Bookings, and total spent">Bookings</th>
                 <th>Last Booking</th>
-                <th className="num">Total Spent</th>
-                <th>Segment</th>
                 <th>Rating</th>
                 <th>Status</th>
                 <th>Joined On</th>
-                <th>Actions</th>
+                <th className="sticky-end">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -299,7 +282,7 @@ export default function Customers() {
                     <td>
                       <div style={{ display: 'grid', gap: 2, fontSize: 13 }}>
                         <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Phone size={13} className="muted" />{c.phone || <span className="muted">—</span>}</span>
-                        <span style={{ display: 'flex', gap: 6, alignItems: 'center', color: '#667085' }}><Mail size={13} />{c.email || '—'}</span>
+                        {c.email && <span style={{ display: 'flex', gap: 6, alignItems: 'center', color: '#667085' }}><Mail size={13} />{c.email}</span>}
                       </div>
                     </td>
                     <td>
@@ -315,7 +298,7 @@ export default function Customers() {
                     </td>
                     <td className="num">
                       <strong>{c.bookings}</strong>
-                      <div className="muted" style={{ fontSize: 11 }}>All Time</div>
+                      <div className="muted" style={{ fontSize: 12 }}>{money(c.spend)}</div>
                     </td>
                     <td>
                       {c.lastBooking ? (
@@ -325,12 +308,10 @@ export default function Customers() {
                         </div>
                       ) : <span className="muted">—</span>}
                     </td>
-                    <td className="num">{money(c.spend)}</td>
-                    <td><Badge tone={SEG_TONE[seg]}>{seg}</Badge></td>
-                    <td><Stars rating={c.rating || 0} /></td>
+                    <td><RatingCell rating={c.rating || 0} /></td>
                     <td><Badge tone={blocked ? 'red' : 'green'}>{blocked ? (c.status || 'Inactive') : 'Active'}</Badge></td>
                     <td className="muted">{shortDate(c.joined)}</td>
-                    <td>
+                    <td className="sticky-end">
                       <div className="actions" style={{ position: 'relative' }}>
                         <button className="iconbtn" style={{ width: 30, height: 30 }} onClick={(e) => { e.stopPropagation(); setMenuId(menuId === c.id ? null : c.id) }}><MoreVertical size={18} /></button>
                         {menuId === c.id && (
@@ -353,7 +334,7 @@ export default function Customers() {
                   </tr>
                 )
               })}
-              {pageRows.length === 0 && <tr><td colSpan={12} className="muted" style={{ textAlign: 'center', padding: 28 }}>No customers match these filters.</td></tr>}
+              {pageRows.length === 0 && <tr><td colSpan={10} className="muted" style={{ textAlign: 'center', padding: 28 }}>No customers match these filters.</td></tr>}
             </tbody>
           </table>
         </div>

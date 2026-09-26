@@ -105,6 +105,12 @@ input, select, textarea { font-family: inherit; }
 .me { display: flex; align-items: center; gap: 10px; padding-left: 14px; margin-left: 2px; border-left: 1px solid var(--line); cursor: pointer; }
 .me strong { font-size: 13.5px; display: block; line-height: 1.15; font-weight: 700; }
 .me small { font-size: 11.5px; color: var(--muted); }
+/* top-bar pills and the signed-in name stay on one line on narrower screens */
+.daterange, .citysel, .me strong, .me small { white-space: nowrap; }
+.titlewrap { min-width: 0; }
+.page-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crumb { white-space: nowrap; }
+.crumb svg { flex-shrink: 0; }
 .me-chev { color: var(--muted); }
 .content { padding: 20px 26px 56px; }
 
@@ -183,7 +189,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 /* ============ search / filters / chips ============ */
 .searchbox { display: flex; align-items: center; gap: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; color: var(--muted); flex: 1; min-width: 180px; transition: .15s; }
 .searchbox:focus-within { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(91,81,232,.12); }
-.searchbox input { border: none; outline: none; background: none; flex: 1; font-size: 13.5px; color: var(--ink); }
+.searchbox input { border: none; outline: none; background: none; flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink); text-overflow: ellipsis; }
+/* the magnifier keeps its size; before, an overflowing input squeezed it to 0px */
+.searchbox > svg { flex-shrink: 0; }
+/* toolbar search that takes the free width instead of a spacer */
+.searchbox.grow { flex: 1 1 260px; }
+/* last column (row actions) stays in view while a wide table scrolls sideways */
+.tbl .sticky-end { position: sticky; right: 0; background: var(--card); box-shadow: -8px 0 8px -8px rgba(26,23,38,.12); }
+.tbl tbody tr:hover .sticky-end { background: var(--violet-50); }
 /* compact variant — matches .dd-trigger's metrics so a search sits flush beside a Dropdown */
 .searchbox.sm { padding: 8px 10px; border-radius: 9px; gap: 7px; flex: 0 1 250px; min-width: 150px; }
 .searchbox.sm input { font-size: 12.5px; }
