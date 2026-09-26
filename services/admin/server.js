@@ -9,7 +9,7 @@
 // The BFF aggregation endpoints (dashboard/analytics/customers/…) are added in Phase 2i.
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, publishEvent, tryGet, internalPost, internalPatch,
+import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, requireAnyPerm, publishEvent, tryGet, internalPost, internalPatch,
   PERMISSION_CATALOG, ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, isSystemRole, inScope } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
@@ -236,7 +236,7 @@ async function resolveScope(a, roster) {
   const byId = new Map(all.map((r) => [r.id, r]))
   const children = new Map()
   for (const r of all) if (r.reports_to != null) { if (!children.has(r.reports_to)) children.set(r.reports_to, []); children.get(r.reports_to).push(r.id) }
-  const cities = new Set(), zoneIds = new Set(), seen = new Set()
+  const cities = new Set(), zoneIds = new Set(), storeIds = new Set(), seen = new Set()
   const stack = [a.id]
   while (stack.length) {
     const id = stack.pop()
@@ -248,17 +248,23 @@ async function resolveScope(a, roster) {
       const vals = Array.isArray(node.scope_values) ? node.scope_values : []
       if (st === 'city') vals.forEach((c) => cities.add(String(c)))
       else if (st === 'zone') vals.forEach((z) => zoneIds.add(Number(z))) // 'all'/'team' add no turf of their own
+      else if (st === 'store') vals.forEach((h) => storeIds.add(Number(h)))  // hubs → resolved to their zones below
     }
     for (const c of (children.get(id) || [])) stack.push(c)
   }
-  if (!cities.size && !zoneIds.size) return { type, zoneIds: [], cities: [], cityScopes: [] } // e.g. a team lead with no scoped reports → sees nothing
+  if (storeIds.size) {
+    // A hub belongs to a zone: zone-level rows (customers, unassigned workers) follow the hub's zone.
+    const stores = await tryGet(U.catalog, '/api/internal/stores', [])
+    for (const st of stores || []) if (storeIds.has(Number(st.id)) && st.zone_id != null) zoneIds.add(Number(st.zone_id))
+  }
+  if (!cities.size && !zoneIds.size) return { type, zoneIds: [], cities: [], cityScopes: [], storeIds: [...storeIds] } // e.g. a team lead with no scoped reports → sees nothing
   const cityScopes = [...cities] // cities granted outright, before zones widen `cities` to theirs
   let zones = await getZonesSnapshot()
   // A zone created in the last minute isn't in the cached snapshot yet — refetch rather than drop it.
   if ([...zoneIds].some((id) => !zones.some((z) => z.id === id)) && Date.now() - zonesSnap.at > 2000) zones = await getZonesSnapshot(true)
   for (const z of zones) if (cities.has(z.city)) zoneIds.add(z.id)        // cities → their zones
   for (const z of zones) if (zoneIds.has(z.id) && z.city) cities.add(z.city) // zones → their cities
-  return { type, zoneIds: [...zoneIds], cities: [...cities], cityScopes }
+  return { type, zoneIds: [...zoneIds], cities: [...cities], cityScopes, storeIds: [...storeIds] }
 }
 
 // Resolved permission keys per role, cached in-process. This is the ONE place authorization is
@@ -412,12 +418,12 @@ app.get('/api/admin/admins', admin, requirePerm('admins.view'), async (_q, res) 
 function readScope(b, fallback = { scope_type: 'all', scope_values: [] }) {
   if (b.scopeType === undefined && b.scopeValues === undefined) return { scopeType: fallback.scope_type, scopeValues: fallback.scope_values }
   const scopeType = String(b.scopeType || 'all')
-  if (!['all', 'city', 'zone', 'team'].includes(scopeType)) return { error: 'Scope must be all, city, zone or team' }
+  if (!['all', 'city', 'zone', 'store', 'team'].includes(scopeType)) return { error: 'Scope must be all, city, zone, hub or team' }
   let scopeValues = Array.isArray(b.scopeValues) ? b.scopeValues : []
   if (scopeType === 'all' || scopeType === 'team') scopeValues = []
   else {
-    scopeValues = scopeType === 'zone' ? scopeValues.map(Number).filter((n) => Number.isFinite(n)) : scopeValues.map(String).filter(Boolean)
-    if (!scopeValues.length) return { error: `Pick at least one ${scopeType} for the scope` }
+    scopeValues = scopeType === 'zone' || scopeType === 'store' ? scopeValues.map(Number).filter((n) => Number.isFinite(n)) : scopeValues.map(String).filter(Boolean)
+    if (!scopeValues.length) return { error: `Pick at least one ${scopeType === 'store' ? 'hub' : scopeType} for the scope` }
   }
   return { scopeType, scopeValues }
 }
@@ -581,7 +587,7 @@ app.delete('/api/admin/roles/:key', admin, requirePerm('roles.manage'), async (r
 })
 
 /* ---------- audit ---------- */
-app.get('/api/admin/audit', admin, async (req, res) => {
+app.get('/api/admin/audit', admin, requireAnyPerm('admins.view'), async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM audit_log ORDER BY id DESC LIMIT $1', [Number(req.query.limit) || 30])
   res.json(rows)
 })
@@ -767,7 +773,7 @@ app.post('/api/admin/actions/payroll-approve', admin, async (req, res) =>
 // Live Ops control tower: real-time per-zone supply (workers) vs demand (open+active jobs).
 /* Live map for the control tower: experts where they are right now (online / on a job / offline,
    by their last GPS heartbeat) and open + active jobs at the customer's location. Zone-scoped. */
-app.get('/api/admin/live-map', admin, async (req, res) => {
+app.get('/api/admin/live-map', admin, requireAnyPerm('liveops.view', 'safety.view'), async (req, res) => {
   const scope = req.admin?.scope
   const [zonesAll, locs, opsAll] = await Promise.all([
     tryGet(U.catalog, '/api/internal/zones', []),
@@ -776,12 +782,12 @@ app.get('/api/admin/live-map', admin, async (req, res) => {
   ])
   const busy = new Set((opsAll || []).filter((b) => b.worker_id && b.status !== 'confirmed').map((b) => b.worker_id))
   const STALE_MS = 30 * 60000
-  const workers = (locs || []).filter((w) => w.last_lat != null && inScope(scope, { zoneId: w.zone_id, city: w.city })).map((w) => ({
+  const workers = (locs || []).filter((w) => w.last_lat != null && inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })).map((w) => ({
     id: w.id, name: w.name, phone: w.phone, zoneId: w.zone_id, lat: Number(w.last_lat), lng: Number(w.last_lng), seenAt: w.location_at,
     state: busy.has(w.id) ? 'busy' : w.available ? 'online' : 'offline',
     stale: !w.location_at || Date.now() - new Date(w.location_at).getTime() > STALE_MS,
   }))
-  const jobs = (opsAll || []).filter((b) => b.cust_lat != null && inScope(scope, { zoneId: b.zone_id })).map((b) => {
+  const jobs = (opsAll || []).filter((b) => b.cust_lat != null && inScope(scope, { zoneId: b.zone_id, storeId: b.store_id })).map((b) => {
     let items = []; try { items = typeof b.items === 'string' ? JSON.parse(b.items) : (b.items || []) } catch { /* ignore */ }
     return { id: b.id, ref: b.ref, status: b.status, zoneId: b.zone_id, lat: Number(b.cust_lat), lng: Number(b.cust_lng), workerId: b.worker_id, pro: b.pro_name || '', service: items.map((i) => i.name).join(', ') }
   })
@@ -790,7 +796,7 @@ app.get('/api/admin/live-map', admin, async (req, res) => {
   res.json({ workers, jobs, zones, at: new Date().toISOString() })
 })
 
-app.get('/api/admin/live-ops', admin, async (req, res) => {
+app.get('/api/admin/live-ops', admin, requireAnyPerm('liveops.view', 'zones.view'), async (req, res) => {
   const ACTIVE = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
   const [zonesAll, wres, opsAll] = await Promise.all([
     tryGet(U.catalog, '/api/internal/zones', []),
@@ -801,8 +807,8 @@ app.get('/api/admin/live-ops', admin, async (req, res) => {
   // three source arrays up front means every count below (zoneRows, totals, unzoned) is scoped too.
   const scope = req.admin?.scope
   const zones = (zonesAll || []).filter((z) => inScope(scope, { zoneId: z.id, city: z.city }))
-  const ops = (opsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id }))
-  const workers = (wres.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
+  const ops = (opsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }))
+  const workers = (wres.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
   const zoneRows = (zones || []).map((z) => {
     const zw = workers.filter((w) => w.zone_id === z.id)
     const online = zw.filter((w) => w.status === 'active' && w.available).length
@@ -847,7 +853,7 @@ const IST_MS = 5.5 * 3600000
 const ageMin = (created) => Math.max(0, Math.round((Date.now() - new Date(created).getTime()) / 60000))
 const istDay = (d) => { try { return new Date(new Date(d).getTime() + IST_MS).toISOString().slice(0, 10) } catch { return '' } }
 
-app.get('/api/admin/command-center', admin, async (req, res) => {
+app.get('/api/admin/command-center', admin, requireAnyPerm('liveops.view'), async (req, res) => {
   const [zonesAll, wres, opsAll, bookingsAll] = await Promise.all([
     tryGet(U.catalog, '/api/internal/zones', []),
     tryGet(U.worker, '/internal/workers', { workers: [] }),
@@ -856,9 +862,9 @@ app.get('/api/admin/command-center', admin, async (req, res) => {
   ])
   const scope = req.admin?.scope
   const zones = (zonesAll || []).filter((z) => inScope(scope, { zoneId: z.id, city: z.city }))
-  const workers = (wres.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
-  const ops = (opsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id }))
-  const bookings = (bookingsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const workers = (wres.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
+  const ops = (opsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }))
+  const bookings = (bookingsAll || []).filter((b) => inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }))
   const zoneName = (id) => zones.find((z) => z.id === id)?.name || (id ? `Zone ${id}` : 'Unzoned')
 
   // ---- demand vs supply per zone ----
@@ -938,7 +944,7 @@ app.get('/api/admin/command-center', admin, async (req, res) => {
  * console offers for reassignment. Scope-aware. Actions themselves go to the booking service's
  * PATCH /api/admin/bookings/:id (reassign / reschedule / escalate / note / cancel). */
 const CT_ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
-app.get('/api/admin/control-tower', admin, async (req, res) => {
+app.get('/api/admin/control-tower', admin, requireAnyPerm('liveops.view'), async (req, res) => {
   const [bookingsAll, customers, wres, zonesAll] = await Promise.all([
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.auth, '/api/internal/customers', []),
@@ -950,7 +956,7 @@ app.get('/api/admin/control-tower', admin, async (req, res) => {
   const wById = new Map((wres.workers || []).map((w) => [w.id, w]))
   const zById = new Map((zonesAll || []).map((z) => [z.id, z]))
   const jobs = (bookingsAll || [])
-    .filter((b) => CT_ACTIVE.includes(b.status) && inScope(scope, { zoneId: b.zone_id }))
+    .filter((b) => CT_ACTIVE.includes(b.status) && inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }))
     .map((b) => {
       const cu = custById.get(b.user_id) || {}
       const w = b.worker_id ? (wById.get(b.worker_id) || {}) : null
@@ -970,7 +976,7 @@ app.get('/api/admin/control-tower', admin, async (req, res) => {
     })
     .sort((a, b) => (Number(b.escalated) - Number(a.escalated)) || (b.id - a.id))
   const pros = (wres.workers || [])
-    .filter((w) => w.status === 'active' && inScope(scope, { zoneId: w.zone_id, city: w.city }))
+    .filter((w) => w.status === 'active' && inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
     .map((w) => ({ id: w.id, name: w.name, zoneId: w.zone_id, available: !!w.available }))
     .sort((a, b) => a.name.localeCompare(b.name))
   res.json({ jobs, pros, generatedAt: nowIso() })
@@ -984,7 +990,7 @@ function bookingCity(b, zonesById) {
   const parts = String(b.address || '').split(',').map((x) => x.trim()).filter((x) => x && !/^\d[\d\s-]*$/.test(x))
   return parts.pop() || 'Unknown'
 }
-app.get('/api/admin/dashboard', admin, async (req, res) => {
+app.get('/api/admin/dashboard', admin, requireAnyPerm('dashboard.view'), async (req, res) => {
   const [customersAll, bookingsAll, workersResp] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.booking, '/api/internal/bookings', []),
@@ -995,8 +1001,8 @@ app.get('/api/admin/dashboard', admin, async (req, res) => {
   const scope = req.admin?.scope
   const zoneOf = scope && scope.type !== 'all' ? await customerZoneMap(await tryGet(U.auth, '/api/internal/addresses/defaults', []), bookingsAll) : {}
   const customers = customersAll.filter((c) => customerInScope(scope, c, zoneOf))
-  const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id }))
-  const wList = (workersResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
+  const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }))
+  const wList = (workersResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
   const wCount = (...s) => wList.filter((w) => s.includes(w.status)).length
   const workers = { stats: { total: wList.length, active: wCount('active'), pending: wCount('pending', 'onboarding'), inactive: wCount('inactive', 'suspended') } }
   const ACTIVE = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
@@ -1058,9 +1064,9 @@ app.get('/api/admin/dashboard', admin, async (req, res) => {
   })
 })
 
-app.get('/api/admin/analytics', admin, async (req, res) => {
+app.get('/api/admin/analytics', admin, requireAnyPerm('analytics.view'), async (req, res) => {
   const bookingsAll = await tryGet(U.booking, '/api/internal/bookings', [])
-  const bookings = bookingsAll.filter((b) => inScope(req.admin?.scope, { zoneId: b.zone_id })) // data scope
+  const bookings = bookingsAll.filter((b) => inScope(req.admin?.scope, { zoneId: b.zone_id, storeId: b.store_id })) // data scope
   const revenue = bookings.filter((b) => b.payment_status === 'paid' || b.status === 'completed').reduce((s, b) => s + (b.total || 0), 0)
   const byDay = {}
   for (const b of bookings) { const d = String(b.created).slice(0, 10); byDay[d] = (byDay[d] || 0) + 1 }
@@ -1069,7 +1075,7 @@ app.get('/api/admin/analytics', admin, async (req, res) => {
 
 // Reports screen (fetchInsights). Builds the full analytics contract the frontend expects;
 // every field is a safe default so the screen renders cleanly even with zero data.
-app.get('/api/admin/insights', admin, async (req, res) => {
+app.get('/api/admin/insights', admin, requireAnyPerm('reports.view', 'analytics.view'), async (req, res) => {
   const [bookingsAll, customersAll, wResp] = await Promise.all([
     tryGet(U.booking, '/api/internal/bookings', []),
     tryGet(U.auth, '/api/internal/customers', []),
@@ -1077,10 +1083,10 @@ app.get('/api/admin/insights', admin, async (req, res) => {
   ])
   // Data scope: filter every source array up front so all insights below are scoped.
   const scope = req.admin?.scope
-  const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id }))
+  const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }))
   const zoneOf = scope && scope.type !== 'all' ? await customerZoneMap(await tryGet(U.auth, '/api/internal/addresses/defaults', []), bookingsAll) : {}
   const customers = customersAll.filter((c) => customerInScope(scope, c, zoneOf))
-  const workers = (wResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
+  const workers = (wResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
   const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
   const paid = bookings.filter(isPaid)
   const revenue = paid.reduce((s, b) => s + (b.total || 0), 0)
@@ -1241,7 +1247,7 @@ async function scopeCustomer(req, res, next) {
   next()
 }
 
-app.get('/api/admin/customers', admin, async (req, res) => {
+app.get('/api/admin/customers', admin, requireAnyPerm('customers.view', 'wallet.view'), async (req, res) => {
   const [customersAll, bookings, zones, defAddrs] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
     tryGet(U.booking, '/api/internal/bookings', []),
@@ -1300,7 +1306,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
 // Customer detail (profile page): everything the /customers/:id screen renders. Bookings are enriched
 // with the fields the Overview cards need (service, worker, schedule, payment, rating) so the screen can
 // derive spending/service/activity summaries client-side without extra round-trips.
-app.get('/api/admin/customers/:id', admin, scopeCustomer, async (req, res) => {
+app.get('/api/admin/customers/:id', admin, requireAnyPerm('customers.view'), scopeCustomer, async (req, res) => {
   const id = Number(req.params.id)
   const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods, membershipLedger, membershipPlans, offers, tickets] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
@@ -1363,7 +1369,7 @@ async function upsertWorkerComm(id, patch) {
     [id, next.whatsapp, next.sms, next.email, next.push, next.promo])
   return next
 }
-app.get('/api/admin/worker-comm/:id', admin, async (req, res) => res.json(await getWorkerComm(Number(req.params.id))))
+app.get('/api/admin/worker-comm/:id', admin, requireAnyPerm('workers.view'), async (req, res) => res.json(await getWorkerComm(Number(req.params.id))))
 app.patch('/api/admin/worker-comm/:id', admin, requirePerm('workers.edit'), async (req, res) => {
   const b = req.body || {}
   // Admin panel sends comm_* keys; translate to the friendly shape.

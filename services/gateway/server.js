@@ -14,6 +14,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware'
 import { Server } from 'socket.io'
 import Redis from 'ioredis'
 import { REALTIME_CHANNEL } from '@homehelp/shared/realtime.js'
+import { inScope } from '@homehelp/shared/scope.js'
 
 const PORT = Number(process.env.PORT || 8080)
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
@@ -49,7 +50,7 @@ function pickTarget(url) {
   if (p('/api/admin/workers') || p('/api/admin/shifts') || p('/api/admin/shift-defs') || p('/api/admin/attendance') || p('/api/admin/next-day-availability') || p('/api/admin/sites') || p('/api/admin/training') || p('/api/admin/equipment') || p('/api/admin/salary-plans') || p('/api/admin/incentive-plans') || p('/api/admin/payroll') || p('/api/admin/incentive-rules')) return U.worker
   if (p('/api/admin/bookings')) return U.booking
   if (p('/api/admin/finance') || p('/api/admin/payments') || p('/api/admin/refunds')) return U.payment
-  if (p('/api/admin/tickets') || p('/api/admin/complaints')) return U.notification
+  if (p('/api/admin/tickets') || p('/api/admin/complaints') || p('/api/admin/sos')) return U.notification
   if (p('/api/admin')) return U.admin
 
   // ----- worker app -----
@@ -147,8 +148,18 @@ io.on('connection', (socket) => {
     .catch(() => {})
   socket.on('booking:join', (id) => socket.join(`booking:${Number(id)}`))
   socket.on('booking:leave', (id) => socket.leave(`booking:${Number(id)}`))
-  // Admin control-tower room — receives ops broadcasts (e.g. worker SOS) in real time.
-  socket.on('admin:join', () => socket.join('admin'))
+  // Admin control-tower room — receives ops broadcasts (e.g. SOS) in real time. Joining needs a
+  // valid admin token: the room carries names, phone numbers and locations. The admin's role,
+  // permissions and data scope are kept on the socket so each alert is delivered only to the
+  // admins it concerns (see the relay below).
+  socket.on('admin:join', async (token) => {
+    try {
+      const r = await fetch(`${U.admin}/api/admin/me`, { headers: { authorization: `Bearer ${String(token || '')}` } })
+      if (!r.ok) return socket.emit('admin:denied')
+      socket.data.admin = (await r.json()).admin
+      socket.join('admin')
+    } catch { socket.emit('admin:denied') }
+  })
   socket.on('admin:leave', () => socket.leave('admin'))
 })
 
@@ -161,10 +172,27 @@ sub.subscribe(REALTIME_CHANNEL, (err) => {
 sub.on('message', (_ch, msg) => {
   try {
     const { room, event, payload } = JSON.parse(msg)
+    if (room === 'admin' && event === 'sos') return deliverSos(payload)
     if (room) io.to(room).emit(event, payload)
     else io.emit(event, payload)
   } catch (e) { console.error('[gateway] bad realtime message:', e.message) }
 })
+
+/* An SOS reaches: super admins; anyone holding safety.view whose scope covers where it happened
+   (the safety desk has scope 'all', a zone/hub manager their own area). Admins without the
+   permission — finance, marketing, trainers… — never see it. */
+function deliverSos(p) {
+  const ids = io.sockets.adapter.rooms.get('admin')
+  if (!ids) return
+  for (const id of ids) {
+    const sock = io.sockets.sockets.get(id)
+    const a = sock?.data?.admin
+    if (!a) continue
+    const perms = Array.isArray(a.permissions) ? a.permissions : []
+    const ok = a.role === 'super' || (perms.includes('safety.view') && inScope(a.scope, { zoneId: p?.zoneId ?? null, storeId: p?.storeId ?? null, city: p?.city ?? null }))
+    if (ok) sock.emit('sos', p)
+  }
+}
 
 httpServer.listen(PORT, () => {
   console.log(`[gateway] listening on http://localhost:${PORT}`)

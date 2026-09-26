@@ -98,6 +98,7 @@ async function main() {
   await sleep(800)
   const sosT = (await api('GET', '/api/admin/tickets', { token: SUP })).json.find((x) => x.booking_id === bk.id && x.category === 'Safety')
   check('SOS opens an urgent safety ticket', !!sosT && sosT.priority === 'urgent')
+  if (sosT) await api('POST', `/api/admin/sos/${sosT.id}/resolve`, { token: SUP, body: { note: 'e2e cleanup' } })
   await api('POST', `/api/bookings/${bk.id}/cancel`, { token: C, body: { reason: 'test' } })
   const tl2 = (await api('GET', `/api/admin/bookings/${bk.id}/timeline`, { token: SUP })).json
   check('Admin booking timeline is available', Array.isArray(tl2) && tl2.some((e) => /placed/i.test(e.title)) && tl2.some((e) => /cancel/i.test(e.title)), JSON.stringify(tl2).slice(0, 120))

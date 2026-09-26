@@ -1,0 +1,16 @@
+{
+  "name": "HomeHelp Field",
+  "short_name": "HH Field",
+  "description": "Run your area from your phone: SOS, live jobs and your team.",
+  "id": "/field",
+  "start_url": "/field",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f5fb",
+  "theme_color": "#5b51e8",
+  "icons": [
+    { "src": "/field-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/field-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

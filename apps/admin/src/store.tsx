@@ -36,7 +36,7 @@ export function useStore() {
 
 // role helper: super > admin > manager > support. Retained for legacy call sites; new code should
 // gate on has(admin, 'perm.key') instead — permissions are authoritative, role rank is not.
-const RANK: Record<string, number> = { super: 4, admin: 3, manager: 2, support: 1 }
+const RANK: Record<string, number> = { super: 4, admin: 3, manager: 2, dispatcher: 2, finance: 2, support: 1, safety: 1, recruiter: 1, trainer: 1, marketing: 1, auditor: 1 }
 export const can = (role: string | undefined, min: string) => (RANK[role || ''] || 0) >= (RANK[min] || 0)
 
 // Permission gate — the one the UI should use. super always passes (holds every permission);

@@ -7,7 +7,7 @@
 // are published to Redis and relayed by the gateway's socket hub.
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeAdminAuth, inScope, internalOnly,
+  makePool, migrate, nowIso, makeAdminAuth, requireAnyPerm, inScope, internalOnly,
   internalPost, tryGet, publishEvent, publishRealtime, getSetting, getSettingInt, subscribeEvents, invalidateSettings, callsMasked,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
@@ -96,6 +96,8 @@ async function init() {
     )`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pincode TEXT`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS zone_id INTEGER`,
+    // The hub (store) whose radius covers the address — hub-level scope for hub managers.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS store_id INTEGER`,
     // The saved address this booking was placed to — stamped at checkout so "last used" is exact
     // rather than a text match. Null on legacy rows and free-typed addresses.
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS address_id INTEGER`,
@@ -889,6 +891,13 @@ app.post('/api/bookings', auth, async (req, res) => {
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
       custLat, custLng, pincode || null, zoneId, nowIso(), addressId ?? null, paymentRef, onlinePart, walletPart, promoPart])
   let booking = rowTo(ins.rows[0])
+  // Which hub serves this address (best-effort; a booking outside every hub stays zone-level).
+  if (custLat != null && custLng != null) {
+    try {
+      const { storeId } = await internalPost(CATALOG_URL, '/api/internal/store-for', { lat: custLat, lng: custLng, zoneId })
+      if (storeId) { await pool.query('UPDATE bookings SET store_id=$1 WHERE id=$2', [storeId, booking.id]); booking = { ...booking, store_id: storeId } }
+    } catch { /* hub lookup is optional */ }
+  }
   if (paymentRef) internalPost(PAYMENT_URL, '/api/internal/payment/attach', { paymentId: paymentRef, ref: `booking:${booking.id}` }).catch(() => {})
 
   // Record the payment in the customer's transaction ledger for NON-wallet methods too. Wallet
@@ -1308,14 +1317,18 @@ app.get('/api/policy/cancellation', async (_q, res) => {
 })
 
 /* ================= admin ================= */
-app.get('/api/admin/bookings', adminAuth, async (req, res) => {
+app.get('/api/admin/bookings', adminAuth, requireAnyPerm('bookings.view', 'cancellations.view'), async (req, res) => {
   // Data scope: bookings are zone-tagged (no city), so a scoped admin filters by their zone ids.
   // Filter in SQL, before the LIMIT, so they get their full 500 rather than 500-then-filtered.
   const scope = req.admin?.scope
   const zids = scope && scope.type !== 'all' && Array.isArray(scope.zoneIds) ? scope.zoneIds : null
-  const { rows } = zids
-    ? await pool.query('SELECT * FROM bookings WHERE zone_id = ANY($1) ORDER BY id DESC LIMIT 500', [zids])
-    : await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
+  // Hub managers: their hubs' bookings, plus zone bookings no hub covers.
+  const hubs = scope?.type === 'store' && Array.isArray(scope.storeIds) && scope.storeIds.length ? scope.storeIds : null
+  const { rows } = hubs
+    ? await pool.query('SELECT * FROM bookings WHERE store_id = ANY($1) OR (store_id IS NULL AND zone_id = ANY($2)) ORDER BY id DESC LIMIT 500', [hubs, zids || []])
+    : zids
+      ? await pool.query('SELECT * FROM bookings WHERE zone_id = ANY($1) ORDER BY id DESC LIMIT 500', [zids])
+      : await pool.query('SELECT * FROM bookings ORDER BY id DESC LIMIT 500')
   const bookings = rows.map(rowTo)
   // Enrich with customer name from the auth service (best-effort).
   const ids = [...new Set(bookings.map((b) => b.user_id))]
@@ -1326,7 +1339,7 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
 })
 // Data scope: bookings are zone-tagged; a scoped admin can't touch one outside their zones. 404
 // (not 403) so they can't probe which booking ids exist outside their scope.
-const bookingInScope = (req, b) => inScope(req.admin?.scope, { zoneId: b.zone_id })
+const bookingInScope = (req, b) => inScope(req.admin?.scope, { zoneId: b.zone_id, storeId: b.store_id })
 /* Customer SOS during a job: alerts the ops control tower (siren) with the booking, expert and
    location, and opens an urgent ticket so it is followed up. */
 app.post('/api/bookings/:id/sos', auth, async (req, res) => {
@@ -1336,14 +1349,15 @@ app.post('/api/bookings/:id/sos', auth, async (req, res) => {
   publishRealtime(REDIS_URL, 'admin', 'sos', {
     kind: 'customer', customerId: req.user.id, workerId: b.worker_id || null, workerName: req.user.name || `Customer #${req.user.id}`,
     phone: req.user.phone || '', lat, lng, at: new Date().toISOString(), reason: `Customer SOS · ${b.ref}${b.pro_name ? ` · expert ${b.pro_name}` : ''}`, bookingId: b.id,
+    zoneId: b.zone_id ?? null, storeId: b.store_id ?? null,
   })
-  internalPost(NOTIFICATION_URL, '/api/internal/sos-ticket', { userId: req.user.id, bookingId: b.id, bookingRef: b.ref, message: String(req.body?.message || 'Customer pressed SOS').slice(0, 300) }).catch(() => {})
+  internalPost(NOTIFICATION_URL, '/api/internal/sos-ticket', { kind: 'customer', userId: req.user.id, bookingId: b.id, bookingRef: b.ref, lat, lng, message: String(req.body?.message || 'Customer pressed SOS').slice(0, 300) }).catch(() => {})
   publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'sos', entityType: 'booking', entityId: b.id, ref: b.ref, detail: '🆘 Customer SOS raised', meta: { lat, lng } })
   res.json({ ok: true, message: 'Our safety team has been alerted and will call you right away.' })
 })
 
 // Timeline of a booking for the admin detail page: what happened, when.
-app.get('/api/admin/bookings/:id/timeline', adminAuth, async (req, res) => {
+app.get('/api/admin/bookings/:id/timeline', adminAuth, requireAnyPerm('bookings.view'), async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const ev = [{ at: b.created, title: 'Booking placed', detail: `${(b.items || []).map((i) => i.name).join(', ')} · ₹${b.total}` }]
@@ -1359,7 +1373,7 @@ app.get('/api/admin/bookings/:id/timeline', adminAuth, async (req, res) => {
   res.json(ev)
 })
 
-app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
+app.get('/api/admin/bookings/:id', adminAuth, requireAnyPerm('bookings.view', 'cancellations.view'), async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
@@ -1371,7 +1385,7 @@ app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
 // actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp
 // (or the commission split); ops/marketing cost rates are configurable and default to 0 so nothing
 // is invented; company margin is whatever's left. Transactions + document refs are derived.
-app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
+app.get('/api/admin/bookings/:id/settlement', adminAuth, requireAnyPerm('bookings.view', 'payments.view'), async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const r2 = (n) => Math.round(n * 100) / 100
@@ -1413,7 +1427,7 @@ app.get('/api/admin/bookings/:id/settlement', adminAuth, async (req, res) => {
 // Service evidence for the admin Service Evidence tab — merges the worker-captured evidence row
 // (before/after photos, checklist, notes, completion OTP, signatures) with the booking's own
 // timestamps/OTP/rating. Fields with no captured data come back empty (never invented).
-app.get('/api/admin/bookings/:id/evidence', adminAuth, async (req, res) => {
+app.get('/api/admin/bookings/:id/evidence', adminAuth, requireAnyPerm('bookings.view'), async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const ev = (await pool.query('SELECT * FROM booking_evidence WHERE booking_id=$1', [b.id])).rows[0] || {}
@@ -1452,7 +1466,7 @@ app.post('/api/internal/bookings/:id/evidence', internalOnly, async (req, res) =
 // Per-booking activity/audit feed — derived from the booking's real lifecycle (create, payment,
 // dispatch, service start, evidence upload, completion, rating, escalation, admin note). Every entry
 // has a real timestamp; nothing is invented. Counts grouped by actor role for the summary chips.
-app.get('/api/admin/bookings/:id/activity', adminAuth, async (req, res) => {
+app.get('/api/admin/bookings/:id/activity', adminAuth, requireAnyPerm('bookings.view'), async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
@@ -1603,7 +1617,7 @@ app.get('/api/internal/pool', internalOnly, async (_q, res) => {
 // Live-ops: open + in-progress bookings (lightweight) for the admin control tower.
 app.get('/api/internal/ops', internalOnly, async (_q, res) => {
   const { rows } = await pool.query(
-    `SELECT id, ref, status, zone_id, pincode, worker_id, pro_name, total, created, cust_lat, cust_lng, items FROM bookings
+    `SELECT id, ref, status, zone_id, store_id, pincode, worker_id, pro_name, total, created, cust_lat, cust_lng, items FROM bookings
      WHERE status = ANY($1) ORDER BY created DESC LIMIT 500`, [ACTIVE_STATES])
   res.json(rows)
 })

@@ -9,7 +9,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
-  makeAdminAuth, requirePerm, getSetting, getSettingInt, smsConfigured, sendOtpSms, inScope,
+  makeAdminAuth, requirePerm, requireAnyPerm, getSetting, getSettingInt, smsConfigured, sendOtpSms, inScope,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: it carries the jsonwebtoken dep.
 import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
@@ -869,7 +869,7 @@ app.use('/api/admin/workers/:id/wallet', adminAuth, async (req, res, next) => {
   const scope = req.admin?.scope
   if (!scope || scope.type === 'all') return next()
   const w = await workerSnapshot(Number(req.params.id))
-  if (!w?.id || !inScope(scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Not found' })
+  if (!w?.id || !inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })) return res.status(404).json({ error: 'Not found' })
   next()
 })
 app.post('/api/admin/workers/:id/wallet/advances/:adv/:action(approve|reject)', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
@@ -896,7 +896,7 @@ app.post('/api/admin/workers/:id/wallet/release-pending', adminAuth, requirePerm
   res.json({ released: amt, ...(await walletState(wid)) })
 })
 app.post('/api/admin/workers/:id/wallet/payslip', adminAuth, async (req, res) => res.json(await savePayslip(Number(req.params.id), req.body?.month)))
-app.get('/api/admin/workers/:id/wallet', adminAuth, async (req, res) => res.json(await walletState(Number(req.params.id))))
+app.get('/api/admin/workers/:id/wallet', adminAuth, requireAnyPerm('wallet.view', 'workers.pay_view'), async (req, res) => res.json(await walletState(Number(req.params.id))))
 // A manually granted bonus records the admin who granted it; everything else is credited by 'System'.
 // Manual wallet adjustments. Each needs a positive whole-rupee amount, and each is logged to the
 // activity feed so it is clear who moved a worker's money and why.

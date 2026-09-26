@@ -8,9 +8,15 @@
 //   • a row with no zone_id falls back to city (workers/customers that were never zone-tagged);
 //   • a row with neither signal is hidden from a scoped admin (it can't be attributed to a scope).
 // scope absent, or type 'all', or an empty scope → everything (unrestricted).
+// type 'store' = a hub manager: scope.storeIds are their hubs, scope.zoneIds those hubs' zones.
 
-export function inScope(scope, { zoneId = null, city = null } = {}) {
+export function inScope(scope, { zoneId = null, city = null, storeId = null } = {}) {
   if (!scope || scope.type === 'all') return true
+  // Hub (store) managers: a row tied to a hub is judged by the hub itself — another hub in the same
+  // zone is out of scope. Rows with no hub (customers, unassigned workers) fall back to the hub's zone.
+  if (scope.type === 'store' && Array.isArray(scope.storeIds) && scope.storeIds.length && storeId != null && storeId !== '') {
+    return scope.storeIds.includes(Number(storeId))
+  }
   const zids = scope.zoneIds, cities = scope.cities
   const hasZ = Array.isArray(zids) && zids.length > 0
   const hasC = Array.isArray(cities) && cities.length > 0
@@ -23,7 +29,7 @@ export function inScope(scope, { zoneId = null, city = null } = {}) {
 }
 
 /** Convenience: keep only the in-scope rows, reading zone/city off each with the given accessors. */
-export function filterScope(scope, rows, pick = (r) => ({ zoneId: r.zone_id, city: r.city })) {
+export function filterScope(scope, rows, pick = (r) => ({ zoneId: r.zone_id, city: r.city, storeId: r.store_id })) {
   if (!scope || scope.type === 'all') return rows
   return rows.filter((r) => inScope(scope, pick(r)))
 }

@@ -9,7 +9,7 @@
 // them, so the admin Activity Monitor and booking timeline work without any service calling it.
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeAdminAuth, requirePerm, internalOnly, subscribeEvents, tryGet, publishEvent, sendPush, inScope, internalPost,
+  makePool, migrate, nowIso, makeAdminAuth, requirePerm, requireAnyPerm, internalOnly, subscribeEvents, tryGet, publishEvent, publishRealtime, sendPush, inScope, internalPost,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
@@ -89,6 +89,11 @@ async function init() {
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS review_at TIMESTAMPTZ`,
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ`,
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_by TEXT`,
+    // SOS incidents are Safety tickets; these carry where it happened and who is responding.
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sos_kind TEXT`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sos_lat DOUBLE PRECISION`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sos_lng DOUBLE PRECISION`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS acknowledged_by TEXT`,
     `CREATE TABLE IF NOT EXISTS ticket_messages (
       id SERIAL PRIMARY KEY, ticket_id INTEGER NOT NULL,
       sender_type TEXT NOT NULL,            -- customer | worker | admin
@@ -143,8 +148,8 @@ app.get('/health', (_q, res) => res.json({ service: 'notification', ok: true }))
 /* ---------- activity (admin monitor) ---------- */
 const listRoute = async (req, res) => { try { res.json(await listActivity(req.query)) } catch (e) { res.status(500).json({ error: e.message }) } }
 const statsRoute = async (req, res) => { try { res.json(await statsActivity(req.query.days)) } catch (e) { res.status(500).json({ error: e.message }) } }
-app.get('/api/admin/activity', adminAuth, listRoute)
-app.get('/api/admin/activity/stats', adminAuth, statsRoute)
+app.get('/api/admin/activity', adminAuth, requireAnyPerm('activity.view'), listRoute)
+app.get('/api/admin/activity/stats', adminAuth, requireAnyPerm('activity.view'), statsRoute)
 app.post('/internal/events', internalOnly, async (req, res) => { try { await logEvent(req.body || {}); res.json({ ok: true }) } catch (e) { res.status(500).json({ error: e.message }) } })
 app.get('/internal/list', internalOnly, listRoute)
 app.get('/internal/timeline/:bookingId', internalOnly, async (req, res) => {
@@ -179,10 +184,13 @@ app.post('/api/tickets/:id/escalate', auth, async (req, res) => {
 app.post('/api/internal/sos-ticket', internalOnly, async (req, res) => {
   const b = req.body || {}
   const ref = '#SOS' + Math.floor(1000 + Math.random() * 8999)
+  const worker = b.kind === 'worker'
   const { rows } = await pool.query(
-    `INSERT INTO tickets (user_id,category,subject,message,status,ref,priority,escalated,booking_id,booking_ref)
-     VALUES ($1,'Safety','SOS during service',$2,'Open',$3,'urgent',true,$4,$5) RETURNING *`,
-    [Number(b.userId), b.message || 'SOS', ref, b.bookingId || null, b.bookingRef || null])
+    `INSERT INTO tickets (user_id,category,subject,message,status,ref,priority,escalated,booking_id,booking_ref,requester,worker_id,sos_kind,sos_lat,sos_lng)
+     VALUES ($1,'Safety',$2,$3,'Open',$4,'urgent',true,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [worker ? 0 : Number(b.userId) || 0, worker ? 'Expert SOS' : 'SOS during service', b.message || 'SOS', ref, b.bookingId || null, b.bookingRef || null,
+      worker ? 'worker' : 'customer', worker ? Number(b.workerId) : null, worker ? 'worker' : 'customer',
+      Number.isFinite(Number(b.lat)) && b.lat != null ? Number(b.lat) : null, Number.isFinite(Number(b.lng)) && b.lng != null ? Number(b.lng) : null])
   res.json(rows[0])
 })
 app.post('/api/internal/worker-tickets', internalOnly, async (req, res) => {
@@ -208,16 +216,70 @@ async function ticketScopeFilter(req, rows) {
     tryGet(WORKER_URL, '/internal/workers', { workers: [] }),
     tryGet(AUTH_URL, '/api/internal/customers', []),
   ])
-  const bz = new Map((bookings || []).map((b) => [b.id, b.zone_id]))
+  const bz = new Map((bookings || []).map((b) => [b.id, b]))
   const wz = new Map((wres.workers || []).map((w) => [w.id, w]))
   const cc = new Map((customers || []).map((c) => [c.id, c.city]))
   return rows.filter((t) => {
-    if (t.booking_id && bz.has(t.booking_id)) return inScope(scope, { zoneId: bz.get(t.booking_id) })
-    if (t.requester === 'worker') { const w = wz.get(t.worker_id); return !!w && inScope(scope, { zoneId: w.zone_id, city: w.city }) }
+    if (t.booking_id && bz.has(t.booking_id)) { const b = bz.get(t.booking_id); return inScope(scope, { zoneId: b.zone_id, storeId: b.store_id }) }
+    if (t.requester === 'worker') { const w = wz.get(t.worker_id); return !!w && inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }) }
     return inScope({ ...scope, zoneIds: [] }, { city: cc.get(t.user_id) || null })
   })
 }
-app.get('/api/admin/tickets', adminAuth, async (req, res) => {
+/* ---------- SOS incidents (the safety desk / hub-manager queue) ----------
+   Every SOS — the expert's button, the volume buttons, an unanswered safety check, or a customer's
+   SOS — is an urgent Safety ticket. Scoped like any ticket, so a hub manager sees their hub's. */
+const sosDto = (t, names) => ({
+  id: t.id, ref: t.ref, kind: t.sos_kind || (t.requester === 'worker' ? 'worker' : 'customer'), status: t.status,
+  who: t.requester === 'worker' ? (names.w.get(t.worker_id) || `Expert #${t.worker_id}`) : (names.c.get(t.user_id) || `Customer #${t.user_id}`),
+  phone: t.requester === 'worker' ? (names.wp.get(t.worker_id) || '') : (names.cp.get(t.user_id) || ''),
+  workerId: t.worker_id, userId: t.user_id, bookingId: t.booking_id, bookingRef: t.booking_ref, message: t.message,
+  lat: t.sos_lat, lng: t.sos_lng, created: t.created, acknowledgedAt: t.acknowledged_at, acknowledgedBy: t.acknowledged_by,
+  resolvedAt: t.resolved_at, resolvedBy: t.resolved_by, response: t.response,
+})
+async function sosNames(rows) {
+  const [wres, customers] = await Promise.all([
+    rows.some((t) => t.requester === 'worker') ? tryGet(WORKER_URL, '/internal/workers', { workers: [] }) : { workers: [] },
+    rows.some((t) => t.requester !== 'worker') ? tryGet(AUTH_URL, '/api/internal/customers', []) : [],
+  ])
+  return {
+    w: new Map((wres.workers || []).map((w) => [w.id, w.name])), wp: new Map((wres.workers || []).map((w) => [w.id, w.phone])),
+    c: new Map((customers || []).map((c) => [c.id, c.name])), cp: new Map((customers || []).map((c) => [c.id, c.phone])),
+  }
+}
+app.get('/api/admin/sos', adminAuth, requirePerm('safety.view'), async (req, res) => {
+  const all = String(req.query.status || 'open') === 'all'
+  const rows = await ticketScopeFilter(req, (await pool.query(
+    `SELECT * FROM tickets WHERE category='Safety' ${all ? '' : "AND lower(coalesce(status,'')) NOT IN ('resolved','closed')"} ORDER BY id DESC LIMIT 200`)).rows)
+  const names = await sosNames(rows)
+  res.json(rows.map((t) => sosDto(t, names)))
+})
+async function sosInScope(req, res) {
+  const t = (await pool.query("SELECT * FROM tickets WHERE id=$1 AND category='Safety'", [Number(req.params.id)])).rows[0]
+  if (!t || !(await ticketScopeFilter(req, [t])).length) { res.status(404).json({ error: 'Not found' }); return null }
+  return t
+}
+app.post('/api/admin/sos/:id/ack', adminAuth, requirePerm('safety.respond'), async (req, res) => {
+  const t = await sosInScope(req, res); if (!t) return
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  if (['Resolved', 'Closed'].includes(t.status)) return res.status(409).json({ error: 'Already resolved' })
+  const { rows } = await pool.query("UPDATE tickets SET status='Acknowledged', acknowledged_at=COALESCE(acknowledged_at, now()), acknowledged_by=COALESCE(acknowledged_by, $1) WHERE id=$2 RETURNING *", [who, t.id])
+  await logEvent({ actorType: 'admin', actorId: req.admin?.id, actorName: who, action: 'sos.ack', entityType: 'ticket', entityId: t.id, ref: t.ref, detail: `${who} is responding to ${t.ref}` })
+  publishRealtime(REDIS_URL, 'admin', 'sos:update', { id: t.id, status: 'Acknowledged', by: who })
+  res.json(sosDto(rows[0], await sosNames(rows)))
+})
+app.post('/api/admin/sos/:id/resolve', adminAuth, requirePerm('safety.respond'), async (req, res) => {
+  const t = await sosInScope(req, res); if (!t) return
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  const note = String(req.body?.note || '').trim().slice(0, 500)
+  if (!note) return res.status(400).json({ error: 'Say what happened before closing the SOS.' })
+  const { rows } = await pool.query(
+    "UPDATE tickets SET status='Resolved', response=$1, resolved_at=now(), resolved_by=$2, acknowledged_at=COALESCE(acknowledged_at, now()), acknowledged_by=COALESCE(acknowledged_by, $2) WHERE id=$3 RETURNING *",
+    [note, who, t.id])
+  await logEvent({ actorType: 'admin', actorId: req.admin?.id, actorName: who, action: 'sos.resolve', entityType: 'ticket', entityId: t.id, ref: t.ref, detail: `${who} closed ${t.ref}: ${note}` })
+  publishRealtime(REDIS_URL, 'admin', 'sos:update', { id: t.id, status: 'Resolved', by: who })
+  res.json(sosDto(rows[0], await sosNames(rows)))
+})
+app.get('/api/admin/tickets', adminAuth, requireAnyPerm('tickets.view'), async (req, res) => {
   const rows = await ticketScopeFilter(req, (await pool.query('SELECT * FROM tickets ORDER BY id DESC')).rows)
   // tickets store only user_id; resolve the customer (or expert) display name for the admin table/search/CSV.
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
@@ -228,7 +290,7 @@ app.get('/api/admin/tickets', adminAuth, async (req, res) => {
 })
 // Booking-scoped tickets + KPI counts for the Support & Complaints tab. Defined before /:id so
 // "booking" isn't captured as an id.
-app.get('/api/admin/tickets/booking/:bookingId', adminAuth, async (req, res) => {
+app.get('/api/admin/tickets/booking/:bookingId', adminAuth, requireAnyPerm('tickets.view', 'bookings.view'), async (req, res) => {
   const rows = (await pool.query('SELECT * FROM tickets WHERE booking_id=$1 ORDER BY id DESC', [Number(req.params.bookingId)])).rows
   const counts = { total: rows.length, open: 0, resolved: 0, reopened: 0, escalated: 0 }
   for (const t of rows) {
@@ -262,7 +324,7 @@ app.use('/api/admin/tickets/:id', adminAuth, async (req, res, next) => {
   if (t && !(await ticketScopeFilter(req, [t])).length) return res.status(404).json({ error: 'Not found' })
   next()
 })
-app.get('/api/admin/tickets/:id', adminAuth, async (req, res) => {
+app.get('/api/admin/tickets/:id', adminAuth, requireAnyPerm('tickets.view'), async (req, res) => {
   const id = Number(req.params.id)
   const t = (await pool.query('SELECT * FROM tickets WHERE id=$1', [id])).rows[0]
   if (!t) return res.status(404).json({ error: 'Not found' })
@@ -309,7 +371,7 @@ app.post('/api/admin/tickets', adminAuth, requirePerm('complaints.resolve'), asy
 })
 
 /* ---------- complaints ---------- */
-app.get('/api/admin/complaints', adminAuth, async (req, res) => {
+app.get('/api/admin/complaints', adminAuth, requireAnyPerm('complaints.view'), async (req, res) => {
   let rows = (await pool.query('SELECT * FROM complaints ORDER BY id DESC')).rows
   if (req.query.status && req.query.status !== 'all') rows = rows.filter((c) => c.status === req.query.status)
   if (req.query.priority && req.query.priority !== 'all') rows = rows.filter((c) => c.priority === req.query.priority)
@@ -423,7 +485,7 @@ app.post('/api/internal/push', internalOnly, async (req, res) => {
   res.json({ ok: true, sent: await pushTo(b.kind === 'worker' ? 'worker' : 'customer', Number(b.ownerId), b) })
 })
 
-app.get('/api/admin/notifications', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))
+app.get('/api/admin/notifications', adminAuth, requireAnyPerm('notifications.view'), async (_q, res) => res.json((await pool.query('SELECT * FROM broadcasts ORDER BY id DESC')).rows))
 app.post('/api/admin/notifications/broadcast', adminAuth, requirePerm('notifications.send'), async (req, res) => {
   const b = req.body || {}
   if (!b.title) return res.status(400).json({ error: 'Title required' })

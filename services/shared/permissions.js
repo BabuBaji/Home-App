@@ -151,6 +151,10 @@ export const PERMISSION_CATALOG = [
     { key: 'roles.view', label: 'View roles' },
     { key: 'roles.manage', label: 'Create / edit / delete roles' },
   ] },
+  { module: 'safety', label: 'Safety & SOS', perms: [
+    { key: 'safety.view', label: 'Receive SOS alerts (within scope)' },
+    { key: 'safety.respond', label: 'Respond to / close SOS incidents' },
+  ] },
   { module: 'approvals', label: 'Approvals', perms: [
     { key: 'approvals.review', label: 'Review & approve/reject requests' },
     { key: 'approvals.manage', label: 'Configure the approval matrix' },
@@ -196,6 +200,8 @@ const MANAGER = dedupe([
   'wallet.adjust',
   'payments.export',
   'notifications.send',
+  // A zone/hub manager is the first responder for SOS inside their own area (routing is by scope).
+  'safety.view', 'safety.respond',
 ])
 
 // admin — adds everything gated min:'admin' today: the whole Zone Ops + Operations back office,
@@ -222,12 +228,41 @@ const ADMIN = dedupe([
   'approvals.review', 'approvals.manage',
 ])
 
+// ---- Functional roles: narrow bundles for one job each (separation of duties). ----
+const VIEW_ALL = ALL_PERMISSIONS.filter((k) => /\.view$/.test(k)).filter((k) => !['admins.view', 'roles.view'].includes(k))
+// dispatcher — the control tower: watch live jobs, assign / reassign / reschedule, nothing else.
+const DISPATCHER = dedupe(['dashboard.view', 'bookings.view', 'bookings.assign', 'bookings.update_status', 'liveops.view', 'liveops.act',
+  'workers.view', 'customers.view', 'zones.view', 'roster.view', 'attendance.view', 'complaints.view', 'tickets.view', 'safety.view'])
+// recruiter — onboarding: add workers, documents, background checks, bank details.
+const RECRUITER = dedupe(['dashboard.view', 'workers.view', 'workers.create', 'workers.edit', 'training.view', 'equipment.view', 'zones.view', 'roster.view'])
+// trainer — training modules, quizzes and results.
+const TRAINER = dedupe(['dashboard.view', 'workers.view', 'training.view', 'training.manage', 'equipment.view'])
+// finance — money only: refunds, payouts, payroll sign-off, settlements. Can't change prices or ops.
+const FINANCE = dedupe(['dashboard.view', 'bookings.view', 'customers.view', 'workers.view', 'workers.pay_view', 'payments.view', 'payments.export',
+  'refunds.view', 'refunds.approve', 'finance.view', 'finance.settle', 'finance.payout', 'finance.export', 'wallet.view', 'wallet.adjust',
+  'payroll.view', 'payroll.approve', 'cancellations.view', 'reports.view', 'reports.export', 'approvals.review'])
+// marketing — offers, banners, packages, broadcasts; reads pricing and analytics.
+const MARKETING = dedupe(['dashboard.view', 'services.view', 'customers.view', 'campaigns.view', 'campaigns.create', 'campaigns.edit', 'campaigns.delete',
+  'pricing.view', 'notifications.view', 'notifications.send', 'analytics.view', 'reports.view'])
+// safety — the SOS response desk: every alert, the worker/booking context, and the safety tickets.
+const SAFETY = dedupe(['dashboard.view', 'safety.view', 'safety.respond', 'workers.view', 'customers.view', 'bookings.view', 'liveops.view',
+  'tickets.view', 'tickets.resolve', 'complaints.view', 'complaints.resolve', 'activity.view'])
+// auditor — read-only everywhere (no admin/role management), plus exports for review.
+const AUDITOR = dedupe([...VIEW_ALL, 'reports.export', 'payments.export', 'finance.export'])
+
 // super — everything, including admin-user management, role authoring, and super-only overrides.
 export const SYSTEM_ROLES = [
   { key: 'super', name: 'Super Admin', description: 'Full system access.', rank: 4, landing: '/dashboard' },
   { key: 'admin', name: 'Admin', description: 'Manage platform operations and the back office.', rank: 3, landing: '/dashboard' },
-  { key: 'manager', name: 'Manager', description: 'Oversee day-to-day city operations.', rank: 2, landing: '/dashboard' },
+  { key: 'manager', name: 'Manager', description: 'Oversee day-to-day operations in a city, zone or hub; first responder for SOS there.', rank: 2, landing: '/dashboard' },
+  { key: 'dispatcher', name: 'Dispatcher', description: 'Control tower: watch live jobs, assign and reschedule.', rank: 2, landing: '/control-tower' },
+  { key: 'finance', name: 'Finance', description: 'Refunds, payouts, payroll sign-off and settlements.', rank: 2, landing: '/payments' },
   { key: 'support', name: 'Support', description: 'Handle customer support, complaints and tickets.', rank: 1, landing: '/dashboard' },
+  { key: 'safety', name: 'Safety Response', description: 'Receives every SOS and safety alert and follows it up.', rank: 1, landing: '/field' },
+  { key: 'recruiter', name: 'Recruiter', description: 'Onboard workers: profiles, documents, background checks, bank details.', rank: 1, landing: '/workers' },
+  { key: 'trainer', name: 'Trainer', description: 'Training modules, quizzes and results.', rank: 1, landing: '/training' },
+  { key: 'marketing', name: 'Marketing', description: 'Offers, banners, packages and broadcasts.', rank: 1, landing: '/campaigns' },
+  { key: 'auditor', name: 'Auditor', description: 'Read-only access to everything, for review and compliance.', rank: 1, landing: '/dashboard' },
 ]
 
 /** roleKey → permission keys for the seeded system roles. super = every key. */
@@ -236,9 +271,16 @@ export const SYSTEM_ROLE_PERMISSIONS = {
   admin: ADMIN,
   manager: MANAGER,
   support: SUPPORT,
+  dispatcher: DISPATCHER,
+  finance: FINANCE,
+  safety: SAFETY,
+  recruiter: RECRUITER,
+  trainer: TRAINER,
+  marketing: MARKETING,
+  auditor: AUDITOR,
 }
 
-/** true for the four seeded, non-deletable roles. */
+/** true for the seeded, non-deletable roles. */
 export const isSystemRole = (key) => SYSTEM_ROLES.some((r) => r.key === key)
 
 function dedupe(list) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, MapPin, Phone, X } from 'lucide-react'
-import { getSocket } from '../api'
+import { getSocket, getToken, ackSos } from '../api'
 
 type Sos = {
   id: string
@@ -12,6 +12,8 @@ type Sos = {
   lat: number | null
   lng: number | null
   at: string
+  ticketId?: number | null
+  ref?: string | null
 }
 
 /**
@@ -26,7 +28,8 @@ export default function SosAlert() {
   // ---- socket subscription ----
   useEffect(() => {
     const socket = getSocket()
-    const join = () => socket.emit('admin:join')
+    // The gateway only admits a signed-in admin, and only sends the SOS alerts that concern them.
+    const join = () => socket.emit('admin:join', getToken())
     join()
     socket.on('connect', join) // re-join after any reconnect
     const onSos = (p: Omit<Sos, 'id'>) => {
@@ -93,7 +96,11 @@ export default function SosAlert() {
   const a = alerts[0]
   const time = (() => { try { return new Date(a.at).toLocaleTimeString() } catch { return '' } })()
   const hasLoc = a.lat != null && a.lng != null
-  const ack = () => setAlerts((prev) => prev.slice(1))
+  const ack = () => {
+    // Records who is responding on the incident (needs safety.respond; the siren stops either way).
+    if (a.ticketId) ackSos(a.ticketId).catch(() => {})
+    setAlerts((prev) => prev.slice(1))
+  }
 
   return (
     <div style={overlay}>

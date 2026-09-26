@@ -2,17 +2,24 @@ import { useEffect, useMemo, useState } from 'react'
 import { UserCog, UserCheck, UserX, ShieldCheck, Pencil, MoreVertical, Filter, Plus, UserPlus, KeyRound } from 'lucide-react'
 import { StatCard, Card, Badge, Avatar, SearchBox, Pagination, SumBars, Modal, Field, Loading, ErrorState, Empty, useToast, useConfirm, shortDate } from '../components/UI'
 import { Donut } from '../components/Charts'
-import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit, fetchRoles, fetchZones, type Zone } from '../api'
+import { fetchAdmins, createAdminUser, updateAdminUser, deleteAdminUser, fetchAudit, fetchRoles, fetchZones, fetchStores, type Zone, type Store } from '../api'
 import type { Admin, Role } from '../types'
 import { useStore, has } from '../store'
 
-// Colours for the four system roles; custom roles fall back to a neutral tone. Labels always come
+// Colours for the system roles; custom roles fall back to a neutral tone. Labels always come
 // from the live roles list so a custom role shows its real name everywhere.
 const SYS_TONE: Record<string, { tone: string; color: string }> = {
   super: { tone: 'violet', color: '#5b51e8' },
   admin: { tone: 'blue', color: '#2e90fa' },
   manager: { tone: 'green', color: '#16a34a' },
   support: { tone: 'amber', color: '#f59e0b' },
+  dispatcher: { tone: 'blue', color: '#0ea5e9' },
+  finance: { tone: 'green', color: '#0d9488' },
+  safety: { tone: 'red', color: '#dc2626' },
+  recruiter: { tone: 'violet', color: '#8b5cf6' },
+  trainer: { tone: 'amber', color: '#d97706' },
+  marketing: { tone: 'violet', color: '#db2777' },
+  auditor: { tone: 'gray', color: '#64748b' },
 }
 const roleTone = (r: string) => SYS_TONE[r]?.tone || 'gray'
 const roleColor = (r: string) => SYS_TONE[r]?.color || '#98a2b3'
@@ -26,7 +33,7 @@ const ACTIVITY_ICON = (action: string) => {
   return UserPlus
 }
 
-type ScopeType = 'all' | 'city' | 'zone' | 'team'
+type ScopeType = 'all' | 'city' | 'zone' | 'store' | 'team'
 const blank = { name: '', email: '', phone: '', role: 'support', status: 'active', password: '', scopeType: 'all' as ScopeType, scopeValues: [] as (string | number)[], reportsTo: '' }
 
 export default function Admins() {
@@ -61,6 +68,8 @@ export default function Admins() {
   useEffect(() => { fetchRoles().then((r) => setRoles(r.roles)).catch(() => setRoles([])) }, [])
   // Zones carry their city, so we derive both the city list and the zone list for the scope picker.
   useEffect(() => { fetchZones().then(setZones).catch(() => setZones([])) }, [])
+  const [stores, setStores] = useState<Store[]>([])
+  useEffect(() => { fetchStores().then(setStores).catch(() => setStores([])) }, [])
   const roleLabel = (key: string) => roles.find((r) => r.key === key)?.name || key
   const assignableRoles = roles.filter((r) => r.active)
   const cityOptions = [...new Set(zones.map((z) => z.city).filter(Boolean))].sort()
@@ -71,6 +80,7 @@ export default function Admins() {
   const effLabel = (a: Admin) => {
     const e = a.effectiveScope
     if (!e || e.type === 'all') return 'All'
+    if (a.scopeType === 'store') return compact((a.scopeValues || []).map((id) => 'Hub: ' + (stores.find((st) => st.id === Number(id))?.name || `#${id}`)))
     const cities = e.cities || []
     const zids = e.zoneIds || []
     if (!cities.length && !zids.length) return 'None'
@@ -285,7 +295,7 @@ export default function Admins() {
                 {(rows || []).filter((a) => !editing || a.id !== editing.id).map((a) => <option key={a.id} value={a.id}>{a.name} · {roleLabel(a.role)}</option>)}
               </select>
             </Field>
-            <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} onType={setScopeType} onToggle={toggleScopeValue} />
+            <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} stores={stores} onType={setScopeType} onToggle={toggleScopeValue} />
           </div>
         </Modal>
       )}
@@ -318,7 +328,7 @@ export default function Admins() {
                 {(rows || []).filter((a) => !editing || a.id !== editing.id).map((a) => <option key={a.id} value={a.id}>{a.name} · {roleLabel(a.role)}</option>)}
               </select>
             </Field>
-            <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} onType={setScopeType} onToggle={toggleScopeValue} />
+            <ScopePicker scopeType={form.scopeType} scopeValues={form.scopeValues} cities={cityOptions} zones={zones} stores={stores} onType={setScopeType} onToggle={toggleScopeValue} />
           </div>
         </Modal>
       )}
@@ -350,21 +360,26 @@ function OrgTree({ admins, roleLabel }: { admins: Admin[]; roleLabel: (k: string
   return <div>{roots.map((r) => renderNode(r, 0))}</div>
 }
 
-function ScopePicker({ scopeType, scopeValues, cities, zones, onType, onToggle }:
-  { scopeType: ScopeType; scopeValues: (string | number)[]; cities: string[]; zones: Zone[]; onType: (t: ScopeType) => void; onToggle: (v: string | number) => void }) {
-  const opts = scopeType === 'city' ? cities.map((c) => ({ v: c as string | number, label: c })) : zones.map((z) => ({ v: z.id as string | number, label: `${z.name} · ${z.city || '—'}` }))
+function ScopePicker({ scopeType, scopeValues, cities, zones, stores, onType, onToggle }:
+  { scopeType: ScopeType; scopeValues: (string | number)[]; cities: string[]; zones: Zone[]; stores: Store[]; onType: (t: ScopeType) => void; onToggle: (v: string | number) => void }) {
+  const zoneName = (id: number | null) => zones.find((z) => z.id === id)?.name || '—'
+  const opts = scopeType === 'city' ? cities.map((c) => ({ v: c as string | number, label: c }))
+    : scopeType === 'store' ? stores.map((st) => ({ v: st.id as string | number, label: `${st.name} · ${zoneName(st.zone_id)}` }))
+    : zones.map((z) => ({ v: z.id as string | number, label: `${z.name} · ${z.city || '—'}` }))
+  const noun = scopeType === 'city' ? 'cities' : scopeType === 'store' ? 'hubs' : 'zones'
   return (
     <Field label="Data scope">
       <select value={scopeType} onChange={(e) => onType(e.target.value as ScopeType)}>
         <option value="all">Entire company — all data</option>
         <option value="city">Specific cities</option>
         <option value="zone">Specific zones</option>
+        <option value="store">Specific hubs (stores)</option>
         <option value="team">Team — roll up from reports</option>
       </select>
-      {(scopeType === 'city' || scopeType === 'zone') && (
+      {(scopeType === 'city' || scopeType === 'zone' || scopeType === 'store') && (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {opts.length === 0 && <span className="muted" style={{ fontSize: 12 }}>No {scopeType === 'city' ? 'cities' : 'zones'} defined yet.</span>}
+            {opts.length === 0 && <span className="muted" style={{ fontSize: 12 }}>No {noun} defined yet.</span>}
             {opts.map((o) => {
               const on = scopeValues.includes(o.v)
               return (
@@ -376,7 +391,9 @@ function ScopePicker({ scopeType, scopeValues, cities, zones, onType, onToggle }
             })}
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
-            Own turf: the selected {scopeType === 'city' ? 'cities' : 'zones'}, plus anything rolled up from their reports. Permissions still control what they can do.
+            {scopeType === 'store'
+              ? 'Hub manager: sees their hubs’ experts, bookings and SOS alerts; customers and anything not tied to a hub follow the hub’s zone. Can’t change zone-wide settings.'
+              : `Own turf: the selected ${noun}, plus anything rolled up from their reports. Permissions still control what they can do.`}
           </div>
         </>
       )}

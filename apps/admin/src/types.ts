@@ -39,7 +39,7 @@ export interface Admin {
   role: string
   permissions?: string[]
   // Data scope — 'all' (unrestricted), 'city'/'zone' with scopeValues, or 'team' (roll-up from reports).
-  scopeType?: 'all' | 'city' | 'zone' | 'team'
+  scopeType?: 'all' | 'city' | 'zone' | 'store' | 'team'
   scopeValues?: (string | number)[]
   // Org hierarchy: who this admin reports to, and their EFFECTIVE scope (own + rolled-up reports).
   reportsTo?: number | null

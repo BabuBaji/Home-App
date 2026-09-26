@@ -8,7 +8,7 @@
 import express from 'express'
 import crypto from 'node:crypto'
 import {
-  makePool, migrate, makeAdminAuth, requirePerm, internalOnly, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, requireAnyPerm, internalOnly, subscribeEvents, invalidateSettings,
   publishEvent, getSetting, getSettingInt, tryGet, internalPost,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
@@ -526,7 +526,7 @@ app.post('/api/payments/bank-validation/webhook', async (req, res) => {
 
 /* ---------- admin finance ---------- */
 // Admin Payments screen expects { summary, methods, transactions } — not a raw row array.
-app.get('/api/admin/payments', adminAuth, async (_q, res) => {
+app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'wallet.view'), async (_q, res) => {
   const rows = (await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
   const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
@@ -556,11 +556,11 @@ app.get('/api/admin/payments', adminAuth, async (_q, res) => {
   }))
   res.json({ summary, methods: Object.values(methodMap), transactions })
 })
-app.get('/api/admin/finance/payments', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows))
-app.get('/api/admin/finance/settlements', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM settlements ORDER BY id DESC LIMIT 500')).rows))
-app.get('/api/admin/finance/payouts', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM payouts ORDER BY id DESC LIMIT 500')).rows))
-app.get('/api/admin/finance/ledger', adminAuth, async (_q, res) => res.json((await pool.query('SELECT * FROM wallet_ledger ORDER BY id DESC LIMIT 500')).rows))
-app.get('/api/admin/finance/reports', adminAuth, async (_q, res) => {
+app.get('/api/admin/finance/payments', adminAuth, requireAnyPerm('finance.view'), async (_q, res) => res.json((await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows))
+app.get('/api/admin/finance/settlements', adminAuth, requireAnyPerm('finance.view'), async (_q, res) => res.json((await pool.query('SELECT * FROM settlements ORDER BY id DESC LIMIT 500')).rows))
+app.get('/api/admin/finance/payouts', adminAuth, requireAnyPerm('finance.view'), async (_q, res) => res.json((await pool.query('SELECT * FROM payouts ORDER BY id DESC LIMIT 500')).rows))
+app.get('/api/admin/finance/ledger', adminAuth, requireAnyPerm('finance.view'), async (_q, res) => res.json((await pool.query('SELECT * FROM wallet_ledger ORDER BY id DESC LIMIT 500')).rows))
+app.get('/api/admin/finance/reports', adminAuth, requireAnyPerm('finance.view'), async (_q, res) => {
   const rev = (await pool.query("SELECT COALESCE(SUM(amount),0)::int s FROM payments WHERE status='PAID'")).rows[0].s
   const paidOut = (await pool.query('SELECT COALESCE(SUM(amount),0)::int s FROM settlements')).rows[0].s
   const commissionPct = await getSettingInt(ADMIN_URL, 'commission_percent', 20)
@@ -568,7 +568,7 @@ app.get('/api/admin/finance/reports', adminAuth, async (_q, res) => {
 })
 // Refunds screen shows CANCELLED bookings + their refund/fee/reason (that data lives on the
 // booking table, not payments). Fetch cancelled bookings and shape them with the customer name.
-app.get('/api/admin/refunds', adminAuth, async (_q, res) => {
+app.get('/api/admin/refunds', adminAuth, requireAnyPerm('refunds.view'), async (_q, res) => {
   const [bookings, customers] = await Promise.all([
     tryGet(BOOKING_URL, '/api/internal/bookings?status=cancelled', []),
     tryGet(AUTH_URL, '/api/internal/customers', []),

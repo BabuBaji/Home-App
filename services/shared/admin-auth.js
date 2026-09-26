@@ -2,7 +2,7 @@
 // identity. They validate the caller's bearer token by asking the admin service `/api/admin/me`
 // (the same delegated-auth pattern the catalog/activity/worker services already used against
 // the monolith — now pointed at the admin service).
-export const RANK = { super: 4, admin: 3, manager: 2, support: 1 }
+export const RANK = { super: 4, admin: 3, manager: 2, dispatcher: 2, finance: 2, support: 1, safety: 1, recruiter: 1, trainer: 1, marketing: 1, auditor: 1 }
 
 export function makeAdminAuth(adminUrl) {
   return async (req, res, next) => {
@@ -28,5 +28,14 @@ export const requirePerm = (...need) => (req, res, next) => {
   if (req.admin?.role === 'super') return next()
   const have = req.admin?.permissions
   if (Array.isArray(have) && need.every((k) => have.includes(k))) return next()
+  return res.status(403).json({ error: 'Insufficient permissions' })
+}
+
+// Any-of gate: passes when the admin holds at least one of the keys. For reads shared by several
+// screens (e.g. salary plans are both their own module and a dropdown on the Add Worker form).
+export const requireAnyPerm = (...any) => (req, res, next) => {
+  if (req.admin?.role === 'super') return next()
+  const have = req.admin?.permissions
+  if (Array.isArray(have) && any.some((k) => have.includes(k))) return next()
   return res.status(403).json({ error: 'Insufficient permissions' })
 }

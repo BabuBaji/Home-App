@@ -64,6 +64,17 @@ const patch = (body?: unknown) => ({ method: 'PATCH', body: JSON.stringify(body 
 export const login = (email: string, password: string) => req<{ token: string; admin: Admin }>('/login', post('', { email, password }))
 export const fetchMe = () => req<{ admin: Admin }>('/me')
 
+/* ---- SOS incidents (safety desk / hub-manager queue) ---- */
+export type SosIncident = {
+  id: number; ref: string; kind: 'worker' | 'customer'; status: string; who: string; phone: string
+  workerId: number | null; userId: number | null; bookingId: number | null; bookingRef: string | null; message: string
+  lat: number | null; lng: number | null; created: string; acknowledgedAt: string | null; acknowledgedBy: string | null
+  resolvedAt: string | null; resolvedBy: string | null; response: string | null
+}
+export const fetchSos = (status: 'open' | 'all' = 'open') => req<SosIncident[]>(`/sos?status=${status}`)
+export const ackSos = (id: number) => req<SosIncident>(`/sos/${id}/ack`, post('', {}))
+export const resolveSos = (id: number, note: string) => req<SosIncident>(`/sos/${id}/resolve`, post('', { note }))
+
 /* dashboard / analytics */
 export const fetchDashboard = () => req<DashboardData>('/dashboard')
 export const fetchAnalytics = () => req<any>('/analytics')

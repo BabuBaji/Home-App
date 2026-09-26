@@ -80,7 +80,7 @@ const TITLES: Record<string, string> = {
   reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals',
 }
 
-const ROLE_LABEL: Record<string, string> = { super: 'Super Admin', admin: 'Admin', manager: 'Manager', support: 'Support' }
+const ROLE_LABEL: Record<string, string> = { super: 'Super Admin', admin: 'Admin', manager: 'Manager', support: 'Support', dispatcher: 'Dispatcher', finance: 'Finance', safety: 'Safety Response', recruiter: 'Recruiter', trainer: 'Trainer', marketing: 'Marketing', auditor: 'Auditor' }
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { admin, signOut } = useStore()

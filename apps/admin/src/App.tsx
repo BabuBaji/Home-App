@@ -52,6 +52,7 @@ import Approvals from './screens/Approvals'
 import OrgHierarchy from './screens/OrgHierarchy'
 import CommandCenter from './screens/CommandCenter'
 import ControlTower from './screens/ControlTower'
+import FieldApp from './screens/field/FieldApp'
 
 export default function App() {
   const { admin, signIn, setAdmin } = useStore()
@@ -70,6 +71,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={admin ? <Navigate to={home} replace /> : <Login />} />
         <Route element={<Guard authed={!!admin} />}>
+          {/* Field app: phone-first, its own full-screen layout (no desktop sidebar); tabs gate themselves. */}
+          <Route path="/field/*" element={<FieldApp />} />
           <Route path="/dashboard" element={<Page perm="dashboard.view"><Dashboard /></Page>} />
           <Route path="/customers" element={<Page perm="customers.view"><Customers /></Page>} />
           <Route path="/customers/:id" element={<Page perm="customers.view"><AdminCustomerDetail /></Page>} />

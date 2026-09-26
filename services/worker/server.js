@@ -8,7 +8,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import multer from 'multer'
 import {
-  makePool, migrate, makeAdminAuth, requirePerm, inScope, internalOnly, tryGet, internalPost, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requirePerm, requireAnyPerm, inScope, internalOnly, tryGet, internalPost, publishEvent, subscribeEvents, publishRealtime, invalidateSettings,
   getSetting, getSettingInt, smsConfigured, sendOtpSms, sendTemplateSms, callsMasked,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: these carry dependencies (AWS SDK, jsonwebtoken)
@@ -40,7 +40,7 @@ const adminAuth = makeAdminAuth(ADMIN_URL)
 async function scopeWorker(req, res, next) {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Not found' })
-  if (!inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Not found' })
+  if (!inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })) return res.status(404).json({ error: 'Not found' })
   req._worker = w
   next()
 }
@@ -867,14 +867,14 @@ async function listWorkers({ status, city, q } = {}, scope = null) {
   let rows = (await pool.query('SELECT * FROM workers ORDER BY id DESC')).rows.map(rowToWorker)
   const by = await shiftsByWorker()
   rows = rows.map((w) => ({ ...w, on_shift: onShiftNow(by[w.id] || []) }))
-  rows = rows.filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city })) // data scope
+  rows = rows.filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })) // data scope
   if (status && status !== 'all') rows = rows.filter((w) => w.status === status)
   if (city && city !== 'all') rows = rows.filter((w) => w.city === city)
   if (q) { const s = q.toLowerCase(); rows = rows.filter((w) => w.name.toLowerCase().includes(s) || (w.phone || '').includes(s) || (w.email || '').toLowerCase().includes(s)) }
   return rows
 }
 async function workerStats(scope = null) {
-  const all = (await pool.query('SELECT status, zone_id, city FROM workers')).rows.filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
+  const all = (await pool.query('SELECT status, zone_id, city, store_id FROM workers')).rows.filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
   const n = (...s) => all.filter((w) => s.includes(w.status)).length
   // Every status lands in exactly one bucket, so the cards always sum to total. 'onboarding'
   // (invited, completing their profile) is its own bucket — folding it into pending or active
@@ -1692,7 +1692,7 @@ app.post('/api/worker/shift/next-day', auth, async (req, res) => {
 })
 
 // Admin: the next-day roster — who's confirmed / out for a given day (defaults to tomorrow).
-app.get('/api/admin/next-day-availability', adminAuth, async (req, res) => {
+app.get('/api/admin/next-day-availability', adminAuth, requireAnyPerm('roster.view', 'workers.view'), async (req, res) => {
   const forDate = /^\d{4}-\d{2}-\d{2}$/.test(req.query?.date || '') ? req.query.date : nextDayTargetStr()
   const { rows } = await pool.query(
     `SELECT n.worker_id, n.coming, n.note, n.responded_at, w.name, w.phone
@@ -1773,18 +1773,29 @@ app.post('/api/worker/support', auth, async (req, res) => {
   res.json(await ticketList(req.worker.id))
 })
 // SOS — emergency alert. Broadcasts to ops (activity monitor) with the worker's live location.
+/* One path for every expert SOS — the SOS button, the volume buttons, an unanswered or "not safe"
+   safety check. It opens an urgent Safety incident (the responder queue), logs it, and raises the
+   live alert; the gateway delivers that alert only to super admins, the safety team, and managers
+   whose zone/hub covers this expert. */
+async function raiseWorkerSos(w, { lat = null, lng = null, reason = '', bookingId = null, bookingRef = null } = {}) {
+  const la = lat ?? w?.last_lat ?? null, ln = lng ?? w?.last_lng ?? null
+  const loc = (la != null && ln != null) ? ` @ ${Number(la).toFixed(5)},${Number(ln).toFixed(5)}` : ''
+  const why = String(reason || 'SOS button').slice(0, 160)
+  const ticket = await internalPost(NOTIFICATION_URL, '/api/internal/sos-ticket', {
+    kind: 'worker', workerId: w.id, lat: la, lng: ln, bookingId, bookingRef, message: `${why}${loc}`,
+  }).catch(() => null)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: w.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: w.id, detail: `🆘 SOS raised — ${why}${loc}`, meta: { lat: la, lng: ln, reason: why, ticketId: ticket?.id ?? null } })
+  publishRealtime(REDIS_URL, 'admin', 'sos', {
+    kind: 'worker', workerId: w.id, workerName: w?.name || `Worker #${w.id}`, phone: w?.phone || '',
+    lat: la, lng: ln, at: new Date().toISOString(), reason: why, ticketId: ticket?.id ?? null, ref: ticket?.ref || null,
+    zoneId: w?.zone_id ?? null, storeId: w?.store_id ?? null, city: w?.city || null,
+  })
+  return ticket
+}
 app.post('/api/worker/sos', auth, async (req, res) => {
   const b = req.body || {}
   const w = await getWorker(req.worker.id)
-  const loc = (b.lat != null && b.lng != null) ? ` @ ${b.lat},${b.lng}` : ''
-  // How it was raised: the SOS button, the volume buttons, or an unanswered automatic safety check.
-  const reason = String(b.reason || '').slice(0, 160)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: req.worker.id, detail: `🆘 SOS raised${reason ? ` — ${reason}` : ''}${loc}`, meta: { lat: b.lat ?? null, lng: b.lng ?? null, reason } })
-  // Real-time push to the admin control tower (siren + alert modal in the admin panel).
-  publishRealtime(REDIS_URL, 'admin', 'sos', {
-    kind: 'worker', workerId: req.worker.id, workerName: w?.name || `Worker #${req.worker.id}`, phone: w?.phone || '',
-    lat: b.lat ?? null, lng: b.lng ?? null, at: new Date().toISOString(), ...(reason ? { reason } : {}),
-  })
+  await raiseWorkerSos(w, { lat: b.lat ?? null, lng: b.lng ?? null, reason: b.reason || 'SOS button' })
   res.json({ ok: true, message: 'Help is on the way. Our team has been alerted.' })
 })
 
@@ -1815,7 +1826,7 @@ app.post('/api/worker/safety/checkin', auth, async (req, res) => {
   safetyPrompts.delete(req.worker.id)
   if (req.body?.safe === false) {
     const w = await getWorker(req.worker.id)
-    publishRealtime(REDIS_URL, 'admin', 'sos', { kind: 'worker', workerId: w.id, workerName: w.name, phone: w.phone || '', lat: req.body?.lat ?? w.lat ?? null, lng: req.body?.lng ?? w.lng ?? null, at: new Date().toISOString(), reason: 'Answered "not safe" to a check-in' })
+    await raiseWorkerSos(w, { lat: req.body?.lat ?? null, lng: req.body?.lng ?? null, reason: 'Answered "not safe" to a check-in', bookingId: p?.bookingId ?? null })
   }
   res.json({ ok: true, prompted: !!p })
 })
@@ -1835,7 +1846,7 @@ async function safetySweep() {
       } else if (!p.escalated && now - p.askedAt > 10 * 60000) {
         p.escalated = true
         const w = await getWorker(b.worker_id)
-        publishRealtime(REDIS_URL, 'admin', 'sos', { kind: 'worker', workerId: w.id, workerName: w.name, phone: w.phone || '', lat: w.lat ?? null, lng: w.lng ?? null, at: new Date().toISOString(), reason: `No reply to a safety check-in (${b.ref})` })
+        await raiseWorkerSos(w, { reason: `No reply to a safety check-in (${b.ref})`, bookingId: b.id, bookingRef: b.ref })
         publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Safety', action: 'safety.escalate', entityType: 'worker', entityId: w.id, ref: b.ref, detail: `${w.name} did not answer a safety check-in — alerted ops` })
       }
     }
@@ -2245,7 +2256,7 @@ async function workerEquipment(workerId) {
   return rows.map(eqDto)
 }
 
-app.get('/api/admin/equipment', adminAuth, async (_q, res) => {
+app.get('/api/admin/equipment', adminAuth, requireAnyPerm('equipment.view'), async (_q, res) => {
   const { rows } = await pool.query(
     `SELECT t.*, (SELECT COUNT(*)::int FROM worker_equipment e WHERE e.type_id = t.id AND e.status = 'issued') issued
      FROM equipment_types t ORDER BY t.sort, t.id`)
@@ -2288,7 +2299,7 @@ app.delete('/api/admin/equipment/:id', adminAuth, requirePerm('equipment.manage'
   res.json({ ok: true })
 })
 
-app.get('/api/admin/workers/:id/equipment', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/equipment', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const workerId = Number(req.params.id)
   const types = (await pool.query('SELECT * FROM equipment_types WHERE active = true ORDER BY sort, id')).rows.map(eqTypeDto)
   res.json({ ok: true, types, issued: await workerEquipment(workerId) })
@@ -2447,7 +2458,7 @@ const incentiveDto = (p) => {
   }
 }
 
-app.get('/api/admin/salary-plans', adminAuth, async (_q, res) => {
+app.get('/api/admin/salary-plans', adminAuth, requireAnyPerm('salary_plans.view', 'workers.create', 'workers.edit'), async (_q, res) => {
   const { rows } = await pool.query(
     `SELECT p.*, (SELECT COUNT(*)::int FROM workers w WHERE w.salary_plan_id = p.id) workers
      FROM salary_plans p ORDER BY p.sort, p.id`)
@@ -2567,7 +2578,7 @@ app.delete('/api/admin/salary-plans/:id', adminAuth, requirePerm('salary_plans.e
  * doesn't exist (a referral graph, peak windows, a festival calendar), and a component that never
  * fires is worse than one that isn't offered.
  */
-app.get('/api/admin/incentive-plans', adminAuth, async (_q, res) => {
+app.get('/api/admin/incentive-plans', adminAuth, requireAnyPerm('incentive_plans.view', 'workers.create', 'workers.edit'), async (_q, res) => {
   const { rows } = await pool.query(
     `SELECT p.*, (SELECT COUNT(*)::int FROM workers w WHERE w.incentive_plan_id = p.id) workers
      FROM incentive_plans p ORDER BY p.sort, p.id`)
@@ -3140,7 +3151,7 @@ async function evaluateMonthlyRules(w, month, tally) {
   return out
 }
 
-app.get('/api/admin/payroll', adminAuth, async (_q, res) => {
+app.get('/api/admin/payroll', adminAuth, requireAnyPerm('payroll.view'), async (_q, res) => {
   const { rows } = await pool.query(
     `SELECT r.*, (SELECT COUNT(*)::int FROM payroll_lines l WHERE l.run_id=r.id) workers,
             (SELECT COALESCE(SUM(l.net),0)::int FROM payroll_lines l WHERE l.run_id=r.id) net
@@ -3158,7 +3169,7 @@ app.get('/api/admin/payroll', adminAuth, async (_q, res) => {
   })
 })
 
-app.get('/api/admin/payroll/:id', adminAuth, async (req, res) => {
+app.get('/api/admin/payroll/:id', adminAuth, requireAnyPerm('payroll.view'), async (req, res) => {
   const r = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1', [Number(req.params.id)])).rows[0]
   if (!r) return res.status(404).json({ error: 'Run not found' })
   const lines = (await pool.query(
@@ -3367,7 +3378,7 @@ const auditRule = (ruleId, action, detail, who) =>
   pool.query('INSERT INTO incentive_rule_audit (rule_id, action, detail, changed_by) VALUES ($1,$2,$3,$4)', [ruleId, action, detail, who])
 
 /** Field / operator / scope / calc vocabulary — drives the visual builder in the panel. */
-app.get('/api/admin/incentive-rules/meta', adminAuth, async (_q, res) => {
+app.get('/api/admin/incentive-rules/meta', adminAuth, requireAnyPerm('comp_rules.view'), async (_q, res) => {
   res.json({
     ok: true,
     triggers: RULE_TRIGGERS,
@@ -3380,7 +3391,7 @@ app.get('/api/admin/incentive-rules/meta', adminAuth, async (_q, res) => {
   })
 })
 
-app.get('/api/admin/incentive-rules', adminAuth, async (_q, res) => {
+app.get('/api/admin/incentive-rules', adminAuth, requireAnyPerm('comp_rules.view'), async (_q, res) => {
   // Two-step, not a wide join: `SELECT r.*, v.*` collides on `id` (rule vs version) and the version
   // clobbers the rule id, so the list would hand back version ids as rule ids.
   const rules = (await pool.query('SELECT * FROM incentive_rules ORDER BY priority ASC, id ASC')).rows
@@ -3393,7 +3404,7 @@ app.get('/api/admin/incentive-rules', adminAuth, async (_q, res) => {
   res.json({ ok: true, rules: out })
 })
 
-app.get('/api/admin/incentive-rules/:id', adminAuth, async (req, res) => {
+app.get('/api/admin/incentive-rules/:id', adminAuth, requireAnyPerm('comp_rules.view'), async (req, res) => {
   const id = Number(req.params.id)
   const r = (await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0]
   if (!r) return res.status(404).json({ error: 'Rule not found' })
@@ -3471,7 +3482,7 @@ app.patch('/api/admin/incentive-rules/:id', adminAuth, requirePerm('comp_rules.e
   res.json({ ok: true, rule: ruleDto((await pool.query('SELECT * FROM incentive_rules WHERE id=$1', [id])).rows[0], cur) })
 })
 
-app.get('/api/admin/workers/:id/pay', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/pay', adminAuth, requireAnyPerm('workers.pay_view', 'workers.edit'), scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   // Field masking: without workers.pay_view, withhold every amount. Non-sensitive settings only.
@@ -3657,7 +3668,7 @@ app.get('/api/internal/workers/:id/pay-config', internalOnly, async (req, res) =
 /* ---------- admin: authoring ---------- */
 const qDto = (q) => ({ id: q.id, moduleId: q.module_id, question: q.question, options: q.options || [], correctIndex: q.correct_index, active: q.active })
 
-app.get('/api/admin/training', adminAuth, async (_q, res) => {
+app.get('/api/admin/training', adminAuth, requireAnyPerm('training.view'), async (_q, res) => {
   const [mods, qs] = await Promise.all([
     pool.query(`SELECT m.*, (SELECT COUNT(*)::int FROM training_questions q WHERE q.module_id = m.id AND q.active) questions
                 FROM training_modules m ORDER BY m.sort, m.id`),
@@ -3874,7 +3885,7 @@ app.post('/api/worker/onboarding/submit', auth, async (req, res) => {
  * still offers other work when the zone is quiet — nobody sits idle next to a job they could do.
  * false: the assignment becomes a restriction — own zone only, and within jobRadiusKm of the store.
  */
-app.get('/api/admin/workers/:id/coverage', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/coverage', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   res.json({
@@ -3920,7 +3931,7 @@ app.patch('/api/admin/workers/:id/coverage', adminAuth, scopeWorker, requirePerm
  * modifying assigns something else and must say why — a worker whose requested shift is silently
  * swapped learns about it from their roster, which is how goodwill gets spent.
  */
-app.get('/api/admin/workers/:id/availability', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/availability', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Worker not found' })
   const shifts = (await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')).rows
@@ -3992,7 +4003,7 @@ app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, r
 const minsToHM = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(Math.round(mins % 60)).padStart(2, '0')}`
 const hoursToHM = (h) => minsToHM(Math.round(h * 60))
 const DOW_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] // JS getUTCDay index -> key
-app.get('/api/admin/workers/:id/availability-overview', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/availability-overview', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
@@ -4186,7 +4197,7 @@ async function backgroundState(workerId) {
   return { worker: { id: w.id, name: w.name }, items, verified: items.every((i) => i.ok) }
 }
 
-app.get('/api/admin/workers/:id/background', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/background', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const s = await backgroundState(Number(req.params.id))
   if (!s) return res.status(404).json({ error: 'Worker not found' })
   res.json({ ok: true, ...s })
@@ -4315,7 +4326,7 @@ async function goLiveChecklist(workerId) {
   }
 }
 
-app.get('/api/admin/workers/:id/checklist', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/checklist', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const c = await goLiveChecklist(Number(req.params.id))
   if (!c) return res.status(404).json({ error: 'Worker not found' })
   const history = (await pool.query('SELECT * FROM worker_approvals WHERE worker_id=$1 ORDER BY created DESC LIMIT 10', [Number(req.params.id)])).rows
@@ -4356,7 +4367,7 @@ app.post('/api/admin/workers/:id/go-live', adminAuth, scopeWorker, requirePerm('
 })
 
 /** One worker's training state, for the detail screen and Phase 12's checklist. */
-app.get('/api/admin/workers/:id/training', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/training', adminAuth, requireAnyPerm('workers.view', 'training.view'), scopeWorker, async (req, res) => {
   const st = await trainingState(Number(req.params.id))
   res.json({ ok: true, ...st, modules: st.modules.map(({ body, ...m }) => m) }) // titles + progress; the admin doesn't need the text echoed back
 })
@@ -4395,7 +4406,7 @@ app.get('/api/worker/documents/:id/url', auth, async (req, res) => {
 })
 
 /* ---------- admin worker management ---------- */
-app.get('/api/admin/workers', adminAuth, async (req, res) => {
+app.get('/api/admin/workers', adminAuth, requireAnyPerm('workers.view'), async (req, res) => {
   const can = canViewPay(req)
   const workers = (await listWorkers(req.query, req.admin?.scope)).map((w) => maskPayRow(w, can))
   res.json({ stats: await workerStats(req.admin?.scope), workers })
@@ -4410,6 +4421,12 @@ app.post('/api/admin/workers', adminAuth, requirePerm('workers.create'), async (
   if (!name) return res.status(400).json({ error: 'Name required' })
   // A zone/city manager can only onboard into their own territory — and must say where.
   if (!inScope(req.admin?.scope, { zoneId: b.zone_id ? Number(b.zone_id) : null, city: b.city || null })) return res.status(403).json({ error: 'Pick a zone inside your territory.' })
+  // A hub manager onboards into their own hub: default it when they run one hub, refuse any other.
+  const hubs = req.admin?.scope?.type === 'store' ? (req.admin.scope.storeIds || []) : null
+  if (hubs) {
+    if (!b.store_id && hubs.length === 1) b.store_id = hubs[0]
+    if (!b.store_id || !hubs.includes(Number(b.store_id))) return res.status(403).json({ error: 'Pick one of your hubs for this worker.' })
+  }
   // The phone IS the login identity (OTP by number), so a duplicate would create a worker who can
   // never sign in — whoever was created first wins the number.
   if (b.phone) {
@@ -4510,7 +4527,7 @@ app.post('/api/admin/workers/:id/invite', adminAuth, scopeWorker, requirePerm('w
   res.json({ ok: true, delivery, worker: rowToWorker(await getWorker(w.id)) })
 })
 // Full worker detail for the admin View modal — the base record + KYC documents + recent jobs.
-app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Not found' })
@@ -4768,11 +4785,13 @@ app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), scop
     const city = b.city !== undefined ? b.city : w.city
     if (!inScope(req.admin?.scope, { zoneId, city })) return res.status(403).json({ error: 'You can only move a worker within your zones.' })
   }
+  if (b.store_id !== undefined && req.admin?.scope?.type === 'store' && !(req.admin.scope.storeIds || []).includes(Number(b.store_id)))
+    return res.status(403).json({ error: 'You can only move a worker between your own hubs.' })
   res.json(await patchWorker(Number(req.params.id), b, res))
 })
 app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), scopeWorker, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
 // Admin notes on a worker.
-app.get('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
+app.get('/api/admin/workers/:id/notes', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
 app.post('/api/admin/workers/:id/notes', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
   const note = String(req.body?.note || '').trim().slice(0, 2000)
   if (!note) return res.status(400).json({ error: 'Note is empty' })
@@ -4795,7 +4814,7 @@ const logCategory = (action) => {
   return 'System'
 }
 const logSource = (actorType) => actorType === 'worker' ? 'Worker App' : actorType === 'admin' ? 'Web Portal' : actorType === 'customer' ? 'Customer App' : 'System'
-app.get('/api/admin/workers/:id/logs', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/logs', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const id = Number(req.params.id)
   const [r, w] = await Promise.all([
     tryGet(NOTIFICATION_URL, `/internal/list?entityType=worker&entityId=${id}&limit=300`, { items: [] }),
@@ -4830,7 +4849,7 @@ app.post('/api/admin/shifts', adminAuth, requirePerm('roster.edit'), async (req,
   const b = req.body || {}
   if (!b.worker_id) return res.status(400).json({ error: 'Worker is required' })
   const w = await getWorker(Number(b.worker_id))
-  if (!w || !inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Worker not found' })
+  if (!w || !inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })) return res.status(404).json({ error: 'Worker not found' })
   if (b.zone_id && !inScope(req.admin?.scope, { zoneId: Number(b.zone_id) })) return res.status(403).json({ error: 'That zone is outside your territory.' })
   const days = Array.isArray(b.weekdays) && b.weekdays.length ? b.weekdays : [b.weekday]
   const sm = toMin(b.start), em = toMin(b.end)
@@ -4851,7 +4870,7 @@ app.delete('/api/admin/shifts/:id', adminAuth, requirePerm('roster.edit'), async
 })
 
 /* ---------- shift PLANS + attendance (admin control) ---------- */
-app.get('/api/admin/shift-defs', adminAuth, async (_q, res) => {
+app.get('/api/admin/shift-defs', adminAuth, requireAnyPerm('roster.view', 'workers.create', 'workers.edit'), async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM shift_defs ORDER BY sort, start_min')
   res.json(rows.map((s) => ({
     id: s.id, code: s.code, name: s.name, start: toHHMM(s.start_min), end: toHHMM(s.end_min),
@@ -4871,7 +4890,7 @@ app.put('/api/admin/shift-defs/:id', adminAuth, requirePerm('roster.edit'), asyn
       b.active === undefined ? null : !!b.active, Number(req.params.id)])
   res.json({ ok: true })
 })
-app.get('/api/admin/attendance', adminAuth, async (req, res) => {
+app.get('/api/admin/attendance', adminAuth, requireAnyPerm('attendance.view'), async (req, res) => {
   const day = req.query.day || istDateStr(Date.now())
   const { rows } = await pool.query(
     `SELECT a.*, w.name worker_name, sd.name shift_name FROM attendance a
@@ -4889,7 +4908,7 @@ app.get('/api/admin/attendance', adminAuth, async (req, res) => {
 })
 
 /* ---------- apartments / geofence sites (admin control) ---------- */
-app.get('/api/admin/sites', adminAuth, async (_q, res) => {
+app.get('/api/admin/sites', adminAuth, requireAnyPerm('roster.view'), async (_q, res) => {
   const { rows } = await pool.query(
     `SELECT s.*, (SELECT COUNT(*)::int FROM workers w WHERE w.site_id = s.id) AS assigned FROM worker_sites s ORDER BY s.id`)
   res.json(rows.map((s) => ({ id: s.id, name: s.name, address: s.address || '', lat: s.lat, lng: s.lng, radius: s.radius, active: !!s.active, assigned: s.assigned })))
@@ -5191,7 +5210,7 @@ app.delete('/api/admin/workers/:id/certifications/:cid', adminAuth, scopeWorker,
  * worker_documents.status, so the admin panel's Verified/Rejected badges were unreachable and a
  * document sat on 'Pending' forever.
  */
-app.get('/api/admin/workers/:id/documents/:docId/url', adminAuth, scopeWorker, async (req, res) => {
+app.get('/api/admin/workers/:id/documents/:docId/url', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
   const d = (await pool.query('SELECT storage_key FROM worker_documents WHERE id=$1 AND worker_id=$2', [Number(req.params.docId), Number(req.params.id)])).rows[0]
   if (!d?.storage_key) return res.status(404).json({ ok: false, error: 'No file for this document' })
   res.json({ ok: true, url: await signedGetUrl(d.storage_key) })

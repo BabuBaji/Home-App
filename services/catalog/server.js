@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
-  makePool, migrate, makeAdminAuth, requireRole, requirePerm, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
+  makePool, migrate, makeAdminAuth, requireRole, requirePerm, requireAnyPerm, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
   inScope, publishEvent,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep. Catalog only reads
@@ -1230,7 +1230,7 @@ function pkClean(b) {
   if (b.sort !== undefined) o.sort = Math.round(Number(b.sort) || 50)
   return o
 }
-app.get('/api/admin/packages', adminAuth, async (req, res) => {
+app.get('/api/admin/packages', adminAuth, requireAnyPerm('campaigns.view'), async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM packages ORDER BY sort, id')
   res.json(rows.filter((p) => !scoped(req) || !p.zone_ids.length || p.zone_ids.some((z) => zoneInScope(req, z)))
     .map((p) => (scoped(req) ? { ...p, readOnly: !zonesWritable(req, p.zone_ids) } : p)))
@@ -1318,7 +1318,7 @@ app.get('/api/admin/zones', adminAuth, async (req, res) => {
 /* ---------- surge pricing (weather-driven + ops override) ---------- */
 // Current surge per live zone: the weather signal, the derived %, and whether it's automatic or a
 // manual override. Enriched with the zone name for display.
-app.get('/api/admin/surge', adminAuth, async (req, res) => {
+app.get('/api/admin/surge', adminAuth, requireAnyPerm('pricing.view'), async (req, res) => {
   await refreshZones(pool)
   const snap = surgeSnapshot().filter((s) => zoneInScope(req, s.zoneId))
   const names = new Map((await pool.query('SELECT id, name FROM zones')).rows.map((r) => [r.id, r.name]))
@@ -1345,7 +1345,8 @@ const scoped = (req) => !!req.admin?.scope && req.admin.scope.type !== 'all'
 const zoneInScope = (req, zoneId) => inScope(req.admin?.scope, { zoneId })
 const zoneRowInScope = (req, z) => inScope(req.admin?.scope, { zoneId: z.id, city: z.city })
 // A write that targets `zoneIds` is allowed when every zone is the admin's; [] / null means "all zones".
-const zonesWritable = (req, zoneIds) => !scoped(req) || (Array.isArray(zoneIds) && zoneIds.length > 0 && zoneIds.every((z) => zoneInScope(req, z)))
+// A hub manager sees their hub's zone but can't change zone-wide settings (surge, zone offers…).
+const zonesWritable = (req, zoneIds) => !scoped(req) || (req.admin?.scope?.type !== 'store' && Array.isArray(zoneIds) && zoneIds.length > 0 && zoneIds.every((z) => zoneInScope(req, z)))
 const OUT_OF_SCOPE = { error: 'That is outside your zones.' }
 
 /* ---------- admin: Home hero banners (festival / promo scheduling) ---------- */
@@ -1364,7 +1365,7 @@ app.post('/api/admin/banners/image', adminAuth, requirePerm('campaigns.edit'), u
   res.status(201).json({ url: `/api/banner-media/${key}` })
 })
 const hbClean = (b) => ({ ...b, zone_id: b.zone_id === '' || b.zone_id == null ? null : Number(b.zone_id), starts: b.starts || null, ends: b.ends || null })
-app.get('/api/admin/banners', adminAuth, async (req, res) => {
+app.get('/api/admin/banners', adminAuth, requireAnyPerm('campaigns.view'), async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM home_banners ORDER BY priority DESC, id DESC')
   res.json(rows.filter((b) => b.zone_id == null || zoneInScope(req, b.zone_id)).map((b) => ({ ...b, readOnly: b.zone_id == null && scoped(req) })))
 })
@@ -1467,7 +1468,7 @@ async function campaignWritable(req, id) {
   if (!scoped(req)) return true
   return zonesWritable(req, (await pool.query('SELECT zone_id FROM campaign_zone WHERE campaign_id=$1', [id])).rows.map((r) => r.zone_id))
 }
-app.get('/api/admin/campaigns', adminAuth, async (req, res) => {
+app.get('/api/admin/campaigns', adminAuth, requireAnyPerm('campaigns.view'), async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM campaign_master ORDER BY priority, campaign_id')
   const ids = rows.map((r) => r.campaign_id)
   if (!ids.length) return res.json([])
@@ -1522,7 +1523,7 @@ app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'
   await pool.query('DELETE FROM campaign_master WHERE campaign_id=$1', [id])
   res.json({ ok: true })
 })
-app.get('/api/admin/campaigns/:id/usage', adminAuth, async (req, res) => {
+app.get('/api/admin/campaigns/:id/usage', adminAuth, requireAnyPerm('campaigns.view'), async (req, res) => {
   const id = intId(req, res); if (id === null) return
   if (scoped(req)) {
     const zs = (await pool.query('SELECT zone_id FROM campaign_zone WHERE campaign_id=$1', [id])).rows.map((r) => r.zone_id)
@@ -1572,6 +1573,26 @@ async function analyseStore(lat, lng, radiusKm, excludeId = null) {
   nearby.sort((a, b) => a.distanceKm - b.distanceKm)
   return { nearby, coveredBy, overlaps }
 }
+
+/** Every hub (store) with its zone — the admin service resolves hub-scoped managers with this. */
+app.get('/api/internal/stores', internalOnly, async (_q, res) => {
+  res.json((await pool.query('SELECT id, name, zone_id, lat, lng, radius_km, status FROM stores ORDER BY id')).rows)
+})
+/** The hub that serves a point: the nearest active store (in the given zone, if one is passed) whose
+ *  radius covers it. null when no hub covers the address — the booking is then zone-level only. */
+app.post('/api/internal/store-for', internalOnly, async (req, res) => {
+  const lat = Number(req.body?.lat), lng = Number(req.body?.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.json({ storeId: null })
+  const zoneId = req.body?.zoneId != null ? Number(req.body.zoneId) : null
+  const { rows } = await pool.query("SELECT id, zone_id, lat, lng, radius_km FROM stores WHERE status='active' AND lat IS NOT NULL AND lng IS NOT NULL")
+  let best = null
+  for (const st of rows) {
+    if (zoneId != null && Number(st.zone_id) !== zoneId) continue
+    const d = haversineKm(lat, lng, st.lat, st.lng)
+    if (d <= (st.radius_km || 3) && (!best || d < best.d)) best = { id: st.id, d }
+  }
+  res.json({ storeId: best ? best.id : null })
+})
 
 /** One store's location, for dispatch's per-worker job radius (measured from the worker's store). */
 app.get('/api/internal/stores/:id', internalOnly, async (req, res) => {
@@ -1776,7 +1797,7 @@ function membershipPlanOut(r) {
   }
 }
 
-app.get('/api/admin/membership-plans', adminAuth, async (_q, res) => {
+app.get('/api/admin/membership-plans', adminAuth, requireAnyPerm('pricing.view', 'customers.edit'), async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM membership_plans ORDER BY sort, id')
   res.json(rows.map(membershipPlanOut))
 })
@@ -1813,7 +1834,7 @@ app.get('/api/membership-plans', async (_q, res) => {
 })
 
 /* Discount stacking policy + margin guard (Phase 3) — global pricing rules. */
-app.get('/api/admin/pricing-rules', adminAuth, async (_q, res) => {
+app.get('/api/admin/pricing-rules', adminAuth, requireAnyPerm('pricing.view'), async (_q, res) => {
   const { rows } = await pool.query('SELECT stacking, max_discount_pct, min_service_amount FROM pricing_rules WHERE id=1')
   res.json(rows[0] || { stacking: 'stack', max_discount_pct: 0, min_service_amount: 0 })
 })
@@ -1830,7 +1851,7 @@ app.put('/api/admin/pricing-rules', adminAuth, requirePerm('pricing.edit'), asyn
 /* Real per-zone operations metrics, aggregated from live DB (apartments, inventory, workers,
  * bookings) — powers the dashboards with real numbers instead of derived estimates. */
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
-app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
+app.get('/api/admin/zones/:id/metrics', adminAuth, requireAnyPerm('zones.view'), async (req, res) => {
   const zoneId = Number(req.params.id)
   const zoneRow = (await pool.query('SELECT * FROM zones WHERE id=$1', [zoneId])).rows[0]
   if (!zoneRow || !zoneRowInScope(req, zoneRow)) return res.status(404).json({ error: 'Zone not found' })
@@ -1859,7 +1880,7 @@ app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
 })
 // Global operational overview (trend / revenue / top-services / worker-status / rating) for
 // the admin all-zones dashboard — all real from the booking + worker services.
-app.get('/api/admin/ops-overview', adminAuth, async (req, res) => {
+app.get('/api/admin/ops-overview', adminAuth, requireAnyPerm('zones.view', 'liveops.view'), async (req, res) => {
   // A scoped admin gets one combined view over all of their zones.
   const zs = (req.admin?.scope?.zoneIds || []).map(Number).filter(Number.isFinite)
   if (scoped(req) && !zs.length) return res.json({ trend: [], revenueDaily: [], rating: 0, topServices: [], workerStatus: {}, recent: [] })
@@ -1875,7 +1896,7 @@ app.get('/api/admin/ops-overview', adminAuth, async (req, res) => {
   res.json({ trend: ops.trend || [], revenueDaily: ops.revenueDaily || [], rating: ops.rating || 0, topServices, workerStatus: ws, recent })
 })
 // All-zones real metrics for the admin dashboard (apartments + real bookings per zone).
-app.get('/api/admin/zones-metrics', adminAuth, async (req, res) => {
+app.get('/api/admin/zones-metrics', adminAuth, requireAnyPerm('zones.view', 'liveops.view'), async (req, res) => {
   const zones = (await pool.query('SELECT id, name, code, city, status FROM zones ORDER BY id')).rows.filter((z) => zoneRowInScope(req, z))
   const bstats = await tryGet(BOOKING_URL, '/api/internal/zone-metrics', [])
   const bmap = Object.fromEntries((Array.isArray(bstats) ? bstats : []).map((x) => [Number(x.zone_id), x]))
