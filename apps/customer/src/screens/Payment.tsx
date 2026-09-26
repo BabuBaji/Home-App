@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Header, FooterCTA, useToast } from '../components/UI'
 import { useStore } from '../store'
-import { createBookingApi, fetchQuote, fetchPaymentConfig, createOrder, verifyPayment } from '../api'
+import { createBookingApi, fetchQuote, fetchPaymentConfig, createOrder, verifyPayment, mockPay } from '../api'
 import { RazorpayNative } from '../razorpayNative'
 import { PayIcon, PayCluster } from '../components/PayIcon'
 import { Capacitor } from '@capacitor/core'
@@ -88,7 +88,7 @@ export default function Payment() {
     // No Razorpay keys yet → in demo mode simulate success so the flow is testable.
     if (demo) {
       setBusy(true)
-      try { await finishBooking({}, 'Payment successful!') }
+      try { await finishBooking({ paymentId: await mockPay(total, payment) }, 'Payment successful!') }
       catch (e) { toast((e as Error).message); setBusy(false) }
       return
     }

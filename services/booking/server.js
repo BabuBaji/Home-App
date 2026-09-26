@@ -157,6 +157,11 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_worker_id INTEGER`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offer_at TIMESTAMPTZ`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS declined_by INTEGER[] NOT NULL DEFAULT '{}'`,
+    // How the booking was paid: the verified gateway payment id and the split between online and wallet.
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_ref TEXT`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS online_paid INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS wallet_paid INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS refund_to_source INTEGER NOT NULL DEFAULT 0`,
     `CREATE INDEX IF NOT EXISTS ix_ext_booking ON booking_extensions(booking_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
@@ -808,14 +813,30 @@ app.post('/api/bookings', auth, async (req, res) => {
     if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
   }
 
-  const payment = body.payment || 'phonepe'
+  const payment = body.payment || 'upi'
   const isCash = payment === 'cash', isWallet = payment === 'wallet'
   const paymentStatus = isCash ? 'pending' : 'paid'
 
-  // Wallet payments debit the customer wallet in the auth service (402 if short).
-  if (isWallet) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'debit', title: `Booking Payment`, amount: priced.total }) }
+  /* Take the money before the booking exists — and only money the server can see. The wallet part
+   * (all of it for 'wallet', or the slice the customer chose to use) is debited here; the rest must
+   * arrive as a verified gateway payment of this customer's that covers it, claimed once. If the
+   * gateway claim fails the wallet debit is put back. */
+  const walletPart = isCash ? 0 : isWallet ? priced.total : Math.min(priced.total, Math.max(0, Math.round(Number(body.walletAmount) || 0)))
+  const onlinePart = isCash ? 0 : priced.total - walletPart
+  let paymentRef = null
+  if (onlinePart > 0 && !body.paymentId) return res.status(402).json({ error: 'Payment not received. Please pay to confirm the booking.' })
+  if (walletPart > 0) {
+    try { await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'debit', title: `Booking Payment`, amount: walletPart }) }
     catch (e) { return res.status(402).json({ error: e.message || 'Insufficient wallet balance' }) }
+  }
+  if (onlinePart > 0) {
+    try {
+      const c = await internalPost(PAYMENT_URL, '/api/internal/payment/claim', { paymentId: body.paymentId, customerId: req.user.id, amount: onlinePart, purpose: 'booking' })
+      paymentRef = c.paymentId
+    } catch (e) {
+      if (walletPart > 0) await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: 'Booking not placed — wallet restored', amount: walletPart }).catch(() => {})
+      return res.status(402).json({ error: e.message || 'Payment not received. Please pay again.' })
+    }
   }
 
   // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops) — same `pincode`
@@ -824,13 +845,15 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   const ins = await pool.query(
     `INSERT INTO bookings (ref,user_id,type,freq,note,date,time,address,payment,payment_status,items,duration,
-       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created,address_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
+       subtotal,fee,tax,discount,coupon,total,status,service_otp,cust_lat,cust_lng,pincode,zone_id,created,address_id,
+       payment_ref,online_paid,wallet_paid)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'confirmed',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
     [ref(), req.user.id, body.type || 'instant', body.freq ?? null, body.note ?? null, body.date ?? null, body.time ?? null,
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
-      custLat, custLng, pincode || null, zoneId, nowIso(), addressId ?? null])
+      custLat, custLng, pincode || null, zoneId, nowIso(), addressId ?? null, paymentRef, onlinePart, walletPart])
   let booking = rowTo(ins.rows[0])
+  if (paymentRef) internalPost(PAYMENT_URL, '/api/internal/payment/attach', { paymentId: paymentRef, ref: `booking:${booking.id}` }).catch(() => {})
 
   // Record the payment in the customer's transaction ledger for NON-wallet methods too. Wallet
   // payments already posted a real balance-moving debit above; UPI/card/PhonePe paid the gateway and
@@ -957,6 +980,28 @@ app.get('/api/bookings/:id/cancel-quote', auth, async (req, res) => {
   res.json(quoteCancellation(b, await cancelCfg()))
 })
 
+/* Send `amount` of a booking back where it came from: the online part to the original card/UPI via
+ * the gateway, the rest to the in-app wallet. If the gateway refund fails the customer is not left
+ * waiting — that part goes to the wallet instead. Returns 'refunded' or 'failed'. */
+async function refundBooking(b, amount, title) {
+  let left = Math.max(0, Math.round(amount || 0)), toSource = 0, status = 'refunded'
+  if (!left) return 'none'
+  const online = Math.max(0, (b.online_paid || 0) - (b.refund_to_source || 0))
+  if (b.payment_ref && online > 0) {
+    const part = Math.min(left, online)
+    try {
+      const r = await internalPost(PAYMENT_URL, '/api/internal/payment/refund', { paymentId: b.payment_ref, amount: part, reason: title })
+      toSource = r.amount || 0; left -= toSource
+    } catch (e) { console.error('[booking] gateway refund failed for', b.ref, e.message, '— crediting wallet instead') }
+  }
+  if (left > 0) {
+    try { await internalPost(AUTH_URL, `/api/internal/users/${b.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title, amount: left, ref: b.ref }) }
+    catch (e) { console.error('[booking] wallet refund failed for', b.ref, e.message); status = 'failed' }
+  }
+  await pool.query('UPDATE bookings SET refund_to_source=refund_to_source+$2, refund_status=$3 WHERE id=$1', [b.id, toSource, status])
+  return status
+}
+
 app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
@@ -968,16 +1013,8 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
        cancelled_by='customer', cancel_time=$4, worker_comp=$5, refund_status=$6,
        payment_status=CASE WHEN $3 > 0 THEN 'refunded' ELSE payment_status END WHERE id=$7`,
     [req.body?.reason || 'Not specified', q.fee, refundable, nowIso(), q.workerComp, refundable > 0 ? 'refunded' : 'none', b.id])
-  if (refundable > 0) {
-    // The credit is best-effort, so record what actually happened: claiming 'refunded' when the
-    // wallet call failed would tell the customer they were paid when they were not.
-    try {
-      await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${b.ref}`, amount: refundable, ref: b.ref })
-    } catch (e) {
-      console.error('[booking] refund credit failed:', e?.message || e)
-      await pool.query("UPDATE bookings SET refund_status='failed' WHERE id=$1", [b.id])
-    }
-  }
+  // Record what actually happened: 'refunded' only once the money has gone back.
+  if (refundable > 0) await refundBooking(b, refundable, `Refund ${b.ref}`)
   await emitBookingUpdate(b.id)
   publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(b.id), quote: q })
   publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.cancel', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Cancelled (${q.title}): ${req.body?.reason || 'Not specified'}`, meta: { fee: q.fee, refund: refundable, workerComp: q.workerComp } })
@@ -1298,9 +1335,18 @@ app.post('/api/internal/bookings/:id/decline', internalOnly, async (req, res) =>
 })
 
 // Admin (via payment service): mark a cancelled booking as refunded.
+// Executes an approved admin refund: actually moves the money (gateway first, then wallet), and
+// never refunds the same booking twice.
 app.post('/api/internal/bookings/:id/refund', internalOnly, async (req, res) => {
-  await pool.query("UPDATE bookings SET payment_status='refunded', refund_status='refunded', refund=COALESCE(refund, total) WHERE id=$1", [Number(req.params.id)])
-  res.json({ ok: true })
+  const b = await getBooking(Number(req.params.id))
+  if (!b) return res.status(404).json({ error: 'Not found' })
+  if (b.refund_status === 'refunded' && b.payment_status === 'refunded') return res.json({ ok: true, duplicate: true })
+  const paid = b.payment === 'cash' && b.payment_status !== 'paid' ? 0 : (b.total || 0)
+  const amount = Math.min(paid, Number(req.body?.amount) || b.refund || paid)
+  const status = await refundBooking(b, amount, `Refund ${b.ref}`)
+  await pool.query("UPDATE bookings SET payment_status=CASE WHEN $2='refunded' THEN 'refunded' ELSE payment_status END, refund=$3 WHERE id=$1", [b.id, status, amount])
+  await emitBookingUpdate(b.id)
+  res.json({ ok: status === 'refunded', status, amount })
 })
 // Dispatch: atomic claim of a job by a worker.
 app.post('/api/internal/bookings/:id/assign', internalOnly, async (req, res) => {
@@ -1483,13 +1529,10 @@ async function autoCancelNoService(r, reason) {
      WHERE id=$6 AND status IN ('confirmed','worker_assigned') RETURNING id`,
     [reason, nowIso(), refund, paid ? 'refunded' : 'none', paid, r.id])
   if (!upd.rowCount) return
-  if (refund > 0) {
-    try { await internalPost(AUTH_URL, `/api/internal/users/${r.user_id}/wallet`, { type: 'credit', kind: 'REFUND', title: `Refund ${r.ref} — no expert available`, amount: refund, ref: r.ref }) }
-    catch (e) { console.error('[booking] auto-refund failed for', r.ref, e.message) }
-  }
+  if (refund > 0) await refundBooking(r, refund, `Refund ${r.ref} — no expert available`)
   await emitBookingUpdate(r.id)
   publishEvent(REDIS_URL, 'booking.cancelled', { booking: await getBooking(r.id), reason: 'no_worker', autoCancelled: true })
-  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'booking.autocancel', entityType: 'booking', entityId: r.id, ref: r.ref, detail: `Auto-cancelled — ${reason}${refund > 0 ? ` · ₹${refund} refunded to wallet` : ''}`, meta: { refund } })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'booking.autocancel', entityType: 'booking', entityId: r.id, ref: r.ref, detail: `Auto-cancelled — ${reason}${refund > 0 ? ` · ₹${refund} refunded` : ''}`, meta: { refund } })
   console.log(`[booking] auto-cancelled ${r.ref} (${reason})${refund > 0 ? `, refunded ₹${refund}` : ''}`)
 }
 async function sweepUnacceptedBookings() {

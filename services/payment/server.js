@@ -30,7 +30,6 @@ process.on('unhandledRejection', (e) => console.error('[payment] unhandledReject
 const pool = makePool(DATABASE_URL)
 const auth = makeCustomerAuth(AUTH_URL)
 const adminAuth = makeAdminAuth(ADMIN_URL)
-const verifiedPayments = new Map() // razorpay_payment_id -> { at } (single-use)
 
 const PAYMENT_METHODS = [
   { group: 'UPI', recommended: true, options: [
@@ -58,6 +57,15 @@ async function init() {
     `CREATE TABLE IF NOT EXISTS bank_validations (id SERIAL PRIMARY KEY, worker_id INTEGER, validation_id TEXT, fund_account_id TEXT, status TEXT, registered_name TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE TABLE IF NOT EXISTS webhook_events (id SERIAL PRIMARY KEY, event_id TEXT UNIQUE, type TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_booking ON payments(booking_id) WHERE booking_id IS NOT NULL`,
+    // Verified-payment ledger: an order is CREATED for a customer + amount, VERIFIED once the gateway
+    // signature checks out, then CLAIMED exactly once by whatever it paid for (purpose + ref).
+    `ALTER TABLE payments ADD COLUMN IF NOT EXISTS purpose TEXT`,
+    `ALTER TABLE payments ADD COLUMN IF NOT EXISTS claimed_ref TEXT`,
+    `ALTER TABLE payments ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`,
+    `ALTER TABLE payments ADD COLUMN IF NOT EXISTS refund_id TEXT`,
+    `ALTER TABLE payments ADD COLUMN IF NOT EXISTS refunded_amount INTEGER DEFAULT 0`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_payment_id ON payments(payment_id) WHERE payment_id IS NOT NULL AND status IN ('VERIFIED','CLAIMED')`,
+    `CREATE INDEX IF NOT EXISTS ix_pay_order ON payments(order_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_settle_booking ON settlements(booking_id)`,
   ])
   console.log('[payment] Postgres ready (payments, settlements, payouts, wallet_ledger, webhook_events)')
@@ -75,6 +83,11 @@ const app = express()
 // Keep the raw body so webhook HMAC signatures verify over the exact bytes.
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf } }))
 app.get('/health', (_q, res) => res.json({ service: 'payment', ok: true }))
+
+// Fake payments exist so the flow can be tested without Razorpay keys. They are never allowed in
+// production unless someone explicitly opts in (ALLOW_MOCK_PAYMENTS=true) — otherwise an app build
+// pointing at a live server without keys would hand out free bookings.
+const mockPaymentsAllowed = () => process.env.NODE_ENV !== 'production' || process.env.ALLOW_MOCK_PAYMENTS === 'true'
 
 async function rzp() {
   const keyId = await getSetting(ADMIN_URL, 'razorpay_key_id', '')
@@ -286,9 +299,13 @@ app.get('/api/payment/config', async (_q, res) => {
     upiMode: await getSetting(ADMIN_URL, 'upi_mode', 'demo'),
   })
 })
+const newOrderRow = (customerId, amount, orderId, gateway, purpose) => pool.query(
+  "INSERT INTO payments (customer_id,amount,mode,gateway,order_id,status,purpose) VALUES ($1,$2,'online',$3,$4,'CREATED',$5)",
+  [customerId, amount, gateway, orderId, purpose || null])
 app.post('/api/payment/order', auth, async (req, res) => {
   const amount = Math.max(0, Math.round(Number(req.body?.amount) || 0))
   if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' })
+  const purpose = req.body?.purpose ? String(req.body.purpose).slice(0, 40) : null
   const r = await rzp()
   if (r.live) {
     try {
@@ -298,20 +315,84 @@ app.post('/api/payment/order', auth, async (req, res) => {
       })
       const o = await resp.json()
       if (!resp.ok) return res.status(502).json({ error: o?.error?.description || 'Gateway order failed' })
+      await newOrderRow(req.user.id, amount, o.id, 'razorpay', purpose)
       return res.json({ provider: 'razorpay', orderId: o.id, amount, currency: 'INR', keyId: r.keyId })
     } catch { return res.status(502).json({ error: 'Could not reach payment gateway' }) }
   }
-  res.json({ provider: 'mock', orderId: 'ORD' + Math.floor(100000 + Math.random() * 899999), amount, currency: 'INR' })
+  if (!mockPaymentsAllowed()) return res.status(503).json({ error: 'Online payments are not set up yet.' })
+  const orderId = 'order_mock_' + crypto.randomBytes(6).toString('hex')
+  await newOrderRow(req.user.id, amount, orderId, 'mock', purpose)
+  res.json({ provider: 'mock', orderId, amount, currency: 'INR' })
 })
+// Mark the customer's own order as paid-and-verified. Returns the payment id to hand to whatever
+// the money is for; that id can then be claimed exactly once, for at most the order's amount.
+async function markVerified(customerId, orderId, paymentId) {
+  const { rows } = await pool.query(
+    `UPDATE payments SET payment_id=$3, status='VERIFIED' WHERE order_id=$1 AND customer_id=$2 AND status='CREATED' RETURNING *`,
+    [orderId, customerId, paymentId])
+  return rows[0] || null
+}
 app.post('/api/payment/verify', auth, async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {}
   const r = await rzp()
   if (!r.live) return res.status(400).json({ error: 'Razorpay not configured' })
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return res.status(400).json({ error: 'Missing payment fields' })
   const expected = crypto.createHmac('sha256', r.keySecret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex')
-  if (expected !== razorpay_signature) return res.status(400).json({ error: 'Payment verification failed' })
-  verifiedPayments.set(String(razorpay_payment_id), { at: Date.now() })
+  const a = Buffer.from(expected), b = Buffer.from(String(razorpay_signature))
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(400).json({ error: 'Payment verification failed' })
+  const row = await markVerified(req.user.id, String(razorpay_order_id), String(razorpay_payment_id))
+  if (!row) {
+    // Re-verifying the same payment (a retried call) is fine; anything else is not this customer's order.
+    const again = (await pool.query("SELECT 1 FROM payments WHERE order_id=$1 AND customer_id=$2 AND payment_id=$3", [razorpay_order_id, req.user.id, razorpay_payment_id])).rowCount
+    if (!again) return res.status(400).json({ error: 'Unknown order' })
+  }
   res.json({ ok: true, txnId: razorpay_payment_id })
+})
+
+/* Claim a verified payment for what it paid for. Single use, same customer, and it must cover the
+ * amount — a ₹1 payment can't be passed off as a ₹500 booking, and one payment can't pay twice. */
+async function claimPayment({ paymentId, customerId, amount, purpose, ref }) {
+  const { rows } = await pool.query(
+    `UPDATE payments SET status='CLAIMED', purpose=COALESCE($4, purpose), claimed_ref=$5, claimed_at=now()
+      WHERE payment_id=$1 AND customer_id=$2 AND status='VERIFIED' AND amount >= $3 RETURNING *`,
+    [String(paymentId || ''), Number(customerId), Math.round(Number(amount) || 0), purpose || null, ref != null ? String(ref) : null])
+  return rows[0] || null
+}
+app.post('/api/internal/payment/claim', internalOnly, async (req, res) => {
+  const row = await claimPayment(req.body || {})
+  if (!row) return res.status(402).json({ error: 'Payment not received. Please pay again.' })
+  res.json({ ok: true, paymentId: row.payment_id, amount: row.amount, gateway: row.gateway })
+})
+// Point an already-claimed payment at the record it paid for (e.g. the booking id once it exists).
+app.post('/api/internal/payment/attach', internalOnly, async (req, res) => {
+  await pool.query('UPDATE payments SET claimed_ref=$2 WHERE payment_id=$1 AND status=$3', [String(req.body?.paymentId || ''), String(req.body?.ref || ''), 'CLAIMED'])
+  res.json({ ok: true })
+})
+/* Refund (part of) a claimed payment back to where it came from. Razorpay when live; recorded only
+ * for mock payments. Never refunds more than was paid minus what has already gone back. */
+app.post('/api/internal/payment/refund', internalOnly, async (req, res) => {
+  const paymentId = String(req.body?.paymentId || '')
+  const row = (await pool.query("SELECT * FROM payments WHERE payment_id=$1 AND status='CLAIMED'", [paymentId])).rows[0]
+  if (!row) return res.status(404).json({ error: 'No such payment' })
+  const left = row.amount - (row.refunded_amount || 0)
+  const amount = Math.min(left, Math.max(0, Math.round(Number(req.body?.amount) || 0)))
+  if (amount <= 0) return res.json({ ok: true, amount: 0 })
+  let refundId
+  if (row.gateway === 'razorpay') {
+    const r = await rzp()
+    if (!r.live) return res.status(503).json({ error: 'Payment gateway not configured' })
+    try {
+      const resp = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Basic ' + Buffer.from(`${r.keyId}:${r.keySecret}`).toString('base64') },
+        body: JSON.stringify({ amount: amount * 100, notes: { reason: String(req.body?.reason || '').slice(0, 200) } }),
+      })
+      const j = await resp.json().catch(() => ({}))
+      if (!resp.ok) return res.status(502).json({ error: j?.error?.description || 'Refund failed at the gateway' })
+      refundId = j.id
+    } catch { return res.status(502).json({ error: 'Could not reach payment gateway' }) }
+  } else refundId = 'rfnd_mock_' + crypto.randomBytes(5).toString('hex')
+  await pool.query('UPDATE payments SET refunded_amount=COALESCE(refunded_amount,0)+$2, refund_id=$3 WHERE id=$1', [row.id, amount, refundId])
+  res.json({ ok: true, amount, refundId })
 })
 // Verified wallet top-up. Credits the customer wallet ONLY after the gateway payment passed
 // server-side signature verification (done in /api/payment/verify). Idempotent by payment_id, so
@@ -320,19 +401,16 @@ app.post('/api/payment/wallet/topup', auth, async (req, res) => {
   const amount = Math.max(1, Math.round(Number(req.body?.amount) || 0))
   const paymentId = String(req.body?.paymentId || '').trim()
   if (!amount || !paymentId) return res.status(400).json({ error: 'Missing amount or paymentId' })
-  const r = await rzp()
-  // Live gateway → the payment must have been verified (never trust frontend success alone).
-  if (r.live && !verifiedPayments.has(paymentId)) return res.status(400).json({ error: 'Payment not verified' })
-  // Idempotency guard — one gateway payment credits the wallet exactly once.
-  const dup = await pool.query("SELECT id FROM payments WHERE payment_id=$1 AND mode='wallet_topup'", [paymentId])
+  // The payment must be this customer's, verified, unclaimed and cover the amount. Claiming it is
+  // the idempotency guard too — one gateway payment credits the wallet exactly once.
+  const dup = await pool.query("SELECT 1 FROM payments WHERE payment_id=$1 AND customer_id=$2 AND purpose='wallet_topup' AND status='CLAIMED'", [paymentId, req.user.id])
   if (dup.rowCount) return res.json({ ok: true, duplicate: true })
+  if (!(await claimPayment({ paymentId, customerId: req.user.id, amount, purpose: 'wallet_topup', ref: 'wallet' }))) return res.status(400).json({ error: 'Payment not verified' })
   let balance = null
   try {
     const credited = await internalPost(AUTH_URL, `/api/internal/users/${req.user.id}/wallet`, { type: 'credit', kind: 'ADD_MONEY', title: 'Added to wallet', amount, ref: paymentId })
     balance = credited?.balance ?? null
   } catch { return res.status(502).json({ error: 'Could not credit wallet' }) }
-  await pool.query("INSERT INTO payments (customer_id,amount,mode,gateway,payment_id,status) VALUES ($1,$2,'wallet_topup','razorpay',$3,'SUCCESS')", [req.user.id, amount, paymentId])
-  verifiedPayments.delete(paymentId)
   res.json({ ok: true, balance })
 })
 
@@ -349,27 +427,26 @@ app.post('/api/internal/payment/extension', internalOnly, async (req, res) => {
   const amount = Math.max(1, Math.round(Number(req.body?.amount) || 0))
   const paymentId = String(req.body?.paymentId || '').trim()
   if (!amount || !paymentId) return res.status(400).json({ error: 'Missing amount or paymentId' })
-  const r = await rzp()
-  // Live gateway → the payment must have passed server-side signature verification. Never trust a
-  // frontend "success" alone. In mock/demo mode there is no signature to check.
-  if (r.live && !verifiedPayments.has(paymentId)) return res.status(400).json({ error: 'Payment not verified' })
-  // Idempotency — one gateway payment settles exactly one extension.
-  const dup = await pool.query("SELECT id FROM payments WHERE payment_id=$1 AND mode='extension'", [paymentId])
-  if (dup.rowCount) return res.json({ ok: true, duplicate: true })
   const orderRef = `EXT-BK${bookingId || '?'}${extId ? '-' + extId : ''}`
-  await pool.query(
-    "INSERT INTO payments (booking_id,customer_id,amount,mode,gateway,payment_id,order_id,status) VALUES (NULL,$1,$2,'extension',$3,$4,$5,'PAID')",
-    [customerId, amount, r.live ? 'razorpay' : 'mock', paymentId, orderRef])
-  verifiedPayments.delete(paymentId)
+  // Idempotency — one gateway payment settles exactly one extension; a retried approve is fine.
+  const dup = await pool.query("SELECT 1 FROM payments WHERE payment_id=$1 AND status='CLAIMED' AND claimed_ref=$2", [paymentId, orderRef])
+  if (dup.rowCount) return res.json({ ok: true, duplicate: true })
+  // Never trust a frontend "success": the payment must be verified, this customer's and cover it.
+  if (!(await claimPayment({ paymentId, customerId, amount, purpose: 'extension', ref: orderRef }))) return res.status(400).json({ error: 'Payment not verified' })
   res.json({ ok: true })
 })
 
+// Test-mode "payment": completes one of the customer's own mock orders. Refused when Razorpay is
+// live, and in production unless mock payments were explicitly allowed.
 app.post('/api/payment/charge', auth, async (req, res) => {
   const r = await rzp()
   if (r.live) return res.status(400).json({ error: 'Use the Razorpay checkout flow' })
-  const amount = Math.max(0, Math.round(Number(req.body?.amount) || 0))
-  if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' })
-  res.json({ status: 'paid', txnId: 'TXN' + Math.floor(10000000 + Math.random() * 89999999), method: req.body?.method || 'phonepe', amount })
+  if (!mockPaymentsAllowed()) return res.status(503).json({ error: 'Online payments are not set up yet.' })
+  const orderId = String(req.body?.orderId || '')
+  const txnId = 'pay_mock_' + crypto.randomBytes(6).toString('hex')
+  const row = await markVerified(req.user.id, orderId, txnId)
+  if (!row || row.gateway !== 'mock') return res.status(400).json({ error: 'Unknown order' })
+  res.json({ status: 'paid', txnId, method: req.body?.method || 'upi', amount: row.amount })
 })
 app.post('/api/payments/order', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)

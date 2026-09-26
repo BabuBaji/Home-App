@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
-import { fetchPaymentMethods, createOrder, chargePayment, fetchPaymentConfig, createPaymentsOrder, verifyPayment } from '../api'
+import { fetchPaymentMethods, createOrder, chargePayment, fetchPaymentConfig, createPaymentsOrder, verifyPayment, mockPay } from '../api'
 import { useToast } from './UI'
 import type { PaymentGroup } from '../types'
 import { UPI_APPS, payByUpi, type UpiApp } from '../upi'
@@ -228,8 +228,15 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
     return payMock()
   }
 
-  function confirmPaid() { setPhase('done'); setTimeout(() => onPaid(method, txnRef || ('HH' + Date.now())), 600) }
-  function payDemoUpi() { setPhase('done'); setTimeout(() => onPaid(method, 'UPI' + Date.now().toString().slice(-10)), 800) }
+  // A direct-UPI or demo payment has no gateway proof, so it settles through a server-side test
+  // order (refused by a production server) — the booking then gets a payment id it can verify.
+  async function settleTest() {
+    setPhase('processing')
+    try { const id = await mockPay(amount, method); setPhase('done'); setTimeout(() => onPaid(method, id), 600) }
+    catch (e) { toast((e as Error).message); setPhase('select') }
+  }
+  const confirmPaid = settleTest
+  const payDemoUpi = settleTest
 
   function RowIcon({ id, emoji }: { id: string; emoji: string }) {
     const pkg = PKG[id]

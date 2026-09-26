@@ -115,6 +115,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CATALOG_URL: http://catalog:4001
       ADMIN_URL: http://admin:4010
+      PAYMENT_URL: http://payment:4008
+      # Google sign-in: the OAuth client id(s) whose ID tokens are accepted (comma list). Unset = off.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       DEV_OTP: ${DEV_OTP}
     ports: ["4002:4002"]
     depends_on:

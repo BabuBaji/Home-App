@@ -181,6 +181,12 @@ export const createPaymentsOrder = (amount: number, mode: string, bookingId?: nu
 export const createOrder = (amount: number) => req<{ provider: 'razorpay' | 'mock'; orderId: string; amount: number; currency: string; keyId?: string }>('/api/payment/order', { method: 'POST', body: JSON.stringify({ amount }) })
 export const verifyPayment = (p: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => req<{ ok: boolean; txnId: string }>('/api/payment/verify', { method: 'POST', body: JSON.stringify(p) })
 export const chargePayment = (orderId: string, method: string, amount: number) => req<ChargeResult>('/api/payment/charge', { method: 'POST', body: JSON.stringify({ orderId, method, amount }) })
+/** Test mode (no Razorpay keys): complete a server-side mock order and return its payment id, which
+ *  the server then accepts exactly once. Refused by a production server. */
+export async function mockPay(amount: number, method = 'upi'): Promise<string> {
+  const order = await createOrder(amount)
+  return (await chargePayment(order.orderId, method, amount)).txnId
+}
 
 /* wallet */
 export interface WalletSummary {
@@ -278,9 +284,9 @@ export interface Membership {
 }
 export interface MembershipEvent { id: number; event: string; detail: string | null; amount: number; created: string }
 export const fetchMembership = () => req<Membership>('/api/membership')
-export const subscribeMembership = (p: { plan: string; cycle: string; method?: string; payWithWallet?: boolean }) =>
+export const subscribeMembership = (p: { plan: string; cycle: string; method?: string; payWithWallet?: boolean; paymentId?: string }) =>
   req<Membership>('/api/membership/subscribe', { method: 'POST', body: JSON.stringify(p) })
-export const renewMembership = (p: { cycle?: string; payWithWallet?: boolean } = {}) =>
+export const renewMembership = (p: { cycle?: string; payWithWallet?: boolean; paymentId?: string } = {}) =>
   req<Membership>('/api/membership/renew', { method: 'POST', body: JSON.stringify(p) })
 export const cancelMembership = (reason?: string) =>
   req<Membership>('/api/membership/cancel', { method: 'POST', body: JSON.stringify({ reason }) })

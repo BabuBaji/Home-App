@@ -16,7 +16,8 @@ services:
   catalog:        { restart: unless-stopped }
   booking:        { restart: unless-stopped }
   dispatch:       { restart: unless-stopped }
-  payment:        { restart: unless-stopped }
+  # Production refuses test-mode (mock) payments; set ALLOW_MOCK_PAYMENTS=true only on a staging box.
+  payment:        { restart: unless-stopped, environment: { NODE_ENV: production, ALLOW_MOCK_PAYMENTS: "${ALLOW_MOCK_PAYMENTS:-false}" } }
   wallet:         { restart: unless-stopped }
   worker:         { restart: unless-stopped }
   notification:   { restart: unless-stopped }

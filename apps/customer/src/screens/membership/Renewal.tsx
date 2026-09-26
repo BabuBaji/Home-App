@@ -6,6 +6,7 @@ import { ArrowLeft, Smartphone } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
 import { pickPlan, loadPlans, CYCLES, cyclePrice, money, type Plan } from '../../membership'
 import { fetchMembership, renewMembership, type Membership } from '../../api'
+import PaymentSheet from '../../components/PaymentSheet'
 
 const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 
@@ -16,6 +17,7 @@ export default function Renewal() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [cycle, setCycle] = useState('monthly')
   const [busy, setBusy] = useState(false)
+  const [sheet, setSheet] = useState(false)
 
   useEffect(() => {
     fetchMembership().then((m) => {
@@ -30,11 +32,16 @@ export default function Renewal() {
 
   const plan = pickPlan(plans, mem.plan || 'gold')
 
-  const renew = async () => {
+  const cyc = CYCLES.find((c) => c.key === cycle) || CYCLES[0]
+  const amount = cyclePrice(plan.price, cyc.months, cyc.savePct).total
+  // Renewal is paid up front through the payment sheet; the server renews only against that payment.
+  const renew = async (paymentId?: string) => {
     if (busy) return
+    if (!paymentId) { setSheet(true); return }
+    setSheet(false)
     setBusy(true)
     try {
-      await renewMembership({ cycle })
+      await renewMembership({ cycle, paymentId })
       toast('Your plan has been renewed 🎉')
       nav('/membership/active', { replace: true })
     } catch (e) {
@@ -82,9 +89,10 @@ export default function Renewal() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" disabled={busy} onClick={renew}>{busy ? 'Processing…' : 'Renew Now'}</button>
+        <button className="btn full" disabled={busy} onClick={() => renew()}>{busy ? 'Processing…' : `Pay ${money(amount)} & Renew`}</button>
         <div className="ren-note">Renewing extends your plan from {fmtDate(mem.renewsAt)}</div>
       </div>
+      <PaymentSheet open={sheet} amount={amount} onClose={() => setSheet(false)} onPaid={(_m, id) => renew(id)} />
     </div>
   )
 }

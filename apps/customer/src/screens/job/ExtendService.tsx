@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Clock, Star } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
-import { fetchExtensions, approveExtension, declineExtension, createOrder, verifyPayment, fetchPaymentConfig, type BookingExtension } from '../../api'
+import { fetchExtensions, approveExtension, declineExtension, createOrder, verifyPayment, fetchPaymentConfig, type BookingExtension, mockPay } from '../../api'
 import { RazorpayNative } from '../../razorpayNative'
 import { useStore } from '../../store'
 import { speak } from '../../notify'
@@ -84,7 +84,7 @@ export default function ExtendService() {
   // simulated success in demo mode so the flow is testable without live keys.
   async function payForExtension(amount: number): Promise<string | null> {
     if (provider !== 'razorpay') {
-      if (demo) return 'MOCKEXT' + Date.now() // no keys, demo mode → settle a mock payment
+      if (demo) { try { return await mockPay(amount) } catch (e) { toast((e as Error).message); return null } } // no keys → server-side test payment
       toast('Online payments are not set up yet. Add Razorpay keys in Admin → Settings.')
       return null
     }

@@ -52,13 +52,6 @@ export default function Login() {
     catch (e) { toast((e as Error).message); setOtp('') } finally { setBusy(false) }
   }
 
-  // Demo Google sign-in (works with no setup)
-  async function googleDemo() {
-    setGbusy(true)
-    try { const { token, user } = await googleAuth({ demo: true }); done(token, user) }
-    catch (e) { toast((e as Error).message); setGbusy(false) }
-  }
-
   // countdown for the resend timer on the OTP step
   useEffect(() => {
     if (step !== 'otp' || left <= 0) return
@@ -147,11 +140,8 @@ export default function Login() {
 
           <div className="au-safe"><ShieldCheck size={16} /> Your number is safe with us</div>
 
-          {!GOOGLE_CLIENT_ID ? (
-            <button className="au-google" onClick={googleDemo} disabled={gbusy}>
-              <GoogleIcon /><span>{gbusy ? 'Signing in…' : 'Continue with Google'}</span>
-            </button>
-          ) : <div ref={gbtnRef} className="au-google-real" />}
+          {/* Google sign-in only when a client id is configured (the server verifies the token). */}
+          {GOOGLE_CLIENT_ID && <div ref={gbtnRef} className="au-google-real" />}
         </div>
         <div className="au-foot">
           <button className="au-btn" onClick={sendOtp} disabled={busy || phone.replace(/\D/g, '').length < 10}>

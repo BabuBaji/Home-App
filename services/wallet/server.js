@@ -9,7 +9,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
-  makeAdminAuth, requirePerm, getSetting, getSettingInt,
+  makeAdminAuth, requirePerm, getSetting, getSettingInt, smsConfigured, sendOtpSms,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: it carries the jsonwebtoken dep.
 import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
@@ -559,8 +559,32 @@ app.post('/api/worker/wallet/payslip/generate', auth, async (req, res) => { cons
 
 // Single source for the withdraw/PIN-reset OTP — the endpoint below hands it out in dev, and
 // the PIN reset checks against the same value.
-const WITHDRAW_OTP = process.env.WORKER_DEV_OTP || '1234'
-app.post('/api/worker/wallet/withdraw/request-otp', auth, (_q, res) => res.json({ ok: true, devOtp: WITHDRAW_OTP }))
+// A fresh random code per request, texted to the worker's registered number, valid 5 minutes and
+// for 5 tries. Only a dev stack (WORKER_DEV_OTP set, no SMS provider) pins it and returns it.
+const walletOtps = new Map() // workerId -> { hash, expires, attempts }
+const otpHash = (wid, code) => crypto.createHash('sha256').update(`${wid}:${code}:${process.env.JWT_SECRET || ''}`).digest('hex')
+function checkWalletOtp(wid, code) {
+  const rec = walletOtps.get(wid)
+  if (!rec || Date.now() > rec.expires || rec.attempts >= 5) return false
+  if (otpHash(wid, String(code || '')) !== rec.hash) { rec.attempts++; return false }
+  walletOtps.delete(wid)
+  return true
+}
+app.post('/api/worker/wallet/withdraw/request-otp', auth, async (req, res) => {
+  const w = await workerSnapshot(req.wid)
+  const phone = w?.phone || w?.worker?.phone
+  const dev = process.env.WORKER_DEV_OTP
+  const sms = await smsConfigured(ADMIN_URL)
+  const code = sms || !dev ? String(crypto.randomInt(1000, 10000)) : String(dev)
+  walletOtps.set(req.wid, { hash: otpHash(req.wid, code), expires: Date.now() + 5 * 60_000, attempts: 0 })
+  if (sms) {
+    const sent = phone ? await sendOtpSms(ADMIN_URL, phone, code) : { ok: false }
+    if (!sent.ok) return res.status(502).json({ ok: false, error: 'Could not send the code. Try again.' })
+    return res.json({ ok: true })
+  }
+  if (!dev) return res.status(503).json({ ok: false, error: 'SMS is not set up — contact support to reset your PIN.' })
+  res.json({ ok: true, devOtp: code })
+})
 app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)
   const avail = (await summary(req.wid)).available
@@ -670,7 +694,7 @@ app.post('/api/worker/wallet/pin/set', auth, async (req, res) => {
   const existing = await pinRow(req.wid)
   if (existing) {
     const otp = String(req.body?.otp || '')
-    if (otp !== WITHDRAW_OTP) return res.status(403).json({ ok: false, error: 'Enter the OTP sent to your phone to reset the PIN' })
+    if (!checkWalletOtp(req.wid, otp)) return res.status(403).json({ ok: false, error: 'Enter the OTP sent to your phone to reset the PIN' })
   }
   const salt = crypto.randomBytes(8).toString('hex')
   await pool.query(

@@ -6,6 +6,7 @@ import { ArrowLeft, Check, Smartphone, CreditCard, Building2, Wallet, ChevronRig
 import { useToast } from '../../components/UI'
 import { planByKey, pickPlan, loadPlans, CYCLES, cyclePrice, money } from '../../membership'
 import { subscribeMembership } from '../../api'
+import PaymentSheet from '../../components/PaymentSheet'
 
 export default function Subscribe() {
   const nav = useNavigate()
@@ -17,15 +18,20 @@ export default function Subscribe() {
   const [cycle, setCycle] = useState('monthly')
   const [method, setMethod] = useState('upi')
   const [busy, setBusy] = useState(false)
+  const [sheet, setSheet] = useState(false)
 
   const active = CYCLES.find((c) => c.key === cycle) || CYCLES[0]
   const { total } = cyclePrice(plan.price, active.months, active.savePct)
 
-  const subscribe = async () => {
+  // Wallet pays on the server; any other method goes through the payment sheet first and the
+  // server only activates the plan against that verified payment.
+  const subscribe = async (paymentId?: string) => {
     if (busy) return
+    if (method !== 'wallet' && !paymentId) { setSheet(true); return }
+    setSheet(false)
     setBusy(true)
     try {
-      await subscribeMembership({ plan: plan.key, cycle, method, payWithWallet: method === 'wallet' })
+      await subscribeMembership({ plan: plan.key, cycle, method, payWithWallet: method === 'wallet', paymentId })
       toast(`Welcome to ${plan.name}! 🎉`)
       nav('/membership/active', { replace: true })
     } catch (e) {
@@ -78,9 +84,10 @@ export default function Subscribe() {
       </div>
 
       <div className="w-foot">
-        <button className="btn full" disabled={busy} onClick={subscribe}>{busy ? 'Processing…' : <>Pay {money(total)} &amp; Subscribe</>}</button>
+        <button className="btn full" disabled={busy} onClick={() => subscribe()}>{busy ? 'Processing…' : <>Pay {money(total)} &amp; Subscribe</>}</button>
         <div className="sub-terms">By continuing, you agree to our <button onClick={() => nav('/terms')}>Terms &amp; Conditions</button></div>
       </div>
+      <PaymentSheet open={sheet} amount={total} onClose={() => setSheet(false)} onPaid={(_m, id) => subscribe(id)} />
     </div>
   )
 }

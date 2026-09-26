@@ -117,6 +117,8 @@ export default function BookingFlow() {
         ...(addr?.id ? { addressId: addr.id } : {}),
         ...(worker !== 'any' ? { workerId: Number(worker) } : {}),
         ...(txnId ? { paymentId: txnId } : {}),
+        // The wallet slice the customer chose; the server debits it and expects the rest paid online.
+        ...(payable > 0 && walletUsed > 0 ? { walletAmount: walletUsed } : {}),
       })
       // Payment done → Payment Success (39) → Booking Confirmed (40) → Tracking (41).
       setNewId(b.id); go('success')

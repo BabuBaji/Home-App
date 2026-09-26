@@ -10,7 +10,7 @@
 // debit/credit, admin customer management). No monolith involved.
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, publishEvent, smsConfigured, sendOtpSms, getSetting } from '@homehelp/shared'
+import { makePool, migrate, nowIso, internalOnly, internalPost, publishEvent, smsConfigured, sendOtpSms, getSetting } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('auth') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -20,6 +20,9 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://homehelp:homehelp@l
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '')
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '') // owns `settings` (SMS provider keys)
+const PAYMENT_URL = (process.env.PAYMENT_URL || 'http://localhost:4008').replace(/\/$/, '')
+// Google sign-in is accepted only for ID tokens Google issued to OUR client id(s) (comma list).
+const GOOGLE_CLIENT_IDS = String(process.env.GOOGLE_CLIENT_ID || '').split(',').map((s) => s.trim()).filter(Boolean)
 /* DEV_OTP pins the code to a known value AND returns it in the response, so demos work with no SMS
  * provider wired up. It is the ONLY way a code is ever disclosed and must be set explicitly —
  * unset means a random code that is never disclosed. It used to default to '4321', i.e. disclosure
@@ -427,8 +430,29 @@ async function recordIdentity(user, provider) {
     [user.id, user.phone || null, user.email || null, provider, user.name || null])
 }
 
-function decodeJwt(t) {
-  try { return JSON.parse(Buffer.from(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) } catch { return null }
+/* Verify a Google ID token with Google itself (signature, expiry) and check it was issued to our
+ * app. Decoding the token without this let anyone sign in as any email by forging the payload. */
+async function verifyGoogleIdToken(credential) {
+  if (!GOOGLE_CLIENT_IDS.length) return null
+  try {
+    const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(String(credential)))
+    if (!r.ok) return null
+    const j = await r.json()
+    const issuerOk = j.iss === 'accounts.google.com' || j.iss === 'https://accounts.google.com'
+    if (!issuerOk || !GOOGLE_CLIENT_IDS.includes(j.aud) || Number(j.exp) * 1000 < Date.now()) return null
+    if (!j.email || String(j.email_verified) !== 'true') return null
+    return j
+  } catch { return null }
+}
+/** Check (and consume) an OTP previously sent to `phone` with /api/auth/request-otp. */
+function consumeOtp(phone, otp) {
+  const rec = otpStore.get(phone)
+  if (!rec || Date.now() > rec.expires || rec.attempts >= OTP_MAX_ATTEMPTS) return false
+  const code = String(otp || '').trim()
+  const ok = code.length === 4 && crypto.timingSafeEqual(Buffer.from(hashOtp(phone, code), 'hex'), Buffer.from(rec.hash, 'hex'))
+  if (!ok) { rec.attempts += 1; return false }
+  otpStore.delete(phone)
+  return true
 }
 
 const app = express()
@@ -496,14 +520,13 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   res.json({ token: signToken('customer', u.id), user: publicUser(u) })
 })
 app.post('/api/auth/google', async (req, res) => {
-  let p = null
-  if (req.body?.credential) {
-    const j = decodeJwt(req.body.credential)
-    if (!j?.email) return res.status(401).json({ error: 'Invalid Google credential' })
-    p = { email: j.email, name: j.name || 'Google User', avatar: j.picture }
-  } else if (req.body?.demo) {
-    p = { email: 'rahul.sharma@gmail.com', name: 'Rahul Sharma' }
-  } else return res.status(400).json({ error: 'Missing Google credential' })
+  // Only a Google-verified ID token for our client id. (The old `{demo:true}` shortcut signed anyone
+  // into a fixed account, and the credential was decoded without checking its signature.)
+  if (!req.body?.credential) return res.status(400).json({ error: 'Missing Google credential' })
+  if (!GOOGLE_CLIENT_IDS.length) return res.status(503).json({ error: 'Google sign-in is not set up' })
+  const j = await verifyGoogleIdToken(req.body.credential)
+  if (!j) return res.status(401).json({ error: 'Invalid Google credential' })
+  const p = { email: j.email, name: j.name || 'Google User', avatar: j.picture }
   const u = await findOrCreateGoogleUser(p)
   await recordIdentity(u, 'google')
   publishEvent(REDIS_URL, 'customer.login', { userId: u.id, name: u.name, detail: `Signed in with Google (${u.email || ''})` })
@@ -515,6 +538,15 @@ app.get('/api/me', auth, async (req, res) => res.json({ user: publicUser(req.use
 app.patch('/api/me', auth, async (req, res) => {
   const b = req.body || {}
   const u = req.user
+  // The phone number is the login identity: changing it needs an OTP sent to the NEW number, and
+  // it can't take a number another account already signs in with.
+  if (b.phone !== undefined && String(b.phone).trim() !== String(u.phone || '')) {
+    const phone = String(b.phone).trim()
+    if (phone.length < 6) return res.status(400).json({ error: 'Enter a valid mobile number' })
+    if ((await pool.query('SELECT 1 FROM users WHERE phone=$1 AND id<>$2', [phone, u.id])).rowCount) return res.status(409).json({ error: 'That number is already registered' })
+    if (!consumeOtp(phone, b.phoneOtp)) return res.status(401).json({ error: 'Verify the new number with the code we sent to it' })
+    b.phone = phone
+  } else delete b.phone
   // Convert any raw "lat,lng" into a human-readable "Area, City - PIN" before saving (keeps a chosen address).
   const norm = b.location !== undefined ? await normalizeLocation(b.location, u.location) : { value: u.location, pincode: pinOf(u.location) }
   const upd = await pool.query(
@@ -602,10 +634,9 @@ app.get('/api/wallet', auth, async (req, res) => {
     topupPresets: presets,
   })
 })
-app.post('/api/wallet/add', auth, async (req, res) => {
-  const bal = await addTransaction(req.user.id, 'credit', 'Added to wallet', Math.max(1, Number(req.body?.amount) || 0), null, 'ADD_MONEY')
-  res.json({ balance: bal })
-})
+// Adding money must go through a verified payment (POST /api/payment/wallet/topup). This route used
+// to credit any amount it was asked for.
+app.post('/api/wallet/add', auth, (_req, res) => res.status(410).json({ error: 'Add money with a payment: use Wallet → Add money.' }))
 
 /* ---------- wallet: cashback, referrals, gift cards, settings ---------- */
 
@@ -903,10 +934,14 @@ async function priceFor(planKey, cycleKey) {
   if (!cyc) throw Object.assign(new Error('Unknown billing cycle'), { code: 400 })
   return { planKey, cycleKey, months: cyc.months, amount: cyclePrice(plan.price, cyc.months, cyc.savePct), name: plan.name }
 }
-// Charge the amount: from the wallet (Promo→Cash) when payWithWallet, else treat the external
-// gateway payment as already succeeded (the app's pay sheet handles the real charge).
-async function chargeMembership(uid, amount, payWithWallet, title) {
-  if (payWithWallet) await walletSpend(uid, amount, { title, kind: 'MEMBERSHIP' })
+// Charge the amount: from the wallet (Promo→Cash) when payWithWallet, else claim the customer's
+// verified gateway payment for it (once, covering the full amount). Nothing is free.
+async function chargeMembership(uid, amount, payWithWallet, title, paymentId) {
+  if (amount <= 0) return
+  if (payWithWallet) return walletSpend(uid, amount, { title, kind: 'MEMBERSHIP' })
+  if (!paymentId) throw Object.assign(new Error('Payment not received'), { code: 402 })
+  try { await internalPost(PAYMENT_URL, '/api/internal/payment/claim', { paymentId, customerId: uid, amount, purpose: 'membership', ref: title }) }
+  catch { throw Object.assign(new Error('Payment not received. Please pay again.'), { code: 402 }) }
 }
 
 app.get('/api/membership', auth, async (req, res) => {
@@ -915,9 +950,9 @@ app.get('/api/membership', auth, async (req, res) => {
 
 app.post('/api/membership/subscribe', auth, async (req, res) => {
   try {
-    const { plan, cycle = 'monthly', method = 'upi', payWithWallet = false } = req.body || {}
+    const { plan, cycle = 'monthly', method = 'upi', payWithWallet = false, paymentId } = req.body || {}
     const { planKey, cycleKey, months, amount, name } = await priceFor(plan, cycle)
-    await chargeMembership(req.user.id, amount, payWithWallet, `${name} membership`)
+    await chargeMembership(req.user.id, amount, payWithWallet, `${name} membership`, paymentId)
     const renewsAt = addMonths(new Date(), months)
     // Replace any prior membership (upgrade/downgrade/re-subscribe) with a fresh active row.
     await pool.query('DELETE FROM memberships WHERE user_id=$1', [req.user.id])
@@ -939,7 +974,7 @@ app.post('/api/membership/renew', auth, async (req, res) => {
     if (!cur) return res.status(404).json({ error: 'No membership to renew' })
     const cycle = req.body?.cycle || cur.cycle
     const { cycleKey, months, amount, name } = await priceFor(cur.plan, cycle)
-    await chargeMembership(req.user.id, amount, req.body?.payWithWallet, `${name} renewal`)
+    await chargeMembership(req.user.id, amount, req.body?.payWithWallet, `${name} renewal`, req.body?.paymentId)
     // Extend from whichever is later: the existing valid-till (if still live) or now.
     const base = new Date(cur.renews_at).getTime() > Date.now() ? new Date(cur.renews_at) : new Date()
     const renewsAt = addMonths(base, months)
