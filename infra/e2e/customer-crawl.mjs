@@ -61,7 +61,7 @@ const ROUTES = ['/home', '/popular-services', '/continue-booking', '/service/mop
   '/job/:live/extend', '/job/:live/progress', '/job/:done/completed', '/rate/:done', '/rate/:done/photos', '/complaint/:done', '/tip/:done', '/rebook/:done',
   '/offers', '/offers/applied', '/offers/zone', '/refer', '/bookings', '/bookings/active', '/bookings/upcoming', '/bookings/completed',
   '/booking-details/:done', '/invoice/:done', '/receipt/:done', '/history', '/wallet', '/wallet/transactions', '/wallet/add', '/wallet/cashback',
-  '/wallet/referrals', '/wallet/gift-cards', '/wallet/refunds', '/wallet/settings', '/profile', '/profile/repeat', '/profile/family',
+  '/wallet/referrals', '/wallet/gift-cards', '/wallet/refunds', '/wallet/payments', '/wallet/settings', '/profile', '/profile/repeat', '/profile/family',
   '/profile/payment-methods', '/profile/notifications', '/profile/language', '/profile/privacy', '/profile/about', '/profile/help', '/profile/logout',
   '/quick-actions', '/membership', '/membership/compare', '/membership/subscribe', '/membership/active', '/membership/manage', '/membership/usage',
   '/membership/renewal', '/membership/cancel', '/membership/benefits', '/ai/recommendations', '/ai/timeline', '/support', '/support/ticket', '/support/chat', '/support/emergency',
