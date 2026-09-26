@@ -71,7 +71,7 @@ function pickTarget(url) {
   // The job chat is the one /api/bookings path the booking service does NOT own: the messages live
   // in the dispatch DB alongside the worker half. Must be tested BEFORE the general rule below.
   if (/^\/api\/bookings\/[^/]+\/messages\b/.test(u)) return U.dispatch
-  if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/favourites') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
+  if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/favourites') || p('/api/favourite-experts') || p('/api/recurring') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
 
   // ----- support tickets -----
   if (p('/api/tickets')) return U.notification

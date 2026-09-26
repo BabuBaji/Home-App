@@ -4975,6 +4975,13 @@ app.post('/internal/workers/:id/location', internalOnly, async (req, res) => { a
 app.get('/internal/workers/:id/public-profile', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json(w ? { id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, phone: w.phone, avatar: w.avatar, verified: !!w.verified, city: w.city, services: Array.isArray(w.services) ? w.services : [] } : null) })
 app.patch('/internal/workers/:id', internalOnly, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
 // Wallet service adjusts the balance snapshot (deltas) after ledger changes.
+// Customer ratings roll up into the expert's rating (the booking service sends the live average).
+app.post('/internal/workers/:id/rating', internalOnly, async (req, res) => {
+  const r = Number(req.body?.rating)
+  if (!(r >= 1 && r <= 5)) return res.status(400).json({ error: 'rating 1–5' })
+  await pool.query('UPDATE workers SET rating=$1 WHERE id=$2', [Math.round(r * 100) / 100, Number(req.params.id)])
+  res.json({ ok: true })
+})
 app.post('/internal/workers/:id/balance', internalOnly, async (req, res) => {
   const b = req.body || {}
   await pool.query(`UPDATE workers SET balance=balance+$1, pending=pending+$2, hold=hold+$3, withdrawn=withdrawn+$4, advance_outstanding=advance_outstanding+$5, earnings=earnings+$6, jobs=jobs+$7 WHERE id=$8`,

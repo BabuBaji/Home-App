@@ -121,6 +121,9 @@ export interface Booking {
   address: string
   payment: string
   payment_status: 'pending' | 'paid' | 'failed' | 'refunded'
+  worker_id?: number | null
+  tip?: number
+  extras_total?: number
   items: CartItem[]
   duration?: string
   subtotal: number

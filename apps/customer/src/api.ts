@@ -397,3 +397,20 @@ export function getSocket(): Socket {
   if (!socket) socket = API_BASE ? io(API_BASE, { transports: ['websocket', 'polling'] }) : io({ path: '/socket.io', transports: ['websocket', 'polling'] })
   return socket
 }
+
+/* ---------- tips · extra tasks · favourite experts · repeat bookings ---------- */
+export const tipBooking = (id: number, amount: number, p: { paymentId?: string; payWithWallet?: boolean }) =>
+  req<{ ok: boolean; tip: number }>(`/api/bookings/${id}/tip`, { method: 'POST', body: JSON.stringify({ amount, ...p }) })
+export interface BookingExtra { id: number; name: string; price: number; status: 'pending' | 'approved' | 'declined' | 'withdrawn'; paid_via?: string | null }
+export const fetchBookingExtras = (id: number) => req<BookingExtra[]>(`/api/bookings/${id}/extras`)
+export const decideBookingExtra = (id: number, eid: number, action: 'approve' | 'decline', p: { paymentId?: string; payWithWallet?: boolean } = {}) =>
+  req<{ ok: boolean; extras: BookingExtra[] }>(`/api/bookings/${id}/extras/${eid}/${action}`, { method: 'POST', body: JSON.stringify(p) })
+export interface FavExpert { id: number; name: string; rating: number; jobs: number; avatar?: string | null; verified?: boolean }
+export const fetchFavExperts = () => req<FavExpert[]>('/api/favourite-experts')
+export const saveFavExpert = (wid: number) => req<number[]>(`/api/favourite-experts/${wid}`, { method: 'POST' })
+export const removeFavExpert = (wid: number) => req<number[]>(`/api/favourite-experts/${wid}`, { method: 'DELETE' })
+export interface RecurringPlan { id: number; items: { id: string; durationId: string }[]; time: string; freq: string; payment: 'cash' | 'wallet'; workerId: number | null; nextDate: string; status: 'active' | 'paused'; lastBookingId: number | null; lastError: string | null }
+export const createRecurring = (p: { items: { id: string; durationId: string }[]; startDate: string; time: string; freq: string; payment: 'cash' | 'wallet'; addressId?: number; pincode?: string; lat?: number | null; lng?: number | null; workerId?: number }) =>
+  req<RecurringPlan>('/api/recurring', { method: 'POST', body: JSON.stringify(p) })
+export const fetchRecurring = () => req<RecurringPlan[]>('/api/recurring')
+export const updateRecurring = (id: number, action: 'pause' | 'resume' | 'cancel') => req<RecurringPlan>(`/api/recurring/${id}/${action}`, { method: 'POST' })

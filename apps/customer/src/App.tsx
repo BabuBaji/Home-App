@@ -103,6 +103,7 @@ import CallWorker from './screens/job/CallWorker'
 import ShareOtp from './screens/job/ShareOtp'
 import ServiceStarted from './screens/job/ServiceStarted'
 import ExtendService from './screens/job/ExtendService'
+import RepeatBookings from './screens/profile/RepeatBookings'
 import LiveProgress from './screens/job/LiveProgress'
 import ServiceCompleted from './screens/job/ServiceCompleted'
 // Module 7 — Rating
@@ -370,6 +371,7 @@ export default function App() {
               <Route path="/wallet/settings" element={<WalletSettings />} />
               {/* Module 12 — Profile (88-96) */}
               <Route path="/profile" element={<MyProfile />} />
+              <Route path="/profile/repeat" element={<RepeatBookings />} />
               <Route path="/profile/family" element={<FamilyMembers />} />
               <Route path="/profile/payment-methods" element={<PaymentMethods />} />
               <Route path="/profile/notifications" element={<NotificationSettings />} />

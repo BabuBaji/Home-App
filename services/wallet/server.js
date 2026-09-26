@@ -795,6 +795,14 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
   if (type === 'payroll.credit') return creditPayroll(data)
   if (type === 'incentive.credit') return creditEngineIncentive(data)
   if (type === 'booking.completed' && data.booking) await settleBooking(data.booking)
+  // Tips go to the expert in full, straight into their available balance (idempotent per booking).
+  if (type === 'booking.tipped' && data.workerId && data.amount > 0) {
+    const ins = await pool.query(
+      `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Tip',$2,$3,$4,'available')
+       ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+      [data.workerId, `Tip from customer · ${data.ref || '#' + data.bookingId}`, Math.round(data.amount), `tip:${data.bookingId}`])
+    if (ins.rowCount) await adjustBalance(data.workerId, { balance: Math.round(data.amount), earnings: Math.round(data.amount) })
+  }
   else if (type === 'job.start') await creditStartBonus({ bookingId: data.bookingId, workerId: data.workerId, ref: data.ref })
   else if (type === 'booking.cancelled' && data.booking?.worker_id && data.quote?.workerComp > 0) {
     const b = data.booking, comp = data.quote.workerComp

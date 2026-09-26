@@ -110,7 +110,15 @@ function defaultPhotoSlots(b) {
 }
 
 // Reads a job's state, seeding the row (its checklist + photo slots) on first touch.
+// Extra tasks live in the booking service (the customer approves and pays for them there); the job
+// state shows them with their live status, and only approved ones count towards the total.
 async function jobState(b) {
+  const row = await jobStateRaw(b)
+  const ex = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}/extras`, null)
+  if (Array.isArray(ex)) row.extras = ex.filter((e) => e.status !== 'withdrawn').map((e) => ({ id: e.id, name: e.name, price: e.price, status: e.status }))
+  return row
+}
+async function jobStateRaw(b) {
   const q = await pool.query('SELECT * FROM job_state WHERE booking_id=$1', [b.id])
   if (q.rows.length) {
     const row = q.rows[0]
@@ -147,7 +155,7 @@ const stateDto = (s) => ({
   extras: s.extras || [],
   paused: !!s.paused,
   pausedMs: pausedMsNow(s),
-  extrasTotal: (s.extras || []).reduce((t, e) => t + Number(e.price || 0), 0),
+  extrasTotal: (s.extras || []).filter((e) => !e.status || e.status === 'approved').reduce((t, e) => t + Number(e.price || 0), 0),
 })
 
 const STATUS_TO_ENUM = { worker_assigned: 'ACCEPTED', on_the_way: 'ON_THE_WAY', arrived: 'ARRIVED', in_progress: 'IN_PROGRESS', completed: 'COMPLETED' }
@@ -607,21 +615,22 @@ app.get('/api/worker/jobs/extensions', auth, async (req, res) => {
 
 app.post('/api/worker/jobs/extras', auth, async (req, res) => {
   const b = await activeOr409(req, res); if (!b) return
-  const s = await jobState(b)
   const name = String(req.body?.name || '').trim()
   const price = Math.max(0, Math.round(Number(req.body?.price) || 0))
   if (!name || !price) return res.status(400).json({ ok: false, error: 'name and price are required' })
-  const extras = [...(s.extras || []), { id: Date.now(), name, price }]
-  const out = stateDto(await saveState(b.id, { extras }))
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.extra', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Added extra: ${name} (₹${price})` })
+  // Sent to the customer for approval; it is billed only once they approve it.
+  try { await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/extras`, { name, price, workerId: req.worker.id }) }
+  catch (e) { return res.status(400).json({ ok: false, error: e.message }) }
+  const out = stateDto(await jobState(b))
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.extra', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Proposed extra task: ${name} (₹${price}) — awaiting customer approval` })
   res.json({ ok: true, ...out })
 })
 
 app.post('/api/worker/jobs/extras/remove', auth, async (req, res) => {
   const b = await activeOr409(req, res); if (!b) return
-  const s = await jobState(b)
-  const id = Number(req.body?.id)
-  res.json({ ok: true, ...stateDto(await saveState(b.id, { extras: (s.extras || []).filter((e) => Number(e.id) !== id) })) })
+  // Only a task the customer hasn't answered yet can be withdrawn.
+  await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/extras/${Number(req.body?.id)}/withdraw`, {}).catch(() => {})
+  res.json({ ok: true, ...stateDto(await jobState(b)) })
 })
 
 // Pause bookkeeping: paused_at marks the current pause's start; paused_ms accumulates finished

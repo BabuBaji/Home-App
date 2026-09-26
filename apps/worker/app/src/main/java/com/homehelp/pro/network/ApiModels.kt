@@ -472,7 +472,8 @@ data class ChecklistTask(
 )
 
 /** A worker-added extra service billed on top of the booking. */
-data class JobExtra(val id: Long = 0, val name: String = "", val price: Int = 0)
+/** status: pending (sent to the customer) · approved (billed) · declined. */
+data class JobExtra(val id: Long = 0, val name: String = "", val price: Int = 0, val status: String = "pending")
 
 /** One captured shot, keyed by its named slot ("Sink Area") so a retake replaces it. */
 data class JobPhoto(val slot: String = "", val url: String = "", val at: String = "")

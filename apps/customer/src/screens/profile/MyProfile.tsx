@@ -2,7 +2,7 @@
 // and family. Rows route to the Module-12 sub-screens. Bottom nav kept (Profile is a tab).
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Pencil, MapPin, CreditCard, Users, Bell, Globe, Shield, HelpCircle, Info, ChevronRight, LogOut, Zap } from 'lucide-react'
+import { Pencil, MapPin, CreditCard, Users, Bell, Globe, Shield, HelpCircle, Info, ChevronRight, LogOut, Zap, Repeat } from 'lucide-react'
 import { BottomNav, Loading } from '../../components/UI'
 import { fetchMe, fetchSavedMethods, fetchFamily } from '../../api'
 import { useStore } from '../../store'
@@ -33,6 +33,7 @@ export default function MyProfile() {
     { icon: <Zap size={17} />, t: 'Quick Actions', to: '/quick-actions' },
     { icon: <Pencil size={17} />, t: 'Edit Profile', to: '/personal' },
     { icon: <MapPin size={17} />, t: 'Addresses', sub: `${counts.addr} Saved`, to: '/addresses' },
+    { icon: <Repeat size={17} />, t: 'Repeat bookings', to: '/profile/repeat' },
     { icon: <CreditCard size={17} />, t: 'Payment Methods', sub: `${counts.pay} Saved`, to: '/profile/payment-methods' },
     { icon: <Users size={17} />, t: 'Family Members', sub: `${counts.family} Member${counts.family === 1 ? '' : 's'}`, to: '/profile/family' },
     { icon: <Bell size={17} />, t: 'Notification Settings', to: '/profile/notifications' },

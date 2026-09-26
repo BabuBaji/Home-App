@@ -211,7 +211,8 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
     var name by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { vm.loadJobState() }
+    // Poll while open so the customer's approve / decline shows up without leaving the screen.
+    LaunchedEffect(Unit) { while (true) { vm.loadJobState(); delay(5_000) } }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
         Header(title = "Add Extra Service", onBack = { nav.popBackStack() })
@@ -285,6 +286,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 Card {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Added to this job", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        // Only tasks the customer approved are billed and counted here.
                         Text("₹${vm.extrasTotal}", color = GreenSuccess, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(Space.m))
@@ -295,15 +297,22 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(e.name, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                Text("Extra service", color = TextGray, fontSize = 11.5.sp)
+                                val (label, tone) = when (e.status) {
+                                    "approved" -> "Approved by customer" to GreenSuccess
+                                    "declined" -> "Declined by customer" to RedCancel
+                                    else -> "Waiting for customer to approve" to TextGray
+                                }
+                                Text(label, color = tone, fontSize = 11.5.sp)
                             }
                             Text("₹${e.price}", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(Space.m))
-                            Box(
-                                Modifier.size(30.dp).clip(RoundedCornerShape(Radius.pill)).background(RedLight)
-                                    .clickable { vm.removeExtra(e.id) },
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Filled.Close, contentDescription = "Remove", tint = RedCancel, modifier = Modifier.size(16.dp)) }
+                            if (e.status == "pending") {
+                                Spacer(Modifier.width(Space.m))
+                                Box(
+                                    Modifier.size(30.dp).clip(RoundedCornerShape(Radius.pill)).background(RedLight)
+                                        .clickable { vm.removeExtra(e.id) },
+                                    contentAlignment = Alignment.Center,
+                                ) { Icon(Icons.Filled.Close, contentDescription = "Withdraw", tint = RedCancel, modifier = Modifier.size(16.dp)) }
+                            }
                         }
                     }
                 }

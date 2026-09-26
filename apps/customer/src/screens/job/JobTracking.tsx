@@ -10,6 +10,7 @@ import { Loading, useToast } from '../../components/UI'
 import { pushBackHandler } from '../../backStack'
 import { useJob, useAutoAdvance, proName, proRating, serviceNames, fmtDateTime } from './useJob'
 import { WorkerAvatar } from './parts'
+import ExtrasPrompt from '../../components/ExtrasPrompt'
 import { isLive } from '../../orders'
 import type { Booking } from '../../types'
 
@@ -93,6 +94,7 @@ export default function JobTracking() {
       </div>
 
       <div className="content jt-scroll">
+        {b && <ExtrasPrompt b={b} />}
         {/* hero */}
         <div className="jt-hero">
           <div className="jt-hero-ava">

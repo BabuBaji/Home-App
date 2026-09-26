@@ -8,7 +8,7 @@ import type { ServiceDetail, Duration, Quote, Review } from '../types'
 
 // Module 4 · #24–#31 — Service configuration wizard. Real durations/quote from the backend;
 // Reviews shows REAL customer reviews for this service (fetchServiceReviews), falling back to the
-// seeded sample reviews when none exist yet. Add-ons/gallery/frequency/instructions are UI-only.
+// seeded sample reviews when none exist yet. Frequency sets up repeat visits; add-ons/gallery are UI-only.
 // The final step hands off to the existing Book flow for real payment + tracking. No backend break.
 type Step = 'duration' | 'addons' | 'frequency' | 'instructions' | 'gallery' | 'pricing' | 'reviews'
 const ORDER: Step[] = ['duration', 'addons', 'frequency', 'instructions', 'gallery', 'pricing', 'reviews']
@@ -261,7 +261,7 @@ export default function ServiceFlow() {
             {reviews.length === 0 && <p className="ad2-hint">No reviews yet — be the first to review this service.</p>}
           </div>
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={() => nav(`/booking/${id}`, { state: { durationId: dur.id } })}>Continue to Book</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={() => nav(`/booking/${id}`, { state: { durationId: dur.id, freq, note } })}>Continue to Book</button></div>
       </>)}
     </div>
   )

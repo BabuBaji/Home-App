@@ -5,6 +5,7 @@ import { Loading, useToast } from '../../components/UI'
 import { fetchExtensions, completeBooking, type ExtensionState } from '../../api'
 import { useJob, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
+import ExtrasPrompt from '../../components/ExtrasPrompt'
 
 // Module 6 · #50 — Live Progress. A circular service timer (elapsed vs the booked duration — the same
 // real math the Track screen uses) plus who's working, what service is running, and where. Nothing is
@@ -98,6 +99,7 @@ export default function LiveProgress() {
 
       <div className="content jt-scroll">
         {/* The expert is waiting on an answer — put it above everything else. */}
+        <ExtrasPrompt b={b} />
         {ext?.pending && (
           <button
             className="jt-card"

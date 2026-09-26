@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Heart } from 'lucide-react'
+import { fetchFavExperts, saveFavExpert, removeFavExpert } from '../../api'
 import { Loading } from '../../components/UI'
 import { useJob, proName, serviceNames } from '../job/useJob'
 import { WorkerAvatar } from '../job/parts'
@@ -38,6 +39,7 @@ export default function RateWorker() {
           <div className="jt-worker-name">{proName(b)}</div>
           <div className="rt-who-svc">{serviceNames(b)}</div>
           {when && <div className="rt-who-when">{when}</div>}
+          {b.worker_id && <FavButton wid={b.worker_id} name={proName(b).split(' ')[0]} />}
         </div>
 
         <div className="rt-q">How was your overall experience?</div>
@@ -62,5 +64,19 @@ export default function RateWorker() {
         </button>
       </div>
     </div>
+  )
+}
+
+/** Save the expert so the customer can pick them again when booking (only after they served them). */
+function FavButton({ wid, name }: { wid: number; name: string }) {
+  const [fav, setFav] = useState<boolean | null>(null)
+  useEffect(() => { fetchFavExperts().then((l) => setFav(l.some((x) => x.id === wid))).catch(() => setFav(false)) }, [wid])
+  if (fav === null) return null
+  const toggle = () => (fav ? removeFavExpert(wid) : saveFavExpert(wid)).then(() => setFav(!fav)).catch(() => {})
+  return (
+    <button className="btn-ghost" onClick={toggle} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <Heart size={16} fill={fav ? '#e5484d' : 'none'} color={fav ? '#e5484d' : 'currentColor'} />
+      {fav ? `${name} is a favourite` : `Save ${name} as favourite`}
+    </button>
   )
 }

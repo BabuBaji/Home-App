@@ -12,7 +12,7 @@ import {
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
-import { assertJwtSecret } from '@homehelp/shared/jwt.js'
+import { assertJwtSecret, signToken, tokenSubject } from '@homehelp/shared/jwt.js'
 import { quoteCancellation, scheduledStartMs } from './cancellation.js'
 
 assertJwtSecret('booking') // refuse to boot without a signing secret rather than trust forgeable tokens
@@ -162,6 +162,20 @@ async function init() {
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS online_paid INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS wallet_paid INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS refund_to_source INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS tip INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS tip_ref TEXT`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extras_total INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS plan_id INTEGER`,
+    // Tasks the expert adds during the job: priced, approved (and paid) by the customer, then billed.
+    `CREATE TABLE IF NOT EXISTS booking_extras (id SERIAL PRIMARY KEY, booking_id INTEGER NOT NULL, name TEXT NOT NULL,
+       price INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', paid_via TEXT, payment_ref TEXT,
+       created TIMESTAMPTZ DEFAULT now(), decided_at TIMESTAMPTZ)`,
+    `CREATE TABLE IF NOT EXISTS fav_workers (user_id INTEGER NOT NULL, worker_id INTEGER NOT NULL, created TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (user_id, worker_id))`,
+    // Repeat bookings: one plan creates each visit as a normal scheduled booking, a day ahead.
+    `CREATE TABLE IF NOT EXISTS recurring_plans (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, items JSONB NOT NULL,
+       address_id INTEGER, pincode TEXT, lat DOUBLE PRECISION, lng DOUBLE PRECISION, time TEXT NOT NULL, freq TEXT NOT NULL,
+       payment TEXT NOT NULL DEFAULT 'cash', worker_id INTEGER, next_date DATE NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+       last_booking_id INTEGER, last_error TEXT, created TIMESTAMPTZ DEFAULT now())`,
     `CREATE INDEX IF NOT EXISTS ix_ext_booking ON booking_extensions(booking_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_user ON bookings(user_id)`,
     `CREATE INDEX IF NOT EXISTS ix_book_worker ON bookings(worker_id)`,
@@ -658,10 +672,13 @@ app.get('/api/bookings/service-workers', async (req, res) => {
     const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2
     return 2 * R * Math.asin(Math.sqrt(s))
   }
+  // A signed-in customer's saved experts are flagged and listed first.
+  const uid = tokenSubject(req.headers.authorization, 'customer')
+  const fav = new Set(Number.isFinite(uid) ? await favExperts(uid) : [])
   res.json((workers || []).map((w) => ({
-    id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, online: w.online,
+    id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, online: w.online, favourite: fav.has(w.id),
     km: (w.lat != null && !isNaN(lat) && !isNaN(lng)) ? Math.round(km(lat, lng, w.lat, w.lng) * 10) / 10 : null,
-  })))
+  })).sort((a, b) => b.favourite - a.favourite))
 })
 
 app.get('/api/bookings/:id', auth, async (req, res) => {
@@ -967,10 +984,26 @@ app.post('/api/bookings/:id/complete', auth, async (req, res) => {
   res.json(done)
 })
 
+// Move a booking to another slot. Only before the expert has set out; the new slot must be a real,
+// future, open slot in the booking's zone. An assigned expert is released (they agreed to the old
+// time) and the booking goes back to dispatch, held until near the new slot.
 app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  await pool.query('UPDATE bookings SET date=$1, time=$2, type=$3 WHERE id=$4', [req.body?.date, req.body?.time, 'schedule', b.id])
+  if (!['confirmed', 'worker_assigned'].includes(b.status)) return res.status(409).json({ error: 'This booking can no longer be rescheduled.' })
+  const date = String(req.body?.date || '').trim(), time = String(req.body?.time || '').trim()
+  const start = scheduledStartMs({ type: 'schedule', date, time })
+  if (start == null) return res.status(400).json({ error: 'Pick a date and time.' })
+  if (start < Date.now() + 30 * 60000) return res.status(400).json({ error: 'Pick a slot at least 30 minutes from now.' })
+  const avail = await slotAvailability(date, time, b.pincode, (b.items || []).map((i) => i.name), b.zone_id)
+  if (!avail.available) return res.status(409).json({ error: avail.reason || 'That slot is full. Pick another.' })
+  const released = b.worker_id
+  await pool.query(
+    `UPDATE bookings SET date=$1, time=$2, type='schedule', worker_id=NULL, pro_name=NULL, offer_worker_id=NULL, offer_at=NULL,
+       status='confirmed' WHERE id=$3`, [date, time, b.id])
+  if (released) internalPost(WORKER_URL, `/internal/workers/${released}/offered`, { bookingId: null }).catch(() => {})
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.reschedule', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Rescheduled to ${date}, ${time}` })
   res.json(await getBooking(b.id))
 })
 
@@ -1024,12 +1057,200 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
 app.post('/api/bookings/:id/review', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  const rating = Number(req.body?.rating) || 5
+  // Only a finished job can be rated — and rating one used to trigger the worker's payout.
+  if (b.status !== 'completed') return res.status(409).json({ error: 'You can rate the service once it is completed.' })
+  const rating = Math.min(5, Math.max(1, Math.round(Number(req.body?.rating) || 5)))
   await pool.query('UPDATE bookings SET rating=$1, review=$2, photo=$3 WHERE id=$4', [rating, req.body?.review ?? null, req.body?.photo ?? null, b.id])
   publishEvent(REDIS_URL, 'booking.completed', { booking: await getBooking(b.id) }) // review confirms completion → settle if not already
+  if (b.worker_id) await refreshWorkerRating(b.worker_id)
   publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.review', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Rated ${rating}★`, meta: { rating } })
   res.json(await getBooking(b.id))
 })
+
+/* The expert's rating is the average of their customers' ratings (not a fixed default). */
+async function refreshWorkerRating(workerId) {
+  const r = (await pool.query('SELECT ROUND(AVG(rating)::numeric, 2)::float avg, COUNT(*)::int n FROM bookings WHERE worker_id=$1 AND rating IS NOT NULL', [workerId])).rows[0]
+  if (r?.n) await internalPost(WORKER_URL, `/internal/workers/${workerId}/rating`, { rating: r.avg, count: r.n }).catch((e) => console.error('[booking] rating sync failed:', e.message))
+}
+
+/* Take a payment from the customer for something extra (a tip, an added task): the wallet, or a
+ * verified gateway payment of theirs covering it, claimed once. Returns { via, ref } or throws. */
+async function takePayment(uid, amount, { paymentId, payWithWallet, title, purpose, ref }) {
+  if (payWithWallet) {
+    await internalPost(AUTH_URL, `/api/internal/users/${uid}/wallet`, { type: 'debit', title, amount, ref })
+    return { via: 'wallet', ref: null }
+  }
+  if (!paymentId) throw Object.assign(new Error('Payment not received'), { code: 402 })
+  const c = await internalPost(PAYMENT_URL, '/api/internal/payment/claim', { paymentId, customerId: uid, amount, purpose, ref })
+  return { via: 'online', ref: c.paymentId }
+}
+
+/* ---------- tips (100% to the expert) ---------- */
+app.post('/api/bookings/:id/tip', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  if (b.status !== 'completed' || !b.worker_id) return res.status(409).json({ error: 'You can tip once the service is completed.' })
+  if (b.tip > 0) return res.status(409).json({ error: 'You have already tipped for this booking.' })
+  const amount = Math.round(Number(req.body?.amount) || 0)
+  if (amount < 10 || amount > 2000) return res.status(400).json({ error: 'Tip must be between ₹10 and ₹2000.' })
+  let paid
+  try { paid = await takePayment(req.user.id, amount, { ...req.body, title: `Tip · ${b.ref}`, purpose: 'tip', ref: `tip:${b.id}` }) }
+  catch (e) { return res.status(402).json({ error: e.message || 'Payment not received' }) }
+  const upd = await pool.query('UPDATE bookings SET tip=$1, tip_ref=$2 WHERE id=$3 AND tip=0 RETURNING id', [amount, paid.ref || paid.via, b.id])
+  if (!upd.rowCount) return res.status(409).json({ error: 'You have already tipped for this booking.' })
+  publishEvent(REDIS_URL, 'booking.tipped', { bookingId: b.id, ref: b.ref, workerId: b.worker_id, amount })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'booking.tip', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Tipped ₹${amount}` })
+  res.json({ ok: true, tip: amount })
+})
+
+/* ---------- extra tasks added during the job ----------
+   The expert proposes a priced task; nothing is billed until the customer approves it. A cash
+   booking adds it to the amount due at the end; otherwise it's paid now (wallet or online). */
+const extrasOf = async (bookingId) => (await pool.query('SELECT id, name, price, status, paid_via, created, decided_at FROM booking_extras WHERE booking_id=$1 ORDER BY id', [bookingId])).rows
+const EXTRA_OPEN = ['worker_assigned', 'on_the_way', 'arrived', 'in_progress']
+app.post('/api/internal/bookings/:id/extras', internalOnly, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !EXTRA_OPEN.includes(b.status)) return res.status(409).json({ error: 'Job is not active' })
+  const name = String(req.body?.name || '').trim().slice(0, 80)
+  const price = Math.round(Number(req.body?.price) || 0)
+  if (!name || price <= 0 || price > 5000) return res.status(400).json({ error: 'A name and a price (₹1–₹5000) are required' })
+  const { rows } = await pool.query('INSERT INTO booking_extras (booking_id,name,price) VALUES ($1,$2,$3) RETURNING *', [b.id, name, price])
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extra_requested', { bookingId: b.id, userId: b.user_id, name, price })
+  res.json(rows[0])
+})
+app.post('/api/internal/bookings/:id/extras/:eid/withdraw', internalOnly, async (req, res) => {
+  await pool.query("UPDATE booking_extras SET status='withdrawn', decided_at=now() WHERE id=$1 AND booking_id=$2 AND status='pending'", [Number(req.params.eid), Number(req.params.id)])
+  await emitBookingUpdate(Number(req.params.id))
+  res.json({ ok: true })
+})
+app.get('/api/internal/bookings/:id/extras', internalOnly, async (req, res) => res.json(await extrasOf(Number(req.params.id))))
+app.get('/api/bookings/:id/extras', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  res.json(await extrasOf(b.id))
+})
+app.post('/api/bookings/:id/extras/:eid/:action(approve|decline)', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const x = (await pool.query("SELECT * FROM booking_extras WHERE id=$1 AND booking_id=$2 AND status='pending'", [Number(req.params.eid), b.id])).rows[0]
+  if (!x) return res.status(404).json({ error: 'Nothing to approve' })
+  if (req.params.action === 'decline') {
+    await pool.query("UPDATE booking_extras SET status='declined', decided_at=now() WHERE id=$1", [x.id])
+  } else {
+    if (!EXTRA_OPEN.includes(b.status)) return res.status(409).json({ error: 'The job has already ended.' })
+    let paid = { via: 'cash', ref: null }
+    if (b.payment !== 'cash' || req.body?.paymentId || req.body?.payWithWallet) {
+      try { paid = await takePayment(req.user.id, x.price, { ...req.body, title: `Extra task · ${x.name} · ${b.ref}`, purpose: 'extra', ref: `extra:${x.id}` }) }
+      catch (e) { return res.status(402).json({ error: e.message || 'Payment not received' }) }
+    }
+    const ok = await pool.query("UPDATE booking_extras SET status='approved', paid_via=$2, payment_ref=$3, decided_at=now() WHERE id=$1 AND status='pending' RETURNING id", [x.id, paid.via, paid.ref])
+    if (ok.rowCount) {
+      // The booking total now includes the task, so the expert's share and the cash due include it.
+      await pool.query('UPDATE bookings SET extras_total=extras_total+$2, total=total+$2 WHERE id=$1', [b.id, x.price])
+      if (paid.via === 'online') await pool.query('UPDATE bookings SET online_paid=online_paid+$2 WHERE id=$1', [b.id, x.price])
+      if (paid.via === 'wallet') await pool.query('UPDATE bookings SET wallet_paid=wallet_paid+$2 WHERE id=$1', [b.id, x.price])
+    }
+  }
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'booking.extra_decided', { bookingId: b.id, workerId: b.worker_id, extraId: x.id, name: x.name, approved: req.params.action === 'approve' })
+  res.json({ ok: true, extras: await extrasOf(b.id), booking: publicBooking(await getBooking(b.id)) })
+})
+
+/* ---------- favourite experts ---------- */
+const favExperts = async (uid) => (await pool.query('SELECT worker_id FROM fav_workers WHERE user_id=$1 ORDER BY created DESC', [uid])).rows.map((r) => r.worker_id)
+app.get('/api/favourite-experts', auth, async (req, res) => {
+  const ids = await favExperts(req.user.id)
+  const out = await Promise.all(ids.map(async (id) => {
+    const w = await tryGet(WORKER_URL, `/internal/workers/${id}/public-profile`, null)
+    return w ? { id, name: w.name, rating: w.rating, jobs: w.jobs, avatar: w.avatar, verified: !!w.verified } : null
+  }))
+  res.json(out.filter(Boolean))
+})
+// Only an expert who actually served this customer can be saved.
+app.post('/api/favourite-experts/:wid', auth, async (req, res) => {
+  const wid = Number(req.params.wid)
+  const served = (await pool.query("SELECT 1 FROM bookings WHERE user_id=$1 AND worker_id=$2 AND status='completed' LIMIT 1", [req.user.id, wid])).rowCount
+  if (!served) return res.status(403).json({ error: 'You can save an expert after they have served you.' })
+  await pool.query('INSERT INTO fav_workers (user_id,worker_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, wid])
+  res.json(await favExperts(req.user.id))
+})
+app.delete('/api/favourite-experts/:wid', auth, async (req, res) => {
+  await pool.query('DELETE FROM fav_workers WHERE user_id=$1 AND worker_id=$2', [req.user.id, Number(req.params.wid)])
+  res.json(await favExperts(req.user.id))
+})
+
+/* ---------- repeat bookings (daily / weekly / …) ---------- */
+const FREQ_DAYS = { daily: 1, alternate: 2, weekly: 7, biweekly: 14, monthly: 'month' }
+const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const fmtDay = (d) => `${d.getUTCDate()} ${MON3[d.getUTCMonth()]} ${d.getUTCFullYear()}` // the app's slot date format
+const parseDay = (s) => { const t = scheduledStartMs({ type: 'schedule', date: s, time: '12:00 PM' }); return t == null ? null : new Date(t + 330 * 60000) }
+function nextDay(d, freq) {
+  const n = new Date(d.getTime())
+  if (FREQ_DAYS[freq] === 'month') n.setUTCMonth(n.getUTCMonth() + 1); else n.setUTCDate(n.getUTCDate() + FREQ_DAYS[freq])
+  return n
+}
+const planOut = (p) => ({ id: p.id, items: p.items, time: p.time, freq: p.freq, payment: p.payment, workerId: p.worker_id, nextDate: fmtDay(new Date(p.next_date)), status: p.status, lastBookingId: p.last_booking_id, lastError: p.last_error, addressId: p.address_id })
+// Created after the first visit is booked (startDate = that visit's date). Visits are paid by cash
+// or wallet, since nobody is there to complete an online checkout for each one.
+app.post('/api/recurring', auth, async (req, res) => {
+  const b = req.body || {}
+  if (!FREQ_DAYS[b.freq]) return res.status(400).json({ error: 'Pick how often.' })
+  if (!Array.isArray(b.items) || !b.items.length) return res.status(400).json({ error: 'Pick a service.' })
+  const first = parseDay(String(b.startDate || ''))
+  if (!first || scheduledStartMs({ type: 'schedule', date: b.startDate, time: b.time }) == null) return res.status(400).json({ error: 'Pick a date and time.' })
+  const payment = b.payment === 'wallet' ? 'wallet' : 'cash'
+  const { rows } = await pool.query(
+    `INSERT INTO recurring_plans (user_id,items,address_id,pincode,lat,lng,time,freq,payment,worker_id,next_date)
+     VALUES ($1,$2::jsonb,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [req.user.id, JSON.stringify(b.items.map((i) => ({ id: i.id, durationId: i.durationId }))), b.addressId ?? null, b.pincode ?? null,
+      Number.isFinite(Number(b.lat)) ? Number(b.lat) : null, Number.isFinite(Number(b.lng)) ? Number(b.lng) : null,
+      String(b.time), b.freq, payment, b.workerId ? Number(b.workerId) : null, nextDay(first, b.freq).toISOString().slice(0, 10)])
+  res.status(201).json(planOut(rows[0]))
+})
+app.get('/api/recurring', auth, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM recurring_plans WHERE user_id=$1 AND status<>'cancelled' ORDER BY id DESC", [req.user.id])
+  res.json(rows.map(planOut))
+})
+app.post('/api/recurring/:id/:action(pause|resume|cancel)', auth, async (req, res) => {
+  const st = { pause: 'paused', resume: 'active', cancel: 'cancelled' }[req.params.action]
+  const { rows } = await pool.query('UPDATE recurring_plans SET status=$1 WHERE id=$2 AND user_id=$3 RETURNING *', [st, Number(req.params.id), req.user.id])
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' })
+  res.json(planOut(rows[0]))
+})
+/* Every 10 minutes: book each active plan's next visit once it is within a day. The visit goes
+ * through the normal booking endpoint as the customer, so zone, hours, capacity, pricing and
+ * payment rules all apply exactly as if they had booked it by hand. */
+async function recurringSweep() {
+  try {
+    const horizon = new Date(Date.now() + 330 * 60000 + 26 * 3600e3).toISOString().slice(0, 10)
+    const due = (await pool.query("SELECT * FROM recurring_plans WHERE status='active' AND next_date <= $1 ORDER BY id LIMIT 100", [horizon])).rows
+    for (const p of due) {
+      const day = new Date(p.next_date)
+      const date = fmtDay(day)
+      const next = nextDay(day, p.freq).toISOString().slice(0, 10)
+      // Advance first so a crash can't book the same visit twice.
+      const adv = await pool.query('UPDATE recurring_plans SET next_date=$1 WHERE id=$2 AND next_date=$3 RETURNING id', [next, p.id, p.next_date])
+      if (!adv.rowCount) continue
+      if (scheduledStartMs({ type: 'schedule', date, time: p.time }) < Date.now()) continue // missed window — skip, don't book the past
+      const r = await fetch(`http://127.0.0.1:${PORT}/api/bookings`, {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + signToken('customer', p.user_id) },
+        body: JSON.stringify({ items: p.items, type: 'schedule', date, time: p.time, addressId: p.address_id, pincode: p.pincode, lat: p.lat, lng: p.lng, payment: p.payment, ...(p.worker_id ? { workerId: p.worker_id } : {}), freq: p.freq }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (r.ok) {
+        await pool.query('UPDATE recurring_plans SET last_booking_id=$1, last_error=NULL WHERE id=$2', [j.id, p.id])
+        await pool.query('UPDATE bookings SET plan_id=$1 WHERE id=$2', [p.id, j.id])
+      } else {
+        await pool.query('UPDATE recurring_plans SET last_error=$1 WHERE id=$2', [`${date}: ${j.error || r.status}`, p.id])
+        publishEvent(REDIS_URL, 'recurring.failed', { planId: p.id, userId: p.user_id, date, error: j.error || String(r.status) })
+      }
+    }
+  } catch (e) { console.error('[booking] recurringSweep:', e.message) }
+}
+app.post('/api/internal/recurring/run', internalOnly, async (_q, res) => { await recurringSweep(); res.json({ ok: true }) })
+setInterval(recurringSweep, 10 * 60_000)
+setTimeout(recurringSweep, 15_000)
 
 /* ---------- favourites ---------- */
 const favs = async (uid) => (await pool.query('SELECT service_id FROM favourites WHERE user_id=$1 ORDER BY created DESC', [uid])).rows.map((r) => r.service_id)

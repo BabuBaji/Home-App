@@ -5,10 +5,10 @@ import { Loading, useToast } from '../components/UI'
 import PaymentSheet from '../components/PaymentSheet'
 import Calendar, { startOfDay, fmtDate, slotLabel, isSlotDisabled } from '../components/Calendar'
 import { useStore } from '../store'
-import { fetchService, fetchQuote, fetchSlots, fetchCoupons, validateCoupon, fetchWallet, fetchMe, createBookingApi, fetchServiceWorkers, getCachedPosition, type SlotInfo } from '../api'
+import { fetchService, fetchQuote, fetchSlots, fetchCoupons, validateCoupon, fetchWallet, fetchMe, createBookingApi, fetchServiceWorkers, getCachedPosition, createRecurring, type SlotInfo } from '../api'
 import type { ServiceDetail, Duration, Quote, Coupon, Address } from '../types'
 
-interface SvcWorker { id: number; name: string; rating: number; jobs: number; km: number | null }
+interface SvcWorker { id: number; name: string; rating: number; jobs: number; km: number | null; favourite?: boolean }
 
 // Module 5 · #32–#39 — Booking wizard. Real slots/quote/coupons/wallet + the existing
 // createBooking + PaymentSheet. Worker selection is a UI preference (the backend auto-assigns
@@ -32,7 +32,10 @@ export default function BookingFlow() {
   const nav = useNavigate()
   const toast = useToast()
   const { pincode } = useStore()
-  const preDurationId = (useLocation().state as { durationId?: string } | null)?.durationId
+  const navState = useLocation().state as { durationId?: string; freq?: string; note?: string } | null
+  const preDurationId = navState?.durationId
+  // Chosen on the service screen: 'one-time', or how often to repeat this visit.
+  const freq = navState?.freq && navState.freq !== 'one-time' ? navState.freq : null
 
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [dur, setDur] = useState<Duration | null>(null)
@@ -120,6 +123,18 @@ export default function BookingFlow() {
         // The wallet slice the customer chose; the server debits it and expects the rest paid online.
         ...(payable > 0 && walletUsed > 0 ? { walletAmount: walletUsed } : {}),
       })
+      // Repeat visits: this booking is the first; the plan books each next one a day ahead, paid by
+      // wallet if this one was, else cash (nobody is there to finish an online checkout each time).
+      if (freq) {
+        try {
+          await createRecurring({
+            items: [{ id: s!.id, durationId: dur!.id }], startDate: dateStr, time: slot !== null ? slotLabel(slot) : '', freq,
+            payment: payable === 0 || method === 'wallet' ? 'wallet' : 'cash', addressId: addr?.id, pincode: pincode || undefined,
+            ...(worker !== 'any' ? { workerId: Number(worker) } : {}),
+          })
+          toast('Repeat visits set up — manage them in Profile → Repeat bookings')
+        } catch (e) { toast(`Booked, but repeat visits could not be set up: ${(e as Error).message}`) }
+      }
       // Payment done → Payment Success (39) → Booking Confirmed (40) → Tracking (41).
       setNewId(b.id); go('success')
     } catch (e) { toast((e as Error).message); setPlacing(false); setSheet(false) }
@@ -318,7 +333,7 @@ function WorkerRow({ w, sel, onPick }: { w: SvcWorker; sel: string; onPick: (id:
   return (
     <button className={`bf-worker ${sel === id ? 'on' : ''}`} onClick={() => onPick(id)}>
       <span className="bf-wava">{w.name[0]?.toUpperCase()}</span>
-      <div className="grow"><b>{w.name}</b><small><Star size={11} className="bf-star" /> {w.rating} ({w.jobs} jobs){w.km != null ? ` · ${w.km} km away` : ''}</small></div>
+      <div className="grow"><b>{w.name}{w.favourite ? ' ♥' : ''}</b><small><Star size={11} className="bf-star" /> {w.rating} ({w.jobs} jobs){w.km != null ? ` · ${w.km} km away` : ''}</small></div>
       <span className={`sf-radio ${sel === id ? 'on' : ''}`}>{sel === id && <Check size={13} />}</span>
     </button>
   )

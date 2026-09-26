@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Gift, Wallet as WalletIcon, Check } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
 import PaymentSheet from '../../components/PaymentSheet'
-import { fetchWallet } from '../../api'
+import { fetchWallet, tipBooking } from '../../api'
 import { useJob, proName } from '../job/useJob'
 import { WorkerAvatar } from '../job/parts'
 
@@ -25,6 +25,14 @@ export default function TipWorker() {
   useEffect(() => { fetchWallet().then((w) => setBalance(w.balance)).catch(() => {}) }, [])
 
   if (!b) return <div className="screen jt"><Loading /></div>
+  // The tip reaches the expert only once the server has the verified payment (100% goes to them).
+  async function sendTip(paymentId: string) {
+    setSheet(false)
+    try {
+      await tipBooking(b!.id, tip, { paymentId })
+      toast(`₹${tip} tip sent to ${proName(b!).split(' ')[0]}! 🎉`); setTimeout(() => nav('/home'), 900)
+    } catch (e) { toast((e as Error).message) }
+  }
   const tip = custom ? Math.max(0, parseInt(custom) || 0) : amt
 
   return (
@@ -63,7 +71,7 @@ export default function TipWorker() {
         <button className="jt-btn text" onClick={() => nav('/home')}>Skip</button>
       </div>
 
-      <PaymentSheet open={sheet} amount={tip} onClose={() => setSheet(false)} onPaid={() => { setSheet(false); toast(`₹${tip} tip sent to ${proName(b).split(' ')[0]}! 🎉`); setTimeout(() => nav('/home'), 900) }} />
+      <PaymentSheet open={sheet} amount={tip} onClose={() => setSheet(false)} onPaid={(_m, paymentId) => sendTip(paymentId)} />
     </div>
   )
 }
