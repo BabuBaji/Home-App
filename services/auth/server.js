@@ -1070,7 +1070,7 @@ app.post('/api/internal/addresses/:aid/default', internalOnly, async (req, res) 
 // N per-user calls. `is_default DESC` picks the default; ties fall back to the earliest address.
 app.get('/api/internal/addresses/defaults', internalOnly, async (_q, res) => {
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (user_id) user_id, street, landmark, apartment, city, pincode
+    `SELECT DISTINCT ON (user_id) user_id, street, landmark, apartment, city, pincode, lat, lng
      FROM addresses ORDER BY user_id, is_default DESC, id`)
   res.json(rows)
 })

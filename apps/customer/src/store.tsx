@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CartItem, User } from './types'
-import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours, setUnauthorizedHandler } from './api'
+import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours, setUnauthorizedHandler, setZoneLocation } from './api'
 import { checkServiceable } from './geo'
 import type { ZoneHours } from './components/Calendar'
 
@@ -25,6 +25,7 @@ interface Store {
   addressLine: string; setAddressLine: (a: string) => void
   note: string; setNote: (n: string) => void
   pincode: string; setPincode: (p: string) => void   // current service-area pincode → zone pricing/offers
+  setServiceLocation: (pincode: string, lat?: number | null, lng?: number | null) => void  // pincode + pin-drop together
   serviceable: boolean | null                        // is the current pincode inside a live zone? (null = unknown/checking)
   zoneHours: ZoneHours | null                         // the serving zone's working hours (for open-now / slot checks)
 
@@ -44,6 +45,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [addressLine, setAddressLine] = useState('')
   const [note, setNote] = useState('')
   const [pincode, setPincode] = useState('')
+  const [zoneLatLng, setZoneLatLng] = useState<{ lat?: number | null; lng?: number | null }>({})
   const [serviceable, setServiceable] = useState<boolean | null>(null)
   const [zoneHours, setZoneHours] = useState<ZoneHours | null>(null)
 
@@ -53,6 +55,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!user) { setPincode(''); return }
     fetchMe().then(({ addresses }) => {
       const a = addresses.find((x) => x.is_default) || addresses[0]
+      // Location first: every zone lookup (triggered by the pincode below) sends it along.
+      setZoneLocation(a?.lat, a?.lng, a?.pincode || '')
+      setZoneLatLng({ lat: a?.lat, lng: a?.lng })
       if (a?.pincode) setPincode(a.pincode)
     }).catch(() => {})
   }, [user])
@@ -62,10 +67,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!pincode) { setServiceable(null); setZoneHours(null); return }
     setServiceable(null)
-    checkServiceable(pincode).then((r) => setServiceable(r.serviceable)).catch(() => setServiceable(true))
+    checkServiceable(pincode, undefined, zoneLatLng.lat, zoneLatLng.lng).then((r) => setServiceable(r.serviceable)).catch(() => setServiceable(true))
     fetchZoneHours(pincode).then(setZoneHours).catch(() => setZoneHours(null))
-  }, [pincode])
+  }, [pincode, zoneLatLng])
 
+  const setServiceLocation = useCallback((p: string, lat?: number | null, lng?: number | null) => {
+    setZoneLocation(lat, lng, p); setZoneLatLng({ lat, lng }); setPincode(p)
+  }, [])
   const signIn = useCallback((t: string, u: User) => { setToken(t); saveUser(u); setUserState(u) }, [])
   const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]) }, [])
   const setUser = useCallback((u: User) => { saveUser(u); setUserState(u) }, [])
@@ -87,7 +95,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cart, addToCart, removeFromCart, inCart, clearCart,
       bookingType, setBookingType, date, setDate, time, setTime,
       payment, setPayment, coupon, setCoupon, addressLine, setAddressLine, note, setNote,
-      pincode, setPincode, serviceable, zoneHours,
+      pincode, setPincode, serviceable, zoneHours, setServiceLocation,
       subtotal,
     }}>
       {children}

@@ -232,7 +232,10 @@ async function matchingBookings(w) {
    * a quiet zone sits idle next to work they could do.
    */
   const wz = w.zone_id ?? null
-  const restricted = w.allowOutsideRadius === false && wz != null
+  // Zones are isolated: a worker only ever sees jobs from their own zone, and a worker with no zone
+  // sees none. (allowOutsideRadius used to let any worker pick up other zones' jobs.)
+  if (wz == null) return []
+  const restricted = w.allowOutsideRadius === false
   const radiusKm = Number(w.jobRadiusKm) || 0
   // The store's location, fetched at most once per call — the radius is measured from it, not from
   // the worker's live GPS, because that is what the admin drew a circle around.
@@ -245,10 +248,12 @@ async function matchingBookings(w) {
 
   for (const b of pool_) {
     if (skip.has(b.id)) continue
+    // Already offered to someone else — theirs until they answer or it lapses.
+    if (b.offer_worker_id != null && Number(b.offer_worker_id) !== Number(w.id)) continue
     const names = (b.items || []).map((i) => String(i.name || '').toLowerCase().trim())
     if (!names.some((n) => svc.has(n))) continue
-    // Restricted: own zone only.
-    if (restricted && b.zone_id !== wz) continue
+    // Own zone only — for everyone.
+    if (Number(b.zone_id) !== Number(wz)) continue
     // Restricted: within their radius of their store. Only when we actually know where the store
     // is — a radius we cannot measure must not silently drop every job.
     if (restricted && store && radiusKm > 0) {
@@ -263,9 +268,7 @@ async function matchingBookings(w) {
     }
     cands.push({ b, dist })
   }
-  // Zone-first: a worker's own-zone jobs rank ahead of out-of-zone ones; then nearest by GPS.
-  // (For an unrestricted worker this stays a soft preference — out-of-zone jobs are still offered
-  // if there is no in-zone work, to avoid starvation.)
+  // All candidates are in the worker's zone; rank nearest by GPS.
   cands.sort((a, c) => {
     const az = wz != null && a.b.zone_id === wz ? 0 : 1
     const cz = wz != null && c.b.zone_id === wz ? 0 : 1
@@ -387,6 +390,8 @@ app.get('/api/worker/jobs/offer', auth, async (req, res) => {
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
   const wl = req.worker.workLimit
   if (wl?.capped) return res.json({ job: null, jobStatus: 'NONE', capped: true, error: cappedMsg(wl) })
+  // One job at a time: a worker mid-job gets no new work.
+  if (await activeBooking(req.worker.id)) return res.json({ job: null, jobStatus: 'NONE', error: 'Finish your current job first.' })
   const match = (await matchingBookings(req.worker))[0]
   if (!match) return res.json({ job: null, jobStatus: 'NONE' })
   await internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/offered`, { bookingId: match.id })
@@ -700,7 +705,7 @@ app.post('/api/worker/jobs/settle', auth, async (req, res) => {
 app.post('/api/worker/jobs/cancel', auth, async (req, res) => {
   const b = await activeBooking(req.worker.id)
   if (b) {
-    await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/release`, {})
+    await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/release`, { worker_id: req.worker.id })
     skipSet(req.worker.id).add(b.id)
     publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.drop', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${req.worker.name} dropped the job (returned to pool)` })
   }

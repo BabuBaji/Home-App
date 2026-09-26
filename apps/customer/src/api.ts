@@ -80,13 +80,25 @@ export const verifyOtp = (phone: string, otp: string) => req<{ token: string; us
 export const googleAuth = (p: { credential?: string; demo?: boolean }) => req<{ token: string; user: User }>('/api/auth/google', { method: 'POST', body: JSON.stringify(p) })
 
 /* catalogue */
-const pinQ = (pincode?: string) => (pincode ? `?pincode=${encodeURIComponent(pincode)}` : '')
+// The customer's current location (pin-drop of their chosen address). Sent with every zone lookup so
+// that, where several zones share a pincode, the customer is placed in the zone they are actually in.
+let zoneLoc: { lat: number; lng: number } | null = null
+let zonePin = ''
+export function setZoneLocation(lat?: number | null, lng?: number | null, pincode?: string) {
+  if (pincode !== undefined) zonePin = pincode || ''
+  zoneLoc = lat != null && lng != null && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) ? { lat: Number(lat), lng: Number(lng) } : null
+}
+const locParams = (pincode?: string) => [
+  pincode ? `pincode=${encodeURIComponent(pincode)}` : '',
+  zoneLoc ? `lat=${zoneLoc.lat}&lng=${zoneLoc.lng}` : '',
+].filter(Boolean).join('&')
+const pinQ = (pincode?: string) => { const q = locParams(pincode); return q ? `?${q}` : '' }
 export const fetchServices = (pincode?: string) => req<{ categories: string[]; services: Service[] }>(`/api/services${pinQ(pincode)}`)
 export const fetchService = (id: string, pincode?: string) => req<ServiceDetail>(`/api/services/${id}${pinQ(pincode)}`)
 export const fetchHome = () => req<HomeContent>('/api/home')
 // Live surge for the customer's zone — drives the "rain incoming" heads-up on Home.
 export interface ZoneSurge { active: boolean; pct: number; reason: string; prob: number | null }
-export const fetchZoneSurge = (pincode: string) => req<ZoneSurge>(`/api/surge?pincode=${encodeURIComponent(pincode)}`)
+export const fetchZoneSurge = (pincode: string) => req<ZoneSurge>(`/api/surge${pinQ(pincode)}`)
 // Dynamic Home hero slides — scheduled festival/promo banners + live offers + weather surge.
 export interface HomeBanner {
   key: string; kind: 'festival' | 'promo' | 'announcement' | 'offer' | 'weather'
@@ -102,14 +114,14 @@ export const fetchInvoiceInfo = () => req<InvoiceInfo>('/api/invoice-info')
 export const fetchOffers = (pincode?: string) => req<Offer[]>(`/api/offers${pinQ(pincode)}`)
 import type { ZoneHours } from './components/Calendar'
 // Working hours for the zone serving a pincode — the Schedule screen builds its slot grid from this.
-export const fetchZoneHours = (pincode: string) => req<ZoneHours>(`/api/zone-hours?pincode=${encodeURIComponent(pincode)}`)
+export const fetchZoneHours = (pincode: string) => req<ZoneHours>(`/api/zone-hours${pinQ(pincode)}`)
 // Live service areas (for the "we are live in" coming-soon screen).
 export const fetchLiveAreas = () => req<{ name: string; state: string; city: string }[]>('/api/zones')
 // Authoritative bookable slots for a date: zone working hours + per-slot availability (capacity).
 export interface SlotInfo { hour: number; time: string; booked: number; available: boolean }
 export const fetchSlots = (date: string, pincode: string, services: string) =>
   req<{ serviceable: boolean; workerCount: number; slots: SlotInfo[]; closed: boolean }>(
-    `/api/slots?date=${encodeURIComponent(date)}&pincode=${encodeURIComponent(pincode)}&services=${encodeURIComponent(services)}`)
+    `/api/slots?date=${encodeURIComponent(date)}&${locParams(pincode)}&services=${encodeURIComponent(services)}`)
 // Google Maps JS key for the interactive map location picker.
 export const fetchMapsKey = () => req<{ key: string }>('/api/maps-key')
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
@@ -122,7 +134,7 @@ export const removeFavouriteApi = (id: string) => req<string[]>(`/api/favourites
 /* coupons & quote */
 export const fetchCoupons = () => req<Coupon[]>('/api/coupons')
 export const validateCoupon = (code: string, subtotal: number) => req<{ code: string; discount: number; label: string }>('/api/coupons/validate', { method: 'POST', body: JSON.stringify({ code, subtotal }) })
-export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string, at?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode, at }) })
+export const fetchQuote = (items: { id: string; durationId: string }[], coupon?: string, pincode?: string, at?: string) => req<Quote>('/api/quote', { method: 'POST', body: JSON.stringify({ items, coupon, pincode, at, ...(zoneLoc || {}) }) })
 
 /* me / addresses */
 export const fetchMe = () => req<{ user: User; addresses: Address[] }>('/api/me')
@@ -323,7 +335,7 @@ export const fetchServiceReviews = (serviceId: string) =>
 // Real workers offering a service (from the worker service), with distance from the customer.
 export const fetchServiceWorkers = (service: string, lat?: number, lng?: number) =>
   req<{ id: number; name: string; rating: number; jobs: number; online: boolean; km: number | null }[]>(
-    `/api/bookings/service-workers?service=${encodeURIComponent(service)}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : ''}`)
+    `/api/bookings/service-workers?service=${encodeURIComponent(service)}${zonePin ? `&pincode=${zonePin}` : ''}${lat != null && lng != null ? `&lat=${lat}&lng=${lng}` : zoneLoc ? `&lat=${zoneLoc.lat}&lng=${zoneLoc.lng}` : ''}`)
 export const fetchBooking = (id: number) => req<Booking>(`/api/bookings/${id}`)
 export const trackBooking = (id: number) => req(`/api/bookings/${id}/track`, { method: 'POST' })
 

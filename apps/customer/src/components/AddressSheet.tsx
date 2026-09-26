@@ -17,7 +17,7 @@ export default function AddressSheet({ open, onClose, onSelect }: {
 }) {
   const nav = useNavigate()
   const toast = useToast()
-  const { setUser, setPincode } = useStore()
+  const { setUser, setServiceLocation } = useStore()
   const [list, setList] = useState<Address[] | null>(null)
   const [menu, setMenu] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
@@ -39,7 +39,7 @@ export default function AddressSheet({ open, onClose, onSelect }: {
       await setDefaultAddressApi(a.id)
       const { user: u } = await updateMe({ city: a.city || '', location: a.line })
       setUser(u)
-      if (a.pincode) setPincode(a.pincode)      // drives zone pricing + the "coming soon" gate
+      if (a.pincode) setServiceLocation(a.pincode, a.lat, a.lng)   // drives zone pricing + the "coming soon" gate
       onSelect(a)
       onClose()
     } catch (e) { toast((e as Error).message) } finally { setBusy(false) }

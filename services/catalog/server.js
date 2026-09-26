@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import express from 'express'
 import {
   makePool, migrate, makeAdminAuth, requireRole, requirePerm, internalOnly, tryGet, publishRealtime, getSetting, subscribeEvents, invalidateSettings,
+  inScope,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep. Catalog only reads
 // the id (browsing stays anonymous), but it must read it from a SIGNED token — otherwise anyone
@@ -73,6 +74,9 @@ async function init() {
     // go-live toggles) persisted server-side as JSON.
     `ALTER TABLE zones ADD COLUMN IF NOT EXISTS code TEXT`,
     `ALTER TABLE zones ADD COLUMN IF NOT EXISTS config JSONB NOT NULL DEFAULT '{}'`,
+    // Zone boundary: [[lat,lng], …] (≥3 points). Lets several zones share a pincode — a customer is
+    // placed by where they are, and the pincode only decides when there's no location or boundary.
+    `ALTER TABLE zones ADD COLUMN IF NOT EXISTS polygon JSONB`,
     // ── Zone-operations entities (real tables; the admin "Operations" submenu manages these) ──
     `CREATE TABLE IF NOT EXISTS cities (
       id SERIAL PRIMARY KEY, name TEXT NOT NULL, state TEXT NOT NULL DEFAULT '',
@@ -475,8 +479,8 @@ async function pricingRules() {
 }
 const invalidatePricingRules = () => { _rulesCache = { at: 0, val: null } }
 
-async function quote({ items, coupon, pincode, customerId = null, at = null }) {
-  const zoneId = await zoneIdForPincode(pincode)
+async function quote({ items, coupon, pincode, lat, lng, zoneId: givenZone, customerId = null, at = null }) {
+  const zoneId = givenZone ? Number(givenZone) : await zoneIdForPincode(pincode, lat, lng)
   const q = await priceCart({ items, coupon, zoneId, customerId, applyCoupons: true })
   if (q.error) return { status: 409, body: q }
   const cfg = await zoneConfigJson(zoneId)
@@ -574,11 +578,11 @@ app.get('/health', (_q, res) => res.json({ service: 'catalog', ok: true }))
 // `?pincode=` resolves the zone; the Bearer token (optional) resolves the customer so prices
 // reflect that zone's overrides + eligible campaigns (zone + customer offers).
 app.get('/api/services', async (req, res) => {
-  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const zoneId = await zoneIdForPincode(...locOf(req.query))
   res.json({ categories: CATEGORIES, services: await catalogueFor(zoneId, customerIdFromReq(req)) })
 })
 app.get('/api/services/:id', async (req, res) => {
-  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const zoneId = await zoneIdForPincode(...locOf(req.query))
   const s = await serviceDetail(req.params.id, zoneId, customerIdFromReq(req))
   if (!s) return res.status(404).json({ error: 'Service not found' })
   res.json(s)
@@ -643,7 +647,7 @@ app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BA
 // on Home so a customer sees it on open, before starting a booking. Silent (no surge) when the
 // pincode isn't in a live zone or there's no active surge.
 app.get('/api/surge', async (req, res) => {
-  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const zoneId = await zoneIdForPincode(...locOf(req.query))
   if (!zoneId) return res.json({ active: false, pct: 0, reason: '' })
   const s = getSurgeForZone(zoneId)
   res.json({ active: !!s.active, pct: s.pct || 0, reason: s.active ? s.reason : '', prob: s.prob ?? null })
@@ -652,7 +656,7 @@ app.get('/api/surge', async (req, res) => {
 // live offers (campaigns with a banner), and the weather surge, ranked by priority. The app prepends
 // its own greeting slide and rotates through them. Everything here is real, dated, targeted data.
 app.get('/api/home-banners', async (req, res) => {
-  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const zoneId = await zoneIdForPincode(...locOf(req.query))
   const customerId = customerIdFromReq(req)
   const slides = []
 
@@ -727,7 +731,7 @@ app.get('/api/referral', (_q, res) => res.json(REFERRAL))
 
 // Customer Offers carousel: campaigns with a banner, scoped to the caller's zone + eligibility.
 app.get('/api/offers', async (req, res) => {
-  const zoneId = await zoneIdForPincode(req.query.pincode)
+  const zoneId = await zoneIdForPincode(...locOf(req.query))
   const customerId = customerIdFromReq(req)
   const zmap = await zonePriceMap(zoneId)
   const [campaigns, ctx] = await Promise.all([campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId)])
@@ -950,15 +954,77 @@ app.get('/api/maps-key', async (_q, res) => {
 // Normalize a pincode blob (comma/space separated) to a clean, de-duped list of 6-digit PINs.
 const normPins = (v) => [...new Set(String(v || '').split(/[\s,]+/).map((s) => s.trim()).filter((s) => /^\d{6}$/.test(s)))]
 
-// Resolve which zone covers a pincode, and load that zone's price/discount overlay from zone_pricing
-// (the authority for zone pricing — kept in sync from the onboarding wizard's config on save).
-async function zoneIdForPincode(pincode) {
+// ── Zone resolution ─────────────────────────────────────────────────────────────────────────────
+// A zone's AREA is its drawn boundary polygon ([[lat,lng], …]) when set, else the coverage circle the
+// zone wizard saves (config.coverage: lat, lng, radiusKm). Resolution:
+//   1. with a pincode → only zones listing that pincode are candidates (the pincode is still the
+//      contract); one candidate → it. Several (zones sharing a pincode) → the one whose area contains
+//      the customer's location, else the nearest area, else the oldest (live preferred throughout).
+//   2. no pincode but a location → the zone whose area contains it.
+// Returns the zone row (id, name, status, …) or null.
+const cleanPolygon = (v) => {
+  let p = v
+  if (typeof p === 'string') { try { p = JSON.parse(p) } catch { return null } }
+  if (!Array.isArray(p)) return null
+  const pts = p.map((q) => (Array.isArray(q) ? [Number(q[0]), Number(q[1])] : [Number(q?.lat), Number(q?.lng)]))
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180)
+  return pts.length >= 3 ? pts : null
+}
+function pointInPolygon(lat, lng, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [yi, xi] = poly[i], [yj, xj] = poly[j]
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi) inside = !inside
+  }
+  return inside
+}
+const kmBetween = (a1, o1, a2, o2) => {
+  const R = 6371, dA = ((a2 - a1) * Math.PI) / 180, dO = ((o2 - o1) * Math.PI) / 180
+  const h = Math.sin(dA / 2) ** 2 + Math.cos((a1 * Math.PI) / 180) * Math.cos((a2 * Math.PI) / 180) * Math.sin(dO / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+function zoneArea(z) {
+  const poly = cleanPolygon(z.polygon)
+  if (poly) return { kind: 'polygon', poly, center: [poly.reduce((s, p) => s + p[0], 0) / poly.length, poly.reduce((s, p) => s + p[1], 0) / poly.length] }
+  let cfg = z.config; if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+  const c = cfg && cfg.coverage
+  const lat = Number(c?.lat), lng = Number(c?.lng), r = Number(c?.radiusKm)
+  if (Number.isFinite(lat) && Number.isFinite(lng) && r > 0) return { kind: 'circle', center: [lat, lng], radiusKm: r }
+  return null
+}
+const inArea = (area, lat, lng) => area && (area.kind === 'polygon' ? pointInPolygon(lat, lng, area.poly) : kmBetween(lat, lng, area.center[0], area.center[1]) <= area.radiusKm)
+const coord = (v) => { const n = Number(v); return v === '' || v == null || !Number.isFinite(n) ? null : n }
+async function loadZonesForResolve() {
+  const { rows } = await pool.query('SELECT id, name, status, pincodes, polygon, config FROM zones ORDER BY id')
+  return rows.map((z) => ({ ...z, area: zoneArea(z) }))
+}
+async function resolveZone(pincode, lat, lng) { return resolveZoneFrom(await loadZonesForResolve(), pincode, lat, lng) }
+function resolveZoneFrom(zones, pincode, lat, lng) {
   const pin = String(pincode || '').trim()
-  if (!/^\d{6}$/.test(pin)) return null
-  const { rows } = await pool.query('SELECT id, pincodes FROM zones')
-  const z = rows.find((r) => normPins(r.pincodes).includes(pin))
+  const la = coord(lat), ln = coord(lng), hasPt = la != null && ln != null
+  const liveFirst = (list) => [...list].sort((a, b) => (b.status === 'live') - (a.status === 'live'))
+  if (/^\d{6}$/.test(pin)) {
+    const cands = zones.filter((z) => normPins(z.pincodes).includes(pin))
+    if (cands.length <= 1 || !hasPt) return liveFirst(cands)[0] || null
+    const inside = cands.filter((z) => inArea(z.area, la, ln))
+    if (inside.length) return liveFirst(inside)[0]
+    const withArea = cands.filter((z) => z.area)
+    if (withArea.length) {
+      const d = (z) => kmBetween(la, ln, z.area.center[0], z.area.center[1])
+      return liveFirst(withArea.sort((a, b) => d(a) - d(b)))[0]
+    }
+    return liveFirst(cands)[0]
+  }
+  if (hasPt) return liveFirst(zones.filter((z) => inArea(z.area, la, ln)))[0] || null
+  return null
+}
+// Resolve which zone covers a pincode (and, when known, a location), and load that zone's
+// price/discount overlay from zone_pricing (the authority for zone pricing).
+async function zoneIdForPincode(pincode, lat, lng) {
+  const z = await resolveZone(pincode, lat, lng)
   return z ? z.id : null
 }
+const locOf = (q) => [q.pincode, q.lat, q.lng]
 async function zonePriceMap(zoneId) {
   if (!zoneId) return {}
   const { rows } = await pool.query('SELECT service_id, price, discount, active FROM zone_pricing WHERE zone_id=$1', [zoneId])
@@ -974,8 +1040,8 @@ async function zoneConfigJson(zoneId) {
   return c || null
 }
 // The zone's working-hours config for a pincode (null when no zone / not configured → all-day).
-async function zoneWorkingHours(pincode) {
-  const cfg = await zoneConfigJson(await zoneIdForPincode(pincode))
+async function zoneWorkingHours(pincode, lat, lng, zoneId) {
+  const cfg = await zoneConfigJson(zoneId ? Number(zoneId) : await zoneIdForPincode(pincode, lat, lng))
   return cfg && cfg.workingHours ? cfg.workingHours : null
 }
 const _minOfDay = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null }
@@ -1015,6 +1081,10 @@ app.get('/api/serviceable', async (req, res) => {
   if (zones.length > 0) {
     const live = zones.filter((z) => z.status === 'live')
     if (live.length === 0) return res.json({ serviceable: false, reason: 'no_live_zones', pincode: pincode || null })
+    if (pincode || req.query.lat) {
+      const z = await resolveZone(pincode, req.query.lat, req.query.lng)
+      if (z) return res.json({ serviceable: z.status === 'live', reason: z.status === 'live' ? 'covered' : 'zone_not_live', zoneId: z.id, pincode: pincode || null })
+    }
     const covered = live.some((z) => {
       const pins = normPins(z.pincodes)
       const cityMatch = city && String(z.city || '').trim().toLowerCase() === city
@@ -1040,7 +1110,7 @@ app.get('/api/zones', async (_q, res) => {
 // time-slot grid from this; the booking service validates chosen times against it. When there's no
 // zone or it isn't configured, we return is247 (all-day) so the default slot grid is used.
 app.get('/api/zone-hours', async (req, res) => {
-  const wh = await zoneWorkingHours(String(req.query.pincode || '').trim())
+  const wh = await zoneWorkingHours(String(req.query.pincode || '').trim(), req.query.lat, req.query.lng, req.query.zoneId)
   // No zone / no hours configured → days:null signals "use the default slot grid" (NOT 24×7).
   if (!wh) return res.json({ is247: false, days: null, specialHours: [] })
   res.json({ is247: !!wh.is247, days: wh.days || null, specialHours: wh.specialHours || [] })
@@ -1048,17 +1118,22 @@ app.get('/api/zone-hours', async (req, res) => {
 
 // Internal: which zone covers a pincode — booking stamps booking.zone_id from this on create.
 app.get('/api/internal/zone-for', internalOnly, async (req, res) => {
-  const pincode = String(req.query.pincode || '').trim()
-  if (!pincode) return res.json({ zoneId: null })
-  const { rows } = await pool.query('SELECT id, name, status, pincodes FROM zones')
-  const z = rows.find((r) => normPins(r.pincodes).includes(pincode))
-  res.json(z ? { zoneId: z.id, zoneName: z.name, live: z.status === 'live' } : { zoneId: null })
+  const z = await resolveZone(...locOf(req.query))
+  const configured = (await pool.query('SELECT 1 FROM zones LIMIT 1')).rowCount > 0
+  res.json(z ? { zoneId: z.id, zoneName: z.name, live: z.status === 'live', configured } : { zoneId: null, configured })
+})
+// Internal: batch zone lookup — [{ pincode, lat, lng }] → [zoneId|null] (admin uses it to place
+// customers in zones by their default address).
+app.post('/api/internal/zones-for', internalOnly, async (req, res) => {
+  const pts = Array.isArray(req.body?.points) ? req.body.points.slice(0, 5000) : []
+  const zones = await loadZonesForResolve()
+  res.json(pts.map((p) => resolveZoneFrom(zones, p?.pincode, p?.lat, p?.lng)?.id ?? null))
 })
 // Internal: a zone's capacity/SLA config (by zoneId or pincode) — booking & dispatch read this to
 // enforce Max Orders/Day, Max Travel Distance, etc. Returns { zoneId, capacity } (capacity null if unset).
 app.get('/api/internal/zone-capacity', internalOnly, async (req, res) => {
   let zoneId = req.query.zoneId ? Number(req.query.zoneId) : null
-  if (!zoneId && req.query.pincode) zoneId = await zoneIdForPincode(String(req.query.pincode))
+  if (!zoneId && (req.query.pincode || req.query.lat)) zoneId = await zoneIdForPincode(...locOf(req.query))
   const cfg = await zoneConfigJson(zoneId)
   res.json({ zoneId: zoneId || null, capacity: (cfg && cfg.capacity) || null })
 })
@@ -1131,17 +1206,17 @@ app.delete('/api/admin/services/:id', adminAuth, requirePerm('services.delete'),
   res.json({ ok: true })
 })
 /* ---------- admin: Service Zones (area-by-area onboarding) ---------- */
-const zoneOut = (z) => ({ ...z, config: z.config || {}, pincodeList: normPins(z.pincodes), pincodeCount: normPins(z.pincodes).length })
-app.get('/api/admin/zones', adminAuth, async (_q, res) => {
+const zoneOut = (z) => ({ ...z, config: z.config || {}, polygon: cleanPolygon(z.polygon), pincodeList: normPins(z.pincodes), pincodeCount: normPins(z.pincodes).length })
+app.get('/api/admin/zones', adminAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM zones ORDER BY state, city, name')
-  res.json(rows.map(zoneOut))
+  res.json(rows.filter((z) => zoneRowInScope(req, z)).map(zoneOut))
 })
 
 /* ---------- surge pricing (weather-driven + ops override) ---------- */
 // Current surge per live zone: the weather signal, the derived %, and whether it's automatic or a
 // manual override. Enriched with the zone name for display.
-app.get('/api/admin/surge', adminAuth, async (_q, res) => {
-  const snap = surgeSnapshot()
+app.get('/api/admin/surge', adminAuth, async (req, res) => {
+  const snap = surgeSnapshot().filter((s) => zoneInScope(req, s.zoneId))
   const names = new Map((await pool.query('SELECT id, name FROM zones')).rows.map((r) => [r.id, r.name]))
   res.json(snap.map((s) => ({ ...s, zone: names.get(s.zoneId) || `Zone ${s.zoneId}` })).sort((a, b) => (b.pct - a.pct) || a.zone.localeCompare(b.zone)))
 })
@@ -1151,11 +1226,22 @@ app.post('/api/admin/surge', adminAuth, requirePerm('pricing.edit'), async (req,
   const b = req.body || {}
   const scope = b.zoneId === 'all' || b.zoneId === '*' ? '*' : Number(b.zoneId)
   if (scope !== '*' && !Number.isFinite(scope)) return res.status(400).json({ error: 'zoneId (a zone id or "all") is required' })
+  if (!zonesWritable(req, scope === '*' ? [] : [scope])) return res.status(403).json(OUT_OF_SCOPE)
   const pct = Math.max(0, Math.min(50, Number(b.pct) || 0))
   const minutes = b.minutes != null ? Math.max(0, Number(b.minutes)) : 120
   setManualSurge(scope, pct, minutes)
   res.json({ ok: true, scope: scope === '*' ? 'all' : scope, pct, minutes })
 })
+
+/* ---------- admin data scope (zone / city managers) ---------- */
+// A scoped admin works only inside their zones: rows tied to a zone are judged by it, and anything
+// platform-wide (zone_id null / a campaign with no zones) is visible read-only but not theirs to change.
+const scoped = (req) => !!req.admin?.scope && req.admin.scope.type !== 'all'
+const zoneInScope = (req, zoneId) => inScope(req.admin?.scope, { zoneId })
+const zoneRowInScope = (req, z) => inScope(req.admin?.scope, { zoneId: z.id, city: z.city })
+// A write that targets `zoneIds` is allowed when every zone is the admin's; [] / null means "all zones".
+const zonesWritable = (req, zoneIds) => !scoped(req) || (Array.isArray(zoneIds) && zoneIds.length > 0 && zoneIds.every((z) => zoneInScope(req, z)))
+const OUT_OF_SCOPE = { error: 'That is outside your zones.' }
 
 /* ---------- admin: Home hero banners (festival / promo scheduling) ---------- */
 const HB_COLS = ['title', 'subtitle', 'emoji', 'theme', 'cta_label', 'cta_link', 'starts', 'ends', 'zone_id', 'priority', 'status', 'kind', 'image_url']
@@ -1173,13 +1259,14 @@ app.post('/api/admin/banners/image', adminAuth, requirePerm('campaigns.edit'), u
   res.status(201).json({ url: `/api/banner-media/${key}` })
 })
 const hbClean = (b) => ({ ...b, zone_id: b.zone_id === '' || b.zone_id == null ? null : Number(b.zone_id), starts: b.starts || null, ends: b.ends || null })
-app.get('/api/admin/banners', adminAuth, async (_q, res) => {
+app.get('/api/admin/banners', adminAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM home_banners ORDER BY priority DESC, id DESC')
-  res.json(rows)
+  res.json(rows.filter((b) => b.zone_id == null || zoneInScope(req, b.zone_id)).map((b) => ({ ...b, readOnly: b.zone_id == null && scoped(req) })))
 })
 app.post('/api/admin/banners', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
   const b = hbClean(req.body || {})
   if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'Title is required' })
+  if (!zonesWritable(req, b.zone_id == null ? [] : [b.zone_id])) return res.status(403).json(OUT_OF_SCOPE)
   const vals = HB_COLS.map((c) => (b[c] !== undefined ? b[c] : hbDefaults[c]))
   const ph = HB_COLS.map((_, i) => `$${i + 1}`).join(',')
   const { rows } = await pool.query(`INSERT INTO home_banners (${HB_COLS.join(',')}) VALUES (${ph}) RETURNING id`, vals)
@@ -1187,7 +1274,9 @@ app.post('/api/admin/banners', adminAuth, requirePerm('campaigns.create'), async
 })
 app.patch('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.edit'), async (req, res) => {
   const id = Number(req.params.id), b = hbClean(req.body || {})
-  if (!(await pool.query('SELECT 1 FROM home_banners WHERE id=$1', [id])).rowCount) return res.status(404).json({ error: 'Banner not found' })
+  const hb = (await pool.query('SELECT zone_id FROM home_banners WHERE id=$1', [id])).rows[0]
+  if (!hb || (hb.zone_id != null && !zoneInScope(req, hb.zone_id))) return res.status(404).json({ error: 'Banner not found' })
+  if (!zonesWritable(req, [hb.zone_id]) || (b.zone_id !== undefined && !zonesWritable(req, [b.zone_id]))) return res.status(403).json(OUT_OF_SCOPE)
   const cols = HB_COLS.filter((c) => b[c] !== undefined)
   if (cols.length) {
     const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
@@ -1196,35 +1285,44 @@ app.patch('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.edit'), as
   res.json({ ok: true })
 })
 app.delete('/api/admin/banners/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
+  const hb = (await pool.query('SELECT zone_id FROM home_banners WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (hb && !zonesWritable(req, [hb.zone_id])) return res.status(403).json(OUT_OF_SCOPE)
   await pool.query('DELETE FROM home_banners WHERE id=$1', [Number(req.params.id)])
   res.json({ ok: true })
 })
 app.post('/api/admin/zones', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Zone name is required' })
+  // A city manager may open zones in their own city; a zone manager can't create zones.
+  if (scoped(req) && !inScope({ ...req.admin.scope, zoneIds: [] }, { city: String(b.city || '').trim() })) return res.status(403).json(OUT_OF_SCOPE)
   const status = ['planned', 'live', 'paused'].includes(b.status) ? b.status : 'planned'
   const { rows } = await pool.query(
-    'INSERT INTO zones (name,state,city,pincodes,status,sla_minutes,code,config) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *',
+    'INSERT INTO zones (name,state,city,pincodes,status,sla_minutes,code,config,polygon) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb) RETURNING *',
     [String(b.name).trim(), String(b.state || '').trim(), String(b.city || '').trim(), normPins(b.pincodes).join(','), status,
-      b.slaMinutes ? Number(b.slaMinutes) : null, b.code ? String(b.code).trim() : null, JSON.stringify(b.config || {})])
+      b.slaMinutes ? Number(b.slaMinutes) : null, b.code ? String(b.code).trim() : null, JSON.stringify(b.config || {}),
+      cleanPolygon(b.polygon) ? JSON.stringify(cleanPolygon(b.polygon)) : null])
   await syncZonePricing(rows[0].id, b.config || {})
   res.status(201).json(zoneOut(rows[0]))
 })
 app.patch('/api/admin/zones/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
   const cur = await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])
-  if (!cur.rowCount) return res.status(404).json({ error: 'Zone not found' })
+  if (!cur.rowCount || !zoneRowInScope(req, cur.rows[0])) return res.status(404).json({ error: 'Zone not found' })
   const z = cur.rows[0], b = req.body || {}
-  await pool.query('UPDATE zones SET name=$1,state=$2,city=$3,pincodes=$4,status=$5,sla_minutes=$6,code=$7,config=$8::jsonb WHERE id=$9', [
+  if (scoped(req) && b.city !== undefined && b.city !== z.city) return res.status(403).json(OUT_OF_SCOPE)
+  const polygon = b.polygon !== undefined ? (cleanPolygon(b.polygon) ? JSON.stringify(cleanPolygon(b.polygon)) : null) : (z.polygon ? JSON.stringify(z.polygon) : null)
+  await pool.query('UPDATE zones SET name=$1,state=$2,city=$3,pincodes=$4,status=$5,sla_minutes=$6,code=$7,config=$8::jsonb,polygon=$10::jsonb WHERE id=$9', [
     b.name ?? z.name, b.state ?? z.state, b.city ?? z.city,
     b.pincodes !== undefined ? normPins(b.pincodes).join(',') : z.pincodes,
     b.status && ['planned', 'live', 'paused'].includes(b.status) ? b.status : z.status,
     b.slaMinutes !== undefined ? (b.slaMinutes ? Number(b.slaMinutes) : null) : z.sla_minutes,
     b.code !== undefined ? (b.code ? String(b.code).trim() : null) : z.code,
-    b.config !== undefined ? JSON.stringify(b.config) : JSON.stringify(z.config || {}), req.params.id])
+    b.config !== undefined ? JSON.stringify(b.config) : JSON.stringify(z.config || {}), req.params.id, polygon])
   await syncZonePricing(Number(req.params.id), b.config !== undefined ? b.config : (z.config || {}))
   res.json(zoneOut((await pool.query('SELECT * FROM zones WHERE id=$1', [req.params.id])).rows[0]))
 })
 app.delete('/api/admin/zones/:id', adminAuth, requirePerm('zones.edit'), async (req, res) => {
+  const cur = (await pool.query('SELECT id, city FROM zones WHERE id=$1', [req.params.id])).rows[0]
+  if (cur && !zoneRowInScope(req, cur)) return res.status(404).json({ error: 'Zone not found' })
   await pool.query('DELETE FROM zones WHERE id=$1', [req.params.id])
   res.json({ ok: true })
 })
@@ -1260,7 +1358,11 @@ async function syncCampaignChildren(id, b) {
   }
 }
 
-app.get('/api/admin/campaigns', adminAuth, async (_q, res) => {
+async function campaignWritable(req, id) {
+  if (!scoped(req)) return true
+  return zonesWritable(req, (await pool.query('SELECT zone_id FROM campaign_zone WHERE campaign_id=$1', [id])).rows.map((r) => r.zone_id))
+}
+app.get('/api/admin/campaigns', adminAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM campaign_master ORDER BY priority, campaign_id')
   const ids = rows.map((r) => r.campaign_id)
   if (!ids.length) return res.json([])
@@ -1274,12 +1376,17 @@ app.get('/api/admin/campaigns', adminAuth, async (_q, res) => {
   const rBy = Object.fromEntries(rules.rows.map((r) => [r.campaign_id, r]))
   const cBy = Object.fromEntries(coupons.rows.map((c) => [c.campaign_id, c]))
   const uBy = Object.fromEntries(usage.rows.map((u) => [u.campaign_id, u.n]))
-  res.json(rows.map((m) => ({ ...m, zoneIds: zBy[m.campaign_id] || [], rule: rBy[m.campaign_id] || null, coupon: cBy[m.campaign_id] || null, usedCount: uBy[m.campaign_id] || 0 })))
+  // Scoped admins see campaigns that reach one of their zones, plus all-zone ones (read-only for them).
+  const out = rows.map((m) => ({ ...m, zoneIds: zBy[m.campaign_id] || [], rule: rBy[m.campaign_id] || null, coupon: cBy[m.campaign_id] || null, usedCount: uBy[m.campaign_id] || 0 }))
+    .filter((m) => !scoped(req) || !m.zoneIds.length || m.zoneIds.some((z) => zoneInScope(req, z)))
+    .map((m) => (scoped(req) ? { ...m, readOnly: !zonesWritable(req, m.zoneIds) } : m))
+  res.json(out)
 })
 app.post('/api/admin/campaigns', adminAuth, requirePerm('campaigns.create'), async (req, res) => {
   const b = req.body || {}
   if (!b.campaign_name || !String(b.campaign_name).trim()) return res.status(400).json({ error: 'Campaign name is required' })
   if (!['zone', 'customer', 'coupon'].includes(b.campaign_type)) return res.status(400).json({ error: 'Invalid campaign type' })
+  if (!zonesWritable(req, b.zoneIds)) return res.status(403).json(OUT_OF_SCOPE)
   const vals = CM_COLS.map((c) => (b[c] !== undefined ? b[c] : cmDefaults[c]))
   const ph = CM_COLS.map((_, i) => `$${i + 1}`).join(',')
   const { rows } = await pool.query(`INSERT INTO campaign_master (${CM_COLS.join(',')}) VALUES (${ph}) RETURNING campaign_id`, vals)
@@ -1292,6 +1399,7 @@ app.patch('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.edit'), 
   const b = req.body || {}
   const cur = (await pool.query('SELECT 1 FROM campaign_master WHERE campaign_id=$1', [id])).rows[0]
   if (!cur) return res.status(404).json({ error: 'Campaign not found' })
+  if (!(await campaignWritable(req, id)) || (b.zoneIds !== undefined && !zonesWritable(req, b.zoneIds))) return res.status(403).json(OUT_OF_SCOPE)
   const cols = CM_COLS.filter((c) => b[c] !== undefined)
   if (cols.length) {
     const set = cols.map((c, i) => `${c}=$${i + 1}`).join(',')
@@ -1302,6 +1410,7 @@ app.patch('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.edit'), 
 })
 app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'), async (req, res) => {
   const id = intId(req, res); if (id === null) return
+  if (!(await campaignWritable(req, id))) return res.status(403).json(OUT_OF_SCOPE)
   await pool.query('DELETE FROM campaign_zone WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM campaign_customer_rule WHERE campaign_id=$1', [id])
   await pool.query('DELETE FROM coupon WHERE campaign_id=$1', [id])
@@ -1310,6 +1419,10 @@ app.delete('/api/admin/campaigns/:id', adminAuth, requirePerm('campaigns.delete'
 })
 app.get('/api/admin/campaigns/:id/usage', adminAuth, async (req, res) => {
   const id = intId(req, res); if (id === null) return
+  if (scoped(req)) {
+    const zs = (await pool.query('SELECT zone_id FROM campaign_zone WHERE campaign_id=$1', [id])).rows.map((r) => r.zone_id)
+    if (zs.length && !zs.some((z) => zoneInScope(req, z))) return res.status(404).json({ error: 'Campaign not found' })
+  }
   const [total, recent] = await Promise.all([
     pool.query('SELECT COUNT(*)::int n, COUNT(DISTINCT customer_id)::int customers FROM customer_campaign_usage WHERE campaign_id=$1', [id]),
     pool.query('SELECT customer_id, booking_id, created FROM customer_campaign_usage WHERE campaign_id=$1 ORDER BY created DESC LIMIT 50', [id]),
@@ -1615,7 +1728,7 @@ const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/
 app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
   const zoneId = Number(req.params.id)
   const zoneRow = (await pool.query('SELECT * FROM zones WHERE id=$1', [zoneId])).rows[0]
-  if (!zoneRow) return res.status(404).json({ error: 'Zone not found' })
+  if (!zoneRow || !zoneRowInScope(req, zoneRow)) return res.status(404).json({ error: 'Zone not found' })
   const [apts, inv] = await Promise.all([
     pool.query('SELECT COUNT(*)::int n, COALESCE(SUM(units),0)::int units, COALESCE(SUM(occupied),0)::int occupied FROM apartments WHERE zone_id=$1', [zoneId]),
     pool.query('SELECT COUNT(*)::int n, COUNT(*) FILTER (WHERE stock < reorder)::int low FROM inventory WHERE zone_id=$1', [zoneId]),
@@ -1641,10 +1754,14 @@ app.get('/api/admin/zones/:id/metrics', adminAuth, async (req, res) => {
 })
 // Global operational overview (trend / revenue / top-services / worker-status / rating) for
 // the admin all-zones dashboard — all real from the booking + worker services.
-app.get('/api/admin/ops-overview', adminAuth, async (_q, res) => {
+app.get('/api/admin/ops-overview', adminAuth, async (req, res) => {
+  // The overview is per-zone or global; a scoped admin gets their zone, or nothing if they span several.
+  const zs = req.admin?.scope?.zoneIds || []
+  if (scoped(req) && zs.length !== 1) return res.json({ trend: [], revenueDaily: [], rating: 0, topServices: [], workerStatus: {}, recent: [] })
+  const zq = scoped(req) ? `?zone_id=${Number(zs[0])}` : ''
   const [ops, ws] = await Promise.all([
-    tryGet(BOOKING_URL, '/api/internal/ops-stats', {}),
-    tryGet(WORKER_URL, '/internal/worker-status', {}),
+    tryGet(BOOKING_URL, `/api/internal/ops-stats${zq}`, {}),
+    tryGet(WORKER_URL, `/internal/worker-status${zq}`, {}),
   ])
   const svcNames = Object.fromEntries((await pool.query('SELECT id, name FROM services')).rows.map((s) => [s.id, s.name]))
   const topServices = (ops.topServices || []).slice(0, 6).map((t) => ({ name: svcNames[t.id] || t.id, count: t.count }))
@@ -1653,8 +1770,8 @@ app.get('/api/admin/ops-overview', adminAuth, async (_q, res) => {
   res.json({ trend: ops.trend || [], revenueDaily: ops.revenueDaily || [], rating: ops.rating || 0, topServices, workerStatus: ws, recent })
 })
 // All-zones real metrics for the admin dashboard (apartments + real bookings per zone).
-app.get('/api/admin/zones-metrics', adminAuth, async (_q, res) => {
-  const zones = (await pool.query('SELECT id, name, code, city, status FROM zones ORDER BY id')).rows
+app.get('/api/admin/zones-metrics', adminAuth, async (req, res) => {
+  const zones = (await pool.query('SELECT id, name, code, city, status FROM zones ORDER BY id')).rows.filter((z) => zoneRowInScope(req, z))
   const bstats = await tryGet(BOOKING_URL, '/api/internal/zone-metrics', [])
   const bmap = Object.fromEntries((Array.isArray(bstats) ? bstats : []).map((x) => [Number(x.zone_id), x]))
   const out = []

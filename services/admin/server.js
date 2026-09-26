@@ -204,8 +204,8 @@ const publicAdmin = (a) => a && ({ id: a.id, name: a.name, email: a.email, phone
 // Zones snapshot (id → city), cached briefly, used only to resolve a scoped admin's scope. A city
 // contains zones (zones.city is a string), so this maps between the two geographic keys.
 let zonesSnap = { at: 0, list: [] }
-async function getZonesSnapshot() {
-  if (Date.now() - zonesSnap.at < 60000 && zonesSnap.list.length) return zonesSnap.list
+async function getZonesSnapshot(force = false) {
+  if (!force && Date.now() - zonesSnap.at < 60000 && zonesSnap.list.length) return zonesSnap.list
   const list = await tryGet(U.catalog, '/api/internal/zones', [])
   if (Array.isArray(list) && list.length) zonesSnap = { at: Date.now(), list }
   return zonesSnap.list
@@ -237,11 +237,14 @@ async function resolveScope(a, roster) {
     }
     for (const c of (children.get(id) || [])) stack.push(c)
   }
-  if (!cities.size && !zoneIds.size) return { type, zoneIds: [], cities: [] } // e.g. a team lead with no scoped reports → sees nothing
-  const zones = await getZonesSnapshot()
+  if (!cities.size && !zoneIds.size) return { type, zoneIds: [], cities: [], cityScopes: [] } // e.g. a team lead with no scoped reports → sees nothing
+  const cityScopes = [...cities] // cities granted outright, before zones widen `cities` to theirs
+  let zones = await getZonesSnapshot()
+  // A zone created in the last minute isn't in the cached snapshot yet — refetch rather than drop it.
+  if ([...zoneIds].some((id) => !zones.some((z) => z.id === id)) && Date.now() - zonesSnap.at > 2000) zones = await getZonesSnapshot(true)
   for (const z of zones) if (cities.has(z.city)) zoneIds.add(z.id)        // cities → their zones
   for (const z of zones) if (zoneIds.has(z.id) && z.city) cities.add(z.city) // zones → their cities
-  return { type, zoneIds: [...zoneIds], cities: [...cities] }
+  return { type, zoneIds: [...zoneIds], cities: [...cities], cityScopes }
 }
 
 // Resolved permission keys per role, cached in-process. This is the ONE place authorization is
@@ -923,7 +926,8 @@ app.get('/api/admin/dashboard', admin, async (req, res) => {
   // Data scope: filter every source array up front, so every metric below is scoped. Worker stats
   // are recomputed from the filtered list (the internal /workers stats are global, unscoped).
   const scope = req.admin?.scope
-  const customers = customersAll.filter((c) => inScope(scope, { city: c.city }))
+  const zoneOf = scope && scope.type !== 'all' ? await customerZoneMap(await tryGet(U.auth, '/api/internal/addresses/defaults', []), bookingsAll) : {}
+  const customers = customersAll.filter((c) => customerInScope(scope, c, zoneOf))
   const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id }))
   const wList = (workersResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
   const wCount = (...s) => wList.filter((w) => s.includes(w.status)).length
@@ -1006,7 +1010,8 @@ app.get('/api/admin/insights', admin, async (req, res) => {
   // Data scope: filter every source array up front so all insights below are scoped.
   const scope = req.admin?.scope
   const bookings = bookingsAll.filter((b) => inScope(scope, { zoneId: b.zone_id }))
-  const customers = customersAll.filter((c) => inScope(scope, { city: c.city }))
+  const zoneOf = scope && scope.type !== 'all' ? await customerZoneMap(await tryGet(U.auth, '/api/internal/addresses/defaults', []), bookingsAll) : {}
+  const customers = customersAll.filter((c) => customerInScope(scope, c, zoneOf))
   const workers = (wResp.workers || []).filter((w) => inScope(scope, { zoneId: w.zone_id, city: w.city }))
   const isPaid = (b) => b.payment_status === 'paid' || b.status === 'completed'
   const paid = bookings.filter(isPaid)
@@ -1125,6 +1130,48 @@ function localityFrom(addr) {
   return a
 }
 
+// Customers carry no zone column, so their zone is derived: the default saved address resolved through
+// the catalog zone map (pincode + map location), else the zone of their latest booking. A scoped admin
+// then judges a customer by that zone (falling back to city), same rule as every other row.
+async function customerZoneMap(defAddrs, bookings) {
+  const out = {}
+  const addrs = (defAddrs || []).filter((a) => a && (a.pincode || (a.lat != null && a.lng != null)))
+  if (addrs.length) {
+    let ids = []
+    try { ids = await internalPost(U.catalog, '/api/internal/zones-for', { points: addrs.map((a) => ({ pincode: a.pincode, lat: a.lat, lng: a.lng })) }) } catch {}
+    addrs.forEach((a, i) => { if (ids?.[i] != null) out[a.user_id] = ids[i] })
+  }
+  const last = {}
+  for (const b of bookings || []) {
+    if (out[b.user_id] != null || !b.zone_id) continue
+    if (!last[b.user_id] || Date.parse(b.created) > Date.parse(last[b.user_id].created)) last[b.user_id] = b
+  }
+  for (const [u, b] of Object.entries(last)) out[u] = b.zone_id
+  return out
+}
+// A customer outside every zone belongs to no zone manager — only a city-level (or all) admin sees them.
+const customerInScope = (scope, c, zoneOf) => zoneOf[c.id] != null
+  ? inScope(scope, { zoneId: zoneOf[c.id], city: c.city })
+  : inScope(scope && scope.type !== 'all' ? { ...scope, zoneIds: [], cities: scope.cityScopes || [] } : scope, { city: c.city })
+// Guards every /api/admin/customers/:id* route: an out-of-scope customer is a 404, never editable.
+async function scopeCustomer(req, res, next) {
+  const scope = req.admin?.scope
+  if (!scope || scope.type === 'all') return next()
+  const id = Number(req.params.id)
+  const [u, addrs, bookings] = await Promise.all([
+    tryGet(U.auth, `/api/internal/users/${id}`, null),
+    tryGet(U.auth, `/api/internal/users/${id}/addresses`, []),
+    tryGet(U.booking, '/api/internal/bookings', []),
+  ])
+  const c = u?.user
+  if (!c) return res.status(404).json({ error: 'Not found' })
+  const live = (addrs || []).filter((a) => !a.archived)
+  const def = live.find((a) => a.is_default) || live[0]
+  const zoneOf = await customerZoneMap(def ? [{ ...def, user_id: id }] : [], (bookings || []).filter((b) => b.user_id === id))
+  if (!customerInScope(scope, c, zoneOf)) return res.status(404).json({ error: 'Not found' })
+  next()
+}
+
 app.get('/api/admin/customers', admin, async (req, res) => {
   const [customersAll, bookings, zones, defAddrs] = await Promise.all([
     tryGet(U.auth, '/api/internal/customers', []),
@@ -1132,8 +1179,8 @@ app.get('/api/admin/customers', admin, async (req, res) => {
     tryGet(U.catalog, '/api/internal/zones', []),
     tryGet(U.auth, '/api/internal/addresses/defaults', []),
   ])
-  // Customers are only city-tagged (no zone), so a scoped admin sees them by city (the coarse key).
-  const customers = customersAll.filter((c) => inScope(req.admin?.scope, { city: c.city }))
+  const zoneOf = await customerZoneMap(defAddrs, bookings)
+  const customers = customersAll.filter((c) => customerInScope(req.admin?.scope, c, zoneOf))
   const zoneName = {}; for (const z of zones) zoneName[z.id] = z.name
   const addrOf = {}; for (const a of defAddrs) addrOf[a.user_id] = a
   // Per-customer roll-up from the full booking list: count, paid/completed spend, most-recent booking
@@ -1157,8 +1204,8 @@ app.get('/api/admin/customers', admin, async (req, res) => {
       spend: spend[c.id] || 0,
       joined: c.created,                 // auth returns `created`, the screen reads `joined`
       lastBooking,                       // ISO of the customer's most recent booking (null if none)
-      zoneId: lastZone[c.id] || null,
-      zone: lastZone[c.id] ? (zoneName[lastZone[c.id]] || null) : null,
+      zoneId: zoneOf[c.id] || lastZone[c.id] || null,
+      zone: (zoneOf[c.id] || lastZone[c.id]) ? (zoneName[zoneOf[c.id] || lastZone[c.id]] || null) : null,
       // Location sub-line: the saved default-address locality, falling back to the last booking's zone.
       area: localityFrom(addr) || (lastZone[c.id] ? (zoneName[lastZone[c.id]] || null) : null),
       // A brand-new customer has no meaningful rating yet — show 0 rather than the 5.0 seed default.
@@ -1184,7 +1231,7 @@ app.post('/api/admin/customers', admin, requirePerm('customers.edit'), async (re
 // Customer detail (profile page): everything the /customers/:id screen renders. Bookings are enriched
 // with the fields the Overview cards need (service, worker, schedule, payment, rating) so the screen can
 // derive spending/service/activity summaries client-side without extra round-trips.
-app.get('/api/admin/customers/:id', admin, async (req, res) => {
+app.get('/api/admin/customers/:id', admin, scopeCustomer, async (req, res) => {
   const id = Number(req.params.id)
   const [u, addresses, allBookings, transactions, notes, referrals, membership, zones, paymentMethods, membershipLedger, membershipPlans, offers, tickets] = await Promise.all([
     tryGet(U.auth, `/api/internal/users/${id}`, null),
@@ -1203,9 +1250,6 @@ app.get('/api/admin/customers/:id', admin, async (req, res) => {
   ])
   const customer = u?.user || null
   if (!customer) return res.status(404).json({ error: 'Not found' })
-  // Data scope: a scoped admin can't open an out-of-scope customer by id. 404 (not 403) so they
-  // can't probe which ids exist outside their scope.
-  if (!inScope(req.admin?.scope, { city: customer.city })) return res.status(404).json({ error: 'Not found' })
   const zoneName = {}; for (const z of zones) zoneName[z.id] = z.name
   const bookings = allBookings.filter((b) => b.user_id === id).map((b) => ({
     id: b.id, ref: b.ref,
@@ -1279,7 +1323,7 @@ async function roleDisplayName(key) {
   return sys?.name || (String(key).charAt(0).toUpperCase() + String(key).slice(1))
 }
 // Pin a typed ops note to a customer (category, optional title + related booking).
-app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'), async (req, res) => {
+app.post('/api/admin/customers/:id/notes', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
   try {
     const b = req.body || {}
     const row = await internalPost(U.auth, `/api/internal/users/${req.params.id}/notes`, {
@@ -1293,14 +1337,14 @@ app.post('/api/admin/customers/:id/notes', admin, requirePerm('customers.edit'),
 })
 // Admin address management for a customer (support/ops action — gated + audited). Archive is a soft
 // delete (PATCH archived=true); there is no hard delete so order history keeps a valid address.
-app.post('/api/admin/customers/:id/addresses', admin, requirePerm('customers.edit'), async (req, res) => {
+app.post('/api/admin/customers/:id/addresses', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/addresses`, req.body || {})
     await logAudit(req.admin?.name || 'admin', 'customer.address_add', `#${req.params.id}`, req)
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
-app.patch('/api/admin/customers/:id/addresses/:aid', admin, requirePerm('customers.edit'), async (req, res) => {
+app.patch('/api/admin/customers/:id/addresses/:aid', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPatch(U.auth, `/api/internal/addresses/${req.params.aid}`, req.body || {})
     const what = req.body?.archived === true ? 'archive' : req.body?.archived === false ? 'restore' : 'edit'
@@ -1308,7 +1352,7 @@ app.patch('/api/admin/customers/:id/addresses/:aid', admin, requirePerm('custome
     res.json(r)
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
-app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('customers.edit'), async (req, res) => {
+app.post('/api/admin/customers/:id/addresses/:aid/default', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/addresses/${req.params.aid}/default`, {})
     await logAudit(req.admin?.name || 'admin', 'customer.address_default', `#${req.params.id} addr#${req.params.aid}`, req)
@@ -1316,7 +1360,7 @@ app.post('/api/admin/customers/:id/addresses/:aid/default', admin, requirePerm('
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
 // Change a customer's membership plan (support/ops action — gated + audited).
-app.post('/api/admin/customers/:id/membership', admin, requirePerm('customers.edit'), async (req, res) => {
+app.post('/api/admin/customers/:id/membership', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
   try {
     const r = await internalPost(U.auth, `/api/internal/users/${req.params.id}/membership/set`, { plan: req.body?.plan, cycle: req.body?.cycle || 'monthly', method: req.body?.method || 'admin' })
     await logAudit(req.admin?.name || 'admin', 'customer.membership_change', `#${req.params.id} → ${req.body?.plan}`, req)
@@ -1325,7 +1369,7 @@ app.post('/api/admin/customers/:id/membership', admin, requirePerm('customers.ed
 })
 // Editing a customer's profile is a support/ops action — gate it on customers.edit and record who
 // changed which fields, so a name/email/city/status change is always traceable.
-app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), async (req, res) => {
+app.patch('/api/admin/customers/:id', admin, scopeCustomer, requirePerm('customers.edit'), async (req, res) => {
   try {
     const body = { ...(req.body || {}) }
     // Phone is the customer's login identity — never editable from the admin profile edit (changing it
@@ -1340,14 +1384,14 @@ app.patch('/api/admin/customers/:id', admin, requirePerm('customers.edit'), asyn
 // Admin wallet adjustment — credit/debit any balance (cash/promo/points), bypasses wallet status.
 // Routed through the approval matrix: executes immediately unless a rule requires sign-off, and now
 // requires customers.edit (was ungated). Amount is signed (+credit / -debit).
-app.post('/api/admin/customers/:id/wallet', admin, async (req, res) => {
+app.post('/api/admin/customers/:id/wallet', admin, scopeCustomer, async (req, res) => {
   const amt = Number(req.body?.amount) || 0
   const balance = ['cash', 'promo', 'points'].includes(req.body?.balance) ? req.body.balance : 'cash'
   const title = req.body?.title || req.body?.note || (amt >= 0 ? 'Admin credit' : 'Admin debit')
   return submitAction('customer.wallet_adjust', { userId: Number(req.params.id), amount: amt, balance, title }, req, res)
 })
 // Admin sets wallet status: active / frozen / blocked / inactive.
-app.post('/api/admin/customers/:id/wallet/status', admin, async (req, res) => {
+app.post('/api/admin/customers/:id/wallet/status', admin, scopeCustomer, async (req, res) => {
   try { res.json(await internalPost(U.auth, `/api/internal/users/${req.params.id}/wallet-status`, { status: req.body?.status })) }
   catch (e) { res.status(500).json({ error: e.message }) }
 })

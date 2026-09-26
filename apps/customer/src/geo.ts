@@ -175,12 +175,13 @@ export async function geocodeAddress(q: string): Promise<{ label: string; sub: s
 
 // Ask the backend whether we cover a pincode/city. Fails open (serviceable) on network error so
 // a flaky connection never blocks a booking. Returns { serviceable: true } when no gating is set.
-export async function checkServiceable(pincode?: string, city?: string): Promise<{ serviceable: boolean; reason: string }> {
-  if (!pincode && !city) return { serviceable: true, reason: 'open' }
+export async function checkServiceable(pincode?: string, city?: string, lat?: number | null, lng?: number | null): Promise<{ serviceable: boolean; reason: string }> {
+  if (!pincode && !city && lat == null) return { serviceable: true, reason: 'open' }
   try {
     const qs = new URLSearchParams()
     if (pincode) qs.set('pincode', pincode)
     if (city) qs.set('city', city)
+    if (lat != null && lng != null) { qs.set('lat', String(lat)); qs.set('lng', String(lng)) }
     const res = await fetch(`${API_BASE}/api/serviceable?${qs.toString()}`)
     if (!res.ok) return { serviceable: true, reason: 'unknown' }
     return await res.json()

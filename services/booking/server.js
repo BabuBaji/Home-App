@@ -270,6 +270,9 @@ async function activeJobCounts() {
 }
 
 // Resolve the zone from the pincode when it wasn't stamped at create time (or the zone was added later).
+const locQ = (pincode, lat, lng) => [
+  pincode ? `pincode=${encodeURIComponent(pincode)}` : '', lat != null ? `lat=${encodeURIComponent(lat)}` : '', lng != null ? `lng=${encodeURIComponent(lng)}` : '',
+].filter(Boolean).join('&')
 async function resolveZoneId(zoneId, pincode) {
   if (zoneId) return zoneId
   if (!pincode) return null
@@ -289,8 +292,10 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
   }
   // Fall back to any qualified active expert when the zone has nobody rostered. The sweep asks for
   // requireZone so it never assigns outside the zone; the create path prefers serving the customer.
-  if (!cands.length && !requireZone) {
-    const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}`, [])
+  // The fallback stays inside the zone: it widens "on shift" to "any active worker of this zone", it
+  // never reaches into another zone. A booking with no zone has nobody to fall back to.
+  if (!cands.length && !requireZone && zid) {
+    const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}&zone_id=${zid}`, [])
     cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0 }))
   }
   if (!cands.length) return null
@@ -447,14 +452,16 @@ function slotHoursFor(hours, dateStr) {
 
 // Capacity check for a scheduled slot: pincode served + at least one qualified worker not already
 // booked at that date/slot. Workers being online *now* doesn't matter for a future slot.
-async function slotAvailability(date, time, pincode, serviceNames) {
+// Capacity is per zone: this zone's experts against this zone's bookings in the slot.
+async function slotAvailability(date, time, pincode, serviceNames, zoneId = null) {
   const srv = pincode ? await tryGet(CATALOG_URL, `/api/serviceable?pincode=${encodeURIComponent(pincode)}`, { serviceable: true }) : { serviceable: true }
-  if (!srv.serviceable) return { available: false, reason: `Sorry, we don't serve ${pincode} yet.` }
-  const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent((serviceNames || []).join(','))}`, { count: 0 })
+  if (!srv.serviceable && zoneId == null) return { available: false, reason: `Sorry, we don't serve ${pincode} yet.` }
+  const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent((serviceNames || []).join(','))}${zoneId ? `&zone_id=${zoneId}` : ''}`, { count: 0 })
   const workerCount = wa.count ?? 0
-  if (workerCount === 0) return { available: false, reason: 'No expert offers this service yet.' }
+  if (workerCount === 0) return { available: false, reason: 'No expert offers this service in your area yet.' }
   const booked = date && time
-    ? (await pool.query(`SELECT count(*)::int n FROM bookings WHERE date=$1 AND time=$2 AND status = ANY($3)`, [date, time, ACTIVE_STATES])).rows[0].n
+    ? (await pool.query(`SELECT count(*)::int n FROM bookings WHERE date=$1 AND time=$2 AND status = ANY($3)${zoneId ? ' AND zone_id=$4' : ''}`,
+        zoneId ? [date, time, ACTIVE_STATES, zoneId] : [date, time, ACTIVE_STATES])).rows[0].n
     : 0
   const available = workerCount > booked
   return { available, workerCount, booked, reason: available ? null : 'All experts are booked for this time. Please pick another slot.' }
@@ -635,7 +642,11 @@ app.get('/api/bookings/service-workers', async (req, res) => {
   const service = String(req.query.service || '').trim()
   if (!service) return res.json([])
   const lat = parseFloat(String(req.query.lat)), lng = parseFloat(String(req.query.lng))
-  const workers = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(service)}`, [])
+  const lq = locQ(String(req.query.pincode || ''), Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null)
+  const zr = lq ? await tryGet(CATALOG_URL, `/api/internal/zone-for?${lq}`, null) : null
+  // Only the experts who serve the customer's zone; nothing when we can't tell where they are.
+  if (!zr?.zoneId) return res.json([])
+  const workers = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(service)}&zone_id=${zr.zoneId}`, [])
   const km = (aLat, aLng, bLat, bLng) => {
     const R = 6371, toRad = (d) => d * Math.PI / 180
     const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng)
@@ -685,13 +696,16 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
 // behind a token meant a stale/invalid session silently showed "no slots" instead of the grid.
 app.get('/api/slots', async (req, res) => {
   const date = String(req.query.date || ''), pincode = String(req.query.pincode || ''), services = String(req.query.services || '')
-  const srv = pincode ? await tryGet(CATALOG_URL, `/api/serviceable?pincode=${encodeURIComponent(pincode)}`, { serviceable: true }) : { serviceable: true }
-  const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent(services)}`, { count: 0 })
+  const lq = locQ(pincode, req.query.lat ?? null, req.query.lng ?? null)
+  const srv = lq ? await tryGet(CATALOG_URL, `/api/serviceable?${lq}`, { serviceable: true }) : { serviceable: true }
+  const zr = lq ? await tryGet(CATALOG_URL, `/api/internal/zone-for?${lq}`, null) : null
+  const zid = zr?.zoneId ?? null
+  const wa = await tryGet(WORKER_URL, `/internal/workers/active-for?services=${encodeURIComponent(services)}${zid ? `&zone_id=${zid}` : ''}`, { count: 0 })
   const workerCount = wa.count ?? 0
-  const rows = date ? (await pool.query(`SELECT time, count(*)::int n FROM bookings WHERE date=$1 AND status = ANY($2) GROUP BY time`, [date, ACTIVE_STATES])).rows : []
+  const rows = date ? (await pool.query(`SELECT time, count(*)::int n FROM bookings WHERE date=$1 AND status = ANY($2)${zid ? ' AND zone_id=$3' : ''} GROUP BY time`, zid ? [date, ACTIVE_STATES, zid] : [date, ACTIVE_STATES])).rows : []
   const booked = Object.fromEntries(rows.map((r) => [r.time, r.n]))
   // Bookable hours come from the serving zone's working hours (falls back to the default grid).
-  const hours = pincode ? await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(pincode)}`, null) : null
+  const hours = lq ? await tryGet(CATALOG_URL, `/api/zone-hours?${lq}`, null) : null
   const hourList = slotHoursFor(hours, date || '')
   const slots = hourList.map((h) => { const time = slotLabel(h); const m = booked[time] || 0; return { hour: h, time, booked: m, available: !!srv.serviceable && workerCount > m } })
   const closed = !!hours && !hours.is247 && hourList.length === 0
@@ -701,11 +715,6 @@ app.get('/api/slots', async (req, res) => {
 app.post('/api/bookings', auth, async (req, res) => {
   const body = req.body || {}
   // Authoritative pricing from the catalog service.
-  let priced
-  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode: body.pincode, customerId: req.user.id, at: body.at }) }
-  catch { return res.status(409).json({ error: 'Could not price these items' }) }
-  if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
-
   // Address: explicit id/text, else the customer's default (from the auth service). We resolve the
   // saved-address id so it can be stamped on the booking ("last used" becomes exact, not a text match).
   // Resolved BEFORE the gates below: pincode is client-supplied and optional, and every gate used to
@@ -713,11 +722,12 @@ app.post('/api/bookings', auth, async (req, res) => {
   // auto-assigned. The address carries the pincode, so derive it here and gate on that.
   let address = body.address
   let addressId = body.addressId ?? body.address_id ?? null
-  if (addressId == null || !address) {
+  let chosen = null
+  if (addressId == null || !address || body.lat == null) {
     const addrs = await tryGet(AUTH_URL, `/api/internal/users/${req.user.id}/addresses`, [])
-    let chosen = addressId != null ? addrs.find((a) => a.id === Number(addressId)) : null
+    chosen = addressId != null ? addrs.find((a) => a.id === Number(addressId)) : null
     if (!chosen && address) chosen = addrs.find((a) => a.line && a.line === address)   // match free text to a saved one
-    if (!chosen) chosen = addrs.find((a) => a.is_default) || addrs[0] || null
+    if (!chosen && addressId == null) chosen = addrs.find((a) => a.is_default) || addrs[0] || null
     if (chosen) {
       if (!address) address = chosen.line || ''
       if (addressId == null) addressId = chosen.id
@@ -726,7 +736,32 @@ app.post('/api/bookings', auth, async (req, res) => {
   // The pincode every gate below is judged on: explicit if sent, else the 6-digit PIN in the address.
   // Still empty (no address, no PIN in it) → no zone to check, so the gates fall open, matching
   // /api/serviceable which also serves everywhere when zones can't be resolved.
-  const pincode = String(body.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+  const pincode = String(body.pincode || '').trim() || String(chosen?.pincode || '').trim() || (String(address || '').match(/\b\d{6}\b/) || [''])[0]
+  // Where the customer is: explicit, else the saved address's pin-drop. Decides the zone when
+  // several zones share a pincode.
+  const custLat = body.lat ?? chosen?.lat ?? null, custLng = body.lng ?? chosen?.lng ?? null
+
+  // Zone gate: every booking must fall inside a live zone. An order nobody serves used to be
+  // accepted and then offered to whoever was free anywhere.
+  const zr = (pincode || custLat != null) ? await tryGet(CATALOG_URL, `/api/internal/zone-for?${locQ(pincode, custLat, custLng)}`, null) : null
+  const zoneId = zr?.zoneId ?? null
+  if (zr?.configured !== false && (!zoneId || !zr.live)) {
+    return res.status(422).json({ error: "We don't serve this location yet.", code: 'not_serviceable' })
+  }
+
+  // A chosen expert must serve this zone (and be active) — checked before anything is charged.
+  const chosenId = Number(body.workerId)
+  if (chosenId) {
+    const cw = await tryGet(WORKER_URL, `/internal/workers/${chosenId}/service-set`, null)
+    if (!cw || cw.status !== 'active') return res.status(422).json({ error: 'That expert is not available.' })
+    if (zoneId != null && Number(cw.zone_id) !== Number(zoneId)) return res.status(422).json({ error: "That expert doesn't serve your area. Please choose another." })
+  }
+
+  // Authoritative pricing from the catalog service, for the resolved zone.
+  let priced
+  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode, lat: custLat, lng: custLng, zoneId, customerId: req.user.id, at: body.at }) }
+  catch { return res.status(409).json({ error: 'Could not price these items' }) }
+  if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
   // Working-hours gate: reject a time outside the serving zone's configured hours (authoritative,
   // before any wallet debit).
@@ -735,7 +770,7 @@ app.post('/api/bookings', auth, async (req, res) => {
   // For SCHEDULE the customer genuinely chose a future slot, so body.date/at is the real intent.
   const isInstant = (body.type || 'instant') !== 'schedule'
   if (pincode) {
-    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?pincode=${encodeURIComponent(pincode)}`, null)
+    const hours = await tryGet(CATALOG_URL, `/api/zone-hours?${locQ(pincode, custLat, custLng)}${zoneId ? `&zoneId=${zoneId}` : ''}`, null)
     if (hours && !hours.is247) {
       const dateStr = isInstant ? istDateStr() : (body.date || istDateStr())
       const win = dayWindow(hours, dateStr)
@@ -759,7 +794,7 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Daily capacity gate: reject once the zone hits its configured Max Orders/Day (excludes cancellations).
   if (pincode) {
-    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?pincode=${encodeURIComponent(pincode)}`, null)
+    const zc = await tryGet(CATALOG_URL, `/api/internal/zone-capacity?${zoneId ? `zoneId=${zoneId}` : locQ(pincode, custLat, custLng)}`, null)
     const maxOrders = Number(zc?.capacity?.maxOrders) || 0
     if (zc?.zoneId && maxOrders > 0) {
       const { rows } = await pool.query(`SELECT count(*)::int n FROM bookings WHERE zone_id=$1 AND created::date = CURRENT_DATE AND status <> 'cancelled'`, [zc.zoneId])
@@ -769,7 +804,7 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Scheduled bookings: verify the chosen slot still has capacity (pincode + a free qualified worker).
   if ((body.type || 'instant') === 'schedule' && body.date && body.time) {
-    const avail = await slotAvailability(body.date, body.time, pincode || '', priced.items.map((i) => i.name))
+    const avail = await slotAvailability(body.date, body.time, pincode || '', priced.items.map((i) => i.name), zoneId)
     if (!avail.available) return res.status(409).json({ error: avail.reason || 'This slot is no longer available. Please pick another.' })
   }
 
@@ -785,8 +820,7 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Stamp the booking's pincode + zone (for zone-scoped dispatch and live-ops) — same `pincode`
   // the gates above were judged on, so what was enforced is what gets recorded.
-  let zoneId = null
-  if (pincode) { const zr = await tryGet(CATALOG_URL, `/api/internal/zone-for?pincode=${encodeURIComponent(pincode)}`, null); zoneId = zr?.zoneId ?? null }
+  // (zoneId was resolved at the zone gate above, from the same pincode + location.)
 
   const ins = await pool.query(
     `INSERT INTO bookings (ref,user_id,type,freq,note,date,time,address,payment,payment_status,items,duration,
@@ -795,7 +829,7 @@ app.post('/api/bookings', auth, async (req, res) => {
     [ref(), req.user.id, body.type || 'instant', body.freq ?? null, body.note ?? null, body.date ?? null, body.time ?? null,
       address, payment, paymentStatus, JSON.stringify(priced.items), priced.items[0]?.durationLabel ?? null,
       priced.subtotal, priced.fee, priced.tax, priced.discount, priced.coupon ?? null, priced.total, otp4(),
-      body.lat ?? null, body.lng ?? null, pincode || null, zoneId, nowIso(), addressId ?? null])
+      custLat, custLng, pincode || null, zoneId, nowIso(), addressId ?? null])
   let booking = rowTo(ins.rows[0])
 
   // Record the payment in the customer's transaction ledger for NON-wallet methods too. Wallet
@@ -823,7 +857,6 @@ app.post('/api/bookings', auth, async (req, res) => {
     if (upd.rows[0]) { booking = rowTo(upd.rows[0]); internalPost(WORKER_URL, `/internal/workers/${id}/offered`, { bookingId: booking.id }).catch(() => {}) }
   }
 
-  const chosenId = Number(body.workerId)
   if (chosenId) {
     const wp = await tryGet(WORKER_URL, `/internal/workers/${chosenId}/public-profile`, null)
     if (wp && wp.name) await assignWorker(chosenId, wp.name, wp.rating)
@@ -1142,7 +1175,13 @@ app.patch('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   if (body.adminNote !== undefined) u.admin_note = String(body.adminNote || '')
   if (body.escalated !== undefined) { u.escalated = !!body.escalated; u.escalate_reason = body.escalated ? String(body.escalateReason || '') : '' }
   if (body.unassign) { u.worker_id = null; u.pro_name = ''; u.status = 'confirmed' }
-  else if (body.workerId) { u.worker_id = Number(body.workerId); u.pro_name = String(body.workerName || ''); if (b.status === 'confirmed' && !body.status) u.status = 'worker_assigned' }
+  else if (body.workerId) {
+    const ws = await tryGet(WORKER_URL, `/internal/workers/${Number(body.workerId)}/service-set`, null)
+    if (!ws || ws.status !== 'active') return res.status(422).json({ error: 'That worker is not active.' })
+    if (b.zone_id != null && Number(ws.zone_id) !== Number(b.zone_id)) return res.status(422).json({ error: "That worker doesn't belong to this booking's zone." })
+    u.worker_id = Number(body.workerId); u.pro_name = String(body.workerName || ws.name || ''); u.offer_worker_id = null
+    if (b.status === 'confirmed' && !body.status) u.status = 'worker_assigned'
+  }
   const cols = Object.keys(u)
   if (cols.length) {
     await pool.query(`UPDATE bookings SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')} WHERE id=$${cols.length + 1}`, [...cols.map((c) => u[c]), b.id])
@@ -1302,7 +1341,12 @@ app.post('/api/internal/bookings/:id/coords', internalOnly, async (req, res) => 
   res.json({ ok: true })
 })
 app.post('/api/internal/bookings/:id/release', internalOnly, async (req, res) => {
-  await pool.query("UPDATE bookings SET worker_id=NULL, status='confirmed' WHERE id=$1", [Number(req.params.id)])
+  // The worker who dropped it joins declined_by, so the sweep hands it to someone else.
+  const wid = Number(req.body?.worker_id) || null
+  await pool.query(
+    `UPDATE bookings SET worker_id=NULL, pro_name='', status='confirmed', offer_worker_id=NULL, offer_at=NULL,
+       declined_by = CASE WHEN $2::int IS NULL OR $2 = ANY(declined_by) THEN declined_by ELSE array_append(declined_by, $2) END
+     WHERE id=$1`, [Number(req.params.id), wid])
   await emitBookingUpdate(Number(req.params.id))
   res.json({ ok: true })
 })

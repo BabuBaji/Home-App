@@ -694,9 +694,12 @@ function periodEarnings(bookings) {
     lifetimeTotal++
     if (b.status === 'completed') lifetimeCompleted++
     if (b.status === 'cancelled') lifetimeCancelled++
-    // Today's job count = everything scheduled/created today that wasn't cancelled.
+    // Today's job count = everything scheduled/created today that wasn't cancelled, plus anything
+    // finished today (a job booked yesterday and done this morning is still one of today's jobs,
+    // otherwise "Jobs done" reads 1 / 0).
     const scheduledToday = istDay(b.date || b.created) === todayStr
-    if (scheduledToday && b.status !== 'cancelled') todayJobs++
+    const doneToday = b.status === 'completed' && istDay(b.completed_at || b.created) === todayStr
+    if ((scheduledToday && b.status !== 'cancelled') || doneToday) todayJobs++
     if (scheduledToday && b.status === 'cancelled') todayCancelled++
     if (b.status !== 'completed') continue
     const day = istDay(b.completed_at || b.created)
@@ -707,7 +710,7 @@ function periodEarnings(bookings) {
     if (day.startsWith(monthStr)) monthEarnings += amt
   }
   return {
-    todayEarnings, weekEarnings, monthEarnings, todayCompleted, todayJobs, todayCancelled,
+    todayEarnings, weekEarnings, monthEarnings, todayCompleted, todayJobs, todayCancelled, lifetimeCompleted,
     // Lifetime rates for the Home "Performance Overview". Null (not 0) when the worker has no
     // jobs yet, so the app renders "—" instead of a misleading 0%.
     completionPct: lifetimeTotal ? Math.round((lifetimeCompleted / lifetimeTotal) * 100) : null,
@@ -939,7 +942,8 @@ async function bootstrap(wid) {
   }
   const walletSummaryOut = wsum ? { ...wsum, ...bookingStats } : { ...walletSummary(w), ...pe, ...bookingStats }
   return {
-    worker: workerDto(w), wallet: walletDto(w), walletSummary: walletSummaryOut,
+    // Lifetime jobs done (Profile "Jobs done", tier) comes from the real booking history.
+    worker: { ...workerDto(w), jobsCompleted: pe.lifetimeCompleted }, wallet: walletDto(w), walletSummary: walletSummaryOut,
     jobStatus: active ? (STATUS_TO_ENUM[active.status] || 'NONE') : 'NONE',
     // Full activeJob so the worker app's (non-null) Job model never deserializes a null field —
     // a missing key here NPE-crashes the In-Progress / Job screens.
@@ -1724,6 +1728,15 @@ app.post('/api/worker/status', auth, async (req, res) => {
   const state = String(req.body?.state || 'Offline')
   await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [state === 'Available', req.worker.id])
   await mergeProfile(req.worker.id, { availabilityState: state })
+  // Going offline hands back any offer still waiting on an answer, so the booking moves to the next
+  // worker now instead of sitting on someone who has left until the offer times out.
+  if (state !== 'Available') {
+    const bid = (await pool.query('SELECT offered_booking FROM workers WHERE id=$1', [req.worker.id])).rows[0]?.offered_booking ?? null
+    if (bid) {
+      await pool.query('UPDATE workers SET offered_booking=NULL, offered_at=NULL WHERE id=$1 AND offered_booking=$2', [req.worker.id, bid])
+      internalPost(BOOKING_URL, `/api/internal/bookings/${bid}/decline`, { worker_id: req.worker.id }).catch(() => {})
+    }
+  }
   res.json(workerDto(await getWorker(req.worker.id)))
 })
 
@@ -4294,6 +4307,8 @@ app.post('/api/admin/workers', adminAuth, requirePerm('workers.create'), async (
   const b = req.body || {}
   const name = fullName(b)
   if (!name) return res.status(400).json({ error: 'Name required' })
+  // A zone/city manager can only onboard into their own territory — and must say where.
+  if (!inScope(req.admin?.scope, { zoneId: b.zone_id ? Number(b.zone_id) : null, city: b.city || null })) return res.status(403).json({ error: 'Pick a zone inside your territory.' })
   // The phone IS the login identity (OTP by number), so a duplicate would create a worker who can
   // never sign in — whoever was created first wins the number.
   if (b.phone) {
@@ -4644,7 +4659,16 @@ app.get('/api/admin/workers/:id', adminAuth, scopeWorker, async (req, res) => {
   // what happened to be uploaded — an absent Police Verification is the thing they need to chase.
   res.json({ ...rowToWorker(w), documents: documentsOut, documentTypes: DOC_TYPES, recentJobs, metrics, liveJob, wallet, notes, activity, earningsTrend, timeline, device, health, jobsPerformance, skillsServices })
 })
-app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), scopeWorker, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))
+app.patch('/api/admin/workers/:id', adminAuth, requirePerm('workers.edit'), scopeWorker, async (req, res) => {
+  const b = req.body || {}, w = req._worker
+  // Moving a worker is only allowed into the admin's own zones/cities — never out of their reach.
+  if (b.zone_id !== undefined || b.city !== undefined) {
+    const zoneId = b.zone_id !== undefined ? (b.zone_id ? Number(b.zone_id) : null) : w.zone_id
+    const city = b.city !== undefined ? b.city : w.city
+    if (!inScope(req.admin?.scope, { zoneId, city })) return res.status(403).json({ error: 'You can only move a worker within your zones.' })
+  }
+  res.json(await patchWorker(Number(req.params.id), b, res))
+})
 app.delete('/api/admin/workers/:id', adminAuth, requirePerm('workers.delete'), scopeWorker, async (req, res) => { await pool.query('DELETE FROM workers WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
 // Admin notes on a worker.
 app.get('/api/admin/workers/:id/notes', adminAuth, scopeWorker, async (req, res) => res.json((await pool.query('SELECT id, note, author, created FROM worker_notes WHERE worker_id=$1 ORDER BY id DESC LIMIT 50', [Number(req.params.id)])).rows))
@@ -4690,18 +4714,23 @@ app.get('/api/admin/workers/:id/logs', adminAuth, scopeWorker, async (req, res) 
 })
 
 /* ---------- shifts / roster (admin) ---------- */
-app.get('/api/admin/shifts', adminAuth, async (_q, res) => {
-  const { rows } = await pool.query('SELECT s.*, w.name AS worker_name FROM shifts s JOIN workers w ON w.id=s.worker_id ORDER BY s.worker_id, s.weekday, s.start_min')
+// A shift is judged by its own zone, else its worker's zone/city.
+const shiftInScope = (req, s) => inScope(req.admin?.scope, { zoneId: s.zone_id ?? s.worker_zone_id ?? null, city: s.worker_city })
+app.get('/api/admin/shifts', adminAuth, requirePerm('roster.view'), async (req, res) => {
+  const { rows } = await pool.query('SELECT s.*, w.name AS worker_name, w.zone_id AS worker_zone_id, w.city AS worker_city FROM shifts s JOIN workers w ON w.id=s.worker_id ORDER BY s.worker_id, s.weekday, s.start_min')
   const { weekday, minutes } = istNow()
-  res.json(rows.map((s) => ({
+  res.json(rows.filter((s) => shiftInScope(req, s)).map((s) => ({
     id: s.id, worker_id: s.worker_id, worker_name: s.worker_name, zone_id: s.zone_id, weekday: s.weekday,
     start: toHHMM(s.start_min), end: toHHMM(s.end_min),
     on_now: s.weekday === weekday && s.start_min <= minutes && minutes < s.end_min,
   })))
 })
-app.post('/api/admin/shifts', adminAuth, async (req, res) => {
+app.post('/api/admin/shifts', adminAuth, requirePerm('roster.edit'), async (req, res) => {
   const b = req.body || {}
   if (!b.worker_id) return res.status(400).json({ error: 'Worker is required' })
+  const w = await getWorker(Number(b.worker_id))
+  if (!w || !inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Worker not found' })
+  if (b.zone_id && !inScope(req.admin?.scope, { zoneId: Number(b.zone_id) })) return res.status(403).json({ error: 'That zone is outside your territory.' })
   const days = Array.isArray(b.weekdays) && b.weekdays.length ? b.weekdays : [b.weekday]
   const sm = toMin(b.start), em = toMin(b.end)
   if (!(em > sm)) return res.status(400).json({ error: 'End time must be after start time' })
@@ -4713,7 +4742,12 @@ app.post('/api/admin/shifts', adminAuth, async (req, res) => {
   }
   res.status(201).json({ ok: true, added })
 })
-app.delete('/api/admin/shifts/:id', adminAuth, async (req, res) => { await pool.query('DELETE FROM shifts WHERE id=$1', [Number(req.params.id)]); res.json({ ok: true }) })
+app.delete('/api/admin/shifts/:id', adminAuth, requirePerm('roster.edit'), async (req, res) => {
+  const s = (await pool.query('SELECT s.zone_id, w.zone_id AS worker_zone_id, w.city AS worker_city FROM shifts s JOIN workers w ON w.id=s.worker_id WHERE s.id=$1', [Number(req.params.id)])).rows[0]
+  if (s && !shiftInScope(req, s)) return res.status(404).json({ error: 'Not found' })
+  await pool.query('DELETE FROM shifts WHERE id=$1', [Number(req.params.id)])
+  res.json({ ok: true })
+})
 
 /* ---------- shift PLANS + attendance (admin control) ---------- */
 app.get('/api/admin/shift-defs', adminAuth, async (_q, res) => {
@@ -4795,7 +4829,9 @@ app.get('/internal/on-shift', internalOnly, async (req, res) => {
   const vals = [weekday, minutes]
   let sql = `SELECT DISTINCT w.* FROM workers w JOIN shifts s ON s.worker_id=w.id
     WHERE w.status='active' AND s.weekday=$1 AND s.start_min<=$2 AND $2 < s.end_min`
-  if (zoneId) { vals.push(zoneId); sql += ` AND (s.zone_id=$3 OR s.zone_id IS NULL)` }
+  // A shift with no zone counts only in the worker's own zone — it used to make them "on shift"
+  // in every zone, which sent other zones' jobs to them.
+  if (zoneId) { vals.push(zoneId); sql += ` AND (s.zone_id=$3 OR (s.zone_id IS NULL AND w.zone_id=$3))` }
   const rows = (await pool.query(sql, vals)).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.length === 0 || names.some((n) => set.has(n)) })
   res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, rating: w.rating, available: !!w.available, zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
@@ -4867,7 +4903,8 @@ app.get('/internal/worker-status', internalOnly, async (req, res) => {
 })
 app.get('/internal/workers/active-for', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
-  const rows = (await pool.query("SELECT services, available FROM workers WHERE status='active'")).rows
+  const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
+  const rows = (await pool.query(`SELECT services, available FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''}`, zoneId ? [zoneId] : [])).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
   // available/onlineCount = qualified workers online now (for instant); count = all active qualified
   // workers (for future scheduled slots, where being online right now doesn't matter).
@@ -4876,7 +4913,10 @@ app.get('/internal/workers/active-for', internalOnly, async (req, res) => {
 // Active workers who offer a service — for the customer "Worker Assignment" screen (list only).
 app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
-  const rows = (await pool.query("SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng FROM workers WHERE status='active' ORDER BY jobs DESC NULLS LAST, rating DESC")).rows
+  const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
+  const rows = (await pool.query(
+    `SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng, zone_id FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''} ORDER BY jobs DESC NULLS LAST, rating DESC`,
+    zoneId ? [zoneId] : [])).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
   res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: !!w.available, lat: w.last_lat, lng: w.last_lng })))
 })
