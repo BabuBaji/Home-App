@@ -39,7 +39,7 @@ export default function Complaint() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Report an Issue')}</b><span style={{ width: 40 }} />
       </div>
 

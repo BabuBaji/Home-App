@@ -71,7 +71,7 @@ export default function Chat() {
   return (
     <div className="screen jt">
       <div className="jt-top jt-chat-top">
-        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <div className="jt-chat-who">
           <WorkerAvatar b={b} size={36} />
           <div><div className="jt-chat-name">{proName(b)}</div><div className="jt-chat-status">{t('Assigned to your job')}</div></div>

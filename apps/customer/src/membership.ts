@@ -57,7 +57,7 @@ export function cyclePrice(price: number, months: number, savePct = 0) {
 
 // Comparison matrix (rows × plan support). true=✓, false=—.
 export const COMPARE_ROWS: { label: string; silver: string | boolean; gold: string | boolean; platinum: string | boolean }[] = [
-  { label: 'Discount on Bookings', silver: 'Upto ₹1,000', gold: 'Upto ₹2,500', platinum: 'Upto ₹5,000' },
+  { label: 'Discount on Bookings', silver: 'Up to ₹1,000', gold: 'Up to ₹2,500', platinum: 'Up to ₹5,000' },
   { label: 'Free Add-ons', silver: false, gold: 'Monthly', platinum: 'Monthly' },
   { label: 'Priority Support', silver: true, gold: true, platinum: true },
   { label: 'Exclusive Offers', silver: true, gold: true, platinum: true },

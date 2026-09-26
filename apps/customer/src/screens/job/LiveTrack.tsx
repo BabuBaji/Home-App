@@ -19,7 +19,7 @@ export default function LiveTrack() {
   return (
     <div className="screen jt jt-map-screen">
       <div className="jt-top">
-        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Track Live')}</b>
         <button className="jt-ic" onClick={() => setB(null)} aria-label={t('Refresh')}><RotateCw size={18} /></button>
       </div>

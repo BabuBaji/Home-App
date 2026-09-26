@@ -163,7 +163,7 @@ export default function BookingFlow() {
   // ---------- empty / loading states ----------
   const top = (title: string, onBack: () => void) => (
     <div className="ps-top">
-      <button className="au-back" onClick={onBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+      <button className="au-back" onClick={onBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       <b>{title}</b><span style={{ width: 42 }} />
     </div>
   )
@@ -282,7 +282,7 @@ export default function BookingFlow() {
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={back} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t(TITLES[step])}</b><span style={{ width: 42 }} />
       </div>
       <div className="bf-progress" aria-label={t('Step {n} of {total}', { n: idx + 1, total: steps.length })}>

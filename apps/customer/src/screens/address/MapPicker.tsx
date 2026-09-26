@@ -73,7 +73,7 @@ export default function MapPicker({ onDone, onClose }: { onDone: (loc: PickedLoc
   return (
     <div className="ad2-overlay m2">
       <div className="ps-top">
-        <button className="au-back" onClick={onClose} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={onClose} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Select on Map')}</b><span style={{ width: 42 }} />
       </div>
 

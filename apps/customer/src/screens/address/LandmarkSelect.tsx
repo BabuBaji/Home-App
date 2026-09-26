@@ -18,7 +18,7 @@ export default function LandmarkSelect({ initial, onDone, onClose }:
   return (
     <div className="ad2-overlay m2">
       <div className="ps-top">
-        <button className="au-back" onClick={onClose} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={onClose} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Add Landmark')}</b><span style={{ width: 42 }} />
       </div>
       <div className="content">

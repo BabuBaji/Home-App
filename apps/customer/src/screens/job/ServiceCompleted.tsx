@@ -31,12 +31,12 @@ export default function ServiceCompleted() {
   }, [b?.id, b?.status])
 
   if (!b) return <div className="screen jt"><Loading /></div>
-  const completedAt = b.completed_at ? new Date(b.completed_at).toLocaleString(dateLocale(), { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }) : '—'
+  const completedAt = b.completed_at ? new Date(b.completed_at).toLocaleString(dateLocale(), { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }).replace(/\b(am|pm)\b/i, (m) => m.toUpperCase()) : '—'
 
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Service Completed')}</b><span style={{ width: 40 }} />
       </div>
       <div className="content jt-scroll jt-center">
@@ -51,7 +51,7 @@ export default function ServiceCompleted() {
           <div className="jt-sc-rate-q">{t('How was your experience?')}</div>
           <div className="jt-stars">
             {[1, 2, 3, 4, 5].map((n) => (
-              <span key={n} className={n <= stars ? 'on' : ''} onClick={() => { setStars(n); nav(`/rate/${b.id}?stars=${n}`) }}>★</span>
+              <button key={n} type="button" aria-label={t('{n} stars', { n })} className={n <= stars ? 'on' : ''} onClick={() => { setStars(n); nav(`/rate/${b.id}?stars=${n}`) }}>★</button>
             ))}
           </div>
         </div>

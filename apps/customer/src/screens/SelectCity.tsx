@@ -39,7 +39,7 @@ export default function SelectCity() {
   return (
     <div className="auth">
       <div className="au-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       </div>
       <div className="content au-body">
         <h1 className="au-h1">{t('Select your')}<br /><span className="av">{t('city')}</span></h1>

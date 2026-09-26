@@ -29,7 +29,7 @@ export default function Renewal() {
   }, [nav])
   useEffect(() => { loadPlans().then(setPlans).catch(() => setPlans([])) }, [])
 
-  if (!mem) return <div className="screen"><header className="appbar ord-appbar"><button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button><div className="titles"><h1>{t('Renew Your Plan')}</h1></div><span className="iconbtn ghost" /></header><Loading /></div>
+  if (!mem) return <div className="screen"><header className="appbar ord-appbar"><button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button><div className="titles"><h1>{t('Renew Your Plan')}</h1></div><span className="iconbtn ghost" /></header><Loading /></div>
 
   const plan = pickPlan(plans, mem.plan || 'gold')
 
@@ -54,7 +54,7 @@ export default function Renewal() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <div className="titles"><h1>{t('Renew Your Plan')}</h1></div>
         <span className="iconbtn ghost" />
       </header>

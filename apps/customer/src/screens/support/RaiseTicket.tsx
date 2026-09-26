@@ -40,7 +40,7 @@ export default function RaiseTicket() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <div className="titles"><h1>{t('Raise a Ticket')}</h1></div>
         <span className="iconbtn ghost" />
       </header>
@@ -52,13 +52,13 @@ export default function RaiseTicket() {
         </div>
 
         <label className="fm-field"><span>{t('Category')} <b className="req">*</b></span>
-          <select value={cat} onChange={(e) => { setCat(e.target.value); setSub('') }}>
+          <select required value={cat} onChange={(e) => { setCat(e.target.value); setSub('') }}>
             <option value="">{t('Select Category')}</option>
             {Object.keys(CATEGORIES).map((c) => <option key={c} value={c}>{t(c)}</option>)}
           </select>
         </label>
         <label className="fm-field"><span>{t('Sub Category')} <b className="req">*</b></span>
-          <select value={sub} onChange={(e) => setSub(e.target.value)} disabled={!cat}>
+          <select required value={sub} onChange={(e) => setSub(e.target.value)} disabled={!cat}>
             <option value="">{t('Select Sub Category')}</option>
             {(CATEGORIES[cat] || []).map((s) => <option key={s} value={s}>{t(s)}</option>)}
           </select>

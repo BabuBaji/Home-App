@@ -34,7 +34,7 @@ export default function FamilyMembers() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       <div className="titles"><h1>{t('Family Members')}</h1></div>
       <button className="iconbtn" onClick={() => setForm({ name: '', relation: '', phone: '', primary: false })} aria-label={t('Add')}><Plus size={18} /></button>
     </header>

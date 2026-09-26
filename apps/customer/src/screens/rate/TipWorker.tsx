@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Gift, Wallet as WalletIcon, Check } from 'lucide-react'
+import { ArrowLeft, Gift, Wallet as WalletIcon } from 'lucide-react'
 import { Loading, useToast } from '../../components/UI'
 import PaymentSheet from '../../components/PaymentSheet'
 import { fetchWallet, tipBooking } from '../../api'
@@ -39,7 +39,7 @@ export default function TipWorker() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Tip Your Worker')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -60,10 +60,11 @@ export default function TipWorker() {
         <div className="tp-note"><Gift size={18} /> {t('100% of your tip goes directly to the worker')}</div>
 
         <div className="tp-label">{t('Payment Method')}</div>
+        {/* The method is picked in the payment sheet on the next step — this card only says so
+            (it used to show "Wallet Balance" as selected, which wasn't how the tip got paid). */}
         <div className="tp-method">
           <span className="tp-method-ic"><WalletIcon size={18} /></span>
-          <div className="grow"><b>{t('Wallet Balance')}</b><span>₹{balance ?? '—'}</span></div>
-          <span className="tp-method-ok"><Check size={15} /></span>
+          <div className="grow"><b>{t('UPI, card or wallet')}</b><span>{t('Choose on the next step · wallet balance ₹{amt}', { amt: balance ?? '—' })}</span></div>
         </div>
       </div>
 

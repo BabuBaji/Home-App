@@ -138,7 +138,7 @@ export default function Login() {
     return (
       <div className="auth">
         <div className="au-top">
-          <button className="au-back" onClick={() => setStep('welcome')} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+          <button className="au-back" onClick={() => setStep('welcome')} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         </div>
         <div className="content au-body">
           <h1 className="au-h1">{t('Enter your')}<br /><span className="av">{t('mobile number')}</span></h1>
@@ -170,7 +170,7 @@ export default function Login() {
   return (
     <div className="auth">
       <div className="au-top">
-        <button className="au-back" onClick={() => { setStep('phone'); setOtp('') }} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => { setStep('phone'); setOtp('') }} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       </div>
       <div className="content au-body">
         <h1 className="au-h1">{t('Enter')} <span className="av">OTP</span></h1>

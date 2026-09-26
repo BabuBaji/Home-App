@@ -3,7 +3,7 @@
 // unchanged (invoiceDoc.ts). All existing actions — rate, rebook, tip, report, track — are kept.
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Share2, Phone, Star, MoreVertical, CalendarClock, XCircle, FileText, ShieldQuestion, Headset, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Share2, Phone, Star, MoreVertical, CalendarClock, XCircle, FileText, ShieldQuestion, Headset, RotateCcw, Heart, Flag } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { Share } from '@capacitor/share'
 import { Loading, useToast, useBack } from '../components/UI'
@@ -34,7 +34,7 @@ export default function BookingDetail() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       {/* spacer: balances the two icons on the right so the title stays centred */}
       {b && <span className="iconbtn ghost" />}
       <div className="titles"><h1>{t('Booking Details')}</h1></div>
@@ -236,10 +236,10 @@ export default function BookingDetail() {
 
         {/* secondary actions — unchanged behaviour, restyled */}
         <div className="bd-acts">
-          {b.status === 'completed' && !b.rating && <button className="bd-act" onClick={() => nav(`/rate/${b.id}`)}>⭐ {t('Rate')}</button>}
-          {(b.status === 'completed' || b.status === 'cancelled') && <button className="bd-act" onClick={() => nav(`/rebook/${b.id}`)}>🔁 {t('Rebook')}</button>}
-          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/tip/${b.id}`)}>💜 {t('Tip')}</button>}
-          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/complaint/${b.id}`)}>⚠️ {t('Report')}</button>}
+          {b.status === 'completed' && !b.rating && <button className="bd-act" onClick={() => nav(`/rate/${b.id}`)}><Star size={15} /> {t('Rate')}</button>}
+          {(b.status === 'completed' || b.status === 'cancelled') && <button className="bd-act" onClick={() => nav(`/rebook/${b.id}`)}><RotateCcw size={15} /> {t('Rebook')}</button>}
+          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/tip/${b.id}`)}><Heart size={15} /> {t('Tip')}</button>}
+          {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/complaint/${b.id}`)}><Flag size={15} /> {t('Report')}</button>}
         </div>
 
         {/* primary CTA sits in the page, as in the design — not a fixed footer bar */}

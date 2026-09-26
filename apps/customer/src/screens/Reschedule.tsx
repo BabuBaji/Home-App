@@ -39,7 +39,7 @@ export default function Reschedule() {
             {slots.map((s) => <button key={s.h} className={`slot ${slot === s.h ? 'sel' : ''}`} disabled={s.disabled} onClick={() => setSlot(s.h)}>{s.label}</button>)}
           </div>
         )}
-        <div className="note-box" style={{ marginTop: 12 }}>📅 {fmtDate(selDate)}{slot !== null ? `, ${slotLabel(slot)}` : ''}</div>
+        <div className="note-box" style={{ marginTop: 12 }}>{fmtDate(selDate)}{slot !== null ? `, ${slotLabel(slot)}` : ''}</div>
       </div>
       <FooterCTA><button className="btn full" onClick={confirm} disabled={busy}>{busy ? t('Updating…') : t('Confirm New Slot')}</button></FooterCTA>
     </div>

@@ -49,7 +49,7 @@ export default function Wallet() {
     <header className="appbar ord-appbar">
       {/* Wallet is a bottom-nav tab but is also reached from the Home wallet icon, so offer a back
           button; fall back to Home when there's no in-app history to pop. */}
-      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/home'))} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       <div className="titles"><h1>{t('Wallet')}</h1></div>
       <button className="iconbtn" onClick={() => nav('/support')} aria-label={t('Help')}><HelpCircle size={18} /></button>
     </header>
@@ -133,7 +133,7 @@ export default function Wallet() {
 
         {!user?.referredBy && !refDone && (
           <div className="card pad ref-apply">
-            <div className="ra-t">🎁 {t('Have a referral code?')}</div>
+            <div className="ra-t">{t('Have a referral code?')}</div>
             <div className="ra-d">{t("Apply a friend's code — they earn when you complete your first booking.")}</div>
             <div className="ra-row">
               <div className="field ra-input">

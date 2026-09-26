@@ -44,7 +44,7 @@ export default function OrdersList() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => (window.history.state?.idx > 0 ? nav(-1) : nav('/bookings'))} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => (window.history.state?.idx > 0 ? nav(-1) : nav('/bookings'))} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       <div className="titles"><h1>{t(TITLE[kind])}</h1></div>
       <button className="iconbtn" onClick={() => setShowSort(true)} aria-label={t('Sort')}><SlidersHorizontal size={18} /></button>
     </header>

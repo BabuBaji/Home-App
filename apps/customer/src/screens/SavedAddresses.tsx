@@ -22,7 +22,7 @@ export default function SavedAddresses() {
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Saved Addresses')}</b>
         <button className="ad2-addnew" onClick={() => nav('/addresses/add')}><Plus size={15} /> {t('Add New')}</button>
       </div>

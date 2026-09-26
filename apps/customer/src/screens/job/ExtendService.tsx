@@ -160,7 +160,7 @@ export default function ExtendService() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(`/job/${b.id}/progress`)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={() => nav(`/job/${b.id}/progress`)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Extend Your Service?')}</b><span style={{ width: 40 }} />
       </div>
 

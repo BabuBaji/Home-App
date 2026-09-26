@@ -81,7 +81,7 @@ export default function LiveProgress() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Live Progress')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -149,7 +149,7 @@ export default function LiveProgress() {
             </button>
             <button className="jt-worker2-main" onClick={() => nav(`/job/${b.id}/worker`)}>
               <div className="jt-worker2-name">{proName(b)}{verified && <BadgeCheck size={15} className="jt-vcheck" />}</div>
-              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {t('{n} jobs', { n: jobs })}</div>
+              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {jobs === 1 ? t('{n} job', { n: jobs }) : t('{n} jobs', { n: jobs })}</div>
               <div className="jt-lp-w-status"><span className="jt-lp-dot" /> {done ? t('Service finished') : t('Working on your service now')}</div>
             </button>
             <button className="jt-wmini ghost" onClick={chat} aria-label={t('Chat')}><MessageCircle size={17} /></button>

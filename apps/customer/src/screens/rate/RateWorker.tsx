@@ -31,7 +31,7 @@ export default function RateWorker() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Rate Your Experience')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -76,7 +76,7 @@ function FavButton({ wid, name }: { wid: number; name: string }) {
   if (fav === null) return null
   const toggle = () => (fav ? removeFavExpert(wid) : saveFavExpert(wid)).then(() => setFav(!fav)).catch(() => {})
   return (
-    <button className="btn-ghost" onClick={toggle} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    <button className="btn-ghost" onClick={toggle} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', minHeight: 38, borderRadius: 999, fontSize: 13 }}>
       <Heart size={16} fill={fav ? '#e5484d' : 'none'} color={fav ? '#e5484d' : 'currentColor'} />
       {fav ? t('{name} is a favourite', { name }) : t('Save {name} as favourite', { name })}
     </button>

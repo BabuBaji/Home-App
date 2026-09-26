@@ -30,7 +30,7 @@ export default function ReferFriend() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft size={20} /></button>
         <b>Refer &amp; Earn</b><span style={{ width: 40 }} />
       </div>
 

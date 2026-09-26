@@ -32,7 +32,7 @@ export default function PopularServices() {
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Popular Services')}</b>
         <span style={{ width: 42 }} />
       </div>
@@ -47,11 +47,13 @@ export default function PopularServices() {
                   <span className="ps-img">
                     <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-                    {!s.available && <span className="ps-soon">{t('Soon')}</span>}
+                    {!s.available && <span className="ps-soon">{t('Coming Soon')}</span>}
                   </span>
                   <span className="ps-name">{t(s.name)}</span>
-                  <span className="ps-rate"><Star size={13} className="ps-star" /> {rating} <em>({count})</em></span>
-                  <span className="ps-price">{t('From ₹{price}', { price: s.price })}</span>
+                  {s.available ? (<>
+                    <span className="ps-rate"><Star size={13} className="ps-star" /> {rating} <em>({count})</em></span>
+                    <span className="ps-price">{t('From ₹{price}', { price: s.price })}</span>
+                  </>) : <span className="ps-rate">{t('Not available yet')}</span>}
                 </button>
               )
             })}

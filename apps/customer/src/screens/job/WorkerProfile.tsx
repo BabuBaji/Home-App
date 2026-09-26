@@ -24,7 +24,7 @@ export default function WorkerProfile() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={back} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={back} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Worker Profile')}</b><span style={{ width: 40 }} />
       </div>
 
@@ -33,7 +33,7 @@ export default function WorkerProfile() {
           <WorkerAvatar b={b} size={76} />
           <div className="jt-wp-id">
             <div className="jt-wp-name">{proName(b)}</div>
-            <div className="jt-wp-rate"><Star size={13} className="jt-star" /> {rating} · {t('{n} jobs', { n: jobs })}</div>
+            <div className="jt-wp-rate"><Star size={13} className="jt-star" /> {rating} · {jobs === 1 ? t('{n} job', { n: jobs }) : t('{n} jobs', { n: jobs })}</div>
             {p?.city && <div className="jt-wp-city">{p.city}</div>}
             {p?.verified && <span className="jt-wp-badge"><BadgeCheck size={13} /> {t('Verified Partner')}</span>}
           </div>

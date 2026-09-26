@@ -40,7 +40,7 @@ export default function PaymentMethods() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       <div className="titles"><h1>{t('Saved Payment Methods')}</h1></div>
       <button className="iconbtn" onClick={() => setForm({ kind: 'upi', label: '', detail: '' })} aria-label={t('Add')}><Plus size={18} /></button>
     </header>

@@ -25,7 +25,7 @@ export default function Cashback() {
 
   const head = (
     <header className="appbar ord-appbar">
-      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+      <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
       <div className="titles"><h1>{t('Cashback')}</h1></div>
       <span className="iconbtn ghost" />
     </header>

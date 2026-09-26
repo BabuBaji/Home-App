@@ -103,7 +103,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;color:#1c18
 .brand{font-size:22px;font-weight:800;letter-spacing:-.3px}.brand span{opacity:.85;font-weight:500}
 .tagline{font-size:11px;opacity:.85;margin-top:3px}
 .co{font-size:10px;opacity:.82;margin-top:7px;line-height:1.45;max-width:300px}
-.it{text-align:right}.it h1{font-size:18px;letter-spacing:2px;font-weight:700}.it .no{font-size:12px;opacity:.9;margin-top:4px}
+.it{text-align:right;flex-shrink:0}.it h1{font-size:16px;letter-spacing:1.2px;font-weight:700;white-space:nowrap}.it .no{font-size:12px;opacity:.9;margin-top:4px;white-space:nowrap}
 .meta{display:flex;flex-wrap:wrap;gap:14px 30px;padding:18px 24px;border-bottom:1px solid #eee}
 .meta .k{color:#8a86a0;text-transform:uppercase;letter-spacing:.4px;font-size:10px}
 .meta .v{font-weight:600;margin-top:2px;font-size:13px;max-width:230px}

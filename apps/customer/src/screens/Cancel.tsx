@@ -41,10 +41,10 @@ export default function Cancel() {
         </div>
 
         {/* Policy banner — the engine tells us the stage + what it costs. */}
-        <div className="card pad mt" style={{ borderLeft: `4px solid ${blocked ? 'var(--red, #e5484d)' : quote.fee > 0 ? '#f59e0b' : 'var(--green)'}` }}>
+        <div className="card pad mt" style={{ boxShadow: `inset 4px 0 0 ${blocked ? 'var(--red, #e5484d)' : quote.fee > 0 ? '#f59e0b' : 'var(--green)'}` }}>
           <div className="label">{quote.title || t('Cancellation')}</div>
           <p className="muted sm" style={{ marginTop: 4 }}>{quote.note}</p>
-          <button className="btn-text" style={{ padding: 0, marginTop: 6 }} onClick={() => nav('/cancellation-policy')}>{t('View full cancellation policy ›')}</button>
+          <button className="btn-text" style={{ padding: '10px 0', margin: '-4px 0 -10px' }} onClick={() => nav('/cancellation-policy')}>{t('View full cancellation policy ›')}</button>
         </div>
 
         {blocked ? (

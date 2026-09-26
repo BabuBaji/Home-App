@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { ChevronLeft, House, CalendarDays, Tag, UserRound, AlertTriangle } from 'lucide-react'
+import { House, CalendarDays, Tag, UserRound, AlertTriangle, ArrowLeft } from 'lucide-react'
 import { t } from '../i18n'
 
 /* ---------- Toast ---------- */
@@ -41,7 +41,7 @@ export function Header({ title, subtitle, right, back = true }: {
   const goBack = useBack()
   return (
     <header className="appbar">
-      {back ? <button className="iconbtn" onClick={goBack} aria-label={t('Back')}><ChevronLeft size={24} /></button> : <span className="iconbtn ghost" />}
+      {back ? <button className="iconbtn" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button> : <span className="iconbtn ghost" />}
       <div className="titles">
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}

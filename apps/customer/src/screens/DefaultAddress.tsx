@@ -30,7 +30,7 @@ export default function DefaultAddress() {
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Default Address')}</b><span style={{ width: 42 }} />
       </div>
       <div className="content au-body">

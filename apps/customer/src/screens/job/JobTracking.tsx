@@ -85,7 +85,7 @@ export default function JobTracking() {
   return (
     <div className="screen jt">
       <div className="jt-top">
-        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="jt-ic" onClick={goBack} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Track Booking')}</b>
         <div className="jt-top-r">
           <button className="jt-ic round" onClick={share} aria-label={t('Share booking')}><Share2 size={18} /></button>
@@ -138,7 +138,7 @@ export default function JobTracking() {
             </button>
             <button className="jt-worker2-main" onClick={() => nav(`/job/${b.id}/worker`)}>
               <div className="jt-worker2-name">{proName(b)}{verified && <BadgeCheck size={15} className="jt-vcheck" />}</div>
-              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {t('{n} jobs', { n: jobs })}{verified ? ` · ${t('Verified')}` : ''}</div>
+              <div className="jt-worker2-sub"><Star size={12} className="jt-star" /> {proRating(b)} · {jobs === 1 ? t('{n} job', { n: jobs }) : t('{n} jobs', { n: jobs })}{verified ? ` · ${t('Verified')}` : ''}</div>
             </button>
             <button className="jt-wmini ghost" onClick={chat} aria-label={t('Chat with worker')}><MessageCircle size={17} /></button>
             <button className="jt-wmini" onClick={call} aria-label={t('Call worker')}><Phone size={17} /></button>

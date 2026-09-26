@@ -49,7 +49,7 @@ export default function LiveChat() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <div className="titles"><h1>{t('Live Chat')}</h1></div>
         <button className="iconbtn" onClick={() => nav('/support/emergency')} aria-label={t('More')}><MoreVertical size={18} /></button>
       </header>

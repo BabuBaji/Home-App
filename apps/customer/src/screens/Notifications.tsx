@@ -32,12 +32,12 @@ export default function Notifications() {
   function load() { fetchNotifications().then(setItems).catch(() => setItems([])) }
   useEffect(() => { load() }, [])
 
-  if (!items) return <div className="screen m2"><div className="ps-top"><button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button><b>{t('Notifications')}</b><span style={{ width: 42 }} /></div><Loading /></div>
+  if (!items) return <div className="screen m2"><div className="ps-top"><button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button><b>{t('Notifications')}</b><span style={{ width: 42 }} /></div><Loading /></div>
 
   return (
     <div className="screen m2">
       <div className="ps-top">
-        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={22} /></button>
+        <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Notifications')}</b>
         <button className="nt2-mark" onClick={() => setRead(new Set(items.map((n) => n.id)))}>{t('Mark all as read')}</button>
       </div>

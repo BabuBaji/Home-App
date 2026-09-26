@@ -2,7 +2,7 @@
 // tapping a question expands its answer, and Contact Support routes to the ticket flow.
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Search, SlidersHorizontal, ChevronDown, MessageCircleQuestion } from 'lucide-react'
+import { ArrowLeft, Search, ChevronDown, MessageCircleQuestion } from 'lucide-react'
 import { t } from '../../i18n'
 
 const CATS = ['All', 'Bookings', 'Payments', 'Services', 'Others']
@@ -32,15 +32,14 @@ export default function FAQs() {
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={18} /></button>
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <div className="titles"><h1>{t('Frequently Asked Questions')}</h1></div>
         <span className="iconbtn ghost" />
       </header>
 
       <div className="content">
-        <div className="cp-entry">
+        <div className="cp-entry" style={{ marginBottom: 10 }}>
           <span className="faq-search"><Search size={17} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search FAQs...')} /></span>
-          <button className="faq-filter" aria-label={t('Filter')}><SlidersHorizontal size={17} /></button>
         </div>
 
         <div className="ord-chips">
