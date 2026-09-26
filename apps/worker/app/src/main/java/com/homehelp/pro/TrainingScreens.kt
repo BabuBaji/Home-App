@@ -67,14 +67,14 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
     val q = vm.quizState
     val p = vm.trainingProgress
 
-    DetailScaffold("Training", nav) {
+    DetailScaffold(tr("Training"), nav) {
         if (q.passed) {
             Card(padding = Dp16.S) {
                 Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
                     IconChip(Icons.Filled.WorkspacePremium, GreenSuccess, GreenLight)
                     Spacer(Modifier.width(Space.m))
                     Column {
-                        Text("Assessment passed", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                        Text(tr("Assessment passed"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
                         Text(
                             "You scored ${q.bestPct ?: 0}%. Your admin will confirm the rest of your onboarding.",
                             fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
@@ -97,10 +97,10 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
 
         if (vm.trainingModules.isEmpty()) {
             Card {
-                Text("No modules yet", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                Text(tr("No modules yet"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
                 Spacer(Modifier.height(Space.xs))
                 Text(
-                    "Your admin hasn't published any training yet. Check back soon — there's nothing for you to do here right now.",
+                    tr("Your admin hasn't published any training yet. Check back soon — there's nothing for you to do here right now."),
                     fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp,
                 )
             }
@@ -109,7 +109,7 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
 
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Your progress", fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                Text(tr("Your progress"), fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
                 Text("${p.completed} of ${p.total}", fontSize = 12.5.sp, color = TextGray)
             }
             Spacer(Modifier.height(Space.s))
@@ -131,9 +131,9 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
                         Text(m.title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
-                        Text(if (m.completed) "Read — tap to read again" else "Not read yet", fontSize = 12.sp, color = TextGray)
+                        Text(if (m.completed) tr("Read — tap to read again") else tr("Not read yet"), fontSize = 12.sp, color = TextGray)
                     }
-                    if (m.completed) StatusPill("Done", GreenLight, GreenSuccess)
+                    if (m.completed) StatusPill(tr("Done"), GreenLight, GreenSuccess)
                 }
             }
         }
@@ -144,13 +144,13 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
         // out button tells a worker none of them.
         val blocker = when {
             q.passed -> null
-            !q.ready -> "The assessment isn't ready yet. Ask your admin to finish setting it up."
+            !q.ready -> tr("The assessment isn't ready yet. Ask your admin to finish setting it up.")
             !q.modulesDone -> "Read all ${p.total} modules first — ${p.total - p.completed} to go."
-            q.onCooldown -> "You've just had an attempt. You can try again shortly."
+            q.onCooldown -> tr("You've just had an attempt. You can try again shortly.")
             else -> null
         }
         if (blocker != null) {
-            Text(blocker, fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = Space.xs))
+            Text(tr(blocker), fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = Space.xs))
         }
         if (q.attempts > 0 && !q.passed) {
             Text(
@@ -161,7 +161,7 @@ fun TrainingScreen(vm: AppViewModel, nav: NavHostController) {
 
         if (!q.passed) {
             PrimaryButton(
-                if (q.attempts > 0) "Try the assessment again" else "Start the assessment",
+                if (q.attempts > 0) tr("Try the assessment again") else tr("Start the assessment"),
                 enabled = blocker == null && !vm.loadingQuiz,
                 loading = vm.loadingQuiz,
             ) { vm.startQuiz { quizOpen = true } }
@@ -184,10 +184,10 @@ private fun ModuleReader(vm: AppViewModel, m: TrainingModuleDto, onBack: () -> U
                 Row(Modifier.padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.CheckCircle, null, tint = GreenSuccess, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(Space.s))
-                    Text("You've read this one", fontSize = 13.sp, color = TextGray)
+                    Text(tr("You've read this one"), fontSize = 13.sp, color = TextGray)
                 }
             } else {
-                PrimaryButton("I've read this") { vm.completeModule(m.id); onBack() }
+                PrimaryButton(tr("I've read this")) { vm.completeModule(m.id); onBack() }
             }
             Spacer(Modifier.height(Space.xl))
         }
@@ -204,7 +204,7 @@ private fun QuizScreen(vm: AppViewModel, onExit: () -> Unit) {
     if (result != null) {
         val close = { vm.quizResult = null; onExit() }
         Column(Modifier.fillMaxSize().background(ScreenBg)) {
-            Header("Result", onBack = close)
+            Header(tr("Result"), onBack = close)
             Column(Modifier.padding(Space.l), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(Space.xxl))
                 Box(
@@ -218,7 +218,7 @@ private fun QuizScreen(vm: AppViewModel, onExit: () -> Unit) {
                 }
                 Spacer(Modifier.height(Space.l))
                 Text(
-                    if (result.passed) "Passed" else "Not passed",
+                    if (result.passed) tr("Passed") else tr("Not passed"),
                     fontSize = 18.sp, fontWeight = FontWeight.Bold,
                     color = if (result.passed) GreenSuccess else RedCancel,
                 )
@@ -230,12 +230,12 @@ private fun QuizScreen(vm: AppViewModel, onExit: () -> Unit) {
                 if (!result.passed) {
                     Spacer(Modifier.height(Space.s))
                     Text(
-                        "Have another read through the modules and try again in a little while.",
+                        tr("Have another read through the modules and try again in a little while."),
                         fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp,
                     )
                 }
                 Spacer(Modifier.height(Space.xxl))
-                PrimaryButton("Done") { close() }
+                PrimaryButton(tr("Done")) { close() }
             }
         }
         return
@@ -243,7 +243,7 @@ private fun QuizScreen(vm: AppViewModel, onExit: () -> Unit) {
 
     val paper = vm.quizPaper
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Assessment", onBack = onExit)
+        Header(tr("Assessment"), onBack = onExit)
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -275,7 +275,7 @@ private fun QuizScreen(vm: AppViewModel, onExit: () -> Unit) {
                     fontSize = 12.5.sp, color = Amber, modifier = Modifier.padding(horizontal = Space.xs),
                 )
             }
-            PrimaryButton("Submit answers", enabled = !vm.loadingQuiz, loading = vm.loadingQuiz) {
+            PrimaryButton(tr("Submit answers"), enabled = !vm.loadingQuiz, loading = vm.loadingQuiz) {
                 vm.submitQuiz(answers.toMap())
             }
             Spacer(Modifier.height(Space.xl))

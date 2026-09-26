@@ -122,7 +122,7 @@ private fun PanelHeader(title: String, action: String, onAction: () -> Unit) {
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(action, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(tr(action), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
         }
     }
@@ -170,15 +170,15 @@ fun OnlineToggleCard(online: Boolean, onToggle: (Boolean) -> Unit) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row {
-                    Text("You are ", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("You are "), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        if (online) "Online" else "Offline",
+                        if (online) tr("Online") else tr("Offline"),
                         color = if (online) GreenSuccess else TextGray,
                         fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     )
                 }
                 Text(
-                    if (online) "Available for new jobs" else "You won't receive new jobs",
+                    if (online) tr("Available for new jobs") else tr("You won't receive new jobs"),
                     color = TextGray, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -254,7 +254,7 @@ fun NextJobHeroCard(
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text(timerLabel, color = TextGray, fontSize = 9.5.sp, maxLines = 1)
+                        Text(tr(timerLabel), color = TextGray, fontSize = 9.5.sp, maxLines = 1)
                         Text(
                             timerText, color = Purple,
                             fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1,
@@ -266,7 +266,7 @@ fun NextJobHeroCard(
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("Starts in", color = TextGray, fontSize = 9.5.sp, maxLines = 1)
+                        Text(tr("Starts in"), color = TextGray, fontSize = 9.5.sp, maxLines = 1)
                         Text(
                             "${job.etaMins} min", color = Purple,
                             fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1,
@@ -292,12 +292,12 @@ fun NextJobHeroCard(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        job.service.ifBlank { "Service" },
+                        job.service.ifBlank { tr("Service") },
                         color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        job.customerName.ifBlank { "Customer" },
+                        job.customerName.ifBlank { tr("Customer") },
                         color = TextGray, fontSize = 14.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
@@ -319,8 +319,8 @@ fun NextJobHeroCard(
             }
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, "Navigate", Primary50, Purple, onNavigate, actionsEnabled)
-                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, "Call", Primary50, Purple, onCall, actionsEnabled)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Navigation, tr("Navigate"), Primary50, Purple, onNavigate, actionsEnabled)
+                HeroAction(Modifier.weight(1f), Icons.Filled.Phone, tr("Call"), Primary50, Purple, onCall, actionsEnabled)
                 HeroAction(Modifier.weight(1.15f), startIcon, startLabel, Purple, Color.White, onStart)
             }
         }
@@ -334,7 +334,7 @@ private fun HeroMeta(icon: ImageVector, text: String) {
         Icon(icon, contentDescription = null, tint = TextGray, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(4.dp))
         Text(
-            text, color = TextGray, fontSize = 13.5.sp,
+            tr(text), color = TextGray, fontSize = 13.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
     }
@@ -361,7 +361,7 @@ private fun HeroAction(
     ) {
         Icon(icon, contentDescription = null, tint = fg.copy(alpha = a), modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, color = fg.copy(alpha = a), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Text(tr(label), color = fg.copy(alpha = a), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
     }
 }
 
@@ -375,11 +375,11 @@ fun QuickActionStrip(onAttendance: () -> Unit, onShifts: () -> Unit, onEmergency
             Modifier.fillMaxWidth().height(IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            QuickAction(Modifier.weight(1f), Icons.Filled.EventAvailable, "Attendance", Purple, onAttendance)
+            QuickAction(Modifier.weight(1f), Icons.Filled.EventAvailable, tr("Attendance"), Purple, onAttendance)
             Box(Modifier.width(1.dp).height(32.dp).background(Divider))
-            QuickAction(Modifier.weight(1f), Icons.Filled.CalendarMonth, "My Shift", BlueAccent, onShifts)
+            QuickAction(Modifier.weight(1f), Icons.Filled.CalendarMonth, tr("My Shift"), BlueAccent, onShifts)
             Box(Modifier.width(1.dp).height(32.dp).background(Divider))
-            QuickAction(Modifier.weight(1f), Icons.Filled.Shield, "Emergency", RedCancel, onEmergency, sosGlyph = true)
+            QuickAction(Modifier.weight(1f), Icons.Filled.Shield, tr("Emergency"), RedCancel, onEmergency, sosGlyph = true)
         }
     }
 }
@@ -401,12 +401,12 @@ private fun QuickAction(
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
             // The reference draws Emergency as the word SOS inside a red shield.
             if (sosGlyph) {
-                Text("SOS", color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
+                Text(tr("SOS"), color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
             }
         }
         Spacer(Modifier.height(5.dp))
         Text(
-            label, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            tr(label), color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
         )
     }
@@ -433,21 +433,21 @@ fun TodayPanel(
     val jobsLeft = (totalJobs - completed).coerceAtLeast(0)
     Panel(padH = 0.dp, padV = 14.dp) {
         Box(Modifier.padding(horizontal = PanelPad)) {
-            PanelHeader("TODAY", "See all", onViewAll)
+            PanelHeader(tr("TODAY"), tr("See all"), onViewAll)
         }
         Spacer(Modifier.height(10.dp))
         // Two big figures per row — readable at a glance on the move.
         Row(Modifier.fillMaxWidth().padding(horizontal = PanelPad), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TodayCell(Modifier.weight(1f), Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, "Earned today", money(earned))
-            TodayCell(Modifier.weight(1f), Icons.Filled.Work, Purple, Primary50, "Jobs done", "$completed / $totalJobs")
+            TodayCell(Modifier.weight(1f), Icons.Filled.CurrencyRupee, GreenSuccess, GreenLight, tr("Earned today"), money(earned))
+            TodayCell(Modifier.weight(1f), Icons.Filled.Work, Purple, Primary50, tr("Jobs done"), "$completed / $totalJobs")
         }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().padding(horizontal = PanelPad), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TodayCell(
                 Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).clickable(onClick = onEditTarget),
-                Icons.Filled.TrackChanges, OrangeAccent, OrangeLight, "Daily target", money(target),
+                Icons.Filled.TrackChanges, OrangeAccent, OrangeLight, tr("Daily target"), money(target),
             )
-            TodayCell(Modifier.weight(1f), Icons.Filled.DonutLarge, Purple, Primary50, "Progress", "${(pct * 100).toInt()}%")
+            TodayCell(Modifier.weight(1f), Icons.Filled.DonutLarge, Purple, Primary50, tr("Progress"), "${(pct * 100).toInt()}%")
         }
         Spacer(Modifier.height(14.dp))
         Box(
@@ -464,9 +464,9 @@ fun TodayPanel(
         Spacer(Modifier.height(5.dp))
         Text(
             when {
-                target > 0 && earned >= target -> "Target reached — nice work!"
+                target > 0 && earned >= target -> tr("Target reached — nice work!")
                 jobsLeft > 0 -> "Complete $jobsLeft more job${if (jobsLeft == 1) "" else "s"} to reach your target"
-                else -> "No jobs scheduled yet — go online to get requests"
+                else -> tr("No jobs scheduled yet — go online to get requests")
             },
             color = TextGray, fontSize = 14.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(horizontal = PanelPad).padding(top = 4.dp, bottom = 4.dp),
@@ -491,7 +491,7 @@ private fun TodayCell(
         }
         Spacer(Modifier.height(8.dp))
         Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(label, color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(tr(label), color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -510,7 +510,7 @@ private fun CellDivider() {
 @Composable
 fun NextUpPanel(items: List<ScheduleItem>, onViewSchedule: () -> Unit, onItem: (ScheduleItem) -> Unit) {
     Panel(padV = 14.dp) {
-        PanelHeader("Upcoming jobs", "See all", onViewSchedule)
+        PanelHeader(tr("Upcoming jobs"), tr("See all"), onViewSchedule)
         Spacer(Modifier.height(6.dp))
         items.forEachIndexed { i, item ->
             NextUpRow(item) { onItem(item) }
@@ -532,7 +532,7 @@ fun NextUpPanel(items: List<ScheduleItem>, onViewSchedule: () -> Unit, onItem: (
 @Composable
 fun RecentServicesPanel(items: List<Booking>, onViewAll: () -> Unit, onItem: (Booking) -> Unit) {
     Panel(padV = 6.dp) {
-        PanelHeader("RECENT SERVICES", "View All", onViewAll)
+        PanelHeader(tr("RECENT SERVICES"), tr("View All"), onViewAll)
         items.forEachIndexed { i, b ->
             RecentServiceRow(b) { onItem(b) }
             if (i != items.lastIndex) {
@@ -555,7 +555,7 @@ private fun RecentServiceRow(b: Booking, onClick: () -> Unit) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                b.service?.ifBlank { null } ?: "Service", color = TextDark, fontSize = 14.sp,
+                b.service?.ifBlank { null } ?: tr("Service"), color = TextDark, fontSize = 14.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text(
@@ -592,13 +592,13 @@ fun WelcomeCard(name: String, greeting: String, online: Boolean) {
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(3.dp))
-                Text("Welcome to HomeHelp", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr("Welcome to HomeHelp"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
             }
         }
         Spacer(Modifier.height(9.dp))
         Text(
-            if (online) "You're online — your first service will appear here as soon as a customer books you."
-            else "Go online to start receiving jobs. Your completed services will show up here.",
+            if (online) tr("You're online — your first service will appear here as soon as a customer books you.")
+            else tr("Go online to start receiving jobs. Your completed services will show up here."),
             color = TextGray, fontSize = 12.sp,
         )
     }
@@ -625,7 +625,7 @@ private fun NextUpRow(item: ScheduleItem, onClick: () -> Unit) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                item.service.ifBlank { "Service" }, color = TextDark, fontSize = 16.sp,
+                item.service.ifBlank { tr("Service") }, color = TextDark, fontSize = 16.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -687,9 +687,9 @@ fun BonusBanner(title: String, subtitle: String, onDetails: () -> Unit) {
             }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(tr(title), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text(
-                    subtitle, color = Color.White.copy(alpha = 0.93f), fontSize = 11.5.sp,
+                    tr(subtitle), color = Color.White.copy(alpha = 0.93f), fontSize = 11.5.sp,
                     lineHeight = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -700,7 +700,7 @@ fun BonusBanner(title: String, subtitle: String, onDetails: () -> Unit) {
                     .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Details", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(tr("Details"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
             }
         }
@@ -713,12 +713,12 @@ fun BonusBanner(title: String, subtitle: String, onDetails: () -> Unit) {
 @Composable
 fun SectionHeading(title: String, action: String, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(tr(title), color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         Row(
             Modifier.clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onAction).padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(action, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(tr(action), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
         }
     }
@@ -747,9 +747,9 @@ fun ActiveJobBanner(label: String, subtitle: String, onResume: () -> Unit) {
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(tr(label), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             Text(
-                subtitle, color = Color.White.copy(alpha = 0.92f), fontSize = 11.5.sp,
+                tr(subtitle), color = Color.White.copy(alpha = 0.92f), fontSize = 11.5.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
@@ -780,21 +780,21 @@ fun AttendanceStrip(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clickable(onClick = onOpen)) {
-                Text(label, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(tr(label), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(
                     when {
                         att.checkedOut && att.checkOutAt.isNotBlank() -> "Out at ${att.checkOutAt}"
                         att.checkedIn && att.checkInAt.isNotBlank() -> "In at ${att.checkInAt}"
                         att.shiftName.isNotBlank() -> "${att.shiftName} · ${att.shiftStart}–${att.shiftEnd}"
-                        else -> "Pick a shift to get started"
+                        else -> tr("Pick a shift to get started")
                     },
                     color = TextGray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.width(10.dp))
             when {
-                !att.checkedIn -> AttendanceAction("Check In", BrandGradient, onCheckIn)
-                !att.checkedOut -> AttendanceAction("Check Out", null, onCheckOut)
+                !att.checkedIn -> AttendanceAction(tr("Check In"), BrandGradient, onCheckIn)
+                !att.checkedOut -> AttendanceAction(tr("Check Out"), null, onCheckOut)
                 else -> Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
             }
         }
@@ -811,7 +811,7 @@ private fun AttendanceAction(label: String, fill: Brush?, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            label, color = if (fill != null) Color.White else TextDark,
+            tr(label), color = if (fill != null) Color.White else TextDark,
             fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
         )
     }

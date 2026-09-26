@@ -120,8 +120,8 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
     val pageRows = filtered.drop(safePage * PAGE_SIZE).take(PAGE_SIZE)
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        AppTopBar("Transactions", onBack = { nav.popBackStack() }, trailing = {
-            TopBarAction(Icons.Filled.FilterList, "Filter") { recentFirst = !recentFirst }
+        AppTopBar(tr("Transactions"), onBack = { nav.popBackStack() }, trailing = {
+            TopBarAction(Icons.Filled.FilterList, tr("Filter")) { recentFirst = !recentFirst }
         })
 
         Column(
@@ -135,7 +135,7 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                     Box(
                         Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) Purple else Color(0xFFF1EFFA))
                             .clickable { tab = t; page = 0 }.padding(horizontal = 16.dp, vertical = 9.dp),
-                    ) { Text(t, color = if (on) Color.White else TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text(tr(t), color = if (on) Color.White else TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                 }
             }
 
@@ -147,7 +147,7 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Available Balance", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                            Text(tr("Available Balance"), color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                             Spacer(Modifier.width(6.dp))
                             Icon(
                                 if (hideBalance) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
@@ -168,7 +168,7 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                     ) {
                         Icon(Icons.Filled.Download, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Withdraw", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Withdraw"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -187,7 +187,7 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                         textStyle = androidx.compose.ui.text.TextStyle(color = TextDark, fontSize = 14.sp),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(Purple),
                         decorationBox = { inner ->
-                            if (query.isEmpty()) Text("Search transactions", color = TextMuted, fontSize = 14.sp)
+                            if (query.isEmpty()) Text(tr("Search transactions"), color = TextMuted, fontSize = 14.sp)
                             inner()
                         },
                     )
@@ -197,12 +197,12 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── Count + sort ──
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("${filtered.size} Transactions", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("${filtered.size} " + tr("Transactions"), color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Row(
                     Modifier.clip(RoundedCornerShape(8.dp)).clickable { recentFirst = !recentFirst; page = 0 }.padding(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(if (recentFirst) "Recent First" else "Oldest First", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(if (recentFirst) tr("Recent First") else tr("Oldest First"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.width(5.dp))
                     Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = TextGray, modifier = Modifier.size(17.dp))
                 }
@@ -213,8 +213,8 @@ fun TransactionsScreen(vm: AppViewModel, nav: NavHostController) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🧾", fontSize = 34.sp)
                     Spacer(Modifier.height(10.dp))
-                    Text("No transactions", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("Nothing here for this filter.", color = TextGray, fontSize = 13.sp)
+                    Text(tr("No transactions"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Nothing here for this filter."), color = TextGray, fontSize = 13.sp)
                 }
             } else {
                 pageRows.forEach { row ->
@@ -279,14 +279,14 @@ private fun TxnPeriodChip(selected: String, onSelect: (String) -> Unit) {
         ) {
             Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(6.dp))
-            Text(selected, color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr(selected), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(4.dp))
             Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = TextGray, modifier = Modifier.size(17.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             listOf("This Month", "Last Month", "All Time").forEach { opt ->
                 DropdownMenuItem(
-                    text = { Text(opt, color = if (opt == selected) Purple else TextDark, fontWeight = if (opt == selected) FontWeight.Bold else FontWeight.Medium, fontSize = 14.sp) },
+                    text = { Text(tr(opt), color = if (opt == selected) Purple else TextDark, fontWeight = if (opt == selected) FontWeight.Bold else FontWeight.Medium, fontSize = 14.sp) },
                     onClick = { onSelect(opt); open = false },
                 )
             }
@@ -337,7 +337,7 @@ private fun TxnRow(e: LedgerEntry, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(e.type, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(tr(e.type), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             Spacer(Modifier.height(2.dp))
             Text(e.remarks.ifBlank { e.refId.ifBlank { "—" } }, color = TextGray, fontSize = 12.5.sp, maxLines = 1)
             Spacer(Modifier.height(5.dp))
@@ -345,7 +345,7 @@ private fun TxnRow(e: LedgerEntry, onClick: () -> Unit) {
                 Text(listOf(e.date, e.time).filter { it.isNotBlank() }.joinToString(", "), color = TextMuted, fontSize = 11.5.sp)
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.clip(RoundedCornerShape(20.dp)).background(pillBg).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                    Text(e.status.ifBlank { "Completed" }, color = pillFg, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    Text(e.status.ifBlank { tr("Completed") }, color = pillFg, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -382,7 +382,7 @@ fun TransactionDetailScreen(vm: AppViewModel, nav: NavHostController) {
     val cat = categoryOf(e)
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        AppTopBar("Transaction Details", onBack = { nav.popBackStack() })
+        AppTopBar(tr("Transaction Details"), onBack = { nav.popBackStack() })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
@@ -399,26 +399,26 @@ fun TransactionDetailScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(14.dp))
                 Text(signedAmount(e), color = amountColor(e), fontSize = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
                 Spacer(Modifier.height(6.dp))
-                Text(e.type, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr(e.type), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 Box(Modifier.clip(RoundedCornerShape(20.dp)).background(pillBg).padding(horizontal = 14.dp, vertical = 6.dp)) {
-                    Text(e.status.ifBlank { "Completed" }, color = pillFg, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    Text(e.status.ifBlank { tr("Completed") }, color = pillFg, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
             // ── Details ──
-            Text("Details", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Details"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(horizontal = 16.dp),
             ) {
-                DetailRow("Category", cat, first = true)
-                DetailRow("Description", e.remarks.ifBlank { "—" })
-                DetailRow("Date", e.date.ifBlank { "—" })
-                if (e.time.isNotBlank()) DetailRow("Time", e.time)
-                DetailRow("Type", if (e.isCredit) "Credit" else "Debit")
-                if (e.method.isNotBlank()) DetailRow("Payment Method", e.method)
-                DetailRow("Reference ID", e.refId.ifBlank { "TXN${100000 + e.id}" })
-                DetailRow("Status", e.status.ifBlank { "Completed" }, valueColor = pillFg)
+                DetailRow(tr("Category"), cat, first = true)
+                DetailRow(tr("Description"), e.remarks.ifBlank { "—" })
+                DetailRow(tr("Date"), e.date.ifBlank { "—" })
+                if (e.time.isNotBlank()) DetailRow(tr("Time"), e.time)
+                DetailRow(tr("Type"), if (e.isCredit) "Credit" else "Debit")
+                if (e.method.isNotBlank()) DetailRow(tr("Payment Method"), e.method)
+                DetailRow(tr("Reference ID"), e.refId.ifBlank { "TXN${100000 + e.id}" })
+                DetailRow(tr("Status"), e.status.ifBlank { tr("Completed") }, valueColor = pillFg)
             }
 
             // ── Amount summary ──
@@ -426,7 +426,7 @@ fun TransactionDetailScreen(vm: AppViewModel, nav: NavHostController) {
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(v.bg.copy(alpha = 0.5f)).padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Total ${if (e.isCredit) "Credited" else "Debited"}", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(tr(if (e.isCredit) "Total Credited" else "Total Debited"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text(signedAmount(e), color = amountColor(e), fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
 
@@ -437,7 +437,7 @@ fun TransactionDetailScreen(vm: AppViewModel, nav: NavHostController) {
             ) {
                 Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Report an issue", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Report an issue"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(Space.s))
         }
@@ -448,7 +448,7 @@ fun TransactionDetailScreen(vm: AppViewModel, nav: NavHostController) {
 private fun DetailRow(label: String, value: String, valueColor: Color = TextDark, first: Boolean = false) {
     if (!first) Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
     Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.m))
         Text(value, color = valueColor, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
     }

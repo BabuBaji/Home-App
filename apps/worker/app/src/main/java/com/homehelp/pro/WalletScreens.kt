@@ -82,7 +82,7 @@ private fun softFieldColors() = OutlinedTextFieldDefaults.colors(
 fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.refreshWallet() }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        BellHeader("My Wallet") { nav.navigate(Routes.P_NOTIFICATIONS) }
+        BellHeader(tr("My Wallet")) { nav.navigate(Routes.P_NOTIFICATIONS) }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -96,7 +96,7 @@ fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Schedule, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(Space.xs))
-                    Text("Next payout: ${vm.nextPayout}", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
+                    Text(tr("Next payout:") + " ${vm.nextPayout}", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(Space.l))
                 Surface(
@@ -113,50 +113,50 @@ fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Three balance types as compact reference-style stat tiles.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Payments, rupee(vm.walletBalance), "Available", GreenSuccess, GreenLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Schedule, rupee(vm.pendingAmount), "Pending", Gold, GoldLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Lock, rupee(vm.holdBalance), "On Hold", RedCancel, RedLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Payments, rupee(vm.walletBalance), tr("Available"), GreenSuccess, GreenLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Schedule, rupee(vm.pendingAmount), tr("Pending"), Gold, GoldLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Lock, rupee(vm.holdBalance), tr("On Hold"), RedCancel, RedLight)
             }
 
             // Period earnings + total withdrawn.
             Card {
-                SectionTitle("Earnings Overview")
+                SectionTitle(tr("Earnings Overview"))
                 Spacer(Modifier.height(Space.m))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatTile("Today", vm.todayEarnings)
-                    StatTile("This Week", vm.weekEarnings)
-                    StatTile("This Month", vm.monthEarnings)
+                    StatTile(tr("Today"), vm.todayEarnings)
+                    StatTile(tr("This Week"), vm.weekEarnings)
+                    StatTile(tr("This Month"), vm.monthEarnings)
                 }
                 Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.m))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatTile("Total Withdrawn", vm.withdrawnTotal, GreenSuccess)
-                    StatTile("Advance Due", vm.advanceOutstanding, if (vm.advanceOutstanding > 0) RedCancel else TextDark)
-                    StatTile("Total Earned", vm.totalEarned)
+                    StatTile(tr("Total Withdrawn"), vm.withdrawnTotal, GreenSuccess)
+                    StatTile(tr("Advance Due"), vm.advanceOutstanding, if (vm.advanceOutstanding > 0) RedCancel else TextDark)
+                    StatTile(tr("Total Earned"), vm.totalEarned)
                 }
             }
 
             // Big, clearly-labelled action buttons.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                BigAction(Modifier.weight(1f), Icons.Filled.Savings, "Salary\nAdvance") { nav.navigate(Routes.SALARY_ADVANCE) }
-                BigAction(Modifier.weight(1f), Icons.Filled.Description, "Payslip") { nav.navigate(Routes.PAYSLIP) }
-                BigAction(Modifier.weight(1f), Icons.Filled.History, "History") { nav.navigate(Routes.WALLET_HISTORY) }
+                BigAction(Modifier.weight(1f), Icons.Filled.Savings, tr("Salary\nAdvance")) { nav.navigate(Routes.SALARY_ADVANCE) }
+                BigAction(Modifier.weight(1f), Icons.Filled.Description, tr("Payslip")) { nav.navigate(Routes.PAYSLIP) }
+                BigAction(Modifier.weight(1f), Icons.Filled.History, tr("History")) { nav.navigate(Routes.WALLET_HISTORY) }
             }
 
             // Earnings breakup (preview).
             Card {
-                RowHeader("Earnings Breakup", "View all") { nav.navigate(Routes.EARNINGS_BREAKUP) }
+                RowHeader(tr("Earnings Breakup"), tr("View all")) { nav.navigate(Routes.EARNINGS_BREAKUP) }
                 Spacer(Modifier.height(Space.xs))
                 val shown = vm.earningsBreakup.filter { it.amount > 0 }.take(5)
-                if (shown.isEmpty()) EmptyHint("No earnings recorded yet.")
+                if (shown.isEmpty()) EmptyHint(tr("No earnings recorded yet."))
                 shown.forEach { BreakupRow(it.category, it.amount, credit = true) }
             }
 
             // Deductions — never hidden, total shown in red.
             Card {
-                RowHeader("Deductions", "View all") { nav.navigate(Routes.DEDUCTIONS) }
+                RowHeader(tr("Deductions"), tr("View all")) { nav.navigate(Routes.DEDUCTIONS) }
                 Spacer(Modifier.height(Space.xs))
                 val shown = vm.deductionSummary.filter { it.amount > 0 }.take(5)
-                if (shown.isEmpty()) EmptyHint("No deductions. You keep 100% of your earnings.")
+                if (shown.isEmpty()) EmptyHint(tr("No deductions. You keep 100% of your earnings."))
                 shown.forEach { BreakupRow(it.category, it.amount, credit = false) }
                 if (vm.deductionTotal > 0) {
                     HairlineDivider()
@@ -169,10 +169,10 @@ fun WalletScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Recent activity.
             Card {
-                RowHeader("Recent Activity", "View all") { nav.navigate(Routes.WALLET_HISTORY) }
+                RowHeader(tr("Recent Activity"), tr("View all")) { nav.navigate(Routes.WALLET_HISTORY) }
                 Spacer(Modifier.height(Space.xs))
                 val recent = vm.walletHistory.take(5)
-                if (recent.isEmpty()) EmptyHint("No transactions yet.")
+                if (recent.isEmpty()) EmptyHint(tr("No transactions yet."))
                 recent.forEachIndexed { i, e ->
                     LedgerRow(e)
                     if (i < recent.lastIndex) HairlineDivider()
@@ -197,7 +197,7 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
     // Best rule: block withdrawal until the bank account is admin-verified (Approved).
     if (!vm.bankApproved) {
         Column(Modifier.fillMaxSize().background(ScreenBg)) {
-            Header("Withdraw Money", onBack = { nav.popBackStack() })
+            Header(tr("Withdraw Money"), onBack = { nav.popBackStack() })
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box(Modifier.fillMaxWidth().background(RedLight, RoundedCornerShape(Radius.card)).padding(Space.l)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -207,20 +207,20 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
                         ) { Icon(Icons.Filled.Lock, null, tint = RedCancel, modifier = Modifier.size(24.dp)) }
                         Spacer(Modifier.width(Space.m))
                         Column {
-                            Text("Bank not verified", fontWeight = FontWeight.Bold, color = TextDark)
+                            Text(tr("Bank not verified"), fontWeight = FontWeight.Bold, color = TextDark)
                             Text(
                                 when (vm.bankStatus) {
-                                    "Pending Verification" -> "Your bank account is awaiting admin approval."
-                                    "Rejected" -> "Your bank account was rejected. Please re-submit."
-                                    else -> "Add your bank account to start withdrawing."
+                                    "Pending Verification" -> tr("Your bank account is awaiting admin approval.")
+                                    "Rejected" -> tr("Your bank account was rejected. Please re-submit.")
+                                    else -> tr("Add your bank account to start withdrawing.")
                                 },
                                 fontSize = 13.sp, color = TextGray,
                             )
                         }
                     }
                 }
-                InfoNote("For your security, withdrawals are enabled only after an admin verifies your bank account.")
-                PrimaryButton(if (vm.bankStatus == "Not Added") "Add Bank Account" else "Manage Bank Accounts") {
+                InfoNote(tr("For your security, withdrawals are enabled only after an admin verifies your bank account."))
+                PrimaryButton(if (vm.bankStatus == "Not Added") tr("Add Bank Account") else tr("Manage Bank Accounts")) {
                     nav.navigate(Routes.BANK_ACCOUNTS)
                 }
             }
@@ -229,45 +229,45 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Withdraw Money", onBack = { nav.popBackStack() })
+        Header(tr("Withdraw Money"), onBack = { nav.popBackStack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            MoneyBanner("Available to withdraw", vm.walletBalance)
+            MoneyBanner(tr("Available to withdraw"), vm.walletBalance)
             Card {
-                SectionTitle("Enter Amount")
+                SectionTitle(tr("Enter Amount"))
                 Spacer(Modifier.height(Space.s))
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) amount = it },
-                    label = { Text("Amount (₹)") }, singleLine = true,
+                    label = { Text(tr("Amount (₹)")) }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     shape = RoundedCornerShape(Radius.field),
                     colors = softFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(Space.l))
-                SectionTitle("Transfer To")
+                SectionTitle(tr("Transfer To"))
                 Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    ChoicePill(Modifier.weight(1f), "Bank Account", method == "Bank") { method = "Bank" }
-                    ChoicePill(Modifier.weight(1f), "UPI", method == "UPI") { method = "UPI" }
+                    ChoicePill(Modifier.weight(1f), tr("Bank Account"), method == "Bank") { method = "Bank" }
+                    ChoicePill(Modifier.weight(1f), tr("UPI"), method == "UPI") { method = "UPI" }
                 }
                 Text(
-                    if (method == "Bank") "${vm.bankName} • ${vm.bankAccount}" else "Linked UPI ID",
+                    if (method == "Bank") "${vm.bankName} • ${vm.bankAccount}" else tr("Linked UPI ID"),
                     color = TextGray, fontSize = 12.sp, modifier = Modifier.padding(top = Space.s),
                 )
             }
             if (otpSent) {
                 Card {
-                    SectionTitle("Confirm with OTP")
-                    Text("Enter the 4-digit OTP sent to your phone.", color = TextGray, fontSize = 12.sp)
+                    SectionTitle(tr("Confirm with OTP"))
+                    Text(tr("Enter the 4-digit OTP sent to your phone."), color = TextGray, fontSize = 12.sp)
                     Spacer(Modifier.height(Space.s))
                     OutlinedTextField(
                         value = otp,
                         onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
-                        label = { Text("OTP") }, singleLine = true,
+                        label = { Text(tr("OTP")) }, singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         shape = RoundedCornerShape(Radius.field),
                         colors = softFieldColors(),
@@ -275,9 +275,9 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
                     )
                 }
             }
-            InfoNote("Withdrawals up to ₹2,000 are auto-approved instantly. Larger amounts go to admin for approval before payout.")
+            InfoNote(tr("Withdrawals up to ₹2,000 are auto-approved instantly. Larger amounts go to admin for approval before payout."))
             if (!otpSent) {
-                PrimaryButton(if (busy) "Sending OTP…" else "Send OTP", enabled = !busy, loading = busy) {
+                PrimaryButton(if (busy) tr("Sending OTP…") else tr("Send OTP"), enabled = !busy, loading = busy) {
                     val amt = amount.toIntOrNull() ?: 0
                     when {
                         amt <= 0 -> toast(ctx, "Enter a valid amount")
@@ -293,7 +293,7 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                 }
             } else {
-                PrimaryButton(if (busy) "Processing…" else "Confirm Withdrawal", enabled = !busy, loading = busy) {
+                PrimaryButton(if (busy) tr("Processing…") else tr("Confirm Withdrawal"), enabled = !busy, loading = busy) {
                     busy = true
                     vm.submitWithdrawal(amount.toIntOrNull() ?: 0, method, otp) { err ->
                         busy = false
@@ -307,7 +307,7 @@ fun WithdrawScreen(vm: AppViewModel, nav: NavHostController) {
             }
             // Past withdrawals — tap to view/download the receipt again.
             if (vm.withdrawals.isNotEmpty()) {
-                SectionTitle("Recent Withdrawals")
+                SectionTitle(tr("Recent Withdrawals"))
                 vm.withdrawals.take(5).forEach { x ->
                     StatusListRow(
                         icon = Icons.Filled.ArrowUpward,
@@ -333,10 +333,10 @@ fun WithdrawalReceiptScreen(vm: AppViewModel, nav: NavHostController, withdrawal
     LaunchedEffect(withdrawalId) { vm.loadWithdrawalReceipt(withdrawalId) }
     val r = vm.withdrawalReceipt
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Transaction Receipt", onBack = { nav.popBackStack() })
+        Header(tr("Transaction Receipt"), onBack = { nav.popBackStack() })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             if (r == null) {
-                Text("Loading receipt…", color = TextGray, modifier = Modifier.padding(Space.xxl))
+                Text(tr("Loading receipt…"), color = TextGray, modifier = Modifier.padding(Space.xxl))
             } else {
                 // Status banner
                 val paid = r.status == "Paid"
@@ -357,15 +357,15 @@ fun WithdrawalReceiptScreen(vm: AppViewModel, nav: NavHostController, withdrawal
                     }
                 }
                 Card {
-                    SectionTitle("Details")
+                    SectionTitle(tr("Details"))
                     Spacer(Modifier.height(Space.xs))
-                    PayRow("Reference No.", r.reference)
-                    PayRow("Worker", "${r.workerName} (${r.workerId})")
-                    PayRow("Amount", rupee(r.amount), if (paid) GreenSuccess else TextDark)
-                    PayRow("Method", r.method)
-                    PayRow("Paid To", r.bankDetails)
-                    PayRow("Requested", "${r.date}, ${r.time}")
-                    if (r.processedDate.isNotBlank()) PayRow("Processed", r.processedDate)
+                    PayRow(tr("Reference No."), r.reference)
+                    PayRow(tr("Worker"), "${r.workerName} (${r.workerId})")
+                    PayRow(tr("Amount"), rupee(r.amount), if (paid) GreenSuccess else TextDark)
+                    PayRow(tr("Method"), r.method)
+                    PayRow(tr("Paid To"), r.bankDetails)
+                    PayRow(tr("Requested"), "${r.date}, ${r.time}")
+                    if (r.processedDate.isNotBlank()) PayRow(tr("Processed"), r.processedDate)
                     HairlineDivider()
                     Row(Modifier.fillMaxWidth().padding(top = Space.s), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(tr("Status"), fontWeight = FontWeight.Bold, color = TextDark)
@@ -373,7 +373,7 @@ fun WithdrawalReceiptScreen(vm: AppViewModel, nav: NavHostController, withdrawal
                     }
                 }
                 InfoNote(r.note)
-                PrimaryButton("Download Receipt") {
+                PrimaryButton(tr("Download Receipt")) {
                     val path = saveReceipt(ctx, r)
                     toast(ctx, if (path != null) "Saved to $path" else "Could not save receipt")
                 }
@@ -411,7 +411,7 @@ fun SalaryAdvanceScreen(vm: AppViewModel, nav: NavHostController) {
     val elig = vm.advanceEligibility
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Salary Advance", onBack = { nav.popBackStack() })
+        Header(tr("Salary Advance"), onBack = { nav.popBackStack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -435,7 +435,7 @@ fun SalaryAdvanceScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(Space.m))
                     Column {
                         Text(
-                            if (eligible) "You're eligible!" else "Not eligible right now",
+                            if (eligible) tr("You're eligible!") else tr("Not eligible right now"),
                             fontWeight = FontWeight.Bold, color = TextDark,
                         )
                         Text(
@@ -447,21 +447,21 @@ fun SalaryAdvanceScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             Card {
-                SectionTitle("Eligibility Check")
+                SectionTitle(tr("Eligibility Check"))
                 Spacer(Modifier.height(Space.s))
-                CriteriaRow("Attendance", "${elig?.attendancePct ?: 0}%", (elig?.attendancePct ?: 0) >= 60)
-                CriteriaRow("Rating", "${elig?.rating ?: 0.0} ★", (elig?.rating ?: 0.0) >= 4.0)
-                CriteriaRow("Completed jobs", "${elig?.completedJobs ?: 0}", (elig?.completedJobs ?: 0) >= 10)
-                CriteriaRow("Active penalties", "${elig?.activePenalties ?: 0}", (elig?.activePenalties ?: 0) == 0)
+                CriteriaRow(tr("Attendance"), "${elig?.attendancePct ?: 0}%", (elig?.attendancePct ?: 0) >= 60)
+                CriteriaRow(tr("Rating"), "${elig?.rating ?: 0.0} ★", (elig?.rating ?: 0.0) >= 4.0)
+                CriteriaRow(tr("Completed jobs"), "${elig?.completedJobs ?: 0}", (elig?.completedJobs ?: 0) >= 10)
+                CriteriaRow(tr("Active penalties"), "${elig?.activePenalties ?: 0}", (elig?.activePenalties ?: 0) == 0)
             }
             if (eligible) {
                 Card {
-                    SectionTitle("Request Amount")
+                    SectionTitle(tr("Request Amount"))
                     Spacer(Modifier.height(Space.s))
                     OutlinedTextField(
                         value = amount,
                         onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) amount = it },
-                        label = { Text("Amount (₹) • max ${rupee(elig?.maxAmount ?: 0)}") }, singleLine = true,
+                        label = { Text(tr("Amount (₹)") + " • " + tr("max") + " ${rupee(elig?.maxAmount ?: 0)}") }, singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         shape = RoundedCornerShape(Radius.field),
                         colors = softFieldColors(),
@@ -469,8 +469,8 @@ fun SalaryAdvanceScreen(vm: AppViewModel, nav: NavHostController) {
                     )
                 }
             }
-            InfoNote("Once approved, the advance is credited to your wallet. Recovery happens automatically as a small deduction from your future job earnings.")
-            PrimaryButton(if (busy) "Sending request…" else "Request Advance", enabled = eligible && !busy, loading = busy) {
+            InfoNote(tr("Once approved, the advance is credited to your wallet. Recovery happens automatically as a small deduction from your future job earnings."))
+            PrimaryButton(if (busy) tr("Sending request…") else tr("Request Advance"), enabled = eligible && !busy, loading = busy) {
                 busy = true
                 vm.submitAdvance(amount.toIntOrNull() ?: 0) { err ->
                     busy = false
@@ -479,7 +479,7 @@ fun SalaryAdvanceScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             if (vm.advances.isNotEmpty()) {
-                SectionTitle("Advance History")
+                SectionTitle(tr("Advance History"))
                 vm.advances.forEach { a ->
                     StatusListRow(
                         icon = Icons.Filled.Savings,
@@ -503,7 +503,7 @@ fun WalletHistoryScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.refreshWallet() }
     var filter by remember { mutableStateOf("All") }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Transaction History", onBack = { nav.popBackStack() })
+        Header(tr("Transaction History"), onBack = { nav.popBackStack() })
         SegmentedTabs(
             options = listOf("All", "Credit", "Debit"),
             selected = filter,
@@ -517,7 +517,7 @@ fun WalletHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                 when (filter) { "Credit" -> it.isCredit; "Debit" -> !it.isCredit; else -> true }
             }
             if (rows.isEmpty()) {
-                EmptyState("🧾", "No transactions", "Your wallet activity will appear here.")
+                EmptyState("🧾", tr("No transactions"), tr("Your wallet activity will appear here."))
             } else {
                 rows.forEach { e ->
                     val meta = buildString {
@@ -548,15 +548,15 @@ fun EarningsBreakupScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.refreshWallet() }
     val total = vm.earningsBreakup.sumOf { it.amount }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Earnings Breakup", onBack = { nav.popBackStack() })
+        Header(tr("Earnings Breakup"), onBack = { nav.popBackStack() })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             // Green total banner connected to the category breakdown as one surface.
             ElevatedGroup {
-                MoneyBanner("Total Income", total)
+                MoneyBanner(tr("Total Income"), total)
                 Column(Modifier.background(CardBg).padding(Space.l)) {
-                    SectionTitle("By Category")
+                    SectionTitle(tr("By Category"))
                     Spacer(Modifier.height(Space.xs))
-                    if (vm.earningsBreakup.isEmpty()) EmptyHint("No earnings recorded yet.")
+                    if (vm.earningsBreakup.isEmpty()) EmptyHint(tr("No earnings recorded yet."))
                     vm.earningsBreakup.forEachIndexed { i, b ->
                         BreakdownRow(b.category, "+ ${rupee(b.amount)}", GreenSuccess)
                         if (i < vm.earningsBreakup.lastIndex) HairlineDivider()
@@ -572,22 +572,22 @@ fun EarningsBreakupScreen(vm: AppViewModel, nav: NavHostController) {
 fun DeductionsScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.refreshWallet() }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Deductions", onBack = { nav.popBackStack() })
+        Header(tr("Deductions"), onBack = { nav.popBackStack() })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             Box(Modifier.fillMaxWidth().background(RedLight, RoundedCornerShape(Radius.card)).padding(Space.l)) {
                 Column {
                     Text(tr("Total Deductions"), color = TextGray, fontSize = 12.sp)
                     Text("- ${rupee(vm.deductionTotal)}", color = RedCancel, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-                    Text("Every deduction is itemised below — nothing is hidden.", color = TextGray, fontSize = 11.sp)
+                    Text(tr("Every deduction is itemised below — nothing is hidden."), color = TextGray, fontSize = 11.sp)
                 }
             }
             Card {
-                SectionTitle("By Category")
+                SectionTitle(tr("By Category"))
                 Spacer(Modifier.height(Space.xs))
                 vm.deductionSummary.forEach { BreakupRow(it.category, it.amount, credit = false, dim = it.amount == 0) }
             }
             if (vm.deductionDetail.isNotEmpty()) {
-                SectionTitle("Itemised")
+                SectionTitle(tr("Itemised"))
                 vm.deductionDetail.forEach { d ->
                     StatusListRow(
                         icon = Icons.Filled.ArrowUpward,
@@ -612,8 +612,8 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadPayslip() }
     val p = vm.payslip
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        AppTopBar("Payslip", onBack = { nav.popBackStack() }, trailing = {
-            TopBarAction(Icons.Filled.Download, "Download", enabled = p != null) {
+        AppTopBar(tr("Payslip"), onBack = { nav.popBackStack() }, trailing = {
+            TopBarAction(Icons.Filled.Download, tr("Download"), enabled = p != null) {
                 p?.let {
                     val path = savePayslip(ctx, it.workerName, it.month, buildPayslipText(it))
                     toast(ctx, if (path != null) "Saved to $path" else "Could not save payslip")
@@ -623,7 +623,7 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
 
         Column(Modifier.verticalScroll(rememberScrollState()).padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             if (p == null) {
-                Text("Loading payslip…", color = TextGray, modifier = Modifier.padding(Space.xxl))
+                Text(tr("Loading payslip…"), color = TextGray, modifier = Modifier.padding(Space.xxl))
             } else {
                 // Worker + pay period.
                 Row(
@@ -635,7 +635,7 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text(p.workerName.ifBlank { "Worker" }, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
+                        Text(p.workerName.ifBlank { tr("Worker") }, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
                         Text("ID: ${p.workerId}", color = TextGray, fontSize = 12.5.sp)
                     }
                     Box(Modifier.clip(RoundedCornerShape(20.dp)).background(Primary50).padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -647,35 +647,35 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(Color(0xFF6D4AFF), Color(0xFF4B2FD6)))).padding(20.dp),
                 ) {
-                    Text("NET PAY", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(tr("NET PAY"), color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Spacer(Modifier.height(6.dp))
                     Text(rupee(p.netPay), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
                     Spacer(Modifier.height(2.dp))
-                    Text("Take-home for ${p.month}", color = Color.White.copy(alpha = 0.85f), fontSize = 12.5.sp)
+                    Text(tr("Take-home for") + " ${p.month}", color = Color.White.copy(alpha = 0.85f), fontSize = 12.5.sp)
                 }
 
                 // Earnings card.
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
                 ) {
-                    Text("Earnings", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Earnings"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(Space.s))
-                    PaySlipRow("Total Jobs", "${p.totalJobs}")
+                    PaySlipRow(tr("Total Jobs"), "${p.totalJobs}")
                     HairlineDivider()
                     if (p.breakup.isNotEmpty()) {
                         p.breakup.forEach { PaySlipRow(it.category, "+ ${rupee(it.amount)}", GreenSuccess); HairlineDivider() }
                     } else {
-                        PaySlipRow("Gross Earnings", "+ ${rupee(p.grossEarnings)}", GreenSuccess)
+                        PaySlipRow(tr("Gross Earnings"), "+ ${rupee(p.grossEarnings)}", GreenSuccess)
                         HairlineDivider()
                     }
-                    PaySlipRow("Bonuses & Incentives", "+ ${rupee(p.bonuses)}", GreenSuccess)
+                    PaySlipRow(tr("Bonuses & Incentives"), "+ ${rupee(p.bonuses)}", GreenSuccess)
                 }
 
                 // Deductions card.
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
                 ) {
-                    Text("Deductions", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Deductions"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(Space.s))
                     if (p.deductionBreakup.isNotEmpty()) {
                         p.deductionBreakup.forEachIndexed { i, it ->
@@ -683,7 +683,7 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
                             if (i < p.deductionBreakup.lastIndex) HairlineDivider()
                         }
                     } else {
-                        PaySlipRow("Total Deductions", "- ${rupee(p.deductions)}", RedCancel)
+                        PaySlipRow(tr("Total Deductions"), "- ${rupee(p.deductions)}", RedCancel)
                     }
                 }
 
@@ -692,7 +692,7 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GreenLight).padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Net Payable", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(tr("Net Payable"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text(rupee(p.netPay), color = GreenSuccess, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 }
 
@@ -700,16 +700,16 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(16.dp)).padding(16.dp),
                 ) {
-                    Text("Settlement", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Settlement"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(Space.s))
-                    PaySlipRow("Withdrawn", rupee(p.withdrawals))
+                    PaySlipRow(tr("Withdrawn"), rupee(p.withdrawals))
                     HairlineDivider()
-                    PaySlipRow("Pending Balance", rupee(p.pending))
+                    PaySlipRow(tr("Pending Balance"), rupee(p.pending))
                     HairlineDivider()
-                    PaySlipRow("Bank", p.bankDetails.ifBlank { "—" })
+                    PaySlipRow(tr("Bank"), p.bankDetails.ifBlank { "—" })
                 }
 
-                PrimaryButton("Download Payslip") {
+                PrimaryButton(tr("Download Payslip")) {
                     val path = savePayslip(ctx, p.workerName, p.month, buildPayslipText(p))
                     toast(ctx, if (path != null) "Saved to $path" else "Could not save payslip")
                 }
@@ -723,7 +723,7 @@ fun PayslipScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 private fun PaySlipRow(label: String, value: String, valueColor: Color = TextDark) {
     Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.m))
         Text(value, color = valueColor, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
     }
@@ -737,7 +737,7 @@ private fun PaySlipRow(label: String, value: String, valueColor: Color = TextDar
 private fun StatTile(label: String, amount: Int, color: Color = TextDark) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(rupee(amount), color = color, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text(label, color = TextGray, fontSize = 11.sp)
+        Text(tr(label), color = TextGray, fontSize = 11.sp)
     }
 }
 
@@ -769,7 +769,7 @@ private fun RowHeader(title: String, action: String, onClick: () -> Unit) {
 @Composable
 private fun BreakupRow(category: String, amount: Int, credit: Boolean, dim: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-        Text(category, color = if (dim) TextGray else TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(tr(category), color = if (dim) TextGray else TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text(
             (if (credit) "+ " else "- ") + rupee(amount),
             color = if (dim) TextGray else if (credit) GreenSuccess else RedCancel,
@@ -792,7 +792,7 @@ private fun LedgerRow(e: LedgerEntry, detailed: Boolean = false) {
         }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(e.type, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+            Text(tr(e.type), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
             Text(
                 buildString {
                     append("${e.date}, ${e.time}")
@@ -838,7 +838,7 @@ private fun CriteriaRow(label: String, value: String, ok: Boolean) {
             null, tint = if (ok) GreenSuccess else RedCancel, modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(Space.s))
-        Text(label, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text(value, color = if (ok) TextDark else RedCancel, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
     }
 }

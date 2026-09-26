@@ -154,8 +154,8 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
         (service ?: "").contains(query, true) || (address ?: "").contains(query, true) ||
         (customerName ?: "").contains(query, true)
 
-    TabScaffold("Jobs", actions = {
-        TabAction(if (searching) Icons.Filled.Close else Icons.Filled.Search, if (searching) "Close search" else "Search jobs") {
+    TabScaffold(tr("Jobs"), actions = {
+        TabAction(if (searching) Icons.Filled.Close else Icons.Filled.Search, if (searching) tr("Close search") else tr("Search jobs")) {
             searching = !searching; if (!searching) query = ""
         }
     }) { pad ->
@@ -165,7 +165,7 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.s),
-                placeholder = { Text("Search service, customer or area", fontSize = 13.sp) },
+                placeholder = { Text(tr("Search service, customer or area"), fontSize = 13.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(Radius.pill),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -189,32 +189,32 @@ fun BookingsScreen(vm: AppViewModel, nav: NavHostController) {
         ) {
             when (tab) {
                 TAB_ACTIVE -> {
-                    SectionLabel("Active Job")
+                    SectionLabel(tr("Active Job"))
                     val job = vm.activeJob
                     if (job == null) {
-                        EmptyState("🛠", "No active job", "Go online and accept a job to see it here.")
+                        EmptyState("🛠", tr("No active job"), tr("Go online and accept a job to see it here."))
                     } else {
                         ActiveJobCard(vm, job) { nav.navigate(resumeRouteFor(vm.jobStatus) ?: Routes.JOB_DETAILS) }
                     }
                     if (upcoming.isNotEmpty()) {
-                        SectionHeader("Upcoming Jobs", onViewAll = { tab = TAB_UPCOMING })
+                        SectionHeader(tr("Upcoming Jobs"), onViewAll = { tab = TAB_UPCOMING })
                         upcoming.take(2).forEach { UpcomingJobCard(it) { nav.navigate(Routes.SCHEDULE) } }
                     }
                     if (history.isNotEmpty()) {
-                        SectionHeader("Job History", onViewAll = { tab = TAB_HISTORY })
+                        SectionHeader(tr("Job History"), onViewAll = { tab = TAB_HISTORY })
                         history.take(1).forEach { HistoryJobCard(it) }
                     }
                 }
                 TAB_UPCOMING -> {
                     val list = upcoming.filter { it.matches() }
-                    SectionLabel("Upcoming Jobs")
-                    if (list.isEmpty()) EmptyState("📅", "Nothing upcoming", "New bookings for today will appear here.")
+                    SectionLabel(tr("Upcoming Jobs"))
+                    if (list.isEmpty()) EmptyState("📅", tr("Nothing upcoming"), tr("New bookings for today will appear here."))
                     else list.forEach { UpcomingJobCard(it) { nav.navigate(Routes.SCHEDULE) } }
                 }
                 else -> {
                     val list = history.filter { it.matches() }
-                    SectionLabel("Job History")
-                    if (list.isEmpty()) EmptyState("📜", "No history yet", "Completed and cancelled jobs land here.")
+                    SectionLabel(tr("Job History"))
+                    if (list.isEmpty()) EmptyState("📜", tr("No history yet"), tr("Completed and cancelled jobs land here."))
                     else list.forEach { HistoryJobCard(it) }
                 }
             }
@@ -237,15 +237,15 @@ private fun resumeRouteFor(status: JobStatus): String? = when (status) {
 
 @Composable
 private fun SectionLabel(text: String) {
-    Text(text, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Text(tr(text), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
 }
 
 @Composable
 private fun SectionHeader(text: String, onViewAll: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(tr(text), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         Text(
-            "View All", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            tr("View All"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clickable(onClick = onViewAll),
         )
     }
@@ -317,38 +317,38 @@ private fun ActiveJobCard(vm: AppViewModel, job: Job, onContinue: () -> Unit) {
                 .border(1.dp, Divider, RoundedCornerShape(12.dp))
                 .padding(vertical = 15.dp),
         ) {
-            JobStat(Modifier.weight(1f), Icons.Filled.Schedule, "Started At", if (startMs != null) clockOf(startMs) else "—", TextDark)
+            JobStat(Modifier.weight(1f), Icons.Filled.Schedule, tr("Started At"), if (startMs != null) clockOf(startMs) else "—", TextDark)
             StatDivider()
-            JobStat(Modifier.weight(1f), Icons.Filled.Timer, "Time Elapsed", if (running) hhmmss(elapsedSec) else "—", Purple)
+            JobStat(Modifier.weight(1f), Icons.Filled.Timer, tr("Time Elapsed"), if (running) hhmmss(elapsedSec) else "—", Purple)
             StatDivider()
             JobStat(
-                Modifier.weight(1f), Icons.AutoMirrored.Filled.FormatListBulleted, "Tasks",
+                Modifier.weight(1f), Icons.AutoMirrored.Filled.FormatListBulleted, tr("Tasks"),
                 if (vm.checklist.isEmpty()) "—" else "${vm.checklistDone} / ${vm.checklist.size}", Purple,
             )
             StatDivider()
-            JobStat(Modifier.weight(1f), Icons.Filled.CurrencyRupee, "Earnings", "₹${job.earnings + vm.extrasTotal}", GreenSuccess)
+            JobStat(Modifier.weight(1f), Icons.Filled.CurrencyRupee, tr("Earnings"), "₹${job.earnings + vm.extrasTotal}", GreenSuccess)
         }
         Spacer(Modifier.height(Space.m))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             Box(Modifier.weight(1f)) {
-                OutlineButton("📞  Call Customer", modifier = Modifier.fillMaxWidth()) { dialCustomerPhone(ctx, job.customerPhone) }
+                OutlineButton(tr("📞  Call Customer"), modifier = Modifier.fillMaxWidth()) { dialCustomerPhone(ctx, job.customerPhone) }
             }
             Box(Modifier.weight(1f)) {
-                PrimaryButton("Continue Job  ›", onClick = onContinue)
+                PrimaryButton(tr("Continue Job  ›"), onClick = onContinue)
             }
         }
     }
 }
 
 private fun statusLabel(status: JobStatus, paused: Boolean) = when {
-    paused -> "Paused"
-    status == JobStatus.IN_PROGRESS -> "In Progress"
-    status == JobStatus.ON_THE_WAY -> "On the way"
-    status == JobStatus.ARRIVED -> "Arrived"
-    status == JobStatus.ACCEPTED -> "Accepted"
-    status == JobStatus.REQUESTED -> "New request"
-    status == JobStatus.COMPLETED -> "Completed"
-    else -> "Active"
+    paused -> tr("Paused")
+    status == JobStatus.IN_PROGRESS -> tr("In Progress")
+    status == JobStatus.ON_THE_WAY -> tr("On the way")
+    status == JobStatus.ARRIVED -> tr("Arrived")
+    status == JobStatus.ACCEPTED -> tr("Accepted")
+    status == JobStatus.REQUESTED -> tr("New request")
+    status == JobStatus.COMPLETED -> tr("Completed")
+    else -> tr("Active")
 }
 
 @Composable
@@ -362,7 +362,7 @@ private fun JobStat(
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(24.dp))
         Spacer(Modifier.height(5.dp))
-        Text(label, color = TextGray, fontSize = 13.sp, maxLines = 1)
+        Text(tr(label), color = TextGray, fontSize = 13.sp, maxLines = 1)
         Spacer(Modifier.height(5.dp))
         Text(value, color = valueColor, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
@@ -390,7 +390,7 @@ private fun UpcomingJobCard(item: ScheduleItem, onClick: () -> Unit) {
                 Spacer(Modifier.height(3.dp))
                 IconLine(Icons.Filled.LocationOn, item.location, 15.5.sp)
                 Spacer(Modifier.height(3.dp))
-                IconLine(Icons.Filled.SwapVert, item.distanceKm?.let { "$it km away" } ?: "— km away", 15.5.sp)
+                IconLine(Icons.Filled.SwapVert, item.distanceKm?.let { "$it km away" } ?: tr("— km away"), 15.5.sp)
             }
             Spacer(Modifier.width(Space.s))
             Column(horizontalAlignment = Alignment.End) {
@@ -403,7 +403,7 @@ private fun UpcomingJobCard(item: ScheduleItem, onClick: () -> Unit) {
                 ) {
                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(item.etaMins?.let { "In ${etaWords(it)}" } ?: "Scheduled", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(item.etaMins?.let { "In ${etaWords(it)}" } ?: tr("Scheduled"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -428,7 +428,7 @@ private fun HistoryJobCard(b: Booking) {
             }
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
-                Text(b.service ?: "Service", color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(b.service ?: tr("Service"), color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
                 IconLine(Icons.Filled.Schedule, b.timeInfo ?: "—", 15.sp)
                 Spacer(Modifier.height(2.dp))
@@ -457,7 +457,7 @@ private fun IconLine(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(5.dp))
-        Text(text, color = TextGray, fontSize = size, maxLines = 1)
+        Text(tr(text), color = TextGray, fontSize = size, maxLines = 1)
     }
 }
 

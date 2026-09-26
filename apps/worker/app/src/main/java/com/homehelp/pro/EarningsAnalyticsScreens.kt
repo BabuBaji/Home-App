@@ -68,7 +68,7 @@ private val IncentiveLilac = Color(0xFF9B8CFA)
 /** Clean white top bar — back + centred indigo title + info, as every analytics mock draws it. */
 @Composable
 private fun AnalyticsBar(title: String, onBack: () -> Unit, onInfo: () -> Unit = {}) {
-    AppTopBar(title, onBack = onBack, trailing = { TopBarAction(Icons.Filled.Info, "Info", onClick = onInfo) })
+    AppTopBar(title, onBack = onBack, trailing = { TopBarAction(Icons.Filled.Info, tr("Info"), onClick = onInfo) })
 }
 
 /** Pill dropdown chip ("This Month ▾") used by the breakdown & trend screens. */
@@ -80,7 +80,7 @@ private fun PeriodChip(label: String, leading: Boolean = false, onClick: () -> U
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading) { Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(label, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(tr(label), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(6.dp))
         Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = TextGray, modifier = Modifier.size(18.dp))
     }
@@ -118,7 +118,7 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
     val highestDayName = if (period == "Last Month") "Saturday" else "Friday"
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        AnalyticsBar("Earnings Breakdown", onBack = { nav.popBackStack() })
+        AnalyticsBar(tr("Earnings Breakdown"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -129,7 +129,7 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
             Card {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Total Earnings", color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(tr("Total Earnings"), color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text("₹${fmt(total)}", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
                     }
@@ -144,7 +144,7 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(10.dp).clip(CircleShape).background(s.color))
                         Spacer(Modifier.width(Space.m))
-                        Text(s.label, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(tr(s.label), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         Text("${"%.1f".format(s.amount * 100.0 / sum)}%", color = TextGray, fontSize = 13.5.sp, modifier = Modifier.width(52.dp), textAlign = TextAlign.End)
                         Text("₹${fmt(s.amount)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(80.dp), textAlign = TextAlign.End)
                         Spacer(Modifier.width(4.dp))
@@ -160,23 +160,23 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column {
-                        Text("All earnings are before taxes", color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Last updated: ${nowStampAnalytics()}", color = TextGray, fontSize = 12.sp)
+                        Text(tr("All earnings are before taxes"), color = TextDark, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(tr("Last updated:") + " ${nowStampAnalytics()}", color = TextGray, fontSize = 12.sp)
                     }
                 }
             }
 
             // ── Insights ──
             Card {
-                Text("Insights", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Insights"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(GreenLight), contentAlignment = Alignment.Center) {
                         Icon(Icons.AutoMirrored.Filled.ShowChart, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(21.dp))
                     }
                     Spacer(Modifier.width(Space.m))
-                    Text("Highest Day", color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    Text(highestDayName, color = GreenSuccess, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Highest Day"), color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text(tr(highestDayName), color = GreenSuccess, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(Space.l))
                     Text("₹${fmt(highestDay)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
@@ -186,7 +186,7 @@ fun EarningsBreakdownScreen(vm: AppViewModel, nav: NavHostController) {
                         Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(21.dp))
                     }
                     Spacer(Modifier.width(Space.m))
-                    Text("Average per Day", color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text(tr("Average per Day"), color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                     Text("₹${fmt(avgPerDay)}", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -210,7 +210,7 @@ fun EarningsAnalyticsScreen(vm: AppViewModel, nav: NavHostController) {
     val avg = series.bars.sum() / series.bars.size
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        AnalyticsBar("Earnings Analytics", onBack = { nav.popBackStack() })
+        AnalyticsBar(tr("Earnings Analytics"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -222,16 +222,16 @@ fun EarningsAnalyticsScreen(vm: AppViewModel, nav: NavHostController) {
                     Box(
                         Modifier.weight(1f).clip(RoundedCornerShape(Radius.button)).background(if (on) Purple else FieldFill).clickable { tab = t }.padding(vertical = 13.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text(t, color = if (on) Color.White else TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text(tr(t), color = if (on) Color.White else TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
                 }
             }
 
             // Total + a simple, readable per-period list (no chart).
             Card {
-                Text(series.periodLabel, color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(tr(series.periodLabel), color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(4.dp))
                 Text("₹${fmt(series.total)}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
-                Text("Total Earnings", color = TextGray, fontSize = 13.sp)
+                Text(tr("Total Earnings"), color = TextGray, fontSize = 13.sp)
                 Spacer(Modifier.height(Space.m))
                 HairlineDivider()
                 Spacer(Modifier.height(4.dp))
@@ -242,7 +242,7 @@ fun EarningsAnalyticsScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Insights.
             Card {
-                Text("Insights", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Insights"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.s))
                 InsightRow(Icons.AutoMirrored.Filled.TrendingUp, GreenSuccess, GreenLight, "Highest ${series.unitWord}", series.names.getOrElse(highestIdx) { "—" }, "₹${fmt(maxVal)}", valueTint = GreenSuccess)
                 HairlineDivider()
@@ -273,8 +273,8 @@ private fun InsightRow(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(Space.m))
-        Text(label, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        if (sub.isNotBlank()) { Text(sub, color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(Space.l)) }
+        Text(tr(label), color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        if (sub.isNotBlank()) { Text(tr(sub), color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(Space.l)) }
         Text(value, color = valueTint, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -291,7 +291,7 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val anim by animateFloatAsState(targetValue = earned.toFloat() / goal, animationSpec = tween(900, easing = LinearOutSlowInEasing), label = "prog")
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        AnalyticsBar("Incentive Progress", onBack = { nav.popBackStack() })
+        AnalyticsBar(tr("Incentive Progress"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -300,7 +300,7 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Monthly Incentive Goal", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(tr("Monthly Incentive Goal"), color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text("₹${fmt(goal)}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
                     }
@@ -318,15 +318,15 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Row {
-                    Text("₹${fmt(earned)} earned", color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                    Text("  of ₹${fmt(goal)}", color = TextGray, fontSize = 13.5.sp)
+                    Text("₹${fmt(earned)} " + tr("earned"), color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    Text("  " + tr("of") + " ₹${fmt(goal)}", color = TextGray, fontSize = 13.5.sp)
                 }
                 Spacer(Modifier.height(Space.m))
                 HairlineDivider()
                 Spacer(Modifier.height(Space.s))
-                IncentiveRow(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, "Incentives Earned", "₹${fmt(earned)}", GreenSuccess)
+                IncentiveRow(Icons.Filled.AccountBalanceWallet, GreenSuccess, GreenLight, tr("Incentives Earned"), "₹${fmt(earned)}", GreenSuccess)
                 Spacer(Modifier.height(Space.s))
-                IncentiveRow(Icons.Filled.HourglassEmpty, Amber, GoldLight, "Incentives Pending", "₹${fmt(pending)}", Amber)
+                IncentiveRow(Icons.Filled.HourglassEmpty, Amber, GoldLight, tr("Incentives Pending"), "₹${fmt(pending)}", Amber)
             }
 
             Row(
@@ -337,7 +337,7 @@ fun IncentiveProgressScreen(vm: AppViewModel, nav: NavHostController) {
                     Icon(Icons.Filled.Description, contentDescription = null, tint = Purple, modifier = Modifier.size(19.dp))
                 }
                 Spacer(Modifier.width(Space.m))
-                Text("View Incentive History", color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(tr("View Incentive History"), color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
             }
         }
@@ -351,7 +351,7 @@ private fun IncentiveRow(icon: androidx.compose.ui.graphics.vector.ImageVector, 
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(Space.m))
-        Text(label, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         Text(value, color = valueTint, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -371,7 +371,7 @@ fun IncentiveHistoryScreen(vm: AppViewModel, nav: NavHostController) {
     val pending = rows.filter { it.isCredit && !it.status.equals("Paid", true) }.sumOf { it.amount }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        AnalyticsBar("Incentive History", onBack = { nav.popBackStack() })
+        AnalyticsBar(tr("Incentive History"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -381,20 +381,20 @@ fun IncentiveHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                 Column(
                     Modifier.weight(1f).clip(RoundedCornerShape(Radius.card)).background(GreenLight).padding(16.dp),
                 ) {
-                    Text("Total Earned", color = TextGray, fontSize = 12.5.sp)
+                    Text(tr("Total Earned"), color = TextGray, fontSize = 12.5.sp)
                     Spacer(Modifier.height(4.dp))
                     Text("₹${fmt(earned)}", color = GreenSuccess, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 }
                 Column(
                     Modifier.weight(1f).clip(RoundedCornerShape(Radius.card)).background(GoldLight).padding(16.dp),
                 ) {
-                    Text("Pending", color = TextGray, fontSize = 12.5.sp)
+                    Text(tr("Pending"), color = TextGray, fontSize = 12.5.sp)
                     Spacer(Modifier.height(4.dp))
                     Text("₹${fmt(pending)}", color = Amber, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
-            Text("All Incentives", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(tr("All Incentives"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
 
             if (rows.isEmpty()) {
                 Column(
@@ -403,9 +403,9 @@ fun IncentiveHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                 ) {
                     Text("🏆", fontSize = 34.sp)
                     Spacer(Modifier.height(10.dp))
-                    Text("No incentives yet", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("No incentives yet"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Complete more jobs to unlock bonuses.", color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    Text(tr("Complete more jobs to unlock bonuses."), color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
                 }
             } else {
                 Column(
@@ -420,7 +420,7 @@ fun IncentiveHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                             Spacer(Modifier.width(Space.m))
                             Column(Modifier.weight(1f)) {
                                 Text(e.type, color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Text("${e.status} • ${e.date}", color = TextGray, fontSize = 12.sp)
+                                Text("${tr(e.status)} • ${e.date}", color = TextGray, fontSize = 12.sp)
                             }
                             Text("+₹${fmt(e.amount)}", color = if (paid) GreenSuccess else Amber, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
@@ -455,7 +455,7 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
     val maxT = trend.max().coerceAtLeast(1)
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        AnalyticsBar("Monthly Earnings Trend", onBack = { nav.popBackStack() })
+        AnalyticsBar(tr("Monthly Earnings Trend"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -465,7 +465,7 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f)) {
                         Text("₹${fmt(headline)}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-                        Text(headlineLabel, color = TextGray, fontSize = 14.sp)
+                        Text(tr(headlineLabel), color = TextGray, fontSize = 14.sp)
                     }
                     PeriodChip(year) { year = if (year == "This Year") "Last Year" else "This Year" }
                 }
@@ -474,7 +474,7 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
                     Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("12% ", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("vs last month", color = TextGray, fontSize = 13.sp)
+                    Text(tr("vs last month"), color = TextGray, fontSize = 13.sp)
                 }
                 Spacer(Modifier.height(Space.m))
                 HairlineDivider()
@@ -487,11 +487,11 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
             // Summary stats.
             Card {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    TrendStat(Modifier.weight(1f), Icons.AutoMirrored.Filled.TrendingUp, GreenLight, GreenSuccess, "Highest Month", months[highIdx], "₹${fmt(trend.max())}", nameTint = GreenSuccess)
+                    TrendStat(Modifier.weight(1f), Icons.AutoMirrored.Filled.TrendingUp, GreenLight, GreenSuccess, tr("Highest Month"), months[highIdx], "₹${fmt(trend.max())}", nameTint = GreenSuccess)
                     Box(Modifier.width(1.dp).height(56.dp).background(Divider))
-                    TrendStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, PurpleLight, Purple, "Average / Month", "", "₹${fmt(avg)}")
+                    TrendStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, PurpleLight, Purple, tr("Average / Month"), "", "₹${fmt(avg)}")
                     Box(Modifier.width(1.dp).height(56.dp).background(Divider))
-                    TrendStat(Modifier.weight(1f), Icons.Filled.BarChart, Color(0xFFE8F0FE), Color(0xFF3B82F6), "Total Earnings", "", "₹${fmt(total)}")
+                    TrendStat(Modifier.weight(1f), Icons.Filled.BarChart, Color(0xFFE8F0FE), Color(0xFF3B82F6), tr("Total Earnings"), "", "₹${fmt(total)}")
                 }
             }
 
@@ -501,8 +501,8 @@ fun MonthlyTrendScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Earnings include completed jobs, incentives and bonuses.", color = TextGray, fontSize = 12.sp)
-                    Text("Last updated: ${nowStampAnalytics()}", color = TextMuted, fontSize = 11.sp)
+                    Text(tr("Earnings include completed jobs, incentives and bonuses."), color = TextGray, fontSize = 12.sp)
+                    Text(tr("Last updated:") + " ${nowStampAnalytics()}", color = TextMuted, fontSize = 11.sp)
                 }
             }
         }
@@ -516,7 +516,7 @@ private fun TrendStat(modifier: Modifier, icon: androidx.compose.ui.graphics.vec
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(17.dp))
         }
         Spacer(Modifier.height(5.dp))
-        Text(label, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
+        Text(tr(label), color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
         if (name.isNotBlank()) Text(name, color = nameTint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text(value, color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
     }

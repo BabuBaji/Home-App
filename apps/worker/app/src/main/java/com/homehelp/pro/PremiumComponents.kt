@@ -214,7 +214,7 @@ fun PremiumStatCard(
             Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
             if (caption != null) {
                 Spacer(Modifier.height(3.dp))
-                Text(caption, color = captionColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(tr(caption), color = captionColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
         }
     }
@@ -231,7 +231,7 @@ fun TrendChip(text: String, up: Boolean = true) {
     ) {
         Text(if (up) "▲" else "▼", color = fg, fontSize = 8.sp)
         Spacer(Modifier.width(3.dp))
-        Text(text, color = fg, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+        Text(tr(text), color = fg, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -397,14 +397,14 @@ fun RewardTierCard(
                 Column {
                     Text("Unlock ${next.label} ${next.emoji}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Spacer(Modifier.height(Space.s))
-                    TierReq("Complete jobs", "$jobsCompleted / ${next.minJobs}", jobsCompleted >= next.minJobs)
+                    TierReq(tr("Complete jobs"), "$jobsCompleted / ${next.minJobs}", jobsCompleted >= next.minJobs)
                     Spacer(Modifier.height(6.dp))
-                    TierReq("Keep rating", "${if (rating > 0) rating else 0.0}★ / ${next.minRating}★", rating >= next.minRating)
+                    TierReq(tr("Keep rating"), "${if (rating > 0) rating else 0.0}★ / ${next.minRating}★", rating >= next.minRating)
                 }
             }
         } else {
             Spacer(Modifier.height(Space.m))
-            Text("Top tier reached — you're elite 💎🏆", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text(tr("Top tier reached — you're elite 💎🏆"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         }
     }
 }
@@ -444,10 +444,10 @@ fun SitaraBonusCard(s: ShaktiBonusDto?, modifier: Modifier = Modifier, onClick: 
             ) { Text("⭐", fontSize = 24.sp) }
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
-                Text("Sitara Bonus", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text(tr("Sitara Bonus"), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Text(
                     if (currentIdx >= 0) "You've earned ${tiers[currentIdx].name} · ₹${tiers[currentIdx].amount}"
-                    else "Work days this month to earn a bonus",
+                    else tr("Work days this month to earn a bonus"),
                     color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp,
                 )
             }
@@ -457,7 +457,7 @@ fun SitaraBonusCard(s: ShaktiBonusDto?, modifier: Modifier = Modifier, onClick: 
         Spacer(Modifier.height(Space.l))
 
         if (tiers.isEmpty()) {
-            Text("Loading your bonus progress…", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            Text(tr("Loading your bonus progress…"), color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
         } else {
             // Bronze → Silver → Gold stepper with real ₹ amounts.
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
@@ -493,7 +493,7 @@ fun SitaraBonusCard(s: ShaktiBonusDto?, modifier: Modifier = Modifier, onClick: 
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.field)).background(Color.White.copy(alpha = 0.12f)).padding(Space.m)) {
                 Column {
                     val hint = when {
-                        s == null -> "Loading…"
+                        s == null -> tr("Loading…")
                         !ratingMet -> "Keep your rating ${ratingTarget}★+ to unlock the bonus"
                         s.nextTier.isNotBlank() -> {
                             val amt = tiers.firstOrNull { it.name == s.nextTier }?.amount ?: 0
@@ -503,13 +503,13 @@ fun SitaraBonusCard(s: ShaktiBonusDto?, modifier: Modifier = Modifier, onClick: 
                             if (need.isEmpty()) "On track for ${s.nextTier} (₹$amt)" else "${need.joinToString(" + ")} to reach ${s.nextTier} (₹$amt)"
                         }
                         currentIdx >= 0 -> "🎉 Top tier reached — ${tiers[currentIdx].name}!"
-                        else -> "Work your shifts to earn your first bonus"
+                        else -> tr("Work your shifts to earn your first bonus")
                     }
-                    Text(hint, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, lineHeight = 17.sp)
+                    Text(tr(hint), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, lineHeight = 17.sp)
                     Spacer(Modifier.height(Space.s))
-                    TierReq("Working days", "$workingDays / $goldDays", workingDays >= goldDays)
+                    TierReq(tr("Working days"), "$workingDays / $goldDays", workingDays >= goldDays)
                     Spacer(Modifier.height(6.dp))
-                    TierReq("Rating", "${if (rating > 0) rating else 0.0}★ / ${ratingTarget}★", ratingMet)
+                    TierReq(tr("Rating"), "${if (rating > 0) rating else 0.0}★ / ${ratingTarget}★", ratingMet)
                 }
             }
         }
@@ -642,12 +642,12 @@ fun FloatingBottomNav(nav: NavHostController, current: String?, vm: AppViewModel
     // The standard Android navigation bar: four destinations, pill indicator on the active one.
     // Wallet lives inside Earnings, so it lights the Earnings tab.
     androidx.compose.material3.NavigationBar(containerColor = CardBg, tonalElevation = 0.dp) {
-        NavTab(Icons.Filled.Home, "Home", current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
-        NavTab(Icons.Filled.Work, "Jobs", current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
-        NavTab(Icons.Filled.AccountBalanceWallet, "Earnings", current == Routes.EARNINGS || current == Routes.WALLET) {
+        NavTab(Icons.Filled.Home, tr("Home"), current == Routes.HOME) { nav.navigateApp(Routes.HOME) }
+        NavTab(Icons.Filled.Work, tr("Jobs"), current == Routes.BOOKINGS) { nav.navigateApp(Routes.BOOKINGS) }
+        NavTab(Icons.Filled.AccountBalanceWallet, tr("Earnings"), current == Routes.EARNINGS || current == Routes.WALLET) {
             nav.navigateApp(Routes.EARNINGS)
         }
-        NavTab(Icons.Filled.Person, "Profile", current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
+        NavTab(Icons.Filled.Person, tr("Profile"), current == Routes.PROFILE) { nav.navigateApp(Routes.PROFILE) }
     }
 }
 

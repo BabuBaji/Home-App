@@ -75,7 +75,7 @@ fun WalletDashboardScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.l, bottom = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Wallet", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
+            Text(tr("Wallet"), color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         }
 
         FitToScreen(Modifier.weight(1f).fillMaxWidth()) {
@@ -104,7 +104,7 @@ private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit,
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Available balance", color = TextGray, fontSize = 14.sp)
+                    Text(tr("Available balance"), color = TextGray, fontSize = 14.sp)
                     Spacer(Modifier.width(6.dp))
                     Icon(
                         if (hidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
@@ -122,9 +122,9 @@ private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit,
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-            HeroFigure(Modifier.weight(1f), "Earnings this month", money(vm.monthEarnings))
+            HeroFigure(Modifier.weight(1f), tr("Earnings this month"), money(vm.monthEarnings))
             Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(30.dp).background(Divider))
-            HeroFigure(Modifier.weight(1f), "Pending Settlement", money(vm.holdBalance))
+            HeroFigure(Modifier.weight(1f), tr("Pending Settlement"), money(vm.holdBalance))
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -136,7 +136,7 @@ private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit,
             ) {
                 Icon(Icons.Filled.ArrowUpward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Withdraw", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Withdraw"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
             // Transaction History — secondary (translucent, outlined) beside Withdraw, per the design
             Row(
@@ -147,7 +147,7 @@ private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit,
             ) {
                 Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("History", color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("History"), color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -156,7 +156,7 @@ private fun BalanceHero(vm: AppViewModel, hidden: Boolean, onToggle: () -> Unit,
 @Composable
 private fun HeroFigure(modifier: Modifier, label: String, value: String) {
     Column(modifier) {
-        Text(label, color = TextGray, fontSize = 13.sp, maxLines = 1)
+        Text(tr(label), color = TextGray, fontSize = 13.sp, maxLines = 1)
         Spacer(Modifier.height(2.dp))
         Text(value, color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
@@ -167,8 +167,8 @@ private fun HeroFigure(modifier: Modifier, label: String, value: String) {
 private fun EarningsOverviewCard(vm: AppViewModel) {
     Card(padding = Dp16.S) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Earnings Overview", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("This Month", color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr("Earnings Overview"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(tr("This Month"), color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(Space.s))
         Text(money(vm.monthEarnings), color = TextDark, fontSize = 26.sp, fontWeight = FontWeight.Bold)
@@ -188,13 +188,13 @@ private fun EarningsOverviewCard(vm: AppViewModel) {
         EarningsBars(vm)
         Spacer(Modifier.height(Space.m))
         // Period list — each with an icon, as the reference draws it.
-        PeriodRow(Icons.Filled.CalendarMonth, "Today", vm.todayEarnings, Purple, Primary50)
+        PeriodRow(Icons.Filled.CalendarMonth, tr("Today"), vm.todayEarnings, Purple, Primary50)
         Divider()
-        PeriodRow(Icons.Filled.CalendarMonth, "This Week", vm.weekEarnings, Amber, GoldLight)
+        PeriodRow(Icons.Filled.CalendarMonth, tr("This Week"), vm.weekEarnings, Amber, GoldLight)
         Divider()
-        PeriodRow(Icons.Filled.BarChart, "This Month", vm.monthEarnings, GreenSuccess, GreenLight)
+        PeriodRow(Icons.Filled.BarChart, tr("This Month"), vm.monthEarnings, GreenSuccess, GreenLight)
         Divider()
-        PeriodRow(Icons.Filled.Savings, "Total Earnings", vm.totalEarned, Violet, PurpleLight)
+        PeriodRow(Icons.Filled.Savings, tr("Total Earnings"), vm.totalEarned, Violet, PurpleLight)
     }
 }
 
@@ -217,7 +217,7 @@ private fun EarningsBars(vm: AppViewModel) {
         verticalAlignment = Alignment.Bottom,
     ) {
         if (days.isEmpty()) {
-            Text("No earnings yet", color = TextMuted, fontSize = 13.5.sp)
+            Text(tr("No earnings yet"), color = TextMuted, fontSize = 13.5.sp)
             return@Row
         }
         days.forEach { d ->
@@ -241,7 +241,7 @@ private fun PeriodRow(icon: ImageVector, label: String, amount: Int, tint: Color
             contentAlignment = Alignment.Center,
         ) { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp)) }
         Spacer(Modifier.width(Space.m))
-        Text(label, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text(money(amount), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -250,13 +250,13 @@ private fun PeriodRow(icon: ImageVector, label: String, amount: Int, tint: Color
 @Composable
 private fun QuickActions(nav: NavHostController) {
     Card(padding = Dp16.S) {
-        Text("Quick Actions", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(tr("Quick Actions"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(Space.m))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            QuickTile(Modifier.weight(1f), Icons.Filled.ArrowUpward, "Withdraw") { nav.navigate(Routes.WITHDRAW) }
-            QuickTile(Modifier.weight(1f), Icons.Filled.Settings, "Payout\nSettings") { nav.navigate(Routes.PAYOUT_SETTINGS) }
-            QuickTile(Modifier.weight(1f), Icons.Filled.AccountBalance, "Bank\nAccounts") { nav.navigate(Routes.BANK_ACCOUNTS) }
-            QuickTile(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, "Help &\nSupport") { nav.navigate(Routes.WALLET_HELP) }
+            QuickTile(Modifier.weight(1f), Icons.Filled.ArrowUpward, tr("Withdraw")) { nav.navigate(Routes.WITHDRAW) }
+            QuickTile(Modifier.weight(1f), Icons.Filled.Settings, tr("Payout\nSettings")) { nav.navigate(Routes.PAYOUT_SETTINGS) }
+            QuickTile(Modifier.weight(1f), Icons.Filled.AccountBalance, tr("Bank\nAccounts")) { nav.navigate(Routes.BANK_ACCOUNTS) }
+            QuickTile(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, tr("Help &\nSupport")) { nav.navigate(Routes.WALLET_HELP) }
         }
     }
 }
@@ -269,6 +269,6 @@ private fun QuickTile(modifier: Modifier, icon: ImageVector, label: String, onCl
             contentAlignment = Alignment.Center,
         ) { Icon(icon, contentDescription = label, tint = Purple, modifier = Modifier.size(23.dp)) }
         Spacer(Modifier.height(6.dp))
-        Text(label, color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 12.sp)
+        Text(tr(label), color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 12.sp)
     }
 }

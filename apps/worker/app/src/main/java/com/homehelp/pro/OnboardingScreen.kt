@@ -70,28 +70,28 @@ fun OnboardingScreen(vm: AppViewModel, nav: NavHostController) {
     val submitted = vm.onboardingSubmittedAt != null
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Getting started")
+        Header(tr("Getting started"))
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Card {
                 Text(
-                    if (submitted) "Sent for approval" else "Welcome, ${vm.workerName.split(" ").firstOrNull() ?: ""}",
+                    if (submitted) tr("Sent for approval") else "Welcome, ${vm.workerName.split(" ").firstOrNull() ?: ""}",
                     fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark,
                 )
                 Spacer(Modifier.height(Space.xs))
                 Text(
                     if (submitted)
-                        "Your admin is reviewing your profile. You'll be able to take jobs once they approve you — we'll let you know. You can still fix anything below."
+                        tr("Your admin is reviewing your profile. You'll be able to take jobs once they approve you — we'll let you know. You can still fix anything below.")
                     else
-                        "Finish these steps so your admin can approve you. You can do them in any order.",
+                        tr("Finish these steps so your admin can approve you. You can do them in any order."),
                     fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(Space.m))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${vm.onboardingDone} of ${vm.onboardingTotal} done", fontSize = 12.5.sp, color = TextGray, modifier = Modifier.weight(1f))
-                    if (submitted) StatusPill("Submitted", GreenLight, GreenSuccess)
+                    if (submitted) StatusPill(tr("Submitted"), GreenLight, GreenSuccess)
                 }
                 Spacer(Modifier.height(Space.s))
                 LinearProgressIndicator(
@@ -108,7 +108,7 @@ fun OnboardingScreen(vm: AppViewModel, nav: NavHostController) {
                         StepNumber(i + 1, s.done, s.optional)
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
-                            Text(s.label, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                            Text(tr(s.label), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
                             Text(
                                 s.detail,
                                 fontSize = 12.sp,
@@ -127,12 +127,12 @@ fun OnboardingScreen(vm: AppViewModel, nav: NavHostController) {
                     StepNumber(vm.onboardingSteps.size + 1, submitted, false)
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("Review & Submit", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                        Text(tr("Review & Submit"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
                         Text(
                             when {
-                                submitted -> "Sent — your admin is reviewing it"
-                                vm.canSubmitOnboarding -> "Everything's filled in. Send it for approval."
-                                else -> "Finish the steps above first"
+                                submitted -> tr("Sent — your admin is reviewing it")
+                                vm.canSubmitOnboarding -> tr("Everything's filled in. Send it for approval.")
+                                else -> tr("Finish the steps above first")
                             },
                             fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
                         )
@@ -141,7 +141,7 @@ fun OnboardingScreen(vm: AppViewModel, nav: NavHostController) {
                 if (!submitted) {
                     Spacer(Modifier.height(Space.m))
                     PrimaryButton(
-                        "Submit for approval",
+                        tr("Submit for approval"),
                         enabled = vm.canSubmitOnboarding && !vm.submittingOnboarding,
                         loading = vm.submittingOnboarding,
                     ) {
@@ -157,7 +157,7 @@ fun OnboardingScreen(vm: AppViewModel, nav: NavHostController) {
                         IconChip(Icons.Filled.Check, GreenSuccess, GreenLight)
                         Spacer(Modifier.width(Space.m))
                         Text(
-                            "Your admin still has to verify your documents and approve your skills before you go live. Nothing else is needed from you right now.",
+                            tr("Your admin still has to verify your documents and approve your skills before you go live. Nothing else is needed from you right now."),
                             fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
                         )
                     }

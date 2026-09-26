@@ -158,11 +158,11 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(18.dp))
                 Row {
-                    Text("HomeHelp", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, letterSpacing = (-0.8).sp)
-                    Text(" Pro", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFC4B5FD), letterSpacing = (-0.8).sp)
+                    Text(tr("HomeHelp"), fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, letterSpacing = (-0.8).sp)
+                    Text(tr(" Pro"), fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFC4B5FD), letterSpacing = (-0.8).sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                Text("Your daily workforce companion", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text(tr("Your daily workforce companion"), color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
             }
         }
 
@@ -177,15 +177,15 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 .background(CardBg)
                 .padding(Space.xxl),
         ) {
-            Text("Welcome back 👋", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = TextDark, letterSpacing = (-0.6).sp)
+            Text(tr("Welcome back 👋"), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = TextDark, letterSpacing = (-0.6).sp)
             Spacer(Modifier.height(4.dp))
-            Text("Sign in to continue to your dashboard", fontSize = 15.sp, color = TextGray)
+            Text(tr("Sign in to continue to your dashboard"), fontSize = 15.sp, color = TextGray)
             Spacer(Modifier.height(28.dp))
 
             OutlinedTextField(
                 value = phone,
                 onValueChange = { if (it.length <= 10 && it.all(Char::isDigit)) phone = it },
-                label = { Text("Mobile number") },
+                label = { Text(tr("Mobile number")) },
                 leadingIcon = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Spacer(Modifier.width(10.dp))
@@ -206,7 +206,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 OutlinedTextField(
                     value = otp,
                     onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) otp = it },
-                    label = { Text("4-digit OTP") },
+                    label = { Text(tr("4-digit OTP")) },
                     leadingIcon = { Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -214,7 +214,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                     shape = RoundedCornerShape(Radius.field),
                     colors = fieldColors,
                 )
-                Text("Enter the OTP sent to your mobile", color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp))
+                Text(tr("Enter the OTP sent to your mobile"), color = TextGray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp))
                 if (vm.loginError != null) {
                     Surface(
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -229,7 +229,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                PrimaryButton("Verify & Continue", enabled = otp.length == 4 && !vm.loggingIn, loading = vm.loggingIn) {
+                PrimaryButton(tr("Verify & Continue"), enabled = otp.length == 4 && !vm.loggingIn, loading = vm.loggingIn) {
                     vm.login(phone, otp)
                 }
                 // Navigate to Home ONLY after the backend confirms the worker is registered & active.
@@ -253,7 +253,7 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(4.dp))
                 // Must round-trip to the server: it issues and stores the code we later verify against.
-                PrimaryButton("Get OTP", enabled = phone.length == 10 && !vm.requestingOtp, loading = vm.requestingOtp) {
+                PrimaryButton(tr("Get OTP"), enabled = phone.length == 10 && !vm.requestingOtp, loading = vm.requestingOtp) {
                     vm.requestLoginOtp(phone)
                 }
             }
@@ -272,17 +272,17 @@ fun LoginScreen(vm: AppViewModel, nav: NavHostController) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TrustItem("🛡️", "Secure")
-                TrustItem("⚡", "Instant OTP")
-                TrustItem("🤝", "Trusted")
+                TrustItem("🛡️", tr("Secure"))
+                TrustItem("⚡", tr("Instant OTP"))
+                TrustItem("🤝", tr("Trusted"))
             }
             Spacer(Modifier.height(28.dp))
             Text(
-                "By continuing, you agree to our",
+                tr("By continuing, you agree to our"),
                 color = TextGray, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "Terms & Conditions & Privacy Policy",
+                tr("Terms & Conditions & Privacy Policy"),
                 color = Purple, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -316,7 +316,7 @@ private fun TrustItem(emoji: String, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(emoji, fontSize = 20.sp)
         Spacer(Modifier.height(4.dp))
-        Text(label, color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(tr(label), color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -382,8 +382,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
 
     // Time-of-day greeting + first name for the header.
     val greetHour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
-    val greeting = when { greetHour < 12 -> "Good morning"; greetHour < 17 -> "Good afternoon"; else -> "Good evening" }
-    val firstName = vm.workerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "Partner" }
+    val greeting = when { greetHour < 12 -> tr("Good morning"); greetHour < 17 -> tr("Good afternoon"); else -> tr("Good evening") }
+    val firstName = vm.workerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { tr("Partner") }
 
     // Today's incentive was derived here for the progress card. That figure left Home when the
     // card was cut to the two job counts, so the wallet-ledger scan it needed went with it.
@@ -553,12 +553,12 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 if (route != null && nextJob == null) {
                     ActiveJobBanner(
                         label = when (vm.jobStatus) {
-                            JobStatus.REQUESTED -> "New job request"
-                            JobStatus.ACCEPTED -> "Job accepted"
-                            JobStatus.ON_THE_WAY -> "On the way to customer"
-                            JobStatus.ARRIVED -> "Arrived — start the service"
-                            JobStatus.IN_PROGRESS -> "Service in progress"
-                            else -> "Active job"
+                            JobStatus.REQUESTED -> tr("New job request")
+                            JobStatus.ACCEPTED -> tr("Job accepted")
+                            JobStatus.ON_THE_WAY -> tr("On the way to customer")
+                            JobStatus.ARRIVED -> tr("Arrived — start the service")
+                            JobStatus.IN_PROGRESS -> tr("Service in progress")
+                            else -> tr("Active job")
                         },
                         subtitle = "${job.services.joinToString(", ")} · tap to resume",
                         onResume = { nav.navigate(route) },
@@ -584,7 +584,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                         if (j != null && vm.jobStatus == JobStatus.ACCEPTED) vm.startOnTheWay()
                         val lat = j?.lat ?: 0.0
                         val lng = j?.lng ?: 0.0
-                        val label = nextJob.service.ifBlank { nextJob.customerName.ifBlank { "Customer" } }
+                        val label = nextJob.service.ifBlank { nextJob.customerName.ifBlank { tr("Customer") } }
                         if (lat != 0.0 || lng != 0.0) {
                             // No origin passed: google.navigation: starts from the device's own
                             // location, and Home has no GPS fix of its own to hand over.
@@ -627,13 +627,13 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                      * from across the city would invite marking arrival early, which is what the
                      * customer's ETA and the start-window bonus are both measured against. */
                     startLabel = when {
-                        vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> "Reached Location"
-                        vm.jobStatus == JobStatus.ON_THE_WAY -> "On The Way"
-                        vm.jobStatus == JobStatus.ARRIVED -> "Start Service"
+                        vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> tr("Reached Location")
+                        vm.jobStatus == JobStatus.ON_THE_WAY -> tr("On The Way")
+                        vm.jobStatus == JobStatus.ARRIVED -> tr("Start Service")
                         // Points at the one action left once the booked time is done.
-                        vm.jobStatus == JobStatus.IN_PROGRESS && serviceTimeUp -> "End Service"
-                        vm.jobStatus == JobStatus.IN_PROGRESS -> "Continue"
-                        else -> "Start Job"
+                        vm.jobStatus == JobStatus.IN_PROGRESS && serviceTimeUp -> tr("End Service")
+                        vm.jobStatus == JobStatus.IN_PROGRESS -> tr("Continue")
+                        else -> tr("Start Job")
                     },
                     startIcon = when {
                         vm.jobStatus == JobStatus.ON_THE_WAY && atCustomer -> Icons.Filled.CheckCircle
@@ -644,15 +644,15 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     // already drove there and the customer is in the room.
                     actionsEnabled = vm.jobStatus != JobStatus.IN_PROGRESS,
                     timerText = serviceElapsedText,
-                    timerLabel = if (serviceTimeUp) "Time up" else "Elapsed",
+                    timerLabel = if (serviceTimeUp) tr("Time up") else tr("Elapsed"),
                     badge = when (vm.jobStatus) {
                         // The booked time finishing is NOT the service ending — the worker still
                         // has to end it with the proof photo. Say which of the two has happened.
-                        JobStatus.IN_PROGRESS -> if (serviceTimeUp) "TIME COMPLETE" else "IN PROGRESS"
-                        JobStatus.ON_THE_WAY -> "ON THE WAY"
-                        JobStatus.ARRIVED -> "ARRIVED"
-                        JobStatus.ACCEPTED -> "ACCEPTED"
-                        else -> "NEXT JOB"
+                        JobStatus.IN_PROGRESS -> if (serviceTimeUp) tr("TIME COMPLETE") else tr("IN PROGRESS")
+                        JobStatus.ON_THE_WAY -> tr("ON THE WAY")
+                        JobStatus.ARRIVED -> tr("ARRIVED")
+                        JobStatus.ACCEPTED -> tr("ACCEPTED")
+                        else -> tr("NEXT JOB")
                     },
                 )
             }
@@ -724,8 +724,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 OnlineStatusStrip(
                     background = BrandGradient,
                     onLight = false,
-                    title = "New Job Request",
-                    subtitle = "A customer needs your service — tap to view",
+                    title = tr("New Job Request"),
+                    subtitle = tr("A customer needs your service — tap to view"),
                     trailing = null,
                     onClick = {
                         vm.requestJob { found ->
@@ -740,10 +740,10 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             // generic weekend copy rather than naming a bonus the worker cannot actually earn.
             val nextBonusTier = vm.shaktiBonus?.tiers?.firstOrNull { it.days > (vm.shaktiBonus?.workingDays ?: 0) }
             BonusBanner(
-                title = "Weekend Bonus!",
+                title = tr("Weekend Bonus!"),
                 subtitle = nextBonusTier
                     ?.let { "Earn ₹${it.amount} extra after ${it.days} working days" }
-                    ?: "Extra incentive on weekend jobs — tap for details",
+                    ?: tr("Extra incentive on weekend jobs — tap for details"),
                 onDetails = { nav.navigate(Routes.SHAKTI) },
             )
 
@@ -789,7 +789,7 @@ private fun HomeHeaderRow(
         Spacer(Modifier.width(6.dp))
         Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
             CircleButton(onClick = onNotifications) {
-                Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", tint = TextDark, modifier = Modifier.size(22.dp))
+                Icon(Icons.Outlined.Notifications, contentDescription = tr("Notifications"), tint = TextDark, modifier = Modifier.size(22.dp))
             }
             if (unread > 0) {
                 Box(
@@ -869,12 +869,12 @@ private fun OnlineStatusStrip(
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                title,
+                tr(title),
                 color = if (onLight) TextDark else Color.White,
                 fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
             )
             Text(
-                subtitle,
+                tr(subtitle),
                 color = if (onLight) TextGray else Color.White.copy(alpha = 0.9f),
                 fontSize = 11.5.sp, maxLines = 1,
             )
@@ -963,9 +963,9 @@ private fun JobTimelineItem(b: Booking, isLast: Boolean, onClick: () -> Unit) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text(b.service ?: "Service", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.5.sp, maxLines = 1)
+                        Text(b.service ?: tr("Service"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.5.sp, maxLines = 1)
                         Spacer(Modifier.height(1.dp))
-                        Text(b.customerName ?: "Customer", color = TextGray, fontSize = 12.sp, maxLines = 1)
+                        Text(b.customerName ?: tr("Customer"), color = TextGray, fontSize = 12.sp, maxLines = 1)
                         if (!b.timeInfo.isNullOrBlank()) {
                             Spacer(Modifier.height(2.dp))
                             Text("🕐 ${b.timeInfo}", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
@@ -995,8 +995,8 @@ private fun SevenDayEarningsCard(days: List<Triple<String, Int, Boolean>>) {
     Card {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("Last 7 Days", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
-                Text("Daily earnings", fontSize = 12.sp, color = TextGray)
+                Text(tr("Last 7 Days"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                Text(tr("Daily earnings"), fontSize = 12.sp, color = TextGray)
             }
             Text("₹${shortInr(total)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 18.sp)
         }
@@ -1028,10 +1028,10 @@ private fun GoalDialog(current: Int, onDismiss: () -> Unit, onConfirm: (Int) -> 
     var value by remember { mutableStateOf(current.toString()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Daily earnings goal", fontWeight = FontWeight.Bold, color = TextDark) },
+        title = { Text(tr("Daily earnings goal"), fontWeight = FontWeight.Bold, color = TextDark) },
         text = {
             Column {
-                Text("Set a target to track your progress each day.", fontSize = 13.sp, color = TextGray)
+                Text(tr("Set a target to track your progress each day."), fontSize = 13.sp, color = TextGray)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = value,
@@ -1053,10 +1053,10 @@ private fun GoalDialog(current: Int, onDismiss: () -> Unit, onConfirm: (Int) -> 
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(value.toIntOrNull() ?: current) }) {
-                Text("Save", color = Purple, fontWeight = FontWeight.SemiBold)
+                Text(tr("Save"), color = Purple, fontWeight = FontWeight.SemiBold)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextGray) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel"), color = TextGray) } },
     )
 }
 

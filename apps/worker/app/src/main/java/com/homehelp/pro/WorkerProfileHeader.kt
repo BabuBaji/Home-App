@@ -89,7 +89,7 @@ fun VerifiedAvatar(onClick: () -> Unit) {
         ) {
             Image(
                 painter = painterResource(R.drawable.dummy_avatar),
-                contentDescription = "Profile photo",
+                contentDescription = tr("Profile photo"),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(Radius.pill)),
             )
@@ -106,7 +106,7 @@ fun VerifiedAvatar(onClick: () -> Unit) {
         ) {
             Icon(
                 Icons.Filled.Verified,
-                contentDescription = "Trusted worker",
+                contentDescription = tr("Trusted worker"),
                 tint = Purple,
                 modifier = Modifier.size(16.dp),
             )
@@ -151,7 +151,7 @@ fun OnlineStatusPill(online: Boolean, onClick: () -> Unit) {
     ) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(Radius.pill)).background(fg))
         Spacer(Modifier.width(7.dp))
-        Text(if (online) "Online" else "Offline", color = fg, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text(if (online) tr("Online") else tr("Offline"), color = fg, fontWeight = FontWeight.Bold, fontSize = 14.sp)
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = fg, modifier = Modifier.size(17.dp))
     }
 }

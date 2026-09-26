@@ -83,16 +83,16 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg).imePadding()) {
-        Header(title = job?.customerName ?: "Customer", onBack = { nav.popBackStack() }) {
+        Header(title = job?.customerName ?: tr("Customer"), onBack = { nav.popBackStack() }) {
             Box(
                 Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill)).background(Primary50)
                     .clickable { job?.customerPhone?.let { dialCustomerPhone(ctx, it) } },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Phone, contentDescription = "Call customer", tint = Purple, modifier = Modifier.size(20.dp)) }
+            ) { Icon(Icons.Filled.Phone, contentDescription = tr("Call customer"), tint = Purple, modifier = Modifier.size(20.dp)) }
         }
 
         if (job == null) {
-            EmptyState("💬", "No active job", "Chat opens once you accept a job.")
+            EmptyState("💬", tr("No active job"), tr("Chat opens once you accept a job."))
             return@Column
         }
 
@@ -104,7 +104,7 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
             ) {
                 Text("💬", fontSize = 40.sp)
                 Spacer(Modifier.height(Space.m))
-                Text("No messages yet", color = TextDark, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(tr("No messages yet"), color = TextDark, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Send ${job.customerName} an update — they see it in their app.",
@@ -131,7 +131,7 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
                 value = draft,
                 onValueChange = { draft = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Message ${job.customerName}…", fontSize = 14.sp) },
+                placeholder = { Text(tr("Message") + " ${job.customerName}…", fontSize = 14.sp) },
                 shape = RoundedCornerShape(Radius.pill),
                 maxLines = 3,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -149,7 +149,7 @@ fun JobChatScreen(vm: AppViewModel, nav: NavHostController) {
                     .background(if (canSend) Purple else Divider)
                     .clickable(enabled = canSend) { vm.sendMessage(draft); draft = "" },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp)) }
+            ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = tr("Send"), tint = Color.White, modifier = Modifier.size(20.dp)) }
         }
     }
 }
@@ -226,10 +226,10 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { while (true) { vm.loadJobState(); delay(5_000) } }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header(title = "Add Extra Service", onBack = { nav.popBackStack() })
+        Header(title = tr("Add Extra Service"), onBack = { nav.popBackStack() })
 
         if (vm.activeJob == null) {
-            EmptyState("➕", "No active job", "Extras attach to a job you're working on.")
+            EmptyState("➕", tr("No active job"), tr("Extras attach to a job you're working on."))
             return@Column
         }
 
@@ -238,7 +238,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(Space.l),
         ) {
             Card {
-                Text("Suggested extras", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Suggested extras"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.m))
                 // Tap to prefill — typing a price on a phone mid-job is the slow path.
                 SUGGESTED_EXTRAS.chunked(2).forEach { row ->
@@ -250,7 +250,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                                     .padding(horizontal = 10.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(label, color = TextDark, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                                Text(tr(label), color = TextDark, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
                                 Text("₹$amount", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -261,12 +261,12 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
             }
 
             Card {
-                Text("Custom extra", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Custom extra"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.m))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("What did you do?") },
+                    label = { Text(tr("What did you do?")) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(Radius.button),
                     singleLine = true,
@@ -275,7 +275,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 OutlinedTextField(
                     value = price,
                     onValueChange = { v -> price = v.filter { it.isDigit() }.take(5) },
-                    label = { Text("Price (₹)") },
+                    label = { Text(tr("Price (₹)")) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(Radius.button),
                     singleLine = true,
@@ -283,7 +283,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 )
                 Spacer(Modifier.height(Space.l))
                 PrimaryButton(
-                    "Add Extra",
+                    tr("Add Extra"),
                     modifier = Modifier.fillMaxWidth(),
                     enabled = name.isNotBlank() && (price.toIntOrNull() ?: 0) > 0,
                 ) {
@@ -296,7 +296,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
             if (vm.extras.isNotEmpty()) {
                 Card {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Added to this job", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Text(tr("Added to this job"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         // Only tasks the customer approved are billed and counted here.
                         Text("₹${vm.extrasTotal}", color = GreenSuccess, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
@@ -309,11 +309,11 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                             Column(Modifier.weight(1f)) {
                                 Text(e.name, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                 val (label, tone) = when (e.status) {
-                                    "approved" -> "Approved by customer" to GreenSuccess
-                                    "declined" -> "Declined by customer" to RedCancel
-                                    else -> "Waiting for customer to approve" to TextGray
+                                    "approved" -> tr("Approved by customer") to GreenSuccess
+                                    "declined" -> tr("Declined by customer") to RedCancel
+                                    else -> tr("Waiting for customer to approve") to TextGray
                                 }
-                                Text(label, color = tone, fontSize = 11.5.sp)
+                                Text(tr(label), color = tone, fontSize = 11.5.sp)
                             }
                             Text("₹${e.price}", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             if (e.status == "pending") {
@@ -322,7 +322,7 @@ fun AddExtraServiceScreen(vm: AppViewModel, nav: NavHostController) {
                                     Modifier.size(30.dp).clip(RoundedCornerShape(Radius.pill)).background(RedLight)
                                         .clickable { vm.removeExtra(e.id) },
                                     contentAlignment = Alignment.Center,
-                                ) { Icon(Icons.Filled.Close, contentDescription = "Withdraw", tint = RedCancel, modifier = Modifier.size(16.dp)) }
+                                ) { Icon(Icons.Filled.Close, contentDescription = tr("Withdraw"), tint = RedCancel, modifier = Modifier.size(16.dp)) }
                             }
                         }
                     }

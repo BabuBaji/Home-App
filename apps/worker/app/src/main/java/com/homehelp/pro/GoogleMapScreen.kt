@@ -50,7 +50,7 @@ fun HyderabadMapScreen(nav: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Hyderabad", onBack = { nav.popBackStack() })
+        Header(tr("Hyderabad"), onBack = { nav.popBackStack() })
         if (hasGoogleKey) {
             GoogleHyderabadMap(Modifier.fillMaxSize())
         } else {
@@ -58,13 +58,13 @@ fun HyderabadMapScreen(nav: NavHostController) {
             OsmMap(
                 destLat = HYD_LAT,
                 destLng = HYD_LNG,
-                destLabel = "Hyderabad",
+                destLabel = tr("Hyderabad"),
                 myLat = null,
                 myLng = null,
                 modifier = Modifier.fillMaxSize(),
             )
             Text(
-                "Showing OpenStreetMap. Add a Google Maps API key to switch to Google tiles.",
+                tr("Showing OpenStreetMap. Add a Google Maps API key to switch to Google tiles."),
                 color = TextGray,
                 fontSize = 11.sp,
                 modifier = Modifier.fillMaxWidth().background(ScreenBg).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -86,8 +86,8 @@ private fun GoogleHyderabadMap(modifier: Modifier) {
     ) {
         Marker(
             state = MarkerState(position = HYDERABAD),
-            title = "Hyderabad",
-            snippet = "Telangana, India",
+            title = tr("Hyderabad"),
+            snippet = tr("Telangana, India"),
         )
     }
 }

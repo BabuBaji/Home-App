@@ -112,16 +112,16 @@ private fun FlowHero(icon: androidx.compose.ui.graphics.vector.ImageVector, titl
         ) { Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp)) }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+            Text(tr(title), color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(tr(subtitle), color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
         }
         Spacer(Modifier.width(Space.s))
         Column(
             Modifier.width(120.dp).clip(RoundedCornerShape(10.dp)).background(Primary50).padding(8.dp),
         ) {
-            Text("💡 Tip", color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text(tr("💡 Tip"), color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(2.dp))
-            Text(tip, color = TextDark, fontSize = 9.sp, lineHeight = 11.sp)
+            Text(tr(tip), color = TextDark, fontSize = 9.sp, lineHeight = 11.sp)
         }
     }
 }
@@ -136,7 +136,7 @@ private fun FlowCustomerPhoto(url: String?, initials: String, size: Int = 44) {
     ) {
         if (!url.isNullOrBlank()) {
             SubcomposeAsyncImage(
-                model = url, contentDescription = "Customer", contentScale = ContentScale.Crop,
+                model = url, contentDescription = tr("Customer"), contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
                 loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs) },
                 error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs) },
@@ -162,7 +162,7 @@ private fun FlowCustomerStrip(job: Job) {
                 Column(Modifier.weight(1f)) {
                     Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                        Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(job.customerType.orEmpty().ifBlank { tr("Residential") }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -186,15 +186,15 @@ private fun FlowCustomerStrip(job: Job) {
         Box(Modifier.width(1.dp).height(62.dp).background(Divider))
         Spacer(Modifier.width(Space.m))
         Column(Modifier.width(108.dp)) {
-            Text("Service", color = TextGray, fontSize = 10.sp)
-            Text(job.services.firstOrNull() ?: "Service", color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
+            Text(tr("Service"), color = TextGray, fontSize = 10.sp)
+            Text(job.services.firstOrNull() ?: tr("Service"), color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
             Spacer(Modifier.height(7.dp))
-            Text("Job ID", color = TextGray, fontSize = 10.sp)
+            Text(tr("Job ID"), color = TextGray, fontSize = 10.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(job.id, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(4.dp))
                 Icon(
-                    Icons.Filled.ContentCopy, contentDescription = "Copy", tint = Purple,
+                    Icons.Filled.ContentCopy, contentDescription = tr("Copy"), tint = Purple,
                     modifier = Modifier.size(13.dp).clickable {
                         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("Job ID", job.id)); toast(ctx, "Job ID copied")
@@ -247,7 +247,7 @@ private fun PhotoSlotCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(11.dp))
                 Spacer(Modifier.width(3.dp))
-                Text("Captured", color = GreenSuccess, fontSize = 9.5.sp, fontWeight = FontWeight.Medium)
+                Text(tr("Captured"), color = GreenSuccess, fontSize = 9.5.sp, fontWeight = FontWeight.Medium)
             }
             Spacer(Modifier.height(5.dp))
             if (bmp != null) {
@@ -267,7 +267,7 @@ private fun PhotoSlotCard(
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = null, tint = Purple, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(3.dp))
-                Text("Retake", color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Retake"), color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
         } else {
             Box(
@@ -280,7 +280,7 @@ private fun PhotoSlotCard(
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp)) }
                     Spacer(Modifier.height(5.dp))
-                    Text("Tap to Capture", color = Purple, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Tap to Capture"), color = Purple, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -306,8 +306,8 @@ private fun EnsureStrip() {
         Text("🛡", fontSize = 14.sp)
         Spacer(Modifier.width(Space.s))
         Column(Modifier.weight(1f)) {
-            Text("Ensure the following", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("Good lighting • Clear visibility • All areas in frame • No blur", color = TextGray, fontSize = 10.sp)
+            Text(tr("Ensure the following"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Good lighting • Clear visibility • All areas in frame • No blur"), color = TextGray, fontSize = 10.sp)
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
     }
@@ -317,15 +317,15 @@ private fun EnsureStrip() {
 private fun NotesField(value: String, placeholder: String, onChange: (String) -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         Row {
-            Text("Add Notes ", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text("(Optional)", color = TextGray, fontSize = 13.sp)
+            Text(tr("Add Notes "), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(tr("(Optional)"), color = TextGray, fontSize = 13.sp)
         }
         Spacer(Modifier.height(5.dp))
         OutlinedTextField(
             value = value,
             onValueChange = { if (it.length <= 200) onChange(it) },
             modifier = Modifier.fillMaxWidth().height(72.dp),
-            placeholder = { Text(placeholder, fontSize = 11.5.sp, color = TextMuted) },
+            placeholder = { Text(tr(placeholder), fontSize = 11.5.sp, color = TextMuted) },
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = TextDark),
             shape = RoundedCornerShape(10.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -388,7 +388,7 @@ private fun PhotoStepScreen(
     Column(Modifier.fillMaxSize().background(Color.White)) {
         FlowTopBar(title) { nav.popBackStack() }
         if (job == null) {
-            EmptyState("📷", "No active job", "Photos attach to a job you're working on.")
+            EmptyState("📷", tr("No active job"), tr("Photos attach to a job you're working on."))
             return@Column
         }
         Column(
@@ -407,7 +407,7 @@ private fun PhotoStepScreen(
             val total = vm.photoSlots.size
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Photos Required ", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Photos Required "), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text(
                         "($done/$total)",
                         color = if (total > 0 && done == total) GreenSuccess else Purple,
@@ -420,14 +420,14 @@ private fun PhotoStepScreen(
                         }.padding(horizontal = 4.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Why photos?", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Why photos?"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp))
                     }
                 }
                 Spacer(Modifier.height(Space.s))
                 if (vm.photoSlots.isEmpty()) {
-                    Text("Loading required shots…", color = TextMuted, fontSize = 12.sp)
+                    Text(tr("Loading required shots…"), color = TextMuted, fontSize = 12.sp)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     vm.photoSlots.forEach { slot ->
@@ -451,7 +451,7 @@ private fun PhotoStepScreen(
             // ── Add additional photo (After Photos only).
             if (phase == "after") {
                 val extra = vm.photoFor("after", "Additional")
-                Text("Add Additional Photo (Optional)", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Add Additional Photo (Optional)"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.5.dp, Purple.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -461,8 +461,8 @@ private fun PhotoStepScreen(
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text(if (extra != null) "Photo added ✓" else "Add Photo", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("Capture any additional photo (optional)", color = TextGray, fontSize = 11.5.sp)
+                        Text(if (extra != null) tr("Photo added ✓") else tr("Add Photo"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Capture any additional photo (optional)"), color = TextGray, fontSize = 11.5.sp)
                     }
                     Box(
                         Modifier.clip(RoundedCornerShape(Radius.button)).background(Color.White).border(1.5.dp, Purple, RoundedCornerShape(Radius.button))
@@ -471,7 +471,7 @@ private fun PhotoStepScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(5.dp))
-                            Text("Take Photo", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Take Photo"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -485,8 +485,8 @@ private fun PhotoStepScreen(
                 Text("🔔", fontSize = 17.sp)
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Reminder", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text(footerNote, color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
+                    Text(tr("Reminder"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr(footerNote), color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
                 }
             }
         }
@@ -497,7 +497,7 @@ private fun PhotoStepScreen(
                 val canContinue = vm.photosDone(phase) >= MIN_PHOTOS
                 if (phase == "after") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                        OutlineButton("← BACK", modifier = Modifier.weight(1f)) { nav.popBackStack() }
+                        OutlineButton(tr("← BACK"), modifier = Modifier.weight(1f)) { nav.popBackStack() }
                         Box(Modifier.weight(1.7f)) {
                             PrimaryButton(ctaLabel, enabled = canContinue) { vm.saveJobNotes(phase, notes); onContinue() }
                         }
@@ -508,7 +508,7 @@ private fun PhotoStepScreen(
                 if (!canContinue) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Capture at least 1 photo to continue.",
+                        tr("Capture at least 1 photo to continue."),
                         color = TextMuted, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                     )
                 }
@@ -521,12 +521,12 @@ private fun PhotoStepScreen(
 @Composable
 fun BeforePhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScreen(
     vm = vm, nav = nav, phase = "before",
-    title = "Before Photos",
-    subtitle = "Take clear photos of the area/items before starting the service.",
-    tip = "Good photos help avoid disputes and improve customer satisfaction.",
-    notesPlaceholder = "Any special instructions or observations before starting…",
-    footerNote = "Please capture all required photos before starting the service. You can't edit photos after starting.",
-    ctaLabel = "Continue to Work in Progress",
+    title = tr("Before Photos"),
+    subtitle = tr("Take clear photos of the area/items before starting the service."),
+    tip = tr("Good photos help avoid disputes and improve customer satisfaction."),
+    notesPlaceholder = tr("Any special instructions or observations before starting…"),
+    footerNote = tr("Please capture all required photos before starting the service. You can't edit photos after starting."),
+    ctaLabel = tr("Continue to Work in Progress"),
     /* Clear the whole pre-service chain, not just this screen. Popping only BEFORE_PHOTOS left the
      * OTP screen sitting underneath, so Back out of a running service landed the worker on "enter
      * the customer's code" for a job they had already started. Back now goes to Home, which shows
@@ -538,12 +538,12 @@ fun BeforePhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScre
 @Composable
 fun AfterPhotosScreen(vm: AppViewModel, nav: NavHostController) = PhotoStepScreen(
     vm = vm, nav = nav, phase = "after",
-    title = "After Photos",
-    subtitle = "Great! Work in progress completed. Please capture after photos of the area.",
-    tip = "Clear after photos help build trust and improve customer satisfaction.",
-    notesPlaceholder = "Any special instructions or observations after completing the service…",
-    footerNote = "Please ensure all after photos are captured before proceeding.",
-    ctaLabel = "Continue to Customer Rating",
+    title = tr("After Photos"),
+    subtitle = tr("Great! Work in progress completed. Please capture after photos of the area."),
+    tip = tr("Clear after photos help build trust and improve customer satisfaction."),
+    notesPlaceholder = tr("Any special instructions or observations after completing the service…"),
+    footerNote = tr("Please ensure all after photos are captured before proceeding."),
+    ctaLabel = tr("Continue to Customer Rating"),
     onContinue = { nav.navigate(Routes.CUSTOMER_SIGN) },
 )
 
@@ -560,9 +560,9 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadJobState() }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowTopBar("Customer Sign & Rating") { nav.popBackStack() }
+        FlowTopBar(tr("Customer Sign & Rating")) { nav.popBackStack() }
         if (job == null) {
-            EmptyState("⭐", "No active job", "Rating attaches to a job you're working on.")
+            EmptyState("⭐", tr("No active job"), tr("Rating attaches to a job you're working on."))
             return@Column
         }
         Column(
@@ -572,9 +572,9 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
             // ── Hero (own card).
             PhotoCard {
                 FlowHero(
-                    Icons.Filled.Star, "Customer Rating",
-                    "Please collect the customer's rating to complete the service.",
-                    "A quick rating from the customer helps us improve our service quality.",
+                    Icons.Filled.Star, tr("Customer Rating"),
+                    tr("Please collect the customer's rating to complete the service."),
+                    tr("A quick rating from the customer helps us improve our service quality."),
                 )
             }
             // ── Customer (own strip, with photo).
@@ -591,17 +591,17 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.s))
                     Column(Modifier.weight(1f)) {
-                        Text("Service Completed!", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text("Please confirm with the customer and collect their rating.", color = TextGray, fontSize = 10.5.sp)
+                        Text(tr("Service Completed!"), color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Please confirm with the customer and collect their rating."), color = TextGray, fontSize = 10.5.sp)
                     }
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).border(1.dp, GreenSuccess, RoundedCornerShape(Radius.pill)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        Text("All tasks done", color = GreenSuccess, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("All tasks done"), color = GreenSuccess, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(Modifier.height(Space.l))
 
                 // ── Rating — the priority, centered and prominent.
-                Text("How would you rate this service?", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                Text(tr("How would you rate this service?"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                 Spacer(Modifier.height(Space.m))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     (1..5).forEach { i ->
@@ -617,25 +617,25 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
                     Text(ratingWord(rating), color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, lineHeight = 17.sp)
                 }
                 Spacer(Modifier.height(Space.l))
-                Text("Add Notes ", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Add Notes "), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(5.dp))
-                NotesField(notes, "Any additional comments from the customer…") { notes = it }
+                NotesField(notes, tr("Any additional comments from the customer…")) { notes = it }
             }
             // ── Thank you.
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Primary50).padding(12.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Thank You!", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Your professionalism and customer satisfaction are highly appreciated.", color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
+                    Text(tr("Thank You!"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Your professionalism and customer satisfaction are highly appreciated."), color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
                 }
             }
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Row(Modifier.padding(Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                OutlineButton("← BACK", modifier = Modifier.weight(1f)) { nav.popBackStack() }
+                OutlineButton(tr("← BACK"), modifier = Modifier.weight(1f)) { nav.popBackStack() }
                 Box(Modifier.weight(1.6f)) {
-                    PrimaryButton("MARK JOB AS COMPLETED", enabled = rating > 0) {
+                    PrimaryButton(tr("MARK JOB AS COMPLETED"), enabled = rating > 0) {
                         vm.saveSignature("", rating, notes)
                         vm.endService()
                         nav.navigate(Routes.JOB_COMPLETED) { popUpTo(Routes.IN_PROGRESS) { inclusive = true } }
@@ -647,11 +647,11 @@ fun CustomerSignScreen(vm: AppViewModel, nav: NavHostController) {
 }
 
 private fun ratingWord(stars: Int) = when (stars) {
-    5 -> "Excellent! Thank you for your wonderful feedback!"
-    4 -> "Great! Thanks for the feedback."
-    3 -> "Thanks — we'll keep improving."
-    2 -> "Sorry to hear that. We'll do better."
-    else -> "We're sorry. Your feedback helps us improve."
+    5 -> tr("Excellent! Thank you for your wonderful feedback!")
+    4 -> tr("Great! Thanks for the feedback.")
+    3 -> tr("Thanks — we'll keep improving.")
+    2 -> tr("Sorry to hear that. We'll do better.")
+    else -> tr("We're sorry. Your feedback helps us improve.")
 }
 
 /** Draws the captured strokes onto a white bitmap and encodes them for the server. */

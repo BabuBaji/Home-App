@@ -128,8 +128,8 @@ private fun BenefitRow(emoji: String, tint: Color, title: String, body: String) 
         IconChip(emoji, tint, size = 42, glyph = 19)
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
-            Text(body, color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+            Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+            Text(tr(body), color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
         }
     }
 }
@@ -143,8 +143,8 @@ private fun RateTableHeader(left: String, right: String) {
             .padding(horizontal = Space.m, vertical = Space.s),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(left, color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Text(right, color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(tr(left), color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(tr(right), color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -152,50 +152,50 @@ private fun RateTableHeader(left: String, right: String) {
 @Composable
 fun RateCardScreen(vm: AppViewModel, nav: NavHostController) {
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Rate Card", onBack = { nav.popBackStack() })
+        Header(tr("Rate Card"), onBack = { nav.popBackStack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             GradientBanner(padding = 20) {
-                Text("VISHWAAS", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(tr("VISHWAAS"), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.xs))
-                Text("How you earn on HomeHelp Pro", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                Text(tr("How you earn on HomeHelp Pro"), color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
             }
             Card {
-                SectionTitle("Per-Job Earnings")
+                SectionTitle(tr("Per-Job Earnings"))
                 Text(
-                    "You keep 80% of every completed booking. HomeHelp charges a 20% platform fee.",
+                    tr("You keep 80% of every completed booking. HomeHelp charges a 20% platform fee."),
                     fontSize = 13.sp, color = TextGray, lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(Space.m))
-                RateTableHeader("Service", "Your share")
-                RateRow("Bathroom Cleaning (₹199)", "You earn ₹159")
+                RateTableHeader(tr("Service"), tr("Your share"))
+                RateRow(tr("Bathroom Cleaning (₹199)"), "You earn ₹159")
                 HairlineDivider()
-                RateRow("Kitchen Cleaning (₹249)", "You earn ₹199")
+                RateRow(tr("Kitchen Cleaning (₹249)"), "You earn ₹199")
                 HairlineDivider()
-                RateRow("Full Home Cleaning (₹499)", "You earn ₹399")
+                RateRow(tr("Full Home Cleaning (₹499)"), "You earn ₹399")
             }
             Card {
-                SectionTitle("Bonuses")
+                SectionTitle(tr("Bonuses"))
                 Spacer(Modifier.height(Space.s))
-                RateTableHeader("Reward", "Amount")
-                RateRow("On-time start bonus", "+ ₹15", GreenSuccess, pill = true)
+                RateTableHeader(tr("Reward"), tr("Amount"))
+                RateRow(tr("On-time start bonus"), "+ ₹15", GreenSuccess, pill = true)
                 HairlineDivider()
-                RateRow("Referral bonus", "+ ₹1,500", GreenSuccess, pill = true)
+                RateRow(tr("Referral bonus"), "+ ₹1,500", GreenSuccess, pill = true)
             }
             Card {
-                SectionTitle("Penalties")
+                SectionTitle(tr("Penalties"))
                 Spacer(Modifier.height(Space.s))
-                RateTableHeader("Penalty", "Amount")
-                RateRow("Late start (OTP not entered in 15 min)", "− ₹15", RedCancel, pill = true)
+                RateTableHeader(tr("Penalty"), tr("Amount"))
+                RateRow(tr("Late start (OTP not entered in 15 min)"), "− ₹15", RedCancel, pill = true)
             }
             Card {
-                SectionTitle("FAQs")
+                SectionTitle(tr("FAQs"))
                 Spacer(Modifier.height(Space.xs))
-                Faq("When do I get paid?", "Your 80% share is credited to your wallet the moment you complete a job.")
-                Faq("How do I withdraw?", "Use Wallet → Withdraw. Amounts up to ₹2,000 are auto-approved instantly.")
-                Faq("What is the on-time bonus?", "Start a job (enter the customer OTP) within 15 minutes of accepting to earn +₹15.")
+                Faq(tr("When do I get paid?"), tr("Your 80% share is credited to your wallet the moment you complete a job."))
+                Faq(tr("How do I withdraw?"), tr("Use Wallet → Withdraw. Amounts up to ₹2,000 are auto-approved instantly."))
+                Faq(tr("What is the on-time bonus?"), tr("Start a job (enter the customer OTP) within 15 minutes of accepting to earn +₹15."))
             }
         }
     }
@@ -208,7 +208,7 @@ private fun RateRow(label: String, value: String, color: Color = TextDark, pill:
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextDark, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.s))
         if (pill) StatusPill(value, bg = color.copy(alpha = 0.12f), fg = color)
         else Text(value, color = color, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
@@ -217,9 +217,9 @@ private fun RateRow(label: String, value: String, color: Color = TextDark, pill:
 @Composable
 private fun Faq(q: String, a: String) {
     Column(Modifier.padding(vertical = Space.s)) {
-        Text(q, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+        Text(tr(q), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
         Spacer(Modifier.height(2.dp))
-        Text(a, color = TextGray, fontSize = 13.sp, lineHeight = 18.sp)
+        Text(tr(a), color = TextGray, fontSize = 13.sp, lineHeight = 18.sp)
     }
 }
 
@@ -234,7 +234,7 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
     val msg = r?.shareMessage ?: ""
     val pink = Color(0xFFEC4899)
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        WhiteTopBar("Refer & Earn") { nav.popBackStack() }
+        WhiteTopBar(tr("Refer & Earn")) { nav.popBackStack() }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -247,7 +247,7 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("Refer a friend, both earn", color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Refer a friend, both earn"), color = TextDark, fontSize = 16.5.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(3.dp))
                         Text("Get ${rupee(bonus)} for every friend who joins and finishes their first shift.", color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp)
                     }
@@ -256,7 +256,7 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── Referral code + quick share ──
             Card {
-                Text("YOUR REFERRAL CODE", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(tr("YOUR REFERRAL CODE"), color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Spacer(Modifier.height(Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -271,44 +271,44 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                     ) { Icon(Icons.Filled.ContentCopy, "Copy", tint = Purple, modifier = Modifier.size(22.dp)) }
                 }
                 Spacer(Modifier.height(Space.m))
-                Text("Share via", color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text(tr("Share via"), color = TextGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth()) {
-                    ShareChip(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, "WhatsApp", Color(0xFF25D366)) { shareWhatsApp(ctx, msg) }
-                    ShareChip(Modifier.weight(1f), Icons.Filled.Sms, "SMS", Color(0xFF3B82F6)) { shareSms(ctx, msg) }
-                    ShareChip(Modifier.weight(1f), Icons.Filled.ContentCopy, "Copy", Purple) { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } }
-                    ShareChip(Modifier.weight(1f), Icons.Filled.Share, "More", TextGray) { shareText(ctx, msg) }
+                    ShareChip(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, tr("WhatsApp"), Color(0xFF25D366)) { shareWhatsApp(ctx, msg) }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.Sms, tr("SMS"), Color(0xFF3B82F6)) { shareSms(ctx, msg) }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.ContentCopy, tr("Copy"), Purple) { r?.code?.let { copyText(ctx, "referral", it); toast(ctx, "Code copied") } }
+                    ShareChip(Modifier.weight(1f), Icons.Filled.Share, tr("More"), TextGray) { shareText(ctx, msg) }
                 }
             }
 
             // ── Stats: friends joined · reward each · total earned ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Group, "$joined", "Joined", Purple, PurpleLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Redeem, rupee(bonus), "Per Friend", pink, pink.copy(alpha = 0.12f))
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, rupee(r?.lifetimeEarnings ?: 0), "Earned", GreenSuccess, GreenLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Group, "$joined", tr("Joined"), Purple, PurpleLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Redeem, rupee(bonus), tr("Per Friend"), pink, pink.copy(alpha = 0.12f))
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, rupee(r?.lifetimeEarnings ?: 0), tr("Earned"), GreenSuccess, GreenLight)
             }
 
             // ── How it works ──
             Card {
-                SectionTitle("How it works")
+                SectionTitle(tr("How it works"))
                 Spacer(Modifier.height(Space.xs))
-                StepRow(1, "Share your code", "Send your code to friends who want to become a HomeHelp Pro.")
-                StepRow(2, "They join & work", "They enter your code in the app and complete their first 10 jobs.")
-                StepRow(3, "You earn", "${rupee(bonus)} is credited to your wallet.")
+                StepRow(1, tr("Share your code"), tr("Send your code to friends who want to become a HomeHelp Pro."))
+                StepRow(2, tr("They join & work"), tr("They enter your code in the app and complete their first 10 jobs."))
+                StepRow(3, tr("You earn"), "${rupee(bonus)} is credited to your wallet.")
             }
 
             // ── Were you referred? (new workers, once) ──
             Card {
-                SectionTitle("Were you referred?")
+                SectionTitle(tr("Were you referred?"))
                 Spacer(Modifier.height(Space.xs))
                 var code by remember { mutableStateOf("") }
                 var busy by remember { mutableStateOf(false) }
                 androidx.compose.material3.OutlinedTextField(
                     value = code, onValueChange = { code = it.uppercase().take(12) }, singleLine = true,
-                    placeholder = { Text("Friend's code, e.g. HHP1042") }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(tr("Friend's code, e.g. HHP1042")) }, modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(Space.s))
-                PrimaryButton(if (busy) "Applying…" else "Apply code", enabled = code.length >= 4 && !busy, loading = busy) {
+                PrimaryButton(if (busy) tr("Applying…") else tr("Apply code"), enabled = code.length >= 4 && !busy, loading = busy) {
                     busy = true
                     vm.applyReferral(code) { err -> busy = false; toast(ctx, err ?: "Code applied — your friend earns when you complete your first jobs") }
                 }
@@ -317,14 +317,14 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
             // ── Referral history ──
             val history = r?.referrals ?: emptyList()
             if (history.isNotEmpty()) {
-                SectionTitle("Your referrals")
+                SectionTitle(tr("Your referrals"))
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     history.forEach { item ->
                         StatusListRow(
                             icon = Icons.Filled.Check,
                             iconTint = GreenSuccess,
                             iconBg = GreenLight,
-                            title = item.label.ifBlank { "Referral" },
+                            title = item.label.ifBlank { tr("Referral") },
                             subtitle = item.date,
                             subtitleColor = TextMuted,
                             value = "+ ${rupee(item.amount)}",
@@ -348,7 +348,7 @@ private fun ShareChip(modifier: Modifier, icon: ImageVector, label: String, tint
             Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.height(6.dp))
-        Text(label, color = TextDark, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(tr(label), color = TextDark, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -362,8 +362,8 @@ private fun StepRow(num: Int, title: String, body: String) {
         ) { Text("$num", color = Purple, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
-            Text(body, color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+            Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+            Text(tr(body), color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
         }
     }
 }
@@ -379,7 +379,7 @@ fun ClaimInsuranceScreen(vm: AppViewModel, nav: NavHostController) {
     var busy by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Health Card", onBack = { nav.popBackStack() })
+        Header(tr("Health Card"), onBack = { nav.popBackStack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -389,10 +389,10 @@ fun ClaimInsuranceScreen(vm: AppViewModel, nav: NavHostController) {
                     IconChip("🛡️", Color.White.copy(alpha = 0.18f), size = 52, glyph = 28)
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("HomeHelp Health Card", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(tr("HomeHelp Health Card"), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                         Spacer(Modifier.height(Space.xs))
                         StatusPill(
-                            if (ins?.activated == true) "Active" else "Not activated yet",
+                            if (ins?.activated == true) tr("Active") else tr("Not activated yet"),
                             bg = Color.White.copy(alpha = 0.22f),
                             fg = Color.White,
                         )
@@ -400,26 +400,26 @@ fun ClaimInsuranceScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             Card {
-                SectionTitle("Coverage")
+                SectionTitle(tr("Coverage"))
                 Spacer(Modifier.height(Space.xs))
-                BenefitRow("🩺", GreenLight, "What's covered", ins?.coverage ?: "—")
+                BenefitRow("🩺", GreenLight, tr("What's covered"), ins?.coverage ?: "—")
                 HairlineDivider()
                 Spacer(Modifier.height(Space.s))
                 BreakdownRow(
-                    "Status",
+                    tr("Status"),
                     if (ins?.activated == true) "Active" else "Not activated",
                     valueColor = if (ins?.activated == true) GreenSuccess else Gold,
                 )
                 if (!ins?.policyNo.isNullOrBlank()) {
-                    LabeledRow("Policy No.", ins?.policyNo)
+                    LabeledRow(tr("Policy No."), ins?.policyNo)
                 }
             }
             Card {
-                Text("Need help with a claim?", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                Text(tr("Need help with a claim?"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
                 Spacer(Modifier.height(2.dp))
-                Text("Our team will guide you through the process.", color = TextGray, fontSize = 13.sp)
+                Text(tr("Our team will guide you through the process."), color = TextGray, fontSize = 13.sp)
                 Spacer(Modifier.height(Space.m))
-                PrimaryButton("Claim Insurance") { showClaim = true }
+                PrimaryButton(tr("Claim Insurance")) { showClaim = true }
                 Spacer(Modifier.height(Space.s))
                 OutlineButton("Call Helpline ${ins?.helpline ?: ""}", modifier = Modifier.fillMaxWidth()) { ins?.helpline?.let { dial(ctx, it) } }
             }
@@ -434,13 +434,13 @@ fun ClaimInsuranceScreen(vm: AppViewModel, nav: NavHostController) {
                     vm.claimInsurance(reason.ifBlank { "Insurance claim request" }) { msg ->
                         busy = false; showClaim = false; reason = ""; toast(ctx, msg)
                     }
-                }) { Text("Submit", color = Purple, fontWeight = FontWeight.Bold) }
+                }) { Text(tr("Submit"), color = Purple, fontWeight = FontWeight.Bold) }
             },
-            dismissButton = { TextButton(onClick = { showClaim = false }) { Text("Cancel", color = TextGray) } },
-            title = { Text("Raise a claim", fontWeight = FontWeight.Bold) },
+            dismissButton = { TextButton(onClick = { showClaim = false }) { Text(tr("Cancel"), color = TextGray) } },
+            title = { Text(tr("Raise a claim"), fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("Briefly describe your claim:", color = TextGray, fontSize = 13.sp)
+                    Text(tr("Briefly describe your claim:"), color = TextGray, fontSize = 13.sp)
                     Spacer(Modifier.height(Space.s))
                     OutlinedTextField(
                         value = reason,
@@ -482,7 +482,7 @@ fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
     val bonusPct = coinVal.toFloat() / (coinVal + cardVal).coerceAtLeast(1)
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        WhiteTopBar("Rewards & Penalties") { nav.popBackStack() }
+        WhiteTopBar(tr("Rewards & Penalties")) { nav.popBackStack() }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -494,7 +494,7 @@ fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
                     Box(
                         Modifier.weight(1f).clip(RoundedCornerShape(Radius.button - 2.dp)).background(if (on) Color.White else Color.Transparent).clickable { period = p }.padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text(p, color = if (on) Purple else TextGray, fontSize = 13.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium) }
+                    ) { Text(tr(p), color = if (on) Purple else TextGray, fontSize = 13.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium) }
                 }
             }
 
@@ -502,7 +502,7 @@ fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Net Rewards", color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(tr("Net Rewards"), color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text((if (net >= 0) "+ " else "− ") + rupee(kotlin.math.abs(net)), color = if (net >= 0) GreenSuccess else RedCancel, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
                         Spacer(Modifier.height(2.dp))
@@ -518,34 +518,34 @@ fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Bonuses ${rupee(coinVal)}", color = GreenSuccess, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                    Text("Penalties ${rupee(cardVal)}", color = RedCancel, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Bonuses") + " ${rupee(coinVal)}", color = GreenSuccess, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Penalties") + " ${rupee(cardVal)}", color = RedCancel, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
             // ── Count tiles ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.MonetizationOn, "$goldCount", "Gold Coins", Gold, GoldLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.Warning, "$redCount", "Red Cards", RedCancel, RedLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.MonetizationOn, "$goldCount", tr("Gold Coins"), Gold, GoldLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.Warning, "$redCount", tr("Red Cards"), RedCancel, RedLight)
             }
 
             // ── Tips (earn more · avoid penalties) ──
             Card {
-                Text("Ways to earn more & avoid penalties", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Ways to earn more & avoid penalties"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.s))
-                TipRow(GreenSuccess, "Start each job within 15 minutes for a ₹15 on-time bonus.")
-                TipRow(GreenSuccess, "Keep a great rating to unlock the monthly Sitara Bonus.")
-                TipRow(RedCancel, "Check in on time — a late shift check-in costs ₹50.")
-                TipRow(RedCancel, "Avoid cancelling accepted jobs to prevent Red Cards.")
+                TipRow(GreenSuccess, tr("Start each job within 15 minutes for a ₹15 on-time bonus."))
+                TipRow(GreenSuccess, tr("Keep a great rating to unlock the monthly Sitara Bonus."))
+                TipRow(RedCancel, tr("Check in on time — a late shift check-in costs ₹50."))
+                TipRow(RedCancel, tr("Avoid cancelling accepted jobs to prevent Red Cards."))
             }
 
             // ── Gold Coins ledger ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Gold Coins — bonuses")
+                SectionTitle(tr("Gold Coins — bonuses"))
                 Text("+ ${rupee(coinVal)}", color = GreenSuccess, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
             if (coins.isEmpty()) {
-                Card { EmptyState("🪙", "No bonuses ${if (monthly) "this month" else "yet"}", "Start jobs on time to earn Gold Coins!") }
+                Card { EmptyState("🪙", "No bonuses ${if (monthly) "this month" else "yet"}", tr("Start jobs on time to earn Gold Coins!")) }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     coins.forEach { c ->
@@ -556,11 +556,11 @@ fun RewardsScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── Red Cards ledger ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Red Cards — penalties")
+                SectionTitle(tr("Red Cards — penalties"))
                 Text("− ${rupee(cardVal)}", color = RedCancel, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
             if (cards.isEmpty()) {
-                Card { EmptyState("✅", "No penalties ${if (monthly) "this month" else ""}", "Great work — keep it up!") }
+                Card { EmptyState("✅", "No penalties ${if (monthly) "this month" else ""}", tr("Great work — keep it up!")) }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     cards.forEach { c ->
@@ -579,7 +579,7 @@ private fun TipRow(dot: Color, text: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
         Box(Modifier.padding(top = 5.dp).size(7.dp).clip(CircleShape).background(dot))
         Spacer(Modifier.width(Space.m))
-        Text(text, color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+        Text(tr(text), color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
     }
 }
 
@@ -594,9 +594,9 @@ fun MerchStoreScreen(vm: AppViewModel, nav: NavHostController) {
     val cartTotal = vm.merch.sumOf { (cart[it.id] ?: 0) * it.price }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        WhiteTopBar("Merch Store", trailing = {
+        WhiteTopBar(tr("Merch Store"), trailing = {
             Box(Modifier.clip(CircleShape).padding(4.dp)) {
-                Icon(Icons.Filled.ShoppingCart, contentDescription = "Cart", tint = TextDark, modifier = Modifier.size(23.dp))
+                Icon(Icons.Filled.ShoppingCart, contentDescription = tr("Cart"), tint = TextDark, modifier = Modifier.size(23.dp))
                 if (cartCount > 0) {
                     Box(
                         Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-5).dp).size(16.dp).clip(CircleShape).background(Purple),
@@ -621,13 +621,13 @@ fun MerchStoreScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("Official HomeHelp Gear", color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
-                        Text("Order now · cost is adjusted from your next payout.", color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+                        Text(tr("Official HomeHelp Gear"), color = TextDark, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Order now · cost is adjusted from your next payout."), color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
                     }
                 }
 
                 if (vm.merch.isEmpty()) {
-                    EmptyState("🛍️", "Loading store…", "Fetching the latest HomeHelp gear for you.")
+                    EmptyState("🛍️", tr("Loading store…"), tr("Fetching the latest HomeHelp gear for you."))
                 } else {
                     // ── 2-column product grid ──
                     vm.merch.chunked(2).forEach { rowItems ->
@@ -657,7 +657,7 @@ fun MerchStoreScreen(vm: AppViewModel, nav: NavHostController) {
                             Text("$cartCount item${if (cartCount > 1) "s" else ""} in cart", color = TextGray, fontSize = 12.sp)
                             Text(rupee(cartTotal), color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
                         }
-                        PrimaryButton("Place Order", modifier = Modifier.width(160.dp)) {
+                        PrimaryButton(tr("Place Order"), modifier = Modifier.width(160.dp)) {
                             val count = cartCount
                             cart.forEach { (id, qty) -> repeat(qty) { vm.orderMerch(id) {} } }
                             toast(ctx, "Order placed! $count item${if (count > 1) "s" else ""} — deducted from your next payout")
@@ -687,7 +687,7 @@ private fun MerchTile(modifier: Modifier, p: MerchProduct, qty: Int, onAdd: () -
             if (qty == 0) {
                 Box(
                     Modifier.clip(RoundedCornerShape(10.dp)).background(Purple).clickable { onAdd() }.padding(horizontal = 14.dp, vertical = 7.dp),
-                ) { Text("Add", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold) }
+                ) { Text(tr("Add"), color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold) }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StepBtn(Icons.Filled.Remove, onDec)
@@ -715,15 +715,15 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
     val medalColors = listOf(Color(0xFFCD7F32), Color(0xFF9AA0AB), Gold)
     val emojis = listOf("🥉", "🥈", "🥇")
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Sitara Bonus", onBack = { nav.popBackStack() })
+        Header(tr("Sitara Bonus"), onBack = { nav.popBackStack() })
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             GradientBanner(padding = 20) {
-                Text("Sitara Bonus ⭐", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Sitara Bonus ⭐"), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.xs))
-                Text("A monthly bonus based on the days you work in the month at a great rating. Gold also needs Sundays worked. Resets on the 1st, paid after month-end.", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 18.sp)
+                Text(tr("A monthly bonus based on the days you work in the month at a great rating. Gold also needs Sundays worked. Resets on the 1st, paid after month-end."), color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 18.sp)
             }
 
             // Tier medallions
@@ -739,8 +739,8 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
                             Spacer(Modifier.height(Space.s))
                             Text(t.name, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 13.sp)
                             Text(rupee(t.amount), color = medalColors.getOrElse(i) { Gold }, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("${t.days} days", color = TextGray, fontSize = 10.sp)
-                            if (t.sundays > 0) Text("+ ${t.sundays} Sundays", color = TextGray, fontSize = 10.sp)
+                            Text("${t.days} " + tr("days"), color = TextGray, fontSize = 10.sp)
+                            if (t.sundays > 0) Text("+ ${t.sundays} " + tr("Sundays"), color = TextGray, fontSize = 10.sp)
                         }
                     }
                 }
@@ -748,12 +748,12 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Progress this month
             Card {
-                SectionTitle("Your progress this month")
+                SectionTitle(tr("Your progress this month"))
                 Spacer(Modifier.height(Space.m))
                 val goldDays = s?.tiers?.lastOrNull()?.days ?: 28
                 val days = s?.workingDays ?: 0
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Working days", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(tr("Working days"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     Text("$days / $goldDays", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(Space.s))
@@ -764,7 +764,7 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
                     val sun = s?.sundays ?: 0
                     val sunMet = sun >= goldSundays
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Sundays worked (Gold)", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(tr("Sundays worked (Gold)"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Text("$sun / $goldSundays", color = if (sunMet) GreenSuccess else Gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(Space.s))
@@ -774,7 +774,7 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
                 val rating = s?.rating ?: 0.0
                 val target = s?.ratingTarget ?: 4.5
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Rating achieved", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(tr("Rating achieved"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     Text("$rating / $target ★", color = if (s?.ratingMet == true) GreenSuccess else Gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(Space.s))
@@ -783,7 +783,7 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Next-step hint
             val hint = when {
-                s == null -> "Loading your progress…"
+                s == null -> tr("Loading your progress…")
                 !s.ratingMet -> "⭐ Improve your rating to ${s.ratingTarget}★+ to unlock the bonus"
                 s.nextTier.isNotBlank() -> {
                     val amt = rupee(s.tiers.firstOrNull { it.name == s.nextTier }?.amount ?: 0)
@@ -793,30 +793,30 @@ fun ShaktiBonusScreen(vm: AppViewModel, nav: NavHostController) {
                     if (need.isEmpty()) "You're on track for ${s.nextTier} ($amt)" else "Need ${need.joinToString(" and ")} to reach ${s.nextTier} ($amt)"
                 }
                 s.currentTier.isNotBlank() -> "🎉 You've reached ${s.currentTier} — the top tier. Great work!"
-                else -> "Keep working your shifts to earn your first Sitara Bonus."
+                else -> tr("Keep working your shifts to earn your first Sitara Bonus.")
             }
             Box(Modifier.fillMaxWidth().background(GoldLight, RoundedCornerShape(Radius.field)).padding(Space.l)) {
-                Text(hint, color = Color(0xFFB7791F), fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(tr(hint), color = Color(0xFFB7791F), fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 18.sp)
             }
 
             // ---- Terms & Conditions (built from the real tier config) ----
             val target = s?.ratingTarget ?: 4.5
             Card {
-                SectionTitle("How it works & Terms")
+                SectionTitle(tr("How it works & Terms"))
                 Spacer(Modifier.height(Space.xs))
-                TncRow("🗓️", GoldLight, "Monthly bonus", "Calculated per calendar month. Your progress resets on the 1st and the bonus is paid to your wallet after the month ends.")
-                TncRow("🗓️", PurpleLight, "Based on working days", "Your tier is decided by the number of days you check in and work during the month. Higher tiers need more working days.")
-                TncRow("🙏", GreenLight, "Sundays for Gold", "The Gold tier also requires working a minimum number of Sundays in the month — Sunday shifts are mandatory for Gold.")
-                TncRow("⭐", GoldLight, "Rating requirement", "You must maintain a rating of $target★ or higher for the month. Below $target★, no bonus is paid even if the day targets are met.")
+                TncRow("🗓️", GoldLight, tr("Monthly bonus"), tr("Calculated per calendar month. Your progress resets on the 1st and the bonus is paid to your wallet after the month ends."))
+                TncRow("🗓️", PurpleLight, tr("Based on working days"), tr("Your tier is decided by the number of days you check in and work during the month. Higher tiers need more working days."))
+                TncRow("🙏", GreenLight, tr("Sundays for Gold"), tr("The Gold tier also requires working a minimum number of Sundays in the month — Sunday shifts are mandatory for Gold."))
+                TncRow("⭐", GoldLight, tr("Rating requirement"), "You must maintain a rating of $target★ or higher for the month. Below $target★, no bonus is paid even if the day targets are met.")
                 (s?.tiers ?: emptyList()).forEachIndexed { i, t ->
                     val cond = "Work ${t.days} days" + (if (t.sundays > 0) " incl. ${t.sundays} Sundays" else "") + " in the month, at $target★+."
                     TncRow(listOf("🥉", "🥈", "🥇").getOrElse(i) { "🏅" }, GoldLight, "${t.name} — ${rupee(t.amount)}", cond)
                 }
-                TncRow("💸", GreenLight, "Highest tier only", "You are paid the single highest tier you reach — tier bonuses are not added together.")
-                TncRow("ℹ️", Primary50, "Policy", "Bonus amounts and thresholds are set by HomeHelp and may change. The bonus is credited automatically and is subject to verification and company policy.")
+                TncRow("💸", GreenLight, tr("Highest tier only"), tr("You are paid the single highest tier you reach — tier bonuses are not added together."))
+                TncRow("ℹ️", Primary50, tr("Policy"), tr("Bonus amounts and thresholds are set by HomeHelp and may change. The bonus is credited automatically and is subject to verification and company policy."))
             }
 
-            Text("Last updated on ${s?.lastUpdated ?: "—"}", color = TextMuted, fontSize = 12.sp)
+            Text(tr("Last updated on") + " ${s?.lastUpdated ?: "—"}", color = TextMuted, fontSize = 12.sp)
         }
     }
 }
@@ -828,8 +828,8 @@ private fun TncRow(emoji: String, tint: Color, title: String, body: String) {
         IconChip(emoji, tint, size = 36, glyph = 16)
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
-            Text(body, color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+            Text(tr(title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+            Text(tr(body), color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
         }
     }
 }

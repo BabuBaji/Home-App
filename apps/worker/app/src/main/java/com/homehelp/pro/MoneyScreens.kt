@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SentimentSatisfiedAlt
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
@@ -131,8 +132,8 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
     val incentivesMonth = hist.filter { it.isCredit && it.date.startsWith(thisYM) && (it.type.contains("incentive", true) || it.type.contains("bonus", true) || it.type.contains("reward", true)) }.sumOf { it.amount }
     val pct = if (lastMonthCredits > 0) ((monthTotal - lastMonthCredits) * 100 / lastMonthCredits) else null
 
-    TabScaffold("Earnings", subtitle = monthName, actions = {
-        TabAction(Icons.Filled.Notifications, "Alerts", badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
+    TabScaffold(tr("Earnings"), subtitle = monthName, actions = {
+        TabAction(Icons.Filled.Notifications, tr("Alerts"), badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
     }) { pad ->
         Column(
             Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.s, bottom = Space.l),
@@ -142,7 +143,7 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
             Column(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Earned this month", color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(tr("Earned this month"), color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text("₹${inr(monthTotal)}", color = TextDark, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp)
                         if (pct != null) {
@@ -153,7 +154,7 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                                     Text("${if (up) "↑" else "↓"} ${kotlin.math.abs(pct)}%", color = if (up) GreenSuccess else RedCancel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.width(6.dp))
-                                Text("vs last month", color = TextGray, fontSize = 13.sp)
+                                Text(tr("vs last month"), color = TextGray, fontSize = 13.sp)
                             }
                         }
                     }
@@ -161,11 +162,11 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(Space.l))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, "$monthJobs", "Jobs")
+                    EarnStat(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, "$monthJobs", tr("Jobs"))
                     Box(Modifier.width(1.dp).height(38.dp).background(Divider))
-                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color(0xFF3B82F6), "₹${inr(avgPerDay)}", "Avg/Day")
+                    EarnStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Color(0xFF3B82F6), "₹${inr(avgPerDay)}", tr("Avg/Day"))
                     Box(Modifier.width(1.dp).height(38.dp).background(Divider))
-                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Amber, "₹${inr(incentivesMonth)}", "Incentives")
+                    EarnStat(Modifier.weight(1f), Icons.Filled.EmojiEvents, Amber, "₹${inr(incentivesMonth)}", tr("Incentives"))
                 }
                 Spacer(Modifier.height(Space.l))
                 HairlineDivider()
@@ -173,29 +174,29 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── Today / This Week ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, "₹${inr(vm.todayEarnings)}", "Today", GreenSuccess, GreenLight)
-                MiniStatCard(Modifier.weight(1f), Icons.Filled.CalendarMonth, "₹${inr(vm.weekEarnings)}", "This Week", Purple, PurpleLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.AccountBalanceWallet, "₹${inr(vm.todayEarnings)}", tr("Today"), GreenSuccess, GreenLight)
+                MiniStatCard(Modifier.weight(1f), Icons.Filled.CalendarMonth, "₹${inr(vm.weekEarnings)}", tr("This Week"), Purple, PurpleLight)
             }
 
             // ── Analytics & insights carousel ──
             Column {
-                ProfileMenuRow(Icons.Filled.DonutLarge, Purple, "Earnings Breakdown", "Where your money comes from") { nav.navigate(Routes.EARNINGS_BREAKDOWN) }
+                ProfileMenuRow(Icons.Filled.DonutLarge, Purple, tr("Earnings Breakdown"), tr("Where your money comes from")) { nav.navigate(Routes.EARNINGS_BREAKDOWN) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.BarChart, GreenSuccess, "Earnings Analytics", "Daily, weekly and monthly trends") { nav.navigate(Routes.EARNINGS_ANALYTICS) }
+                ProfileMenuRow(Icons.Filled.BarChart, GreenSuccess, tr("Earnings Analytics"), tr("Daily, weekly and monthly trends")) { nav.navigate(Routes.EARNINGS_ANALYTICS) }
             }
 
             // ── Payout summary ──
-            SectionTitle("Payout")
+            SectionTitle(tr("Payout"))
             Card {
-                LabeledRow("Available to withdraw", "₹${inr(vm.walletBalance)}", GreenSuccess)
-                LabeledRow("Pending clearance", "₹${inr(vm.pendingAmount)}", Gold)
-                LabeledRow("Next payout", vm.nextPayout)
+                LabeledRow(tr("Available to withdraw"), "₹${inr(vm.walletBalance)}", GreenSuccess)
+                LabeledRow(tr("Pending clearance"), "₹${inr(vm.pendingAmount)}", Gold)
+                LabeledRow(tr("Next payout"), vm.nextPayout)
             }
-            PrimaryButton("Withdraw to Bank") { nav.navigate(Routes.WITHDRAW) }
-            OutlineButton("Open Wallet & Transactions", modifier = Modifier.fillMaxWidth()) { nav.navigateApp(Routes.WALLET) }
+            PrimaryButton(tr("Withdraw to Bank")) { nav.navigate(Routes.WITHDRAW) }
+            OutlineButton(tr("Open Wallet & Transactions"), modifier = Modifier.fillMaxWidth()) { nav.navigateApp(Routes.WALLET) }
 
             // ── Recent Earnings — live calendar; tap a day to see that day's services + income ──
-            SectionTitle("Recent Earnings")
+            SectionTitle(tr("Recent Earnings"))
             RecentEarningsCalendar(vm)
             Spacer(Modifier.height(Space.s))
         }
@@ -212,7 +213,7 @@ private fun EarnStat(modifier: Modifier, icon: ImageVector, tint: Color, value: 
         Spacer(Modifier.height(6.dp))
         Text(value, color = if (onDark) Color.White else TextDark, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         Spacer(Modifier.height(1.dp))
-        Text(label, color = if (onDark) Color.White.copy(alpha = 0.72f) else TextGray, fontSize = 11.sp)
+        Text(tr(label), color = if (onDark) Color.White.copy(alpha = 0.72f) else TextGray, fontSize = 11.sp)
     }
 }
 
@@ -291,12 +292,12 @@ private fun RecentEarningsCalendar(vm: AppViewModel) {
             Spacer(Modifier.height(Space.s))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LegendDot(GreenSuccess); Spacer(Modifier.width(Space.xs))
-                Text("Worked", fontSize = 11.5.sp, color = TextGray)
+                Text(tr("Worked"), fontSize = 11.5.sp, color = TextGray)
                 Spacer(Modifier.width(Space.l))
                 LegendDot(Purple); Spacer(Modifier.width(Space.xs))
-                Text("Selected", fontSize = 11.5.sp, color = TextGray)
+                Text(tr("Selected"), fontSize = 11.5.sp, color = TextGray)
                 Spacer(Modifier.weight(1f))
-                Text("Tap a day", fontSize = 11.5.sp, color = TextMuted)
+                Text(tr("Tap a day"), fontSize = 11.5.sp, color = TextMuted)
             }
         }
 
@@ -304,7 +305,7 @@ private fun RecentEarningsCalendar(vm: AppViewModel) {
         Card {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text(if (selected == todayIso) "Today" else prettyDate(selected), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
+                    Text(if (selected == todayIso) tr("Today") else prettyDate(selected), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
                     Text(
                         "${services.size} ${if (services.size == 1) "service" else "services"} done",
                         fontSize = 12.sp, color = TextGray,
@@ -318,31 +319,31 @@ private fun RecentEarningsCalendar(vm: AppViewModel) {
                     Text(if (selected > todayIso) "🗓️" else "🛌", fontSize = 20.sp)
                     Spacer(Modifier.width(Space.m))
                     Text(
-                        if (selected > todayIso) "No work scheduled yet." else "No work on this day — it was an off day.",
+                        if (selected > todayIso) tr("No work scheduled yet.") else tr("No work on this day — it was an off day."),
                         fontSize = 13.sp, color = TextGray,
                     )
                 }
             } else {
                 Spacer(Modifier.height(Space.m)); HairlineDivider(); Spacer(Modifier.height(Space.s))
                 if (services.isNotEmpty()) {
-                    Text("Services", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    Text(tr("Services"), fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
                     services.forEachIndexed { i, e ->
                         ServiceRow(i + 1, e, bookingsByRef[e.remarks.ifBlank { e.refId }])
                     }
                 }
                 if (otherIncome.isNotEmpty()) {
                     Spacer(Modifier.height(Space.s))
-                    Text("Other income", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                    otherIncome.forEach { IncomeLine(it.type.ifBlank { "Incentive" }, "+₹${inr(it.amount)}", GreenSuccess) }
+                    Text(tr("Other income"), fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    otherIncome.forEach { IncomeLine(it.type.ifBlank { tr("Incentive") }, "+₹${inr(it.amount)}", GreenSuccess) }
                 }
                 if (deductions.isNotEmpty()) {
                     Spacer(Modifier.height(Space.s))
-                    Text("Deductions", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                    deductions.forEach { IncomeLine(it.type.ifBlank { "Deduction" }, "−₹${inr(it.amount)}", RedCancel) }
+                    Text(tr("Deductions"), fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    deductions.forEach { IncomeLine(it.type.ifBlank { tr("Deduction") }, "−₹${inr(it.amount)}", RedCancel) }
                 }
                 Spacer(Modifier.height(Space.s)); HairlineDivider(); Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Total income", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
+                    Text(tr("Total income"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 15.sp)
                     Text("₹${inr(dayTotal)}", fontWeight = FontWeight.Bold, color = GreenSuccess, fontSize = 16.sp)
                 }
             }
@@ -379,7 +380,7 @@ private fun ServiceRow(index: Int, e: com.homehelp.pro.network.LedgerEntry, book
 @Composable
 private fun IncomeLine(label: String, value: String, valueColor: Color) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = TextGray, fontSize = 13.sp)
+        Text(tr(label), color = TextGray, fontSize = 13.sp)
         Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -421,7 +422,7 @@ private fun LegendDot(color: Color) {
 private fun MonthNavigator(label: String, onPrev: () -> Unit, onNext: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = Space.xs), verticalAlignment = Alignment.CenterVertically) {
         NavArrow(Icons.Filled.ChevronLeft, onPrev)
-        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
+        Text(tr(label), modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextDark)
         NavArrow(Icons.Filled.ChevronRight, onNext)
     }
 }
@@ -644,9 +645,9 @@ private fun scheduleBg(s: String) = when (s) { "Completed" -> GreenLight; "In pr
 fun ScheduleScreen(vm: AppViewModel, nav: NavHostController) {
     val items = vm.schedule
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        Header("Today's Schedule", onBack = { nav.popBackStack() })
+        Header(tr("Today's Schedule"), onBack = { nav.popBackStack() })
         if (items.isEmpty()) {
-            EmptyState("🗓️", "No jobs scheduled today", "New bookings appear here as customers book you.")
+            EmptyState("🗓️", tr("No jobs scheduled today"), tr("New bookings appear here as customers book you."))
         } else {
             Column(
                 Modifier.verticalScroll(rememberScrollState()).padding(Space.l),
@@ -698,7 +699,7 @@ private fun ScheduleRow(item: com.homehelp.pro.network.ScheduleItem) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = TextMuted, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(Space.s))
-                    Text("${item.durationMins} min", fontSize = 12.sp, color = TextGray)
+                    Text("${item.durationMins} " + tr("min"), fontSize = 12.sp, color = TextGray)
                 }
                 StatusPill(
                     item.paymentStatus,
@@ -726,9 +727,9 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
     val progressFrac = if (nextTier != null) (progressCur.toFloat() / progressMax).coerceIn(0f, 1f) else 1f
     val kycVerified = vm.workerStatus.equals("active", true) || vm.bankApproved
 
-    TabScaffold("Profile", actions = {
-        TabAction(Icons.Filled.Notifications, "Notifications", badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
-        TabAction(Icons.Filled.Settings, "Settings") { nav.navigate(Routes.SETTINGS) }
+    TabScaffold(tr("Profile"), actions = {
+        TabAction(Icons.Filled.Notifications, tr("Notifications"), badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
+        TabAction(Icons.Filled.Settings, tr("Settings")) { nav.navigate(Routes.SETTINGS) }
     }) { pad ->
     Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState())) {
         // ═══════════════ Content ═══════════════
@@ -748,7 +749,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                             if (vm.avatarUrl.isNotBlank()) {
                                 SubcomposeAsyncImage(
                                     model = vm.avatarUrl,
-                                    contentDescription = "Profile photo",
+                                    contentDescription = tr("Profile photo"),
                                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                                     contentScale = ContentScale.Crop,
                                     loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = 22.sp) },
@@ -762,19 +763,19 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                             Modifier.align(Alignment.BottomEnd).size(26.dp).clip(CircleShape).background(Purple)
                                 .border(2.5.dp, CardBg, CircleShape).clickable { nav.navigate(Routes.P_PERSONAL) },
                             contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Change photo", tint = Color.White, modifier = Modifier.size(13.dp)) }
+                        ) { Icon(Icons.Filled.CameraAlt, contentDescription = tr("Change photo"), tint = Color.White, modifier = Modifier.size(13.dp)) }
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                vm.workerName.ifBlank { "HomeHelp Partner" }, color = TextDark,
+                                vm.workerName.ifBlank { tr("HomeHelp Partner") }, color = TextDark,
                                 fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             if (kycVerified) {
                                 Spacer(Modifier.width(5.dp))
-                                Icon(Icons.Filled.Verified, contentDescription = "Verified", tint = ProfBlue, modifier = Modifier.size(17.dp))
+                                Icon(Icons.Filled.Verified, contentDescription = tr("Verified"), tint = ProfBlue, modifier = Modifier.size(17.dp))
                             }
                         }
                         Spacer(Modifier.height(5.dp))
@@ -794,7 +795,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                                 color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text("Rating", color = TextGray, fontSize = 13.sp)
+                            Text(tr("Rating"), color = TextGray, fontSize = 13.sp)
                         }
                     }
                     Spacer(Modifier.width(8.dp))
@@ -809,7 +810,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                     ) {
                         Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("Edit Profile", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(tr("Edit Profile"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
@@ -829,17 +830,17 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(11.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Level ", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            Text(tier.label, color = Gold, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Level "), color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text(tr(tier.label), color = Gold, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                         }
                         Text(
-                            if (nextTier != null) "Keep going to reach ${nextTier.label} level" else "You're at the top tier",
+                            if (nextTier != null) "Keep going to reach ${nextTier.label} level" else tr("You're at the top tier"),
                             color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Spacer(Modifier.width(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Benefits", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(tr("Benefits"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
                     }
                 }
@@ -850,7 +851,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
-                        if (nextTier != null) "Progress to ${nextTier.label}" else "Highest tier reached",
+                        if (nextTier != null) "Progress to ${nextTier.label}" else tr("Highest tier reached"),
                         color = TextGray, fontSize = 13.sp,
                     )
                     Text(
@@ -867,65 +868,67 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, "Jobs done", "${vm.jobsCompleted}", "Total")
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, "Accepted", vm.acceptancePct?.let { "$it%" } ?: "—", "This Month")
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, "Completed", vm.completionPct?.let { "$it%" } ?: "—", "This Month")
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, tr("Jobs done"), "${vm.jobsCompleted}", tr("Total"))
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, tr("Accepted"), vm.acceptancePct?.let { "$it%" } ?: "—", tr("This Month"))
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, tr("Completed"), vm.completionPct?.let { "$it%" } ?: "—", tr("This Month"))
                 ProfileStatCard(
-                    Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, "Rating",
-                    if (vm.workerRating > 0) String.format("%.1f", vm.workerRating) else "—", "Out of 5",
+                    Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, tr("Rating"),
+                    if (vm.workerRating > 0) String.format("%.1f", vm.workerRating) else "—", tr("Out of 5"),
                 )
             }
 
             // ── Everything else, grouped. This replaces the old ☰ side menu: one place to find
             // any screen, in the order a worker needs them.
-            ProfileMenuGroup("Work") {
-                ProfileMenuRow(Icons.Filled.CalendarMonth, Purple, "My Shifts", "Your shift plan and schedule") { nav.navigate(Routes.MY_SHIFTS) }
+            ProfileMenuGroup(tr("Work")) {
+                ProfileMenuRow(Icons.Filled.CalendarMonth, Purple, tr("My Shifts"), tr("Your shift plan and schedule")) { nav.navigate(Routes.MY_SHIFTS) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Schedule, GreenSuccess, "Attendance", "Check in and check out") { nav.navigate(Routes.ATTENDANCE) }
+                ProfileMenuRow(Icons.Filled.Schedule, GreenSuccess, tr("Attendance"), tr("Check in and check out")) { nav.navigate(Routes.ATTENDANCE) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.EventBusy, ProfBlue, "Leaves", "Request and track leave") { nav.navigate(Routes.LEAVE) }
+                ProfileMenuRow(Icons.Filled.EventBusy, ProfBlue, tr("Leaves"), tr("Request and track leave")) { nav.navigate(Routes.LEAVE) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Tune, Amber, "Availability", "Days and hours you can work") { nav.navigate(Routes.P_AVAILABILITY) }
+                ProfileMenuRow(Icons.Filled.Tune, Amber, tr("Availability"), tr("Days and hours you can work")) { nav.navigate(Routes.P_AVAILABILITY) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Star, Gold, "Performance & Ratings", "Your rating and ranking") { nav.navigate(Routes.PERFORMANCE) }
+                ProfileMenuRow(Icons.Filled.Star, Gold, tr("Performance & Ratings"), tr("Your rating and ranking")) { nav.navigate(Routes.PERFORMANCE) }
             }
-            ProfileMenuGroup("Money") {
-                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, Purple, "Wallet", "Balance, withdraw and history") { nav.navigateApp(Routes.WALLET) }
+            ProfileMenuGroup(tr("Money")) {
+                ProfileMenuRow(Icons.Filled.AccountBalanceWallet, Purple, tr("Wallet"), tr("Balance, withdraw and history")) { nav.navigateApp(Routes.WALLET) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.AccountBalance, ProfBlue, "Bank Accounts", "Where your payouts go") { nav.navigate(Routes.BANK_ACCOUNTS) }
+                ProfileMenuRow(Icons.Filled.AccountBalance, ProfBlue, tr("Bank Accounts"), tr("Where your payouts go")) { nav.navigate(Routes.BANK_ACCOUNTS) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Receipt, GreenSuccess, "Payslip", "Monthly pay statement") { nav.navigate(Routes.PAYSLIP) }
+                ProfileMenuRow(Icons.Filled.Receipt, GreenSuccess, tr("Payslip"), tr("Monthly pay statement")) { nav.navigate(Routes.PAYSLIP) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Savings, Amber, "Early Payout", "Get part of your pay early") { nav.navigate(Routes.SALARY_ADVANCE) }
+                ProfileMenuRow(Icons.Filled.Savings, Amber, tr("Early Payout"), tr("Get part of your pay early")) { nav.navigate(Routes.SALARY_ADVANCE) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Description, GreenSuccess, "Rate Card", "What you earn per job") { nav.navigate(Routes.RATE_CARD) }
+                ProfileMenuRow(Icons.Filled.Description, GreenSuccess, tr("Rate Card"), tr("What you earn per job")) { nav.navigate(Routes.RATE_CARD) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.EmojiEvents, Gold, "Rewards & Bonuses", "Rewards, penalties and Sitara bonus") { nav.navigate(Routes.REWARDS) }
+                ProfileMenuRow(Icons.Filled.EmojiEvents, Gold, tr("Rewards & Bonuses"), tr("Rewards, penalties and Sitara bonus")) { nav.navigate(Routes.REWARDS) }
             }
-            ProfileMenuGroup("Account") {
-                ProfileMenuRow(Icons.Filled.Person, Purple, "Personal Information", "Name, phone and address") { nav.navigate(Routes.P_PERSONAL) }
+            ProfileMenuGroup(tr("Account")) {
+                ProfileMenuRow(Icons.Filled.Person, Purple, tr("Personal Information"), tr("Name, phone and address")) { nav.navigate(Routes.P_PERSONAL) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.VerifiedUser, GreenSuccess, "KYC Documents", null, verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
+                ProfileMenuRow(Icons.Filled.VerifiedUser, GreenSuccess, tr("KYC Documents"), null, verified = kycVerified) { nav.navigate(Routes.P_DOCUMENTS) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.WorkspacePremium, Purple, "Skills & Services", "Services you offer") { nav.navigate(Routes.P_SKILLS) }
+                ProfileMenuRow(Icons.Filled.WorkspacePremium, Purple, tr("Skills & Services"), tr("Services you offer")) { nav.navigate(Routes.P_SKILLS) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.AutoMirrored.Filled.MenuBook, ProfBlue, "Training", "Modules and assessment") { nav.navigate(Routes.P_TRAINING) }
+                ProfileMenuRow(Icons.AutoMirrored.Filled.MenuBook, ProfBlue, tr("Training"), tr("Modules and assessment")) { nav.navigate(Routes.P_TRAINING) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Inventory2, TextGray, "My Equipment", "Kit issued to you") { nav.navigate(Routes.P_EQUIPMENT) }
+                ProfileMenuRow(Icons.Filled.Inventory2, TextGray, tr("My Equipment"), tr("Kit issued to you")) { nav.navigate(Routes.P_EQUIPMENT) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Settings, TextGray, "Settings", "Language, notifications, preferences") { nav.navigate(Routes.SETTINGS) }
+                ProfileMenuRow(Icons.Filled.Language, Purple, "Language / भाषा", if (I18n.isHindi) "हिंदी" else "English") { nav.navigate(Routes.SETTINGS) }
+                ProfileRowDivider()
+                ProfileMenuRow(Icons.Filled.Settings, TextGray, tr("Settings"), tr("Language, notifications, preferences")) { nav.navigate(Routes.SETTINGS) }
             }
-            ProfileMenuGroup("Perks") {
-                ProfileMenuRow(Icons.Filled.Redeem, Color(0xFFEC4899), "Refer & Earn", "Invite friends, earn bonus") { nav.navigate(Routes.REFER) }
+            ProfileMenuGroup(tr("Perks")) {
+                ProfileMenuRow(Icons.Filled.Redeem, Color(0xFFEC4899), tr("Refer & Earn"), tr("Invite friends, earn bonus")) { nav.navigate(Routes.REFER) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Shield, ProfBlue, "Insurance", "Your cover and claims") { nav.navigate(Routes.INSURANCE) }
+                ProfileMenuRow(Icons.Filled.Shield, ProfBlue, tr("Insurance"), tr("Your cover and claims")) { nav.navigate(Routes.INSURANCE) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Storefront, Purple, "Merch Store", "Uniforms and supplies") { nav.navigate(Routes.MERCH) }
+                ProfileMenuRow(Icons.Filled.Storefront, Purple, tr("Merch Store"), tr("Uniforms and supplies")) { nav.navigate(Routes.MERCH) }
             }
-            ProfileMenuGroup("Support") {
-                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, Amber, "Help & Support", "FAQs and contact us") { nav.navigate(Routes.P_HELP) }
+            ProfileMenuGroup(tr("Support")) {
+                ProfileMenuRow(Icons.AutoMirrored.Filled.HelpOutline, Amber, tr("Help & Support"), tr("FAQs and contact us")) { nav.navigate(Routes.P_HELP) }
                 ProfileRowDivider()
-                ProfileMenuRow(Icons.Filled.Info, TextGray, "About", null) { nav.navigate(Routes.P_ABOUT) }
+                ProfileMenuRow(Icons.Filled.Info, TextGray, tr("About"), null) { nav.navigate(Routes.P_ABOUT) }
             }
 
             // ── Logout
@@ -941,8 +944,8 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column {
-                        Text("Logout", color = RedCancel, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Logout from your account", color = RedCancel.copy(alpha = 0.72f), fontSize = 12.sp)
+                        Text(tr("Logout"), color = RedCancel, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(tr("Logout from your account"), color = RedCancel.copy(alpha = 0.72f), fontSize = 12.sp)
                     }
                 }
             }
@@ -957,7 +960,7 @@ private fun ProfileIconLine(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = TextGray, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
-        Text(text, color = TextGray, fontSize = 13.sp)
+        Text(tr(text), color = TextGray, fontSize = 13.sp)
     }
 }
 
@@ -1004,7 +1007,7 @@ private fun ProfileStatCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(value, color = TextDark, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-        Text(label, color = TextGray, fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
+        Text(tr(label), color = TextGray, fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
     }
 }
 
@@ -1052,15 +1055,15 @@ private fun ProfileMenuRow(
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr(title), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 if (verified) {
                     Spacer(Modifier.width(Space.s))
-                    StatusPill("Verified", GreenLight, GreenSuccess)
+                    StatusPill(tr("Verified"), GreenLight, GreenSuccess)
                 }
             }
             if (subtitle != null) {
                 Spacer(Modifier.height(1.dp))
-                Text(subtitle, color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
+                Text(tr(subtitle), color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
             }
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
@@ -1094,7 +1097,7 @@ private fun SplitStat(value: String, label: String) {
 private fun SummaryMini(value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, color = color, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text(label, color = TextGray, fontSize = 11.sp)
+        Text(tr(label), color = TextGray, fontSize = 11.sp)
     }
 }
 
@@ -1134,9 +1137,9 @@ fun EarningsInsightsCarousel(nav: NavHostController, modifier: Modifier = Modifi
     )
     Column(modifier) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle("Earnings Insights")
+            SectionTitle(tr("Earnings Insights"))
             Spacer(Modifier.weight(1f))
-            Text("Swipe →", color = TextMuted, fontSize = 12.sp)
+            Text(tr("Swipe →"), color = TextMuted, fontSize = 12.sp)
         }
         Spacer(Modifier.height(Space.s))
         Row(
@@ -1207,7 +1210,7 @@ private fun WalletAction(icon: ImageVector, label: String, onClick: () -> Unit) 
             Icon(icon, contentDescription = label, tint = Purple, modifier = Modifier.size(24.dp))
         }
         Spacer(Modifier.height(Space.s))
-        Text(label, fontSize = 11.sp, color = TextDark, fontWeight = FontWeight.Medium)
+        Text(tr(label), fontSize = 11.sp, color = TextDark, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1216,7 +1219,7 @@ private fun AmountDialog(title: String, action: String, onDismiss: () -> Unit, o
     var amount by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, fontWeight = FontWeight.Bold) },
+        title = { Text(tr(title), fontWeight = FontWeight.Bold) },
         text = {
             OutlinedTextField(
                 value = amount,
@@ -1237,10 +1240,10 @@ private fun AmountDialog(title: String, action: String, onDismiss: () -> Unit, o
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(amount.toIntOrNull() ?: 0) }) {
-                Text(action, color = Purple, fontWeight = FontWeight.SemiBold)
+                Text(tr(action), color = Purple, fontWeight = FontWeight.SemiBold)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel")) } },
     )
 }
 
@@ -1257,8 +1260,8 @@ private fun TxnRow(t: WalletTxn) {
         }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(t.title, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
-            Text(t.subtitle, fontSize = 11.sp, color = TextGray)
+            Text(tr(t.title), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+            Text(tr(t.subtitle), fontSize = 11.sp, color = TextGray)
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(

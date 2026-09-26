@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
         }
         // Restore any persisted login so the worker stays signed in across app restarts.
         Session.init(applicationContext)
+        I18n.init()
         // osmdroid requires a unique user-agent or OSM tile servers return 403.
         org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
         setContent {
@@ -217,10 +218,10 @@ fun AppRoot() {
     if (vm.safetyPrompt) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = {},
-            title = { androidx.compose.material3.Text("Are you safe?") },
-            text = { androidx.compose.material3.Text("Your job has run past its time. Let us know you're okay.") },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { vm.answerSafety(true) }) { androidx.compose.material3.Text("I'm safe") } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { vm.answerSafety(false) }) { androidx.compose.material3.Text("I need help") } },
+            title = { androidx.compose.material3.Text(tr("Are you safe?")) },
+            text = { androidx.compose.material3.Text(tr("Your job has run past its time. Let us know you're okay.")) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { vm.answerSafety(true) }) { androidx.compose.material3.Text(tr("I'm safe")) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { vm.answerSafety(false) }) { androidx.compose.material3.Text(tr("I need help")) } },
         )
     }
 
@@ -428,10 +429,10 @@ fun AppRoot() {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { vm.dismissGeofenceAlert() },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { vm.dismissGeofenceAlert() }) { Text("OK", color = Purple) }
+                androidx.compose.material3.TextButton(onClick = { vm.dismissGeofenceAlert() }) { Text(tr("OK"), color = Purple) }
             },
-            title = { Text("⚠  Left your assigned area", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-            text = { Text(msg) },
+            title = { Text(tr("⚠  Left your assigned area"), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(tr(msg)) },
         )
     }
 
@@ -440,10 +441,10 @@ fun AppRoot() {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { vm.clearActionBlockedMessage() },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { vm.clearActionBlockedMessage() }) { Text("OK", color = Purple) }
+                androidx.compose.material3.TextButton(onClick = { vm.clearActionBlockedMessage() }) { Text(tr("OK"), color = Purple) }
             },
-            title = { Text("Still on a job", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-            text = { Text(msg) },
+            title = { Text(tr("Still on a job"), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(tr(msg)) },
         )
     }
 
@@ -453,10 +454,10 @@ fun AppRoot() {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { vm.clearOfferLostReason() },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { vm.clearOfferLostReason() }) { Text("OK", color = Purple) }
+                androidx.compose.material3.TextButton(onClick = { vm.clearOfferLostReason() }) { Text(tr("OK"), color = Purple) }
             },
-            title = { Text("Job no longer available", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-            text = { Text(msg) },
+            title = { Text(tr("Job no longer available"), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(tr(msg)) },
         )
     }
 
@@ -467,16 +468,16 @@ fun AppRoot() {
             onDismissRequest = { vm.dismissNextDayPrompt() },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = { vm.submitNextDay(true) }) {
-                    Text("Yes, I'll be there", color = Purple, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Text(tr("Yes, I'll be there"), color = Purple, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                 }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { vm.submitNextDay(false) }) {
-                    Text("Not tomorrow", color = androidx.compose.ui.graphics.Color.Gray)
+                    Text(tr("Not tomorrow"), color = androidx.compose.ui.graphics.Color.Gray)
                 }
             },
-            title = { Text("Coming in tomorrow?", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-            text = { Text("Great work finishing today's shift! 🎉  Please let us know if you'll be coming in for your shift tomorrow so we can plan the roster.") },
+            title = { Text(tr("Coming in tomorrow?"), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text(tr("Great work finishing today's shift! 🎉  Please let us know if you'll be coming in for your shift tomorrow so we can plan the roster.")) },
         )
     }
     }

@@ -205,7 +205,7 @@ fun BackButton(onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Purple, modifier = Modifier.size(21.dp))
+        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"), tint = Purple, modifier = Modifier.size(21.dp))
     }
 }
 
@@ -263,7 +263,7 @@ fun WalletChip(balance: Int, onDark: Boolean = false, onClick: () -> Unit) {
             Modifier.padding(start = 10.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Wallet", tint = fg, modifier = Modifier.size(17.dp))
+            Icon(Icons.Filled.AccountBalanceWallet, contentDescription = tr("Wallet"), tint = fg, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(5.dp))
             Text(
                 "₹" + java.text.NumberFormat.getIntegerInstance(java.util.Locale("en", "IN")).format(balance),
@@ -286,7 +286,7 @@ fun ProfileChip(initials: String, onDark: Boolean = false, onClick: () -> Unit) 
         contentAlignment = Alignment.Center,
     ) {
         if (initials.isBlank()) {
-            Icon(Icons.Filled.Person, contentDescription = "Profile", tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.Person, contentDescription = tr("Profile"), tint = Color.White, modifier = Modifier.size(20.dp))
         } else {
             Text(initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
         }
@@ -308,7 +308,7 @@ fun BellHeader(title: String, onBell: (() -> Unit)? = null) {
                 .then(if (onBell != null) Modifier.clickable { onBell() } else Modifier),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Notifications, contentDescription = "Alerts", tint = Color.White, modifier = Modifier.size(21.dp))
+            Icon(Icons.Filled.Notifications, contentDescription = tr("Alerts"), tint = Color.White, modifier = Modifier.size(21.dp))
         }
     })
 }
@@ -448,7 +448,7 @@ fun ErrorState(title: String = "Something went wrong", subtitle: String = "Pleas
         Text(tr(subtitle), color = TextGray, fontSize = 13.sp, textAlign = TextAlign.Center)
         if (onRetry != null) {
             Spacer(Modifier.height(Space.l))
-            OutlineButton("Retry", modifier = Modifier.width(160.dp), onClick = onRetry)
+            OutlineButton(tr("Retry"), modifier = Modifier.width(160.dp), onClick = onRetry)
         }
     }
 }
@@ -502,7 +502,7 @@ fun TierBadge(tier: WorkerTier, modifier: Modifier = Modifier) {
         ) {
             Text(tier.emoji, fontSize = 12.sp)
             Spacer(Modifier.width(5.dp))
-            Text("${tier.label} Partner", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr(tier.label) + " " + tr("Partner"), color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -547,7 +547,7 @@ fun SectionTitle(text: String) {
 }
 
 fun toast(context: Context, message: String) {
-    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    Toast.makeText(context, tr(message), Toast.LENGTH_SHORT).show()
 }
 
 /** Tactile press feedback: springs the element down to 93% while pressed (ripple-free).

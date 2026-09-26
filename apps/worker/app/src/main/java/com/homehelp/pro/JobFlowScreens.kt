@@ -150,7 +150,7 @@ fun StartDeadlineBanner(vm: AppViewModel) {
                     Box(Modifier.size(8.dp).clip(RoundedCornerShape(Radius.pill)).background(fg))
                     Spacer(Modifier.width(Space.xs))
                     Text(
-                        if (expired) "Start window elapsed"
+                        if (expired) tr("Start window elapsed")
                         else "Start within ${"%d:%02d".format(shown / 60, shown % 60)} for a +₹$ONTIME_BONUS bonus",
                         fontWeight = FontWeight.Bold, color = fg, fontSize = 14.sp,
                     )
@@ -207,7 +207,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
     val expectedAtSite = "%02d:%02d".format(job.durationMinutes / 60, job.durationMinutes % 60)
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        AppTopBar("New Job Request", onBack = { vm.rejectJob(); nav.popBackStack(Routes.HOME, inclusive = false) })
+        AppTopBar(tr("New Job Request"), onBack = { vm.rejectJob(); nav.popBackStack(Routes.HOME, inclusive = false) })
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -229,7 +229,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                         ) {
                             Icon(Icons.Filled.Navigation, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("${job.distanceKm} km away", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("${job.distanceKm} " + tr("km away"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -241,7 +241,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(job.customerName, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = TextGray, fontSize = 13.sp)
+                            Text(job.customerType.orEmpty().ifBlank { tr("Residential") }, color = TextGray, fontSize = 13.sp)
                         }
                         OfferIconButton(Icons.Filled.Phone) { dialNumber(ctx, job.customerPhone) }
                         Spacer(Modifier.width(8.dp))
@@ -265,7 +265,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                                 Text("${job.earnings}", color = TextDark, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Estimated Earnings", color = TextGray, fontSize = 12.5.sp)
+                                Text(tr("Estimated Earnings"), color = TextGray, fontSize = 12.5.sp)
                                 Spacer(Modifier.width(4.dp))
                                 Icon(Icons.Filled.Info, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
                             }
@@ -276,11 +276,11 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                                 Spacer(Modifier.width(6.dp))
                                 Text(expectedAtSite, color = TextDark, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             }
-                            Text("Expected time at site", color = TextGray, fontSize = 12.5.sp)
+                            Text(tr("Expected time at site"), color = TextGray, fontSize = 12.5.sp)
                         }
                     }
                     Spacer(Modifier.height(18.dp))
-                    PrimaryButton("ACCEPT") {
+                    PrimaryButton(tr("ACCEPT")) {
                         vm.acceptJob()
                         /* Back to Home, which already shows the accepted job — the NEXT JOB hero,
                          * or the "Job accepted · tap to resume" banner — with its Start Job action
@@ -290,7 +290,7 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                         nav.popBackStack(Routes.HOME, inclusive = false)
                     }
                     Spacer(Modifier.height(10.dp))
-                    OutlineButton("REJECT", modifier = Modifier.fillMaxWidth()) {
+                    OutlineButton(tr("REJECT"), modifier = Modifier.fillMaxWidth()) {
                         vm.rejectJob(); nav.popBackStack(Routes.HOME, inclusive = false)
                     }
                 }
@@ -305,16 +305,16 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.AutoMirrored.Filled.Assignment, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(Space.s))
-                        Text("Job Details", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Job Details"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(10.dp))
-                    JobDetailRow(Icons.Filled.CleaningServices, GreenSuccess, "Service Type", service)
+                    JobDetailRow(Icons.Filled.CleaningServices, GreenSuccess, tr("Service Type"), service)
                     HairlineDivider()
-                    JobDetailRow(Icons.Filled.Schedule, Color(0xFF3B82F6), "Preferred Time", job.dateTime)
+                    JobDetailRow(Icons.Filled.Schedule, Color(0xFF3B82F6), tr("Preferred Time"), job.dateTime)
                     HairlineDivider()
-                    JobDetailRow(Icons.Filled.LocalOffer, Amber, "Customer Notes", job.note.orEmpty().ifBlank { "Not specified" })
+                    JobDetailRow(Icons.Filled.LocalOffer, Amber, tr("Customer Notes"), job.note.orEmpty().ifBlank { tr("Not specified") })
                     HairlineDivider()
-                    JobDetailRow(Icons.Filled.Apartment, RedCancel, "Special Instructions", "Focus on the booked area")
+                    JobDetailRow(Icons.Filled.Apartment, RedCancel, tr("Special Instructions"), "Focus on the booked area")
                 }
             }
 
@@ -327,10 +327,10 @@ fun NewJobScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        buildString { append("You have "); append("%02d:%02d".format(secs / 60, secs % 60)); append(" min to accept this job") },
+                        buildString { append(tr("You have ")); append("%02d:%02d".format(secs / 60, secs % 60)); append(tr(" min to accept this job")) },
                         color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp,
                     )
-                    Text("After that, the job will be auto-rejected", color = TextGray, fontSize = 12.sp)
+                    Text(tr("After that, the job will be auto-rejected"), color = TextGray, fontSize = 12.sp)
                 }
                 Spacer(Modifier.width(Space.s))
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(48.dp)) {
@@ -362,7 +362,7 @@ private fun NewJobBadge() {
     ) {
         Icon(Icons.Filled.Bolt, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp).scale(scale))
         Spacer(Modifier.width(4.dp))
-        Text("New Job", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(tr("New Job"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -373,7 +373,7 @@ private fun CustomerPhoto(url: String?, initials: String, size: Int) {
     Box(Modifier.size(size.dp).clip(CircleShape).background(Primary50).border(1.5.dp, Purple.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) {
         if (!url.isNullOrBlank()) {
             SubcomposeAsyncImage(
-                model = url, contentDescription = "Customer", contentScale = ContentScale.Crop,
+                model = url, contentDescription = tr("Customer"), contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
                 loading = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs) },
                 error = { Text(initials, color = Purple, fontWeight = FontWeight.Bold, fontSize = fs) },
@@ -399,7 +399,7 @@ private fun InProgressCustomerStrip(job: Job, unread: Int, onChat: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                        Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(job.customerType.orEmpty().ifBlank { tr("Residential") }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 // Chat with the customer — a tappable message button (with unread badge) beside the name.
@@ -409,7 +409,7 @@ private fun InProgressCustomerStrip(job: Job, unread: Int, onChat: () -> Unit) {
                         Modifier.size(36.dp).clip(CircleShape).background(PurpleLight).clickable { onChat() },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat with customer", tint = Purple, modifier = Modifier.size(19.dp))
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = tr("Chat with customer"), tint = Purple, modifier = Modifier.size(19.dp))
                     }
                     if (unread > 0) {
                         Box(
@@ -439,15 +439,15 @@ private fun InProgressCustomerStrip(job: Job, unread: Int, onChat: () -> Unit) {
         Box(Modifier.width(1.dp).height(62.dp).background(Divider))
         Spacer(Modifier.width(Space.m))
         Column(Modifier.width(104.dp)) {
-            Text("Service", color = TextGray, fontSize = 10.sp)
-            Text(job.services.firstOrNull() ?: "Service", color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
+            Text(tr("Service"), color = TextGray, fontSize = 10.sp)
+            Text(job.services.firstOrNull() ?: tr("Service"), color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
             Spacer(Modifier.height(7.dp))
-            Text("Job ID", color = TextGray, fontSize = 10.sp)
+            Text(tr("Job ID"), color = TextGray, fontSize = 10.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(job.id, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(4.dp))
                 Icon(
-                    Icons.Filled.ContentCopy, contentDescription = "Copy", tint = Purple,
+                    Icons.Filled.ContentCopy, contentDescription = tr("Copy"), tint = Purple,
                     modifier = Modifier.size(13.dp).clickable {
                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("Job ID", job.id)); toast(ctx, "Job ID copied")
@@ -463,7 +463,7 @@ private fun MapLine(icon: androidx.compose.ui.graphics.vector.ImageVector, text:
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text(text, color = TextDark, fontSize = 13.sp, lineHeight = 16.sp)
+        Text(tr(text), color = TextDark, fontSize = 13.sp, lineHeight = 16.sp)
     }
 }
 
@@ -472,7 +472,7 @@ private fun JobDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, 
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(Space.s))
-        Text(label, color = TextGray, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 13.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.s))
         Text(value, color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1.2f))
     }
@@ -504,8 +504,8 @@ private fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title
         }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
-            if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = TextGray)
+            Text(tr(title), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
+            if (subtitle != null) Text(tr(subtitle), fontSize = 12.sp, color = TextGray)
         }
     }
 }
@@ -515,8 +515,8 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
     val job = vm.activeJob ?: return
     val ctx = LocalContext.current
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        JobWhiteBar("Job Details", onBack = { nav.popBackStack() }, trailing = {
-            Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
+        JobWhiteBar(tr("Job Details"), onBack = { nav.popBackStack() }, trailing = {
+            Icon(Icons.Filled.Phone, contentDescription = tr("Call"), tint = Purple,
                 modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
         })
         Column(
@@ -524,11 +524,11 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                StatusPill("Job Accepted", GreenLight, GreenSuccess)
+                StatusPill(tr("Job Accepted"), GreenLight, GreenSuccess)
             }
             StartDeadlineBanner(vm)
             Card {
-                SectionTitle("Customer Details")
+                SectionTitle(tr("Customer Details"))
                 Spacer(Modifier.height(Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Avatar(job.initials)
@@ -541,27 +541,27 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             Card {
-                SectionTitle("Job Details")
+                SectionTitle(tr("Job Details"))
                 Spacer(Modifier.height(Space.xs))
-                LabeledRow("Services", job.services.joinToString(", "))
+                LabeledRow(tr("Services"), job.services.joinToString(", "))
                 HorizontalDivider(color = Divider)
-                LabeledRow("Date & Time", job.dateTime)
+                LabeledRow(tr("Date & Time"), job.dateTime)
                 HorizontalDivider(color = Divider)
-                LabeledRow("Duration", "${job.durationHours} Hours")
+                LabeledRow(tr("Duration"), "${job.durationHours} Hours")
                 HorizontalDivider(color = Divider)
-                LabeledRow("Address", job.area)
+                LabeledRow(tr("Address"), job.area)
             }
             Card {
-                SectionTitle("Payment Details")
+                SectionTitle(tr("Payment Details"))
                 Spacer(Modifier.height(Space.xs))
-                LabeledRow("Estimated Earnings", "₹${job.earnings}", valueColor = GreenSuccess)
-                Text("Payable after job completion", fontSize = 12.sp, color = TextGray)
+                LabeledRow(tr("Estimated Earnings"), "₹${job.earnings}", valueColor = GreenSuccess)
+                Text(tr("Payable after job completion"), fontSize = 12.sp, color = TextGray)
             }
             SafetyCard()
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
-                PrimaryButton("Start On The Way") {
+                PrimaryButton(tr("Start On The Way")) {
                     vm.startOnTheWay(); nav.navigate(Routes.ON_THE_WAY)
                 }
             }
@@ -622,16 +622,16 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
     } ?: "—"
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar("On The Way", onBack = { nav.popBackStack() })
+        FlowNavBar(tr("On The Way"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            StatusBanner(GreenLight, GreenSuccess, "On The Way", "You are on your way to customer location")
+            StatusBanner(GreenLight, GreenSuccess, tr("On The Way"), tr("You are on your way to customer location"))
             Card {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Route", fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
-                    StatusPill("En route", GreenLight, GreenSuccess)
+                    Text(tr("Route"), fontWeight = FontWeight.SemiBold, color = TextDark, modifier = Modifier.weight(1f))
+                    StatusPill(tr("En route"), GreenLight, GreenSuccess)
                 }
                 Spacer(Modifier.height(Space.m))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -642,14 +642,14 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
                         Text(job.address, fontSize = 13.sp, color = TextDark)
-                        Text("Destination: ${job.lat}, ${job.lng}", fontSize = 11.sp, color = TextGray)
+                        Text(tr("Destination:") + " ${job.lat}, ${job.lng}", fontSize = 11.sp, color = TextGray)
                     }
                 }
                 Spacer(Modifier.height(Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Navigation, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(Space.s))
-                    Text("Your GPS: $myLocation", fontSize = 12.sp, color = TextDark, modifier = Modifier.weight(1f))
+                    Text(tr("Your GPS:") + " " + tr(myLocation), fontSize = 12.sp, color = TextDark, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -657,7 +657,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                         if (distKm != null) "%.1f km away · ~%d min".format(distKm, etaMin) else "${job.distanceKm} km away",
                         fontSize = 13.sp, color = TextGray, modifier = Modifier.weight(1f),
                     )
-                    OutlineButton("Navigate", modifier = Modifier.width(130.dp)) {
+                    OutlineButton(tr("Navigate"), modifier = Modifier.width(130.dp)) {
                         launchNavigation(ctx, job.lat, job.lng, job.customerName, myLat, myLng)
                     }
                 }
@@ -667,13 +667,13 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                     modifier = Modifier.weight(1f),
                     icon = Icons.Filled.Navigation,
                     value = if (distKm != null) "%.1f km".format(distKm) else "${job.distanceKm} km",
-                    label = "Distance", tint = Purple, tintBg = PurpleLight,
+                    label = tr("Distance"), tint = Purple, tintBg = PurpleLight,
                 )
                 MiniStatCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Filled.Schedule,
                     value = etaMin?.let { "$it min" } ?: "—",
-                    label = "ETA", tint = GreenSuccess, tintBg = GreenLight,
+                    label = tr("ETA"), tint = GreenSuccess, tintBg = GreenLight,
                 )
             }
             OsmMap(
@@ -685,7 +685,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(Radius.card)),
             )
             Card {
-                Text("Customer", fontSize = 12.sp, color = TextMuted)
+                Text(tr("Customer"), fontSize = 12.sp, color = TextMuted)
                 Spacer(Modifier.height(Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Avatar(job.initials)
@@ -693,26 +693,26 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                     Column(Modifier.weight(1f)) {
                         Text(job.customerName, fontWeight = FontWeight.SemiBold, color = TextDark)
                         Text(
-                            job.customerPhone.ifBlank { "No number" }, fontSize = 13.sp, color = Purple,
+                            job.customerPhone.ifBlank { tr("No number") }, fontSize = 13.sp, color = Purple,
                             modifier = Modifier.clickable { dialNumber(ctx, job.customerPhone) },
                         )
                     }
-                    Icon(Icons.Filled.Phone, contentDescription = "Call", tint = Purple,
+                    Icon(Icons.Filled.Phone, contentDescription = tr("Call"), tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { dialNumber(ctx, job.customerPhone) })
                     Spacer(Modifier.width(Space.l))
-                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = Purple,
+                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = tr("Chat"), tint = Purple,
                         modifier = Modifier.size(22.dp).clickable { toast(ctx, "Opening chat…") })
                 }
                 Spacer(Modifier.height(Space.m))
                 HairlineDivider()
                 Spacer(Modifier.height(Space.m))
-                Text("Service Address", fontSize = 12.sp, color = TextMuted)
+                Text(tr("Service Address"), fontSize = 12.sp, color = TextMuted)
                 Text(job.address, fontSize = 13.sp, color = TextDark)
                 Spacer(Modifier.height(Space.s))
-                Text("Estimated Arrival", fontSize = 12.sp, color = TextMuted)
+                Text(tr("Estimated Arrival"), fontSize = 12.sp, color = TextMuted)
                 Text(arrivalClock, fontWeight = FontWeight.SemiBold, color = TextDark)
             }
-            PrimaryButton("Navigate with Google Maps") {
+            PrimaryButton(tr("Navigate with Google Maps")) {
                 launchNavigation(ctx, job.lat, job.lng, job.customerName, myLat, myLng)
             }
         }
@@ -724,7 +724,7 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                  * fix is poor indoors — and they are the ones standing at the door. */
                 val nearCustomer = distKm != null && distKm <= 0.15
                 PrimaryButton(
-                    if (nearCustomer || distKm == null) "Reached Location"
+                    if (nearCustomer || distKm == null) tr("Reached Location")
                     else "Reached Location (%.1f km away)".format(distKm),
                 ) {
                     vm.markArrived(); nav.navigate(Routes.ARRIVED)
@@ -750,7 +750,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
     val arrivalClock = remember { java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US).format(java.util.Date()) }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar("Arrived", onBack = { nav.popBackStack() })
+        FlowNavBar(tr("Arrived"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -763,8 +763,8 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("You've Arrived!", color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                        Text("You have reached the customer location.", color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
+                        Text(tr("You've Arrived!"), color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("You have reached the customer location."), color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
                     }
                     Spacer(Modifier.width(Space.s))
                     Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Primary50), contentAlignment = Alignment.Center) {
@@ -783,7 +783,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
                             Text(job.customerName, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                             Spacer(Modifier.width(Space.s))
                             Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                                Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(job.customerType.orEmpty().ifBlank { tr("Residential") }, color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         Spacer(Modifier.height(5.dp))
@@ -813,7 +813,7 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Phone, contentDescription = null, tint = Purple, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Call Customer", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Call Customer"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -821,47 +821,47 @@ fun ArrivedScreen(vm: AppViewModel, nav: NavHostController) {
             // ── Arrival stats.
             FlowCard {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    ArrivalStat(Modifier.weight(1f), Icons.Filled.Navigation, "Distance", "At site", "from destination")
-                    ArrivalStat(Modifier.weight(1f), Icons.Filled.Schedule, "Arrival Time", arrivalClock, "Today")
-                    ArrivalStat(Modifier.weight(1.2f), Icons.Filled.LocationOn, "Address", building.ifBlank { job.area }, "")
-                    ArrivalStat(Modifier.weight(1f), Icons.Filled.Shield, "Status", "In Range", "(50 m)", valueColor = GreenSuccess)
+                    ArrivalStat(Modifier.weight(1f), Icons.Filled.Navigation, tr("Distance"), "At site", tr("from destination"))
+                    ArrivalStat(Modifier.weight(1f), Icons.Filled.Schedule, tr("Arrival Time"), arrivalClock, tr("Today"))
+                    ArrivalStat(Modifier.weight(1.2f), Icons.Filled.LocationOn, tr("Address"), building.ifBlank { job.area }, "")
+                    ArrivalStat(Modifier.weight(1f), Icons.Filled.Shield, tr("Status"), "In Range", tr("(50 m)"), valueColor = GreenSuccess)
                 }
             }
 
             // ── What's next + OTP waiting.
             FlowCard {
-                Text("What's Next?", color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("What's Next?"), color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
-                Text("Please confirm your arrival and proceed to OTP verification to start the job.", color = TextDark, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(tr("Please confirm your arrival and proceed to OTP verification to start the job."), color = TextDark, fontSize = 13.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(Space.m))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(Space.m))
                     Column {
-                        Text("Waiting for OTP Verification", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text("Customer will provide OTP to verify your arrival.", color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                        Text(tr("Waiting for OTP Verification"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Customer will provide OTP to verify your arrival."), color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
                     }
                 }
             }
 
             // ── Quick actions.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                ArrivedAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, "Chat with Customer") { nav.navigate(Routes.JOB_CHAT) }
-                ArrivedAction(Modifier.weight(1f), Icons.Filled.Phone, "Customer Not Reachable") { dialNumber(ctx, job.customerPhone) }
-                ArrivedAction(Modifier.weight(1f), Icons.Filled.Schedule, "I'm Waiting") { toast(ctx, "Marked as waiting") }
+                ArrivedAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.Chat, tr("Chat with Customer")) { nav.navigate(Routes.JOB_CHAT) }
+                ArrivedAction(Modifier.weight(1f), Icons.Filled.Phone, tr("Customer Not Reachable")) { dialNumber(ctx, job.customerPhone) }
+                ArrivedAction(Modifier.weight(1f), Icons.Filled.Schedule, tr("I'm Waiting")) { toast(ctx, "Marked as waiting") }
             }
 
             Spacer(Modifier.height(2.dp))
             // ── Continue (matches the reference: primary CTA above the safety note).
-            PrimaryButton("CONTINUE TO OTP VERIFICATION") { nav.navigate(Routes.START_SERVICE) }
+            PrimaryButton(tr("CONTINUE TO OTP VERIFICATION")) { nav.navigate(Routes.START_SERVICE) }
 
             // ── Safety.
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Shield, contentDescription = null, tint = Amber, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Safety First", color = Amber, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Stay safe and professional. Contact support if you face any issues.", color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                    Text(tr("Safety First"), color = Amber, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Stay safe and professional. Contact support if you face any issues."), color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
                 }
             }
             Spacer(Modifier.height(Space.s))
@@ -883,10 +883,10 @@ private fun ArrivalStat(modifier: Modifier, icon: androidx.compose.ui.graphics.v
     Column(modifier) {
         Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
         Spacer(Modifier.height(4.dp))
-        Text(label, color = TextGray, fontSize = 9.5.sp, lineHeight = 11.sp, maxLines = 1)
+        Text(tr(label), color = TextGray, fontSize = 9.5.sp, lineHeight = 11.sp, maxLines = 1)
         Spacer(Modifier.height(3.dp))
         Text(value, color = valueColor, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp, maxLines = 2)
-        if (caption.isNotBlank()) Text(caption, color = TextMuted, fontSize = 9.sp, lineHeight = 11.sp, maxLines = 1)
+        if (caption.isNotBlank()) Text(tr(caption), color = TextMuted, fontSize = 9.sp, lineHeight = 11.sp, maxLines = 1)
     }
 }
 
@@ -900,7 +900,7 @@ private fun ArrivedAction(modifier: Modifier, icon: androidx.compose.ui.graphics
             Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.height(6.dp))
-        Text(label, color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 13.sp)
+        Text(tr(label), color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, lineHeight = 13.sp)
     }
 }
 
@@ -1049,7 +1049,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar("Start Service", onBack = { nav.popBackStack() })
+        FlowNavBar(tr("Start Service"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -1062,8 +1062,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("OTP Verification", color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                        Text("Enter the OTP sent by the customer to start the service.", color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
+                        Text(tr("OTP Verification"), color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Enter the OTP sent by the customer to start the service."), color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
                     }
                 }
             }
@@ -1077,7 +1077,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                             Spacer(Modifier.width(Space.s))
                             Column(Modifier.weight(1f)) {
                                 Text(job.customerName, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(job.customerType.orEmpty().ifBlank { tr("Residential") }, color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -1097,15 +1097,15 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                     Box(Modifier.width(1.dp).height(66.dp).background(Divider))
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.width(104.dp)) {
-                        Text("Service", color = TextGray, fontSize = 10.sp)
-                        Text(job.services.firstOrNull() ?: "Service", color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
+                        Text(tr("Service"), color = TextGray, fontSize = 10.sp)
+                        Text(job.services.firstOrNull() ?: tr("Service"), color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
                         Spacer(Modifier.height(8.dp))
-                        Text("Job ID", color = TextGray, fontSize = 10.sp)
+                        Text(tr("Job ID"), color = TextGray, fontSize = 10.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(job.id, color = TextDark, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.width(4.dp))
                             Icon(
-                                Icons.Filled.ContentCopy, contentDescription = "Copy", tint = Purple,
+                                Icons.Filled.ContentCopy, contentDescription = tr("Copy"), tint = Purple,
                                 modifier = Modifier.size(13.dp).clickable {
                                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                     cm.setPrimaryClip(android.content.ClipData.newPlainText("Job ID", job.id)); toast(ctx, "Job ID copied")
@@ -1118,7 +1118,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
 
             // ── OTP entry.
             Spacer(Modifier.height(2.dp))
-            Text("Enter 4-digit OTP", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            Text(tr("Enter 4-digit OTP"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 BasicTextField(
                     value = otp,
@@ -1140,13 +1140,13 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 )
             }
             error?.let { Text(it, color = RedCancel, fontSize = 12.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) }
-            Text("Ask the customer for the code sent to their registered mobile number", color = TextGray, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            Text(tr("Ask the customer for the code sent to their registered mobile number"), color = TextGray, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 if (resendSec > 0) {
-                    Text("Resend OTP in ", color = TextGray, fontSize = 13.sp)
+                    Text(tr("Resend OTP in "), color = TextGray, fontSize = 13.sp)
                     Text("%02d:%02d".format(resendSec / 60, resendSec % 60), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 } else {
-                    Text("Resend OTP", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    Text(tr("Resend OTP"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable { resendSec = 28; toast(ctx, "OTP resent") })
                 }
             }
@@ -1158,8 +1158,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
-                    Text("Didn't receive OTP?", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Ask the customer to resend OTP or you can call them directly.", color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                    Text(tr("Didn't receive OTP?"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Ask the customer to resend OTP or you can call them directly."), color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
                 }
                 Spacer(Modifier.width(Space.s))
                 Box(
@@ -1170,7 +1170,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Phone, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("CALL", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("CALL"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1180,8 +1180,8 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 Text("💡", fontSize = 18.sp)
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Important", color = Amber, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("You must verify using OTP to start the job. Do not start the service without verification.", color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
+                    Text(tr("Important"), color = Amber, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("You must verify using OTP to start the job. Do not start the service without verification."), color = TextGray, fontSize = 12.sp, lineHeight = 16.sp)
                 }
             }
             Spacer(Modifier.height(2.dp))
@@ -1190,7 +1190,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    OutlineButton("CANCEL JOB", modifier = Modifier.weight(1f)) { showCancel = true }
+                    OutlineButton(tr("CANCEL JOB"), modifier = Modifier.weight(1f)) { showCancel = true }
                     val canVerify = otp.length == 4 && !verifying
                     Box(
                         Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(Radius.button))
@@ -1199,7 +1199,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (verifying) "VERIFYING…" else "VERIFY & CONTINUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(if (verifying) tr("VERIFYING…") else tr("VERIFY & CONTINUE"), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             if (!verifying) {
                                 Spacer(Modifier.width(6.dp))
                                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
@@ -1211,7 +1211,7 @@ fun StartServiceScreen(vm: AppViewModel, nav: NavHostController) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Lock, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(5.dp))
-                    Text("Your data is secure and encrypted", color = TextMuted, fontSize = 11.sp)
+                    Text(tr("Your data is secure and encrypted"), color = TextMuted, fontSize = 11.sp)
                 }
             }
         }
@@ -1347,7 +1347,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
     val elapsedFrac = if (targetSec > 0) (elapsed.toFloat() / targetSec).coerceIn(0f, 1f) else 0f
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        FlowNavBar("Service In Progress", onBack = { nav.popBackStack() })
+        FlowNavBar(tr("Service In Progress"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -1362,8 +1362,8 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                             }
                             Spacer(Modifier.width(Space.s))
                             Column {
-                                Text("Work In Progress", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                                Text(if (vm.jobPaused) "Paused — resume when you're back." else "Service started. Keep updating your progress.", color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
+                                Text(tr("Work In Progress"), color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                Text(if (vm.jobPaused) tr("Paused — resume when you're back.") else tr("Service started. Keep updating your progress."), color = TextGray, fontSize = 12.sp, lineHeight = 15.sp)
                             }
                         }
                         Spacer(Modifier.height(10.dp))
@@ -1373,7 +1373,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                         ) {
                             Box(Modifier.size(7.dp).clip(CircleShape).background(if (vm.jobPaused) Amber else GreenSuccess))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (vm.jobPaused) "Paused" else "Service in progress", color = if (vm.jobPaused) Amber else GreenSuccess, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            Text(if (vm.jobPaused) tr("Paused") else tr("Service in progress"), color = if (vm.jobPaused) Amber else GreenSuccess, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Spacer(Modifier.width(Space.s))
@@ -1388,11 +1388,11 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Schedule, contentDescription = null, tint = Purple, modifier = Modifier.size(13.dp))
                                 Spacer(Modifier.width(3.dp))
-                                Text("Timer", color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(tr("Timer"), color = Purple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(Modifier.height(2.dp))
                             Text(elapsedHms, color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-                            Text("Time Elapsed", color = TextGray, fontSize = 9.sp)
+                            Text(tr("Time Elapsed"), color = TextGray, fontSize = 9.sp)
                         }
                     }
                 }
@@ -1405,7 +1405,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                         Text("⏱", fontSize = 17.sp)
                         Spacer(Modifier.width(Space.s))
                         Column(Modifier.weight(1f)) {
-                            Text("Service Extended", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Service Extended"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             Text(
                                 "Original ${job.durationMinutes} min + ${vm.extensionMinutes} min extra = ${job.durationMinutes + vm.extensionMinutes} min",
                                 color = TextGray, fontSize = 12.sp,
@@ -1426,16 +1426,16 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 val done = vm.checklistDone
                 val total = vm.checklist.size
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Checklist ", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("($done/$total Completed)", color = if (total > 0 && done == total) GreenSuccess else Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Checklist "), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("($done/$total " + tr("Completed") + ")", color = if (total > 0 && done == total) GreenSuccess else Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("View Details", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("View Details"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                         Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
                     }
                 }
                 Spacer(Modifier.height(Space.s))
-                if (vm.checklist.isEmpty()) Text("Loading tasks…", fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(vertical = Space.s))
+                if (vm.checklist.isEmpty()) Text(tr("Loading tasks…"), fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(vertical = Space.s))
                 val firstUndone = vm.checklist.indexOfFirst { !it.done }
                 vm.checklist.forEachIndexed { i, t ->
                     val active = i == firstUndone
@@ -1453,16 +1453,16 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                             else -> Box(Modifier.size(22.dp).clip(CircleShape).border(1.5.dp, Divider, CircleShape))
                         }
                         Spacer(Modifier.width(Space.m))
-                        Text(t.label, fontSize = 14.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, color = if (t.done) TextGray else TextDark, modifier = Modifier.weight(1f))
-                        if (active) { Text("In Progress", color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(Space.s)) }
-                        Icon(Icons.Filled.CameraAlt, contentDescription = "Photo", tint = Purple, modifier = Modifier.size(18.dp).clickable { captureBefore() })
+                        Text(tr(t.label), fontSize = 14.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, color = if (t.done) TextGray else TextDark, modifier = Modifier.weight(1f))
+                        if (active) { Text(tr("In Progress"), color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(Space.s)) }
+                        Icon(Icons.Filled.CameraAlt, contentDescription = tr("Photo"), tint = Purple, modifier = Modifier.size(18.dp).clickable { captureBefore() })
                     }
                     if (i < vm.checklist.lastIndex) HairlineDivider()
                 }
             }
 
             // ── Add progress photo (dashed).
-            Text("Add Progress Photo (Optional)", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Add Progress Photo (Optional)"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .border(1.5.dp, Purple.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(12.dp),
@@ -1473,8 +1473,8 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 }
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
-                    Text(if (beforeShot) "Photo added ✓" else "Add Photo", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Capture progress photo (optional)", color = TextGray, fontSize = 11.5.sp)
+                    Text(if (beforeShot) tr("Photo added ✓") else tr("Add Photo"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Capture progress photo (optional)"), color = TextGray, fontSize = 11.5.sp)
                 }
                 Box(
                     Modifier.clip(RoundedCornerShape(Radius.button)).background(Color.White).border(1.5.dp, Purple, RoundedCornerShape(Radius.button))
@@ -1483,17 +1483,17 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("Take Photo", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Take Photo"), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
             // ── Notes.
-            Text("Add Notes (Optional)", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Add Notes (Optional)"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = progressNotes, onValueChange = { if (it.length <= 200) progressNotes = it },
                 modifier = Modifier.fillMaxWidth().height(72.dp),
-                placeholder = { Text("Any notes about the work progress…", fontSize = 12.sp, color = TextMuted) },
+                placeholder = { Text(tr("Any notes about the work progress…"), fontSize = 12.sp, color = TextMuted) },
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = TextDark),
                 shape = RoundedCornerShape(10.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -1508,8 +1508,8 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                 Icon(Icons.Filled.Info, contentDescription = null, tint = Purple, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Note", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Regular updates help us ensure quality and customer satisfaction.", color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
+                    Text(tr("Note"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Regular updates help us ensure quality and customer satisfaction."), color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
                 }
             }
             Spacer(Modifier.height(2.dp))
@@ -1522,7 +1522,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                     Box(
                         Modifier.weight(1.4f).height(54.dp).clip(RoundedCornerShape(Radius.button)).background(Purple).clickable { vm.resumeJob() },
                         contentAlignment = Alignment.Center,
-                    ) { Text("▶  RESUME WORK", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text(tr("▶  RESUME WORK"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
                 } else {
                     Box(
                         Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(Radius.button)).background(Color.White)
@@ -1532,7 +1532,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Pause, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(5.dp))
-                            Text("PAUSE WORK", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("PAUSE WORK"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Box(
@@ -1542,7 +1542,7 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("CONTINUE WORK", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("CONTINUE WORK"), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.width(6.dp))
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                         }
@@ -1560,15 +1560,15 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
             onDismissRequest = { timeUpDismissed = true },
             confirmButton = {
                 TextButton(onClick = { timeUpDismissed = true; nav.navigate(Routes.AFTER_PHOTOS) }) {
-                    Text("Yes, complete", fontWeight = FontWeight.Bold)
+                    Text(tr("Yes, complete"), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { timeUpDismissed = true; extSheet = true; vm.loadExtensionOptions() }) {
-                    Text("Need more time")
+                    Text(tr("Need more time"))
                 }
             },
-            title = { Text("⏱  Service Time Completed", fontWeight = FontWeight.Bold) },
+            title = { Text(tr("⏱  Service Time Completed"), fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     "The $booked min booked for this service is over.\n\nIs the service complete? If you need longer, you can ask the customer to approve extra time.",
@@ -1585,13 +1585,13 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         if (extSheet) extSheet = false
         AlertDialog(
             onDismissRequest = { },
-            confirmButton = { TextButton(onClick = { vm.refreshExtensions() }) { Text("Refresh") } },
-            title = { Text("Extension approval pending", fontWeight = FontWeight.Bold) },
+            confirmButton = { TextButton(onClick = { vm.refreshExtensions() }) { Text(tr("Refresh")) } },
+            title = { Text(tr("Extension approval pending"), fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "Waiting for the customer to approve +${p.minutes} min" +
-                        (if (p.price > 0) " (₹${p.price})" else " (no charge)") +
-                        ".\n\nCarry on only once they approve — the extra time isn't active yet.",
+                    tr("Waiting for the customer to approve") + " +${p.minutes} " + tr("min") +
+                        (if (p.price > 0) " (₹${p.price})" else tr(" (no charge)")) +
+                        tr(".\n\nCarry on only once they approve — the extra time isn't active yet."),
                     color = TextGray, fontSize = 14.sp,
                 )
             },
@@ -1604,14 +1604,14 @@ fun InProgressScreen(vm: AppViewModel, nav: NavHostController) {
         val o = outcome
         AlertDialog(
             onDismissRequest = { vm.clearExtensionOutcome() },
-            confirmButton = { TextButton(onClick = { vm.clearExtensionOutcome() }) { Text("OK") } },
-            title = { Text(if (o.status == "approved") "Extra time approved" else "Extension declined", fontWeight = FontWeight.Bold) },
+            confirmButton = { TextButton(onClick = { vm.clearExtensionOutcome() }) { Text(tr("OK")) } },
+            title = { Text(if (o.status == "approved") tr("Extra time approved") else tr("Extension declined"), fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     if (o.status == "approved")
-                        "+${o.minutes} min added" + (if (o.payout > 0) " · you earn ₹${o.payout} extra" else "") + ". The timer has been updated."
+                        "+${o.minutes} " + tr("min added") + (if (o.payout > 0) " · " + tr("you earn") + " ₹${o.payout} " + tr("extra") else "") + tr(". The timer has been updated.")
                     else
-                        "The customer declined the extra time. Finish what you can of the original scope, then complete the job and note anything left undone.",
+                        tr("The customer declined the extra time. Finish what you can of the original scope, then complete the job and note anything left undone."),
                     color = TextGray, fontSize = 14.sp,
                 )
             },
@@ -1640,25 +1640,25 @@ private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text("Request more time", fontWeight = FontWeight.Bold) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel")) } },
+        title = { Text(tr("Request more time"), fontWeight = FontWeight.Bold) },
         text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             Text(
-                "The customer decides — they'll see the extra cost and can approve or decline.",
+                tr("The customer decides — they'll see the extra cost and can approve or decline."),
                 color = TextGray, fontSize = 12.5.sp, lineHeight = 17.sp,
             )
             Spacer(Modifier.height(Space.l))
 
             when {
-                opts == null -> Text("Loading options…", color = TextMuted, fontSize = 13.sp)
+                opts == null -> Text(tr("Loading options…"), color = TextMuted, fontSize = 13.sp)
                 !opts.enabled -> Text(
-                    if (opts.requestsLeft <= 0) "This booking has already used all its allowed extensions. Contact Operations if more time is genuinely needed."
-                    else "Extra time isn't available for this service.",
+                    if (opts.requestsLeft <= 0) tr("This booking has already used all its allowed extensions. Contact Operations if more time is genuinely needed.")
+                    else tr("Extra time isn't available for this service."),
                     color = TextGray, fontSize = 13.sp, lineHeight = 18.sp,
                 )
                 else -> {
-                    Text("Additional time required", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Additional time required"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(Space.s))
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         opts.blocks.forEach { b ->
@@ -1670,14 +1670,14 @@ private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                                     .padding(horizontal = 18.dp, vertical = 12.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Text("+${b.mins} min", color = if (on) Color.White else TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("+${b.mins} " + tr("min"), color = if (on) Color.White else TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 Text("₹${b.price}", color = if (on) Color.White.copy(alpha = 0.9f) else TextGray, fontSize = 12.sp)
                             }
                         }
                     }
                     Spacer(Modifier.height(Space.l))
 
-                    Text("Why is more time required?", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Why is more time required?"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(Space.s))
                     opts.reasons.forEach { r ->
                         Row(
@@ -1691,9 +1691,9 @@ private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                                 contentAlignment = Alignment.Center,
                             ) { if (reason == r.code) Box(Modifier.size(7.dp).clip(CircleShape).background(Color.White)) }
                             Spacer(Modifier.width(Space.s))
-                            Text(r.label, color = TextDark, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(tr(r.label), color = TextDark, fontSize = 13.sp, modifier = Modifier.weight(1f))
                             // Being straight with the worker: this reason means the customer isn't billed.
-                            if (!r.chargeable) Text("no charge", color = TextMuted, fontSize = 11.sp)
+                            if (!r.chargeable) Text(tr("no charge"), color = TextMuted, fontSize = 11.sp)
                         }
                     }
 
@@ -1702,14 +1702,14 @@ private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         Column(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Primary50).padding(Space.m),
                         ) {
-                            Text("+${block.mins} minutes", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("+${block.mins} " + tr("minutes"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                if (chargeable) "Customer charge: ₹${block.price}" else "Customer charge: ₹0 — absorbed, not billed",
+                                if (chargeable) "Customer charge: ₹${block.price}" else tr("Customer charge: ₹0 — absorbed, not billed"),
                                 color = TextGray, fontSize = 12.5.sp,
                             )
                             Text(
-                                if (chargeable) "Your additional earning: ₹${block.payout}" else "Your additional earning: ₹0",
+                                if (chargeable) "Your additional earning: ₹${block.payout}" else tr("Your additional earning: ₹0"),
                                 color = TextGray, fontSize = 12.5.sp,
                             )
                         }
@@ -1717,7 +1717,7 @@ private fun RequestExtensionSheet(vm: AppViewModel, onDismiss: () -> Unit) {
 
                     Spacer(Modifier.height(Space.l))
                     PrimaryButton(
-                        if (sending) "Sending…" else "Send Request to Customer",
+                        if (sending) tr("Sending…") else tr("Send Request to Customer"),
                         enabled = !sending && block != null && reason.isNotBlank(),
                     ) {
                         sending = true
@@ -1749,11 +1749,11 @@ private fun PauseReasonDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text("Pause the service?", fontWeight = FontWeight.Bold) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel")) } },
+        title = { Text(tr("Pause the service?"), fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Text("The timer stops until you resume. Pick a reason:", color = TextGray, fontSize = 13.sp)
+                Text(tr("The timer stops until you resume. Pick a reason:"), color = TextGray, fontSize = 13.sp)
                 Spacer(Modifier.height(Space.m))
                 reasons.forEach { r ->
                     Row(
@@ -1762,7 +1762,7 @@ private fun PauseReasonDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                     ) {
                         Text("⏸", fontSize = 14.sp)
                         Spacer(Modifier.width(Space.m))
-                        Text(r, fontSize = 14.sp, color = TextDark)
+                        Text(tr(r), fontSize = 14.sp, color = TextDark)
                     }
                     HorizontalDivider(color = Divider)
                 }
@@ -1777,7 +1777,7 @@ private fun TimeInfoRow(emoji: String, label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = Space.m), verticalAlignment = Alignment.CenterVertically) {
         Text(emoji, fontSize = 18.sp)
         Spacer(Modifier.width(Space.m))
-        Text(label, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp, modifier = Modifier.weight(1f))
         Text(value, color = TextGray, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -1795,7 +1795,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { vm.loadJobState() }   // so the photo summary + counts are populated
     Column(Modifier.fillMaxSize().background(Color.White)) {
-        JobWhiteBar("Job Completed", onBack = null)
+        JobWhiteBar(tr("Job Completed"), onBack = null)
         HairlineDivider()
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(top = Space.m, bottom = Space.m),
@@ -1826,14 +1826,14 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                         }
                     }
                     Spacer(Modifier.height(10.dp))
-                    Text("Job Completed!", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextDark)
+                    Text(tr("Job Completed!"), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextDark)
                     Spacer(Modifier.height(4.dp))
-                    Text("Great job! The service has been completed successfully.", fontSize = 13.sp, color = TextGray, lineHeight = 17.sp, textAlign = TextAlign.Center)
+                    Text(tr("Great job! The service has been completed successfully."), fontSize = 13.sp, color = TextGray, lineHeight = 17.sp, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(Space.m))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        CompletedStat(Icons.Filled.Schedule, "Completed At", endedAt)
-                        CompletedStat(Icons.Filled.CalendarMonth, "Date", dateStr)
-                        CompletedStat(Icons.Filled.Star, "Job ID", job.id)
+                        CompletedStat(Icons.Filled.Schedule, tr("Completed At"), endedAt)
+                        CompletedStat(Icons.Filled.CalendarMonth, tr("Date"), dateStr)
+                        CompletedStat(Icons.Filled.Star, tr("Job ID"), job.id)
                     }
                 }
             }
@@ -1843,8 +1843,8 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                 Icon(Icons.Filled.Shield, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(Space.m))
                 Column {
-                    Text("Thank you for your hard work!", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Your professionalism helps us keep our customers happy.", color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
+                    Text(tr("Thank you for your hard work!"), color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Your professionalism helps us keep our customers happy."), color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
                 }
             }
 
@@ -1857,7 +1857,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                         Column(Modifier.weight(1f)) {
                             Text(job.customerName, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                                Text(job.customerType.orEmpty().ifBlank { "Residential" }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(job.customerType.orEmpty().ifBlank { tr("Residential") }, color = Purple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1872,16 +1872,16 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                 Box(Modifier.width(1.dp).height(62.dp).background(Divider))
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.width(104.dp)) {
-                    Text("Service", color = TextGray, fontSize = 10.sp)
-                    Text(job.services.firstOrNull() ?: "Service", color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
+                    Text(tr("Service"), color = TextGray, fontSize = 10.sp)
+                    Text(job.services.firstOrNull() ?: tr("Service"), color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
                     Spacer(Modifier.height(6.dp))
                     Row {
                         Column(Modifier.weight(1f)) {
-                            Text("Duration", color = TextGray, fontSize = 10.sp)
+                            Text(tr("Duration"), color = TextGray, fontSize = 10.sp)
                             Text(taken, color = TextDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                         Column {
-                            Text("Rating", color = TextGray, fontSize = 10.sp)
+                            Text(tr("Rating"), color = TextGray, fontSize = 10.sp)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Star, contentDescription = null, tint = Purple, modifier = Modifier.size(11.dp))
                                 Spacer(Modifier.width(2.dp))
@@ -1895,17 +1895,17 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
             // ── Job photos summary.
             FlowCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Job Photos Summary", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Text("View All", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Job Photos Summary"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(tr("View All"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.height(Space.m))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PhotoSummaryTile(Modifier.weight(1f), "Before", "${vm.beforePhotos.size} Photos", vm.beforePhotos.firstOrNull()?.url)
+                    PhotoSummaryTile(Modifier.weight(1f), tr("Before"), "${vm.beforePhotos.size} Photos", vm.beforePhotos.firstOrNull()?.url)
                     Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    PhotoSummaryTile(Modifier.weight(1f), "In Progress", "${if (vm.beforePhoto != null) 1 else 0} Photo", vm.beforePhoto)
+                    PhotoSummaryTile(Modifier.weight(1f), tr("In Progress"), "${if (vm.beforePhoto != null) 1 else 0} Photo", vm.beforePhoto)
                     Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    PhotoSummaryTile(Modifier.weight(1f), "After", "${vm.afterPhotos.size} Photos", vm.afterPhotos.firstOrNull()?.url)
+                    PhotoSummaryTile(Modifier.weight(1f), tr("After"), "${vm.afterPhotos.size} Photos", vm.afterPhotos.firstOrNull()?.url)
                 }
             }
 
@@ -1913,23 +1913,23 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
             FlowCard {
                 Row(Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f)) {
-                        Text("Payment Summary", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Payment Summary"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
-                        PayMini("Service Charge", "₹$serviceCharge")
-                        PayMini("Taxes & Fees", "₹$taxes")
+                        PayMini(tr("Service Charge"), "₹$serviceCharge")
+                        PayMini(tr("Taxes & Fees"), "₹$taxes")
                         Spacer(Modifier.height(6.dp)); HairlineDivider(); Spacer(Modifier.height(6.dp))
-                        Row { Text("Total Paid", color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text("₹$totalPaid", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                        Row { Text(tr("Total Paid"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text("₹$totalPaid", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                     }
                     Spacer(Modifier.width(Space.m))
                     Box(Modifier.width(1.dp).height(96.dp).background(Divider))
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("Your Earnings", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Your Earnings"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
-                        PayMini("Base Pay", "₹$basePay")
-                        PayMini("Incentives", "₹$incentives")
+                        PayMini(tr("Base Pay"), "₹$basePay")
+                        PayMini(tr("Incentives"), "₹$incentives")
                         Spacer(Modifier.height(6.dp)); HairlineDivider(); Spacer(Modifier.height(6.dp))
-                        Row { Text("Total Earned", color = GreenSuccess, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text("₹$earned", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                        Row { Text(tr("Total Earned"), color = GreenSuccess, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text("₹$earned", color = GreenSuccess, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                     }
                 }
             }
@@ -1940,10 +1940,10 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("❝", color = Purple, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(6.dp))
-                        Text("Customer Feedback", color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Customer Feedback"), color = TextDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text("Excellent service! Very professional and thorough. Highly recommended.", color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
+                    Text(tr("Excellent service! Very professional and thorough. Highly recommended."), color = TextGray, fontSize = 11.5.sp, lineHeight = 15.sp)
                 }
                 Spacer(Modifier.width(Space.m))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1956,8 +1956,8 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
         Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, "Contact Support") { nav.navigate(Routes.WALLET_HELP) }
-                    CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.Assignment, "Download Invoice") {
+                    CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.HelpOutline, tr("Contact Support")) { nav.navigate(Routes.WALLET_HELP) }
+                    CompletedFooterButton(Modifier.weight(1f), Icons.AutoMirrored.Filled.Assignment, tr("Download Invoice")) {
                         toast(ctx, if (downloadInvoice(ctx, job)) "Invoice saved to Downloads" else "Couldn't save the invoice")
                     }
                 }
@@ -1972,7 +1972,7 @@ fun JobCompletedScreen(vm: AppViewModel, nav: NavHostController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("BACK TO DASHBOARD", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("BACK TO DASHBOARD"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2045,7 +2045,7 @@ private fun CompletedStat(icon: androidx.compose.ui.graphics.vector.ImageVector,
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
         Spacer(Modifier.height(3.dp))
-        Text(label, color = TextGray, fontSize = 9.5.sp, maxLines = 1)
+        Text(tr(label), color = TextGray, fontSize = 9.5.sp, maxLines = 1)
         Text(value, color = Purple, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
@@ -2065,7 +2065,7 @@ private fun PhotoSummaryTile(modifier: Modifier, label: String, count: String, p
             }
         }
         Spacer(Modifier.height(5.dp))
-        Text(label, color = TextDark, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 12.sp, maxLines = 1)
+        Text(tr(label), color = TextDark, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 12.sp, maxLines = 1)
         Text(count, color = TextGray, fontSize = 9.sp, maxLines = 1)
     }
 }
@@ -2073,7 +2073,7 @@ private fun PhotoSummaryTile(modifier: Modifier, label: String, count: String, p
 @Composable
 private fun PayMini(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text(label, color = TextGray, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
         Text(value, color = TextDark, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -2087,7 +2087,7 @@ private fun CompletedFooterButton(modifier: Modifier, icon: androidx.compose.ui.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = Purple, modifier = Modifier.size(15.dp))
             Spacer(Modifier.width(5.dp))
-            Text(label, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(tr(label), color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
     }
 }
@@ -2104,8 +2104,8 @@ private fun StatusBanner(bg: Color, fg: Color, title: String, subtitle: String) 
             ) { Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = fg, modifier = Modifier.size(24.dp)) }
             Spacer(Modifier.width(Space.m))
             Column {
-                Text(title, fontWeight = FontWeight.Bold, color = fg)
-                Text(subtitle, fontSize = 13.sp, color = TextGray)
+                Text(tr(title), fontWeight = FontWeight.Bold, color = fg)
+                Text(tr(subtitle), fontSize = 13.sp, color = TextGray)
             }
         }
     }
@@ -2129,12 +2129,12 @@ fun SafetyHeader(title: String, vm: AppViewModel, nav: NavHostController, onBack
                 BackButton(onBack)
                 Spacer(Modifier.width(Space.m))
             }
-            Text(title, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp, color = TextDark, modifier = Modifier.weight(1f))
+            Text(tr(title), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.4).sp, color = TextDark, modifier = Modifier.weight(1f))
             Surface(shape = RoundedCornerShape(Radius.pill), color = PurpleLight, modifier = Modifier.clickable { nav.navigate(Routes.P_HELP) }) {
                 Row(Modifier.padding(horizontal = 13.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Phone, null, tint = Purple, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(5.dp))
-                    Text("Help", color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(tr("Help"), color = Purple, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
             Spacer(Modifier.width(Space.s))
@@ -2142,7 +2142,7 @@ fun SafetyHeader(title: String, vm: AppViewModel, nav: NavHostController, onBack
                 Row(Modifier.padding(horizontal = 14.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("🆘", fontSize = 13.sp)
                     Spacer(Modifier.width(5.dp))
-                    Text("SOS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(tr("SOS"), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }
@@ -2158,11 +2158,11 @@ fun SafetyHeader(title: String, vm: AppViewModel, nav: NavHostController, onBack
                     // still fires (with null coords) if permission/GPS is unavailable — never blocked.
                     val ll = lastKnownLatLng(ctx)
                     vm.sendSos(ll?.first, ll?.second) { msg -> toast(ctx, msg) }
-                }) { Text("Send Alert", color = RedCancel, fontWeight = FontWeight.Bold) }
+                }) { Text(tr("Send Alert"), color = RedCancel, fontWeight = FontWeight.Bold) }
             },
-            dismissButton = { TextButton(onClick = { confirmSos = false }) { Text("Cancel", color = TextGray) } },
-            title = { Text("🆘  Send SOS?", fontWeight = FontWeight.Bold) },
-            text = { Text("This alerts HomeHelp safety and shares your live location. Use only in a genuine emergency.", color = TextGray, fontSize = 14.sp) },
+            dismissButton = { TextButton(onClick = { confirmSos = false }) { Text(tr("Cancel"), color = TextGray) } },
+            title = { Text(tr("🆘  Send SOS?"), fontWeight = FontWeight.Bold) },
+            text = { Text(tr("This alerts HomeHelp safety and shares your live location. Use only in a genuine emergency."), color = TextGray, fontSize = 14.sp) },
         )
     }
 }
@@ -2177,8 +2177,8 @@ fun SafetyCard() {
             ) { Icon(Icons.Filled.Shield, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(Space.m))
             Column {
-                Text("Safety First", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 13.sp)
-                Text("Your safety is our priority. Share live location with family/friends.", fontSize = 11.sp, color = TextGray)
+                Text(tr("Safety First"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 13.sp)
+                Text(tr("Your safety is our priority. Share live location with family/friends."), fontSize = 11.sp, color = TextGray)
             }
         }
     }
@@ -2203,7 +2203,7 @@ private fun MapPlaceholder() {
             drawCircle(GreenSuccess, radius = 16f, center = end)
             drawCircle(Purple, radius = 16f, center = start)
         }
-        Text("🗺  Live Route", color = TextGray, fontWeight = FontWeight.Medium)
+        Text(tr("🗺  Live Route"), color = TextGray, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -2213,11 +2213,11 @@ private fun CancelDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        title = { Text("Cancel Job", fontWeight = FontWeight.Bold) },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Close")) } },
+        title = { Text(tr("Cancel Job"), fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Text("Select a reason:", color = TextGray, fontSize = 13.sp)
+                Text(tr("Select a reason:"), color = TextGray, fontSize = 13.sp)
                 Spacer(Modifier.height(Space.s))
                 reasons.forEach { r ->
                     Text(

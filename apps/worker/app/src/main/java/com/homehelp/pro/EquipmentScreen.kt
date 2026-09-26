@@ -30,13 +30,13 @@ fun EquipmentScreen(vm: AppViewModel, nav: NavHostController) {
     val held = vm.equipment.filter { it.status == "issued" }
     val returned = vm.equipment.filter { it.status != "issued" }
 
-    DetailScaffold("My Equipment", nav) {
+    DetailScaffold(tr("My Equipment"), nav) {
         Card(padding = Dp16.S) {
             Row(Modifier.padding(Space.xs), verticalAlignment = Alignment.CenterVertically) {
                 IconChip(Icons.Filled.Info, Purple, PurpleLight)
                 Spacer(Modifier.width(Space.m))
                 Text(
-                    "Kit your admin has issued to you. Contact them if something here looks wrong.",
+                    tr("Kit your admin has issued to you. Contact them if something here looks wrong."),
                     fontSize = 12.sp, color = TextGray, lineHeight = 17.sp,
                 )
             }
@@ -44,9 +44,9 @@ fun EquipmentScreen(vm: AppViewModel, nav: NavHostController) {
 
         if (vm.equipment.isEmpty()) {
             Card {
-                Text("Nothing issued yet", fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                Text(tr("Nothing issued yet"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
                 Spacer(Modifier.height(Space.xs))
-                Text("Your admin hasn't issued you any equipment.", fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp)
+                Text(tr("Your admin hasn't issued you any equipment."), fontSize = 12.5.sp, color = TextGray, lineHeight = 18.sp)
             }
             return@DetailScaffold
         }
@@ -64,18 +64,18 @@ fun EquipmentScreen(vm: AppViewModel, nav: NavHostController) {
                         )
                         if (bits.isNotEmpty()) Text(bits.joinToString(" · "), fontSize = 12.sp, color = TextGray)
                     }
-                    StatusPill("Issued", GreenLight, GreenSuccess)
+                    StatusPill(tr("Issued"), GreenLight, GreenSuccess)
                 }
             }
         }
 
         if (returned.isNotEmpty()) {
-            Text("Returned", fontSize = 12.sp, color = TextGray, modifier = Modifier.padding(horizontal = Space.xs))
+            Text(tr("Returned"), fontSize = 12.sp, color = TextGray, modifier = Modifier.padding(horizontal = Space.xs))
             returned.forEach { e ->
                 Card {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(e.name, color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
-                        StatusPill("Returned", FieldFill, TextMuted)
+                        StatusPill(tr("Returned"), FieldFill, TextMuted)
                     }
                 }
             }

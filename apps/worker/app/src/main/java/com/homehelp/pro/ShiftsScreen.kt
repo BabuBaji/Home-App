@@ -78,8 +78,8 @@ fun MyShiftsScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadShifts(); vm.loadAvailability() }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        AppTopBar("My Shifts", onBack = { nav.popBackStack() }, trailing = {
-            TopBarAction(Icons.Filled.Add, "Add") { nav.navigate(Routes.P_AVAILABILITY) }
+        AppTopBar(tr("My Shifts"), onBack = { nav.popBackStack() }, trailing = {
+            TopBarAction(Icons.Filled.Add, tr("Add")) { nav.navigate(Routes.P_AVAILABILITY) }
         })
 
         Column(
@@ -91,16 +91,16 @@ fun MyShiftsScreen(vm: AppViewModel, nav: NavHostController) {
                     val on = t == tab
                     Box(
                         Modifier.clip(RoundedCornerShape(Radius.pill)).background(if (on) Purple else FieldFill).clickable { tab = t }.padding(horizontal = 15.dp, vertical = 8.dp),
-                    ) { Text(t, color = if (on) Color.White else TextDark, fontSize = 12.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium) }
+                    ) { Text(tr(t), color = if (on) Color.White else TextDark, fontSize = 12.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium) }
                 }
             }
 
             when (tab) {
                 "Availability" -> {
-                    ShiftHint("Set the days & hours you're available — an admin confirms them.")
-                    OutlineButton("Open Availability", modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.P_AVAILABILITY) }
+                    ShiftHint(tr("Set the days & hours you're available — an admin confirms them."))
+                    OutlineButton(tr("Open Availability"), modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.P_AVAILABILITY) }
                 }
-                "Shift History" -> ShiftHint("Your completed shifts will appear here.")
+                "Shift History" -> ShiftHint(tr("Your completed shifts will appear here."))
                 "Shift Swap" -> ShiftSwapTab(vm, ctx)
                 else -> ScheduleTab(vm, nav, ctx) { tab = it }
             }
@@ -114,8 +114,8 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
     var showCalendar by remember { mutableStateOf(false) }
 
     if (shift == null) {
-        ShiftHint("You're not on a shift yet. Tap ＋ to pick your shift & availability.")
-        OutlineButton("Choose a Shift", modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.P_AVAILABILITY) }
+        ShiftHint(tr("You're not on a shift yet. Tap ＋ to pick your shift & availability."))
+        OutlineButton(tr("Choose a Shift"), modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.P_AVAILABILITY) }
         return
     }
 
@@ -139,29 +139,29 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Today's Shift", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                    Text(tr("Today's Shift"), color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                     Spacer(Modifier.width(8.dp))
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(Color.White.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                        Text(if (active) "Active" else "Upcoming", color = Color(0xFF86EFAC), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(if (active) tr("Active") else tr("Upcoming"), color = Color(0xFF86EFAC), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Text("${fmtShift(shift.start)} – ${fmtShift(shift.end)}", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-                Text("${shift.name} Shift", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr(shift.name) + " " + tr("Shift"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(vm.workerCity.ifBlank { "Hyderabad" }, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                    Text(vm.workerCity.ifBlank { tr("Hyderabad") }, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                 }
             }
             Box(contentAlignment = Alignment.Center, modifier = Modifier.size(94.dp)) {
                 CircularProgressIndicator(progress = { 1f }, modifier = Modifier.size(94.dp), color = Color.White.copy(alpha = 0.22f), strokeWidth = 7.dp)
                 CircularProgressIndicator(progress = { frac.coerceIn(0f, 1f) }, modifier = Modifier.size(94.dp), color = Color(0xFF4ADE80), trackColor = Color.Transparent, strokeWidth = 7.dp, strokeCap = StrokeCap.Round)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(if (active) "In Shift" else "Starts in", color = Color.White.copy(alpha = 0.9f), fontSize = 10.sp)
+                    Text(if (active) tr("In Shift") else tr("Starts in"), color = Color.White.copy(alpha = 0.9f), fontSize = 10.sp)
                     Text("%02d:%02d".format(leftMin / 60, leftMin % 60), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("hrs left", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
+                    Text(tr("hrs left"), color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
                 }
             }
         }
@@ -169,11 +169,11 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
 
     // ── Upcoming shifts — the assigned shift on the next available days.
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Upcoming Shifts", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(tr("Upcoming Shifts"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         Row(Modifier.clip(RoundedCornerShape(Radius.pill)).clickable { showCalendar = !showCalendar }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(5.dp))
-            Text(if (showCalendar) "Hide Calendar" else "View Calendar", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(if (showCalendar) tr("Hide Calendar") else tr("View Calendar"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
 
@@ -181,7 +181,7 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
 
     val upcoming = upcomingDays(vm)
     if (upcoming.isEmpty()) {
-        ShiftHint("No working days set yet. Tap ＋ to set your availability.")
+        ShiftHint(tr("No working days set yet. Tap ＋ to set your availability."))
     } else {
         upcoming.forEach { c ->
             Card {
@@ -195,16 +195,16 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
                     Box(Modifier.width(1.dp).height(50.dp).background(Divider))
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("${shift.name} Shift", color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(tr(shift.name) + " " + tr("Shift"), color = Purple, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text("${fmtShift(shift.start)} – ${fmtShift(shift.end)}", color = TextGray, fontSize = 13.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.LocationOn, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(vm.workerCity.ifBlank { "Hyderabad" }, color = TextGray, fontSize = 12.sp, maxLines = 1)
+                            Text(vm.workerCity.ifBlank { tr("Hyderabad") }, color = TextGray, fontSize = 12.sp, maxLines = 1)
                         }
                     }
                     Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(PurpleLight).padding(horizontal = 9.dp, vertical = 4.dp)) {
-                        Text("Scheduled", color = Purple, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Scheduled"), color = Purple, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -212,28 +212,28 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
     }
 
     // ── Week overview — all four in one card, evenly aligned.
-    Text("This Week Overview", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    Text(tr("This Week Overview"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     val workDays = vm.availableDays.count { it.value }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Color.White).border(1.dp, Divider, RoundedCornerShape(Radius.card)).padding(vertical = 14.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        OverviewStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Purple, PurpleLight, "$workDays", "Total Shifts")
+        OverviewStat(Modifier.weight(1f), Icons.Filled.CalendarMonth, Purple, PurpleLight, "$workDays", tr("Total Shifts"))
         Box(Modifier.width(1.dp).height(40.dp).background(Divider))
-        OverviewStat(Modifier.weight(1f), Icons.Filled.CheckCircle, GreenSuccess, GreenLight, "$workDays", "Scheduled")
+        OverviewStat(Modifier.weight(1f), Icons.Filled.CheckCircle, GreenSuccess, GreenLight, "$workDays", tr("Scheduled"))
         Box(Modifier.width(1.dp).height(40.dp).background(Divider))
-        OverviewStat(Modifier.weight(1f), Icons.Filled.Schedule, Amber, GoldLight, "0", "Pending")
+        OverviewStat(Modifier.weight(1f), Icons.Filled.Schedule, Amber, GoldLight, "0", tr("Pending"))
         Box(Modifier.width(1.dp).height(40.dp).background(Divider))
-        OverviewStat(Modifier.weight(1f), Icons.Filled.Close, RedCancel, RedLight, "0", "Cancelled")
+        OverviewStat(Modifier.weight(1f), Icons.Filled.Close, RedCancel, RedLight, "0", tr("Cancelled"))
     }
 
     // ── Quick actions.
-    Text("Quick Actions", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    Text(tr("Quick Actions"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-        ShiftAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.CompareArrows, Purple, "Request Shift Swap") { onSelectTab("Shift Swap") }
-        ShiftAction(Modifier.weight(1f), Icons.Filled.EventAvailable, GreenSuccess, "Set Availability") { nav.navigate(Routes.P_AVAILABILITY) }
-        ShiftAction(Modifier.weight(1f), Icons.Filled.Schedule, Amber, "Request Time Off") { nav.navigate(Routes.LEAVE) }
-        ShiftAction(Modifier.weight(1f), Icons.Filled.Description, Color(0xFF3B82F6), "Shift History") { onSelectTab("Shift History") }
+        ShiftAction(Modifier.weight(1f), Icons.AutoMirrored.Filled.CompareArrows, Purple, tr("Request Shift Swap")) { onSelectTab("Shift Swap") }
+        ShiftAction(Modifier.weight(1f), Icons.Filled.EventAvailable, GreenSuccess, tr("Set Availability")) { nav.navigate(Routes.P_AVAILABILITY) }
+        ShiftAction(Modifier.weight(1f), Icons.Filled.Schedule, Amber, tr("Request Time Off")) { nav.navigate(Routes.LEAVE) }
+        ShiftAction(Modifier.weight(1f), Icons.Filled.Description, Color(0xFF3B82F6), tr("Shift History")) { onSelectTab("Shift History") }
     }
     Spacer(Modifier.height(Space.s))
 }
@@ -241,8 +241,8 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
 /* ── Shift Swap tab — pick a different shift; routes through the real selectShift request. ── */
 @Composable
 private fun ShiftSwapTab(vm: AppViewModel, ctx: android.content.Context) {
-    ShiftHint("Pick the shift you'd like to move to. An admin confirms the swap — your current shift stands until then.")
-    if (vm.shifts.isEmpty()) { ShiftHint("No shifts available to swap into right now."); return }
+    ShiftHint(tr("Pick the shift you'd like to move to. An admin confirms the swap — your current shift stands until then."))
+    if (vm.shifts.isEmpty()) { ShiftHint(tr("No shifts available to swap into right now.")); return }
     vm.shifts.forEach { s ->
         val current = vm.selectedShiftId == s.id
         val requested = vm.requestedShiftId == s.id && !current
@@ -253,17 +253,17 @@ private fun ShiftSwapTab(vm: AppViewModel, ctx: android.content.Context) {
                 }
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
-                    Text("${s.name} Shift", color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(tr(s.name) + " " + tr("Shift"), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text("${fmtShift(s.start)} – ${fmtShift(s.end)} · ${s.hours}h", color = TextGray, fontSize = 12.5.sp)
                 }
                 when {
                     current -> Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(GreenLight).padding(horizontal = 9.dp, vertical = 4.dp)) {
-                        Text("Current", color = GreenSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Current"), color = GreenSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                     requested -> Box(Modifier.clip(RoundedCornerShape(Radius.pill)).background(GoldLight).padding(horizontal = 9.dp, vertical = 4.dp)) {
-                        Text("Requested", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("Requested"), color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
-                    else -> Text("Swap", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    else -> Text(tr("Swap"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -318,10 +318,10 @@ private fun ShiftCalendar(vm: AppViewModel) {
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(10.dp).clip(CircleShape).background(PurpleLight)); Spacer(Modifier.width(5.dp))
-            Text("Working day", color = TextGray, fontSize = 11.sp)
+            Text(tr("Working day"), color = TextGray, fontSize = 11.sp)
             Spacer(Modifier.width(Space.m))
             Box(Modifier.size(10.dp).clip(CircleShape).background(Purple)); Spacer(Modifier.width(5.dp))
-            Text("Today", color = TextGray, fontSize = 11.sp)
+            Text(tr("Today"), color = TextGray, fontSize = 11.sp)
         }
     }
 }
@@ -334,7 +334,7 @@ private fun OverviewStat(modifier: Modifier, icon: androidx.compose.ui.graphics.
         }
         Spacer(Modifier.height(5.dp))
         Text(value, color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1, lineHeight = 12.sp)
+        Text(tr(label), color = TextGray, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1, lineHeight = 12.sp)
     }
 }
 
@@ -349,7 +349,7 @@ private fun ShiftAction(modifier: Modifier, icon: androidx.compose.ui.graphics.v
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.height(7.dp))
-        Text(label, color = TextDark, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 12.sp)
+        Text(tr(label), color = TextDark, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 12.sp)
     }
 }
 
@@ -358,7 +358,7 @@ private fun ShiftHint(text: String) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.card)).background(Primary50).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(Space.m))
-        Text(text, color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
+        Text(tr(text), color = TextGray, fontSize = 13.sp, lineHeight = 17.sp)
     }
 }
 

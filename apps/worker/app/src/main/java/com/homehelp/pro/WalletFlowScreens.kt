@@ -125,7 +125,7 @@ fun WithdrawMoneyScreen(vm: AppViewModel, nav: NavHostController) {
     val canContinue = amount > 0 && !tooLow && !tooHigh && bank != null && bank.verified
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Withdraw Earnings", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Withdraw Earnings"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -136,7 +136,7 @@ fun WithdrawMoneyScreen(vm: AppViewModel, nav: NavHostController) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Available Balance", color = Color.White.copy(alpha = 0.9f), fontSize = 13.5.sp)
+                    Text(tr("Available Balance"), color = Color.White.copy(alpha = 0.9f), fontSize = 13.5.sp)
                     Spacer(Modifier.height(3.dp))
                     Text(rs(vm.walletBalance), color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
                 }
@@ -147,14 +147,14 @@ fun WithdrawMoneyScreen(vm: AppViewModel, nav: NavHostController) {
             }
 
             // Destination
-            Text("Select Bank Account", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Select Bank Account"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             if (vm.bankAccounts.isEmpty()) {
                 Card(padding = Dp16.S) {
-                    Text("No payout account yet", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("No payout account yet"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(3.dp))
-                    Text("Add a bank account to withdraw your earnings.", color = TextGray, fontSize = 13.5.sp)
+                    Text(tr("Add a bank account to withdraw your earnings."), color = TextGray, fontSize = 13.5.sp)
                     Spacer(Modifier.height(Space.s))
-                    PrimaryButton("Add Bank Account") { nav.navigate(Routes.BANK_ACCOUNTS) }
+                    PrimaryButton(tr("Add Bank Account")) { nav.navigate(Routes.BANK_ACCOUNTS) }
                 }
             } else if (bank != null) {
                 Row(
@@ -168,19 +168,19 @@ fun WithdrawMoneyScreen(vm: AppViewModel, nav: NavHostController) {
                     ) { Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp)) }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text(bank.bankName.ifBlank { "Bank account" }, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(bank.bankName.ifBlank { tr("Bank account") }, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text(bank.accountMasked, color = TextGray, fontSize = 13.5.sp)
-                        if (!bank.verified) Text("Verification pending", color = Amber, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        if (!bank.verified) Text(tr("Verification pending"), color = Amber, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                     }
                     Text(
-                        "Change", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        tr("Change"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable { nav.navigate(Routes.BANK_ACCOUNTS) },
                     )
                 }
             }
 
             // Amount
-            Text("Enter Amount", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Enter Amount"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = amountText,
                 onValueChange = { v -> amountText = v.filter { it.isDigit() }.take(7) },
@@ -197,34 +197,34 @@ fun WithdrawMoneyScreen(vm: AppViewModel, nav: NavHostController) {
                 ),
             )
             when {
-                tooHigh -> Text("That's more than your available balance.", color = RedCancel, fontSize = 13.sp)
-                tooLow -> Text("Minimum withdrawal is ${rs(min)}.", color = RedCancel, fontSize = 13.sp)
+                tooHigh -> Text(tr("That's more than your available balance."), color = RedCancel, fontSize = 13.sp)
+                tooLow -> Text(tr("Minimum withdrawal is") + " ${rs(min)}.", color = RedCancel, fontSize = 13.sp)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 listOf(500, 1000, 1500).forEach { q ->
                     QuickAmount(Modifier.weight(1f), rs(q), amountText == q.toString()) { amountText = q.toString() }
                 }
-                QuickAmount(Modifier.weight(1f), "MAX", amountText == vm.walletBalance.toString()) { amountText = vm.walletBalance.toString() }
+                QuickAmount(Modifier.weight(1f), tr("MAX"), amountText == vm.walletBalance.toString()) { amountText = vm.walletBalance.toString() }
             }
 
             // Summary — fees are ₹0 today; shown so the worker sees exactly what lands.
             Card(padding = Dp16.S) {
-                Text("Withdrawal Summary", color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Withdrawal Summary"), color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.s))
-                SummaryRow("Withdrawal Amount", rs(amount))
-                SummaryRow("Processing Fee", rs(0))
-                SummaryRow("GST (0%)", rs(0))
+                SummaryRow(tr("Withdrawal Amount"), rs(amount))
+                SummaryRow(tr("Processing Fee"), rs(0))
+                SummaryRow(tr("GST (0%)"), rs(0))
                 Spacer(Modifier.height(4.dp))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
                 Spacer(Modifier.height(6.dp))
                 Row {
-                    Text("Amount You Will Receive", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(tr("Amount You Will Receive"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text(rs(amount), color = GreenSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
         BottomBar {
-            PrimaryButton("Continue", enabled = canContinue) {
+            PrimaryButton(tr("Continue"), enabled = canContinue) {
                 WithdrawDraft.amount = amount
                 WithdrawDraft.bankId = bank?.id ?: 0
                 nav.navigate(if (vm.pinIsSet) Routes.WITHDRAW_PIN else Routes.WALLET_PIN_SET)
@@ -232,7 +232,7 @@ fun WithdrawMoneyScreen(vm: AppViewModel, nav: NavHostController) {
             if (bank != null && !bank.verified) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "This account is still being verified — you can't withdraw to it yet.",
+                    tr("This account is still being verified — you can't withdraw to it yet."),
                     color = TextMuted, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
                 )
             }
@@ -248,13 +248,13 @@ private fun QuickAmount(modifier: Modifier, label: String, on: Boolean, onClick:
             .border(1.dp, if (on) Purple else Divider, RoundedCornerShape(Radius.pill))
             .clickable(onClick = onClick).padding(vertical = 9.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = if (on) Color.White else Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold) }
+    ) { Text(tr(label), color = if (on) Color.White else Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold) }
 }
 
 @Composable
 private fun SummaryRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-        Text(label, color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
         Text(value, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -289,15 +289,15 @@ fun WithdrawPinScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     PinPad(
-        title = "Enter 4-digit PIN",
-        subtitle = "Enter your 4-digit wallet PIN",
+        title = tr("Enter 4-digit PIN"),
+        subtitle = tr("Enter your 4-digit wallet PIN"),
         pin = pin,
         error = error,
         busy = checking,
         onBack = { nav.popBackStack() },
         footer = {
             Text(
-                "Forgot PIN?", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                tr("Forgot PIN?"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clickable { nav.navigate(Routes.WALLET_PIN_SET) },
             )
         },
@@ -324,22 +324,22 @@ fun WalletPinSetScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadPinStatus() }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar(if (resetting) "Reset Wallet PIN" else "Set Wallet PIN", onBack = { nav.popBackStack() })
+        WalletTopBar(if (resetting) tr("Reset Wallet PIN") else tr("Set Wallet PIN"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Card(padding = Dp16.S) {
                 Text(
-                    if (resetting) "Enter the OTP sent to your phone, then choose a new 4-digit PIN."
-                    else "Choose a 4-digit PIN. You'll enter it every time you withdraw.",
+                    if (resetting) tr("Enter the OTP sent to your phone, then choose a new 4-digit PIN.")
+                    else tr("Choose a 4-digit PIN. You'll enter it every time you withdraw."),
                     color = TextGray, fontSize = 14.sp,
                 )
             }
             if (resetting) {
-                PinField("OTP", otp) { otp = it.filter { c -> c.isDigit() }.take(4) }
+                PinField(tr("OTP"), otp) { otp = it.filter { c -> c.isDigit() }.take(4) }
                 Text(
-                    "Tap to send the OTP", color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
+                    tr("Tap to send the OTP"), color = Purple, fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable {
                         // Dev builds hand the OTP straight back; show it rather than pretend it was SMS'd.
                         vm.requestWithdrawOtp { code ->
@@ -348,14 +348,14 @@ fun WalletPinSetScreen(vm: AppViewModel, nav: NavHostController) {
                     },
                 )
             }
-            PinField("New PIN", pin) { pin = it.filter { c -> c.isDigit() }.take(4) }
-            PinField("Confirm PIN", confirm) { confirm = it.filter { c -> c.isDigit() }.take(4) }
+            PinField(tr("New PIN"), pin) { pin = it.filter { c -> c.isDigit() }.take(4) }
+            PinField(tr("Confirm PIN"), confirm) { confirm = it.filter { c -> c.isDigit() }.take(4) }
             error?.let { Text(it, color = RedCancel, fontSize = 13.5.sp) }
         }
         androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
                 PrimaryButton(
-                    if (resetting) "Reset PIN" else "Set PIN",
+                    if (resetting) tr("Reset PIN") else tr("Set PIN"),
                     enabled = pin.length == 4 && confirm.length == 4 && !vm.walletBusy,
                 ) {
                     if (pin != confirm) { error = "Both PINs must match"; return@PrimaryButton }
@@ -373,7 +373,7 @@ private fun PinField(label: String, value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        label = { Text(tr(label)) },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         shape = RoundedCornerShape(Radius.button),
@@ -404,16 +404,16 @@ private fun PinPad(
             Box(
                 Modifier.size(36.dp).clip(RoundedCornerShape(Radius.pill)).background(Primary50),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Help", tint = Purple, modifier = Modifier.size(19.dp)) }
+            ) { Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = tr("Help"), tint = Purple, modifier = Modifier.size(19.dp)) }
         })
         Column(
             Modifier.weight(1f).padding(Space.l),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(Space.xxl))
-            Text(title, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Text(tr(title), color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(Space.s))
-            Text(subtitle, color = TextGray, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Text(tr(subtitle), color = TextGray, fontSize = 14.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(Space.xl))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
                 repeat(4) { i ->
@@ -424,8 +424,8 @@ private fun PinPad(
                 }
             }
             Spacer(Modifier.height(Space.m))
-            if (error != null) Text(error, color = RedCancel, fontSize = 13.5.sp, textAlign = TextAlign.Center)
-            else if (busy) Text("Checking…", color = TextMuted, fontSize = 13.5.sp)
+            if (error != null) Text(tr(error), color = RedCancel, fontSize = 13.5.sp, textAlign = TextAlign.Center)
+            else if (busy) Text(tr("Checking…"), color = TextMuted, fontSize = 13.5.sp)
             Spacer(Modifier.height(Space.s))
             footer()
             Spacer(Modifier.height(Space.xl))
@@ -446,7 +446,7 @@ private fun PinPad(
                         ) {
                             when (key) {
                                 "" -> Unit
-                                "<" -> Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = TextDark, modifier = Modifier.size(22.dp))
+                                "<" -> Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = tr("Delete"), tint = TextDark, modifier = Modifier.size(22.dp))
                                 else -> Text(key, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
@@ -469,7 +469,7 @@ fun ConfirmWithdrawalScreen(vm: AppViewModel, nav: NavHostController) {
     val amount = WithdrawDraft.amount
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Confirm Withdrawal", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Confirm Withdrawal"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
@@ -487,7 +487,7 @@ fun ConfirmWithdrawalScreen(vm: AppViewModel, nav: NavHostController) {
                     ) { Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Purple, modifier = Modifier.size(26.dp)) }
                     Spacer(Modifier.width(Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text("To", color = TextGray, fontSize = 14.sp)
+                        Text(tr("To"), color = TextGray, fontSize = 14.sp)
                         Spacer(Modifier.height(2.dp))
                         Text(bank?.bankName ?: "—", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Text(bank?.accountMasked ?: "", color = TextGray, fontSize = 14.sp)
@@ -496,17 +496,17 @@ fun ConfirmWithdrawalScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.height(Space.l))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
                 Spacer(Modifier.height(Space.m))
-                ConfirmRow("Amount", rs(amount))
-                ConfirmRow("Processing Fee", rs(0))
-                ConfirmRow("GST", rs(0))
+                ConfirmRow(tr("Amount"), rs(amount))
+                ConfirmRow(tr("Processing Fee"), rs(0))
+                ConfirmRow(tr("GST"), rs(0))
                 Spacer(Modifier.height(Space.s))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
                 Spacer(Modifier.height(Space.s))
                 Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("You Will Receive", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(tr("You Will Receive"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text(rs(amount), color = GreenSuccess, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
-                ConfirmRow("Expected Credit", "Within 30 minutes")
+                ConfirmRow(tr("Expected Credit"), "Within 30 minutes")
             }
             error?.let {
                 Row(
@@ -517,7 +517,7 @@ fun ConfirmWithdrawalScreen(vm: AppViewModel, nav: NavHostController) {
         }
         androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
-                PrimaryButton("Withdraw Now", enabled = !vm.walletBusy && amount > 0) {
+                PrimaryButton(tr("Withdraw Now"), enabled = !vm.walletBusy && amount > 0) {
                     vm.requestWithdrawalWithPin(amount, WithdrawDraft.pin, WithdrawDraft.bankId.takeIf { it > 0 }) { ok, err ->
                         if (ok) nav.navigate(Routes.WITHDRAW_SUCCESS) { popUpTo(Routes.WITHDRAW) { inclusive = true } }
                         else error = err
@@ -532,7 +532,7 @@ fun ConfirmWithdrawalScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 private fun ConfirmRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextGray, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
         Text(value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -553,32 +553,32 @@ fun WithdrawalSuccessScreen(vm: AppViewModel, nav: NavHostController) {
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(54.dp)) }
             Spacer(Modifier.height(Space.l))
-            Text("Withdrawal Requested", color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Withdrawal Requested"), color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(rs(WithdrawDraft.amount), color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(
-                "Your withdrawal request is successfully placed.",
+                tr("Your withdrawal request is successfully placed."),
                 color = TextGray, fontSize = 14.sp, textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(Space.xl))
             Card(padding = Dp16.S) {
-                SummaryRow("Reference ID", r?.reference ?: "—")
-                SummaryRow("Requested On", nowStamp())
-                SummaryRow("To", r?.destination?.takeIf { it.isNotBlank() } ?: "—")
-                SummaryRow("Status", r?.status ?: "—")
-                SummaryRow("Expected Credit", r?.expectedCredit?.takeIf { it.isNotBlank() } ?: "—")
+                SummaryRow(tr("Reference ID"), r?.reference ?: "—")
+                SummaryRow(tr("Requested On"), nowStamp())
+                SummaryRow(tr("To"), r?.destination?.takeIf { it.isNotBlank() } ?: "—")
+                SummaryRow(tr("Status"), r?.status ?: "—")
+                SummaryRow(tr("Expected Credit"), r?.expectedCredit?.takeIf { it.isNotBlank() } ?: "—")
             }
         }
         androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(Space.l)) {
-                PrimaryButton("Done") {
+                PrimaryButton(tr("Done")) {
                     WithdrawDraft.clear()
                     nav.navigate(Routes.WALLET) { popUpTo(Routes.WALLET) { inclusive = true } }
                 }
                 Spacer(Modifier.height(Space.s))
                 Text(
-                    "View Withdrawal History", color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    tr("View Withdrawal History"), color = Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.fillMaxWidth().clickable {
                         WithdrawDraft.clear(); nav.navigate(Routes.WITHDRAW_HISTORY)
                     },
@@ -616,10 +616,10 @@ fun WithdrawalHistoryScreen(vm: AppViewModel, nav: NavHostController) {
         }
     }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Withdrawal History", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Withdrawal History"), onBack = { nav.popBackStack() })
         Box(Modifier.padding(Space.l)) { SegmentedTabs(tabs, tab) { tab = it } }
         if (rows.isEmpty()) {
-            EmptyState("💸", "Nothing here yet", "Withdrawals you make will show up under this filter.")
+            EmptyState("💸", tr("Nothing here yet"), tr("Withdrawals you make will show up under this filter."))
         } else {
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(bottom = Space.l),
@@ -652,7 +652,7 @@ fun WithdrawalHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                                 Text(rs(w.amount), color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.height(3.dp))
                                 Text(
-                                    displayStatus(w.status), color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                    tr(displayStatus(w.status)), color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                                 )
                                 if (failed) {
                                     Spacer(Modifier.height(4.dp))
@@ -660,7 +660,7 @@ fun WithdrawalHistoryScreen(vm: AppViewModel, nav: NavHostController) {
                                         Modifier.clip(RoundedCornerShape(Radius.pill)).background(RedLight)
                                             .clickable { WithdrawDraft.amount = w.amount; nav.navigate(Routes.WITHDRAW) }
                                             .padding(horizontal = 12.dp, vertical = 4.dp),
-                                    ) { Text("Retry", color = RedCancel, fontSize = 12.5.sp, fontWeight = FontWeight.Bold) }
+                                    ) { Text(tr("Retry"), color = RedCancel, fontSize = 12.5.sp, fontWeight = FontWeight.Bold) }
                                 }
                             }
                         }
@@ -681,19 +681,19 @@ fun BankAccountsScreen(vm: AppViewModel, nav: NavHostController) {
     confirmDelete?.let { acct ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("Remove this account?", fontWeight = FontWeight.Bold) },
+            title = { Text(tr("Remove this account?"), fontWeight = FontWeight.Bold) },
             text = { Text("${acct.bankName} ${acct.accountMasked} will be removed from your payout accounts.", color = TextGray, fontSize = 14.sp) },
             confirmButton = {
                 TextButton(onClick = { vm.deleteBankAccount(acct.id); confirmDelete = null }) {
-                    Text("Remove", color = RedCancel, fontWeight = FontWeight.Bold)
+                    Text(tr("Remove"), color = RedCancel, fontWeight = FontWeight.Bold)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(tr("Cancel")) } },
         )
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Bank Accounts", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Bank Accounts"), onBack = { nav.popBackStack() })
         vm.walletError?.let {
             Row(Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.s)) {
                 Text(it, color = RedCancel, fontSize = 13.5.sp)
@@ -702,7 +702,7 @@ fun BankAccountsScreen(vm: AppViewModel, nav: NavHostController) {
         // KYC status pinned at the top — stays until verification completes.
         Box(Modifier.padding(horizontal = Space.l).padding(top = Space.m)) { KycStatusBanner(vm) }
         if (vm.bankAccounts.isEmpty()) {
-            EmptyState("🏦", "No payout accounts", "Add a bank account to receive your earnings.")
+            EmptyState("🏦", tr("No payout accounts"), tr("Add a bank account to receive your earnings."))
         } else {
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
@@ -715,7 +715,7 @@ fun BankAccountsScreen(vm: AppViewModel, nav: NavHostController) {
         }
         androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
-                PrimaryButton("+  Add New Bank Account") { nav.navigate(Routes.BANK_ADD) }
+                PrimaryButton(tr("+  Add New Bank Account")) { nav.navigate(Routes.BANK_ADD) }
             }
         }
     }
@@ -740,7 +740,7 @@ private fun BankCard(a: BankAccount, onDefault: () -> Unit, onManage: () -> Unit
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp)) }
                     Spacer(Modifier.width(Space.m))
-                    Text(a.bankName.ifBlank { "Bank Account" }, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
+                    Text(a.bankName.ifBlank { tr("Bank Account") }, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
                     if (a.verified) {
                         Row(
                             Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.22f)).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -748,11 +748,11 @@ private fun BankCard(a: BankAccount, onDefault: () -> Unit, onManage: () -> Unit
                         ) {
                             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(3.dp))
-                            Text("Verified", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Verified"), color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                         }
                     } else {
                         Box(Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.22f)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            Text(a.status, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                            Text(tr(a.status), color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -765,7 +765,7 @@ private fun BankCard(a: BankAccount, onDefault: () -> Unit, onManage: () -> Unit
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("ACCOUNT HOLDER", color = Color.White.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(tr("ACCOUNT HOLDER"), color = Color.White.copy(alpha = 0.7f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text(a.holder.ifBlank { "—" }, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                     if (a.isDefault) {
@@ -775,7 +775,7 @@ private fun BankCard(a: BankAccount, onDefault: () -> Unit, onManage: () -> Unit
                         ) {
                             Icon(Icons.Filled.Star, contentDescription = null, tint = Gold, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(3.dp))
-                            Text("Default", color = Purple, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Default"), color = Purple, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -789,20 +789,20 @@ private fun BankCard(a: BankAccount, onDefault: () -> Unit, onManage: () -> Unit
                 ) {
                     Icon(Icons.Filled.Star, contentDescription = null, tint = if (a.verified) Gold else TextMuted, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Make Default", color = if (a.verified) Purple else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Make Default"), color = if (a.verified) Purple else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(Space.l))
             }
             Row(Modifier.clickable(onClick = onManage), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Manage", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Manage"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.weight(1f))
             Row(Modifier.clickable(onClick = onDelete), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Delete, contentDescription = null, tint = RedCancel, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Delete", color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Delete"), color = RedCancel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -825,8 +825,8 @@ private fun KycStatusBanner(vm: AppViewModel) {
             }
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
-                Text("KYC Verified", color = GreenSuccess, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text("Your identity documents are approved.", color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
+                Text(tr("KYC Verified"), color = GreenSuccess, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Your identity documents are approved."), color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
             }
         }
     } else {
@@ -839,8 +839,8 @@ private fun KycStatusBanner(vm: AppViewModel) {
             }
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
-                Text("Complete your KYC", color = Amber, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text("Verify your documents to start receiving payouts.", color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
+                Text(tr("Complete your KYC"), color = Amber, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Verify your documents to start receiving payouts."), color = TextGray, fontSize = 12.5.sp, lineHeight = 16.sp)
             }
         }
     }
@@ -878,22 +878,22 @@ fun AddBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
     LaunchedEffect(Unit) { vm.loadDocumentTypes() }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Add Bank Account", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Add Bank Account"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             KycStatusBanner(vm)
-            BankField("Full Name", holder) { holder = it }
+            BankField(tr("Full Name"), holder) { holder = it }
             // Bank Name — searchable dropdown over the full bank list, as requested.
             BankNamePicker(bankName) { bankName = it }
-            BankField("Account Number", account, KeyboardType.Number) { account = it.filter { c -> c.isDigit() }.take(18) }
+            BankField(tr("Account Number"), account, KeyboardType.Number) { account = it.filter { c -> c.isDigit() }.take(18) }
             // Re-enter to catch typos before the account is saved.
-            BankField("Confirm Account Number", confirmAccount, KeyboardType.Number, isError = accountsMismatch) {
+            BankField(tr("Confirm Account Number"), confirmAccount, KeyboardType.Number, isError = accountsMismatch) {
                 confirmAccount = it.filter { c -> c.isDigit() }.take(18)
             }
-            if (accountsMismatch) Text("Account numbers don't match.", color = RedCancel, fontSize = 13.sp)
-            BankField("IFSC Code", ifsc) { ifsc = it.uppercase().take(11) }
+            if (accountsMismatch) Text(tr("Account numbers don't match."), color = RedCancel, fontSize = 13.sp)
+            BankField(tr("IFSC Code"), ifsc) { ifsc = it.uppercase().take(11) }
             lookedUp?.let {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(GreenLight).padding(10.dp),
@@ -902,7 +902,7 @@ fun AddBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
                     Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = GreenSuccess, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(Space.s))
                     Column {
-                        Text("IFSC found", color = GreenSuccess, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Text(tr("IFSC found"), color = GreenSuccess, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                         Text(it, color = TextGray, fontSize = 13.sp, lineHeight = 14.sp)
                     }
                 }
@@ -914,14 +914,14 @@ fun AddBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
             }
             vm.walletError?.let { Text(it, color = RedCancel, fontSize = 13.5.sp) }
             Text(
-                "New accounts are verified before they can receive payouts.",
+                tr("New accounts are verified before they can receive payouts."),
                 color = TextMuted, fontSize = 12.5.sp,
             )
         }
         androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
             Box(Modifier.padding(Space.l)) {
                 PrimaryButton(
-                    "Save Account",
+                    tr("Save Account"),
                     enabled = account.length >= 8 && account == confirmAccount && ifsc.length == 11 && holder.isNotBlank() && !vm.walletBusy,
                 ) {
                     submitted = true
@@ -1076,10 +1076,10 @@ private fun BankNamePicker(value: String, onSelect: (String) -> Unit) {
             value = value,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Bank Name") },
-            placeholder = { Text("Search bank") },
+            label = { Text(tr("Bank Name")) },
+            placeholder = { Text(tr("Search bank")) },
             leadingIcon = if (value.isNotBlank()) { { BankLogo(value, size = 28) } } else null,
-            trailingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search bank", tint = Purple) },
+            trailingIcon = { Icon(Icons.Filled.Search, contentDescription = tr("Search bank"), tint = Purple) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             shape = RoundedCornerShape(Radius.button),
@@ -1096,12 +1096,12 @@ private fun BankNamePicker(value: String, onSelect: (String) -> Unit) {
         Dialog(onDismissRequest = { open = false }) {
             androidx.compose.material3.Surface(shape = RoundedCornerShape(20.dp), color = Color.White) {
                 Column(Modifier.fillMaxWidth().padding(Space.l)) {
-                    Text("Select Bank", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Select Bank"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(Space.m))
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = { Text("Search bank name") },
+                        placeholder = { Text(tr("Search bank name")) },
                         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Purple) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -1116,7 +1116,7 @@ private fun BankNamePicker(value: String, onSelect: (String) -> Unit) {
                     Column(Modifier.fillMaxWidth().heightIn(max = 340.dp).verticalScroll(rememberScrollState())) {
                         if (matches.isEmpty()) {
                             Text(
-                                "No matching bank.", color = TextGray, fontSize = 13.5.sp,
+                                tr("No matching bank."), color = TextGray, fontSize = 13.5.sp,
                                 modifier = Modifier.padding(vertical = 14.dp),
                             )
                         }
@@ -1135,7 +1135,7 @@ private fun BankNamePicker(value: String, onSelect: (String) -> Unit) {
                     }
                     Spacer(Modifier.height(Space.s))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { open = false }) { Text("Close", color = Purple, fontWeight = FontWeight.Bold) }
+                        TextButton(onClick = { open = false }) { Text(tr("Close"), color = Purple, fontWeight = FontWeight.Bold) }
                     }
                 }
             }
@@ -1148,7 +1148,7 @@ private fun BankField(label: String, value: String, kb: KeyboardType = KeyboardT
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        label = { Text(tr(label)) },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         isError = isError,
@@ -1174,8 +1174,8 @@ fun ManageBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
 
     if (a == null) {
         Column(Modifier.fillMaxSize().background(ScreenBg)) {
-            WalletTopBar("Manage Account", onBack = { nav.popBackStack() })
-            EmptyState("🏦", "Account not found", "It may have been removed.")
+            WalletTopBar(tr("Manage Account"), onBack = { nav.popBackStack() })
+            EmptyState("🏦", tr("Account not found"), tr("It may have been removed."))
         }
         return
     }
@@ -1183,38 +1183,38 @@ fun ManageBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text("Remove this account?", fontWeight = FontWeight.Bold) },
+            title = { Text(tr("Remove this account?"), fontWeight = FontWeight.Bold) },
             text = { Text("${a.bankName} ${a.accountMasked} will no longer receive payouts.", color = TextGray, fontSize = 14.sp) },
             confirmButton = {
                 TextButton(onClick = { vm.deleteBankAccount(a.id); confirmRemove = false; nav.popBackStack() }) {
-                    Text("Remove", color = RedCancel, fontWeight = FontWeight.Bold)
+                    Text(tr("Remove"), color = RedCancel, fontWeight = FontWeight.Bold)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(tr("Cancel")) } },
         )
     }
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Manage Account", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Manage Account"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            BankField("Account Holder Name", holder) { holder = it }
-            BankField("Bank Name", bankName) { bankName = it }
+            BankField(tr("Account Holder Name"), holder) { holder = it }
+            BankField(tr("Bank Name"), bankName) { bankName = it }
             // The number and IFSC identify the account — changing them would be a different
             // account, so they're shown read-only. Remove and re-add instead.
-            ReadOnlyRow("Account Number", a.accountMasked)
-            ReadOnlyRow("IFSC Code", a.ifsc)
-            if (a.branch.isNotBlank()) ReadOnlyRow("Branch", a.branch)
+            ReadOnlyRow(tr("Account Number"), a.accountMasked)
+            ReadOnlyRow(tr("IFSC Code"), a.ifsc)
+            if (a.branch.isNotBlank()) ReadOnlyRow(tr("Branch"), a.branch)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 listOf("Savings", "Current").forEach { t -> QuickAmount(Modifier.weight(1f), t, type == t) { type = t } }
             }
-            BankField("UPI ID", upi) { upi = it }
+            BankField(tr("UPI ID"), upi) { upi = it }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Status", color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                Text(tr("Status"), color = TextGray, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
                 StatusPill(
-                    if (a.verified) "Verified" else a.status,
+                    if (a.verified) tr("Verified") else a.status,
                     if (a.verified) GreenLight else GoldLight,
                     if (a.verified) GreenSuccess else Amber,
                 )
@@ -1222,14 +1222,14 @@ fun ManageBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
         }
         androidx.compose.material3.Surface(color = Color.White, shadowElevation = 12.dp) {
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                PrimaryButton("Save Changes", enabled = !vm.walletBusy) {
+                PrimaryButton(tr("Save Changes"), enabled = !vm.walletBusy) {
                     vm.updateBankAccount(a.id, holder.trim(), bankName.trim(), upi.trim(), type)
                     nav.popBackStack()
                 }
                 if (!a.isDefault) {
-                    OutlineButton("Make Default", modifier = Modifier.fillMaxWidth()) { vm.makeBankDefault(a.id) }
+                    OutlineButton(tr("Make Default"), modifier = Modifier.fillMaxWidth()) { vm.makeBankDefault(a.id) }
                 }
-                OutlineButton("Remove Account", modifier = Modifier.fillMaxWidth(), color = RedCancel) { confirmRemove = true }
+                OutlineButton(tr("Remove Account"), modifier = Modifier.fillMaxWidth(), color = RedCancel) { confirmRemove = true }
             }
         }
     }
@@ -1238,7 +1238,7 @@ fun ManageBankAccountScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 private fun ReadOnlyRow(label: String, value: String) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.button)).background(FieldFill).padding(12.dp)) {
-        Text(label, color = TextMuted, fontSize = 12.5.sp)
+        Text(tr(label), color = TextMuted, fontSize = 12.5.sp)
         Spacer(Modifier.height(2.dp))
         Text(value, color = TextDark, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -1253,7 +1253,7 @@ fun PayoutSettingsScreen(vm: AppViewModel, nav: NavHostController) {
     fun save(next: PayoutSettingsDto) = vm.savePayoutSettings(next)
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Settlement Settings", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Settlement Settings"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -1261,18 +1261,18 @@ fun PayoutSettingsScreen(vm: AppViewModel, nav: NavHostController) {
             Card(padding = Dp16.S) {
                 // Daily and weekly are one choice: the server refuses to honour both, because
                 // settling twice would pay the same earnings out twice.
-                ToggleRow("Daily Settlement", "Settle earnings daily to bank", s.dailySettlement) {
+                ToggleRow(tr("Daily Settlement"), tr("Settle earnings daily to bank"), s.dailySettlement) {
                     save(s.copy(dailySettlement = it, weeklySettlement = if (it) false else s.weeklySettlement))
                 }
                 Spacer(Modifier.height(Space.s))
-                ToggleRow("Weekly Settlement", "Settle earnings once a week", s.weeklySettlement) {
+                ToggleRow(tr("Weekly Settlement"), tr("Settle earnings once a week"), s.weeklySettlement) {
                     save(s.copy(weeklySettlement = it, dailySettlement = if (it) false else s.dailySettlement))
                 }
             }
             Card(padding = Dp16.S) {
                 // The reference draws these as dropdown fields — a bordered box showing the chosen
                 // value with a chevron — rather than a row of quick-select pills.
-                Text("Minimum Payout Amount", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Minimum Payout Amount"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.s))
                 SettingDropdown(
                     value = rs(s.minPayout),
@@ -1280,7 +1280,7 @@ fun PayoutSettingsScreen(vm: AppViewModel, nav: NavHostController) {
                     selected = s.minPayout,
                 ) { save(s.copy(minPayout = it)) }
                 Spacer(Modifier.height(Space.m))
-                Text("Settlement Time", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Settlement Time"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(Space.s))
                 SettingDropdown(
                     value = s.settlementTime,
@@ -1289,24 +1289,24 @@ fun PayoutSettingsScreen(vm: AppViewModel, nav: NavHostController) {
                 ) { save(s.copy(settlementTime = it)) }
             }
             Card(padding = Dp16.S) {
-                ToggleRow("Auto Withdraw", "Automatically withdraw on settlement", s.autoWithdraw) { save(s.copy(autoWithdraw = it)) }
+                ToggleRow(tr("Auto Withdraw"), tr("Automatically withdraw on settlement"), s.autoWithdraw) { save(s.copy(autoWithdraw = it)) }
                 Spacer(Modifier.height(Space.s))
-                ToggleRow("SMS Notification", "Get SMS on settlement & withdrawal", s.smsNotify) { save(s.copy(smsNotify = it)) }
+                ToggleRow(tr("SMS Notification"), tr("Get SMS on settlement & withdrawal"), s.smsNotify) { save(s.copy(smsNotify = it)) }
                 Spacer(Modifier.height(Space.s))
-                ToggleRow("Email Notification", "Get email on settlement & withdrawal", s.emailNotify) { save(s.copy(emailNotify = it)) }
+                ToggleRow(tr("Email Notification"), tr("Get email on settlement & withdrawal"), s.emailNotify) { save(s.copy(emailNotify = it)) }
             }
             if (vm.bankAccounts.none { it.verified }) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(GoldLight).padding(10.dp),
                 ) {
                     Text(
-                        "Auto-withdraw needs a verified payout account before it can run.",
+                        tr("Auto-withdraw needs a verified payout account before it can run."),
                         color = TextDark, fontSize = 13.sp,
                     )
                 }
             }
             // Settings and Schedule are a pair — let the worker jump to the schedule view from here.
-            OutlineButton("View Payout Schedule", modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.PAYOUT_SCHEDULE) }
+            OutlineButton(tr("View Payout Schedule"), modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.PAYOUT_SCHEDULE) }
         }
     }
 }
@@ -1356,8 +1356,8 @@ private fun <T> SettingDropdown(
 private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = TextGray, fontSize = 12.5.sp)
+            Text(tr(title), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(tr(subtitle), color = TextGray, fontSize = 12.5.sp)
         }
         Switch(
             checked = checked, onCheckedChange = onChange,
@@ -1378,7 +1378,7 @@ fun PayoutScheduleScreen(vm: AppViewModel, nav: NavHostController) {
     val automatic = s.dailySettlement || s.weeklySettlement
 
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Payout Schedule", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Payout Schedule"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.l),
@@ -1395,7 +1395,7 @@ fun PayoutScheduleScreen(vm: AppViewModel, nav: NavHostController) {
                 Spacer(Modifier.width(Space.l))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "NEXT SETTLEMENT", color = TextGray, fontSize = 11.5.sp,
+                        tr("NEXT SETTLEMENT"), color = TextGray, fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
                     )
                     Spacer(Modifier.height(6.dp))
@@ -1410,25 +1410,25 @@ fun PayoutScheduleScreen(vm: AppViewModel, nav: NavHostController) {
 
             // Schedule detail — roomy rows for legibility.
             Card(padding = Dp16.M) {
-                Text("Payout Schedule", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+                Text(tr("Payout Schedule"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
                 Spacer(Modifier.height(Space.s))
-                ScheduleRow("Frequency", if (s.weeklySettlement) "Weekly" else if (s.dailySettlement) "Daily" else "Manual")
-                ScheduleRow("Settlement Time", s.settlementTime)
-                ScheduleRow("Minimum Payout", rs(s.minPayout))
-                ScheduleRow("Auto Withdraw", if (auto) "Enabled" else "Disabled", valueColor = if (auto) GreenSuccess else TextGray)
-                ScheduleRow("Preferred Account", bank?.let { "${it.bankName} ${it.accountMasked}" } ?: "Not set")
+                ScheduleRow(tr("Frequency"), if (s.weeklySettlement) "Weekly" else if (s.dailySettlement) "Daily" else "Manual")
+                ScheduleRow(tr("Settlement Time"), s.settlementTime)
+                ScheduleRow(tr("Minimum Payout"), rs(s.minPayout))
+                ScheduleRow(tr("Auto Withdraw"), if (auto) "Enabled" else "Disabled", valueColor = if (auto) GreenSuccess else TextGray)
+                ScheduleRow(tr("Preferred Account"), bank?.let { "${it.bankName} ${it.accountMasked}" } ?: "Not set")
             }
 
             // What this schedule means, spelled out.
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Primary50).padding(14.dp)) {
                 Text(
                     if (auto)
-                        "Your earnings are automatically transferred to your bank account as per this schedule."
-                    else "Settlement moves earnings into your wallet on this schedule. Withdraw them yourself, or turn on Auto Withdraw.",
+                        tr("Your earnings are automatically transferred to your bank account as per this schedule.")
+                    else tr("Settlement moves earnings into your wallet on this schedule. Withdraw them yourself, or turn on Auto Withdraw."),
                     color = TextGray, fontSize = 13.sp, lineHeight = 19.sp,
                 )
             }
-            OutlineButton("Change Payout Settings", modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.PAYOUT_SETTINGS) }
+            OutlineButton(tr("Change Payout Settings"), modifier = Modifier.fillMaxWidth()) { nav.navigate(Routes.PAYOUT_SETTINGS) }
         }
     }
 }
@@ -1437,7 +1437,7 @@ fun PayoutScheduleScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 private fun ScheduleRow(label: String, value: String, valueColor: Color = TextDark) {
     Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextGray, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(tr(label), color = TextGray, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.m))
         Text(
             value, color = valueColor, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold,
@@ -1473,7 +1473,7 @@ private val WALLET_FAQS = listOf(
 fun WalletHelpScreen(vm: AppViewModel, nav: NavHostController) {
     var open by remember { mutableIntStateOf(-1) }
     Column(Modifier.fillMaxSize().background(ScreenBg)) {
-        WalletTopBar("Help & Support", onBack = { nav.popBackStack() })
+        WalletTopBar(tr("Help & Support"), onBack = { nav.popBackStack() })
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.s),
@@ -1484,20 +1484,20 @@ fun WalletHelpScreen(vm: AppViewModel, nav: NavHostController) {
                         Modifier.fillMaxWidth().clickable { open = if (open == i) -1 else i },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(q, color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(tr(q), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
                     }
                     if (open == i) {
                         Spacer(Modifier.height(6.dp))
-                        Text(a, color = TextGray, fontSize = 13.5.sp, lineHeight = 16.sp)
+                        Text(tr(a), color = TextGray, fontSize = 13.5.sp, lineHeight = 16.sp)
                     }
                 }
             }
             Card(padding = Dp16.S) {
-                Text("Need more help?", color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text("Our support team is here for you.", color = TextGray, fontSize = 13.5.sp)
+                Text(tr("Need more help?"), color = TextDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(tr("Our support team is here for you."), color = TextGray, fontSize = 13.5.sp)
                 Spacer(Modifier.height(Space.s))
-                PrimaryButton("Contact Support") { nav.navigate(Routes.P_HELP) }
+                PrimaryButton(tr("Contact Support")) { nav.navigate(Routes.P_HELP) }
             }
         }
     }

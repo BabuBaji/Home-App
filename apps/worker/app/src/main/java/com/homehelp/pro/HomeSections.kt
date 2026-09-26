@@ -95,7 +95,7 @@ fun EarningsOverviewCard(
         // floating above the other.
         Row(Modifier.fillMaxWidth().clickable(onClick = onToday), verticalAlignment = Alignment.Bottom) {
             Column(Modifier.weight(1f)) {
-                Text("Today's Earnings", color = Color.White.copy(alpha = 0.8f), fontSize = 12.5.sp)
+                Text(tr("Today's Earnings"), color = Color.White.copy(alpha = 0.8f), fontSize = 12.5.sp)
                 Text(
                     rupee(today),
                     color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold,
@@ -103,7 +103,7 @@ fun EarningsOverviewCard(
                 )
             }
             Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 5.dp)) {
-                Text("Wallet", color = Color.White.copy(alpha = 0.8f), fontSize = 12.5.sp, maxLines = 1)
+                Text(tr("Wallet"), color = Color.White.copy(alpha = 0.8f), fontSize = 12.5.sp, maxLines = 1)
                 Text(rupee(walletBalance), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
@@ -134,8 +134,8 @@ fun EarningsOverviewCard(
         // Week and month as plain figures on one line — the boxed tiles they replace were two
         // more bordered surfaces competing with the figure above them.
         Row(Modifier.fillMaxWidth()) {
-            PeriodFigure(Modifier.weight(1f), "This Week", week, onWeek)
-            PeriodFigure(Modifier.weight(1f), "This Month", month, onMonth)
+            PeriodFigure(Modifier.weight(1f), tr("This Week"), week, onWeek)
+            PeriodFigure(Modifier.weight(1f), tr("This Month"), month, onMonth)
         }
     }
 }
@@ -150,7 +150,7 @@ private fun HairlineOnGradient() {
 @Composable
 private fun PeriodFigure(modifier: Modifier, label: String, amount: Int, onClick: () -> Unit) {
     Column(modifier.clickable(onClick = onClick)) {
-        Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1)
+        Text(tr(label), color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1)
         Text(rupee(amount), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
@@ -174,7 +174,7 @@ fun TodaysProgressCard(
     // Animated so the ring sweeps in on load and grows as jobs land, rather than snapping.
     val sweep by animateFloatAsState(targetValue = progress, animationSpec = tween(900), label = "progress")
     Card(padding = Dp16.M) {
-        Text("Today's Progress", color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(tr("Today's Progress"), color = TextDark, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(14.dp))
         // Ring, then the two counts as equal-weight columns across the remaining width. Stacking
         // them in a narrow column left the card's right half empty and the whole thing lopsided.
@@ -191,8 +191,8 @@ fun TodaysProgressCard(
             // Two figures, not four. "Earnings" repeated the hero number one card above, and
             // "Incentive" reads "—" until a bonus lands; both were noise beside the job counts,
             // which are the only part of today's progress this card uniquely reports.
-            ProgressFigure(Modifier.weight(1f), "Completed", "$completed", GreenSuccess)
-            ProgressFigure(Modifier.weight(1f), "Cancelled", cancelled?.toString() ?: "—", RedCancel)
+            ProgressFigure(Modifier.weight(1f), tr("Completed"), "$completed", GreenSuccess)
+            ProgressFigure(Modifier.weight(1f), tr("Cancelled"), cancelled?.toString() ?: "—", RedCancel)
         }
     }
 }
@@ -226,7 +226,7 @@ private fun ProgressRing(sweep: Float, centre: String, caption: String) {
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(centre, color = TextDark, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(caption, color = TextGray, fontSize = 11.sp, maxLines = 1)
+            Text(tr(caption), color = TextGray, fontSize = 11.sp, maxLines = 1)
         }
     }
 }
@@ -237,7 +237,7 @@ private fun ProgressFigure(modifier: Modifier, label: String, value: String, val
     // Start-aligned now that these sit in a 2×2 grid — centred columns left ragged gutters.
     Column(modifier.padding(end = 2.dp)) {
         Text(value, color = valueColor, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text(label, color = TextGray, fontSize = 12.sp, maxLines = 1)
+        Text(tr(label), color = TextGray, fontSize = 12.sp, maxLines = 1)
     }
 }
 
@@ -257,9 +257,9 @@ fun NextJobCard(
 ) {
     Card(padding = Dp16.XS) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Next Job", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(tr("Next Job"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text(
-                "View All", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                tr("View All"), color = Purple, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clickable(onClick = onViewAll),
             )
         }
@@ -289,7 +289,7 @@ fun NextJobCard(
                 }
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    if (distanceKm == null) "— km away" else "${distanceKm} km away",
+                    if (distanceKm == null) tr("— km away") else "${distanceKm} km away",
                     color = TextGray, fontSize = 13.sp,
                 )
             }
@@ -307,7 +307,7 @@ fun NextJobCard(
                         if (etaMins == null) "—" else "$etaMins mins",
                         color = GreenSuccess, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     )
-                    Text("ETA", color = GreenSuccess.copy(alpha = 0.8f), fontSize = 11.sp)
+                    Text(tr("ETA"), color = GreenSuccess.copy(alpha = 0.8f), fontSize = 11.sp)
                 }
                 Spacer(Modifier.height(4.dp))
                 Row(
@@ -317,7 +317,7 @@ fun NextJobCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    Text("Navigate", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(tr("Navigate"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(4.dp))
                     Text("↗", color = Color.White, fontSize = 13.sp)
                 }
@@ -411,13 +411,13 @@ fun AnnouncementTicker(onViewAll: () -> Unit) {
                     Box(
                         Modifier.clip(RoundedCornerShape(6.dp)).background(Purple)
                             .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) { Text("NEW", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text(tr("NEW"), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.width(7.dp))
                 }
-                Text(a.text, color = TextDark, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                Text(tr(a.text), color = TextDark, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
             }
         }
         Spacer(Modifier.width(7.dp))
-        Icon(Icons.Filled.ChevronRight, contentDescription = "View all announcements", tint = Purple, modifier = Modifier.size(18.dp))
+        Icon(Icons.Filled.ChevronRight, contentDescription = tr("View all announcements"), tint = Purple, modifier = Modifier.size(18.dp))
     }
 }
