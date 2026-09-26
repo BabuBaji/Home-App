@@ -1235,7 +1235,7 @@ private fun assamesePart5(): Map<String, String> = mapOf(
     "Female" to "মহিলা",
     "Single" to "অবিবাহিত",
     "Married" to "বিবাহিত",
-    "Below 10th" to "দশমৰ তলত",
+    "Below 10th" to "10ম শ্ৰেণীৰ তলত",
     "Diploma" to "ডিপ্লোমা",
     "Graduate" to "স্নাতক",
     "Post Graduate" to "স্নাতকোত্তৰ",
