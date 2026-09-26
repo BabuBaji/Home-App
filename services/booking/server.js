@@ -1287,6 +1287,9 @@ app.get('/api/notifications', auth, async (req, res) => {
   for (const m of (Array.isArray(inbox) ? inbox : [])) items.push({ id: 'n' + m.id, type: m.type || 'announcement', title: m.title, body: m.body || '', time: m.created, bookingId: m.booking_id || undefined })
   res.json(items)
 })
+app.get('/api/support/contact', async (_q, res) => res.json({
+  phone: await getSetting(ADMIN_URL, 'support_phone', ''), whatsapp: await getSetting(ADMIN_URL, 'support_whatsapp', ''),
+}))
 app.get('/api/support/reasons', (_q, res) => res.json({ cancelReasons: ['Booked by mistake', 'Found a better price', 'Service no longer needed', 'Pro is taking too long', 'Want to change date/time', 'Other'] }))
 app.get('/api/policy/cancellation', async (_q, res) => {
   const c = await cancelCfg()
@@ -1313,6 +1316,38 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
 // Data scope: bookings are zone-tagged; a scoped admin can't touch one outside their zones. 404
 // (not 403) so they can't probe which booking ids exist outside their scope.
 const bookingInScope = (req, b) => inScope(req.admin?.scope, { zoneId: b.zone_id })
+/* Customer SOS during a job: alerts the ops control tower (siren) with the booking, expert and
+   location, and opens an urgent ticket so it is followed up. */
+app.post('/api/bookings/:id/sos', auth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
+  const lat = req.body?.lat ?? b.cust_lat ?? null, lng = req.body?.lng ?? b.cust_lng ?? null
+  publishRealtime(REDIS_URL, 'admin', 'sos', {
+    kind: 'customer', customerId: req.user.id, workerId: b.worker_id || null, workerName: req.user.name || `Customer #${req.user.id}`,
+    phone: req.user.phone || '', lat, lng, at: new Date().toISOString(), reason: `Customer SOS · ${b.ref}${b.pro_name ? ` · expert ${b.pro_name}` : ''}`, bookingId: b.id,
+  })
+  internalPost(NOTIFICATION_URL, '/api/internal/sos-ticket', { userId: req.user.id, bookingId: b.id, bookingRef: b.ref, message: String(req.body?.message || 'Customer pressed SOS').slice(0, 300) }).catch(() => {})
+  publishEvent(REDIS_URL, 'activity', { actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'sos', entityType: 'booking', entityId: b.id, ref: b.ref, detail: '🆘 Customer SOS raised', meta: { lat, lng } })
+  res.json({ ok: true, message: 'Our safety team has been alerted and will call you right away.' })
+})
+
+// Timeline of a booking for the admin detail page: what happened, when.
+app.get('/api/admin/bookings/:id/timeline', adminAuth, async (req, res) => {
+  const b = await getBooking(Number(req.params.id))
+  if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
+  const ev = [{ at: b.created, title: 'Booking placed', detail: `${(b.items || []).map((i) => i.name).join(', ')} · ₹${b.total}` }]
+  if (b.worker_id && b.pro_name) ev.push({ at: null, title: 'Expert assigned', detail: b.pro_name })
+  if (b.started_at) ev.push({ at: b.started_at, title: 'Service started' })
+  for (const x of (await pool.query('SELECT * FROM booking_extras WHERE booking_id=$1 ORDER BY id', [b.id])).rows) ev.push({ at: x.created, title: `Extra task ${x.status}`, detail: `${x.name} · ₹${x.price}` })
+  for (const x of (await pool.query('SELECT * FROM booking_extensions WHERE booking_id=$1 ORDER BY id', [b.id]).catch(() => ({ rows: [] }))).rows) ev.push({ at: x.created || x.requested_at || null, title: `Extension ${x.status}`, detail: `+${x.minutes} min · ₹${x.price}` })
+  if (b.completed_at) ev.push({ at: b.completed_at, title: 'Completed' })
+  if (b.status === 'cancelled') ev.push({ at: b.cancel_time, title: 'Cancelled', detail: `${b.cancelled_by || ''} — ${b.cancel_reason || ''}` })
+  if (b.refund > 0) ev.push({ at: b.cancel_time, title: `Refund ${b.refund_status || ''}`, detail: `₹${b.refund}${b.refund_to_source ? ` (₹${b.refund_to_source} to card/UPI)` : ''}` })
+  if (b.tip > 0) ev.push({ at: null, title: 'Tip', detail: `₹${b.tip}` })
+  if (b.rating) ev.push({ at: null, title: `Rated ${b.rating}★`, detail: b.review || '' })
+  res.json(ev)
+})
+
 app.get('/api/admin/bookings/:id', adminAuth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || !bookingInScope(req, b)) return res.status(404).json({ error: 'Not found' })
@@ -1528,7 +1563,8 @@ app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
   })
   res.json({ trend, revenueDaily, rating, topServices, recent })
 })
-app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => res.json(await getBooking(Number(req.params.id))))
+// end_at: when the booked (plus any approved extra) time runs out, for safety check-ins.
+app.get('/api/internal/bookings/:id', internalOnly, async (req, res) => { const b = await getBooking(Number(req.params.id)); res.json(b ? { ...b, end_at: currentEndMs(b) } : null) })
 // Dispatch: the open job pool (unclaimed confirmed bookings).
 app.get('/api/internal/pool', internalOnly, async (_q, res) => {
   const { rows } = await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL ORDER BY id DESC")

@@ -420,3 +420,5 @@ export const registerPushToken = (token: string, platform: string) => req<{ ok: 
 /** Ask for a call to the booking's expert. 'bridge' = our number rings you and connects you (no one
  *  sees the other's number); 'direct' = masking isn't set up, dial the returned number. */
 export const callExpert = (bookingId: number) => req<{ ok: boolean; mode: 'bridge' | 'direct'; phone?: string | null }>(`/api/bookings/${bookingId}/call`, { method: 'POST' })
+export const supportContact = () => req<{ phone: string; whatsapp: string }>('/api/support/contact')
+export const raiseSos = (bookingId: number, lat?: number, lng?: number) => req<{ ok: boolean; message: string }>(`/api/bookings/${bookingId}/sos`, { method: 'POST', body: JSON.stringify({ lat, lng }) })

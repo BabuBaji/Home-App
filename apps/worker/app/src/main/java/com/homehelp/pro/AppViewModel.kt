@@ -17,6 +17,8 @@ import com.homehelp.pro.network.ExtensionRequestBody
 import com.homehelp.pro.network.ExtraBody
 import com.homehelp.pro.network.ExtraRemoveBody
 import com.homehelp.pro.network.JobExtra
+import com.homehelp.pro.network.SafetyBody
+import com.homehelp.pro.network.ReferralApplyBody
 import com.homehelp.pro.network.JobMessage
 import com.homehelp.pro.network.JobStateResponse
 import com.homehelp.pro.network.JobPhoto
@@ -875,6 +877,7 @@ class AppViewModel : ViewModel() {
         pollingStarted = true
         viewModelScope.launch {
             while (true) {
+                if (activeJob != null) pollSafety()
                 if (isOnline && activeJob == null) {
                     try {
                         val r = api.jobsAvailable()
@@ -1468,6 +1471,28 @@ class AppViewModel : ViewModel() {
     }
 
     fun loadPayslip() = sync { payslip = api.payslip() }
+
+    fun applyReferral(code: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try { api.applyReferral(ReferralApplyBody(code.trim())); onResult(null) }
+            catch (e: retrofit2.HttpException) { onResult(httpErrorMessage(e)) }
+            catch (e: Exception) { onResult("Network error — please retry") }
+        }
+    }
+
+    /** Safety check-in: set while the server is waiting for "Are you safe?" (see AppRoot dialog). */
+    var safetyPrompt by mutableStateOf(false)
+        private set
+    private var safetyPolledAt = 0L
+    private fun pollSafety() {
+        if (System.currentTimeMillis() - safetyPolledAt < 30_000) return
+        safetyPolledAt = System.currentTimeMillis()
+        viewModelScope.launch { runCatching { safetyPrompt = api.safety().prompt } }
+    }
+    fun answerSafety(safe: Boolean) {
+        safetyPrompt = false
+        viewModelScope.launch { runCatching { api.safetyCheckin(SafetyBody(safe)) } }
+    }
 
     // ---- Refer & Earn / Insurance / Merch / Rewards / Language (additive modules) ----
     var referral by mutableStateOf<ReferralDto?>(null)

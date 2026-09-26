@@ -213,6 +213,16 @@ fun AppRoot() {
     // Register this phone for push once signed in (no-op without the Firebase config).
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     androidx.compose.runtime.LaunchedEffect(vm.isLoggedIn) { if (vm.isLoggedIn) PushRegistrar.register(appCtx) }
+    // "Are you safe?" — the job ran well past its time. No answer in 10 min alerts the ops team.
+    if (vm.safetyPrompt) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            title = { androidx.compose.material3.Text("Are you safe?") },
+            text = { androidx.compose.material3.Text("Your job has run past its time. Let us know you're okay.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { vm.answerSafety(true) }) { androidx.compose.material3.Text("I'm safe") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { vm.answerSafety(false) }) { androidx.compose.material3.Text("I need help") } },
+        )
+    }
 
     // Deep-link from a notification tap (e.g. a customer message → open the chat). Runs whenever
     // NavIntent.route is set; navigates once the worker is signed in, then clears it.

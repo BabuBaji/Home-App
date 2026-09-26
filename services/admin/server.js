@@ -69,6 +69,10 @@ const DEFAULT_SETTINGS = {
   firebase_server_key: '', smtp_host: '', smtp_user: '', smtp_pass: '',
   // Push: the Firebase service-account JSON (FCM HTTP v1). Empty = no push, in-app updates only.
   fcm_service_account: '',
+  // Worker insurance shown in the expert app (the company's real policy; empty = "ask your manager").
+  insurance_coverage: '', insurance_provider: '', insurance_helpline: '',
+  // Customer emergency / support contacts shown in the app (empty = the button is hidden).
+  support_phone: '', support_whatsapp: '',
   // Masked calls (Exotel): customer and expert talk through a bridged call, never seeing each
   // other's number. Empty = calls fall back to the direct number.
   exotel_sid: '', exotel_api_key: '', exotel_api_token: '', exotel_caller_id: '', exotel_subdomain: 'api.exotel.com',

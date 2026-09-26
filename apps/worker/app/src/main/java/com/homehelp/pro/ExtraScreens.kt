@@ -293,8 +293,25 @@ fun ReferEarnScreen(vm: AppViewModel, nav: NavHostController) {
                 SectionTitle("How it works")
                 Spacer(Modifier.height(Space.xs))
                 StepRow(1, "Share your code", "Send your code to friends who want to become a HomeHelp Pro.")
-                StepRow(2, "They join & work", "They sign up with your code and complete their first shift.")
-                StepRow(3, "You both earn", "${rupee(bonus)} is credited to each of your wallets.")
+                StepRow(2, "They join & work", "They enter your code in the app and complete their first 10 jobs.")
+                StepRow(3, "You earn", "${rupee(bonus)} is credited to your wallet.")
+            }
+
+            // ── Were you referred? (new workers, once) ──
+            Card {
+                SectionTitle("Were you referred?")
+                Spacer(Modifier.height(Space.xs))
+                var code by remember { mutableStateOf("") }
+                var busy by remember { mutableStateOf(false) }
+                androidx.compose.material3.OutlinedTextField(
+                    value = code, onValueChange = { code = it.uppercase().take(12) }, singleLine = true,
+                    placeholder = { Text("Friend's code, e.g. HHP1042") }, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(Space.s))
+                PrimaryButton(if (busy) "Applying…" else "Apply code", enabled = code.length >= 4 && !busy, loading = busy) {
+                    busy = true
+                    vm.applyReferral(code) { err -> busy = false; toast(ctx, err ?: "Code applied — your friend earns when you complete your first jobs") }
+                }
             }
 
             // ── Referral history ──

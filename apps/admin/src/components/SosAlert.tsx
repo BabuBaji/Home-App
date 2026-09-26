@@ -4,6 +4,8 @@ import { getSocket } from '../api'
 
 type Sos = {
   id: string
+  kind?: 'worker' | 'customer'
+  reason?: string
   workerId: number
   workerName: string
   phone: string
@@ -28,7 +30,7 @@ export default function SosAlert() {
     join()
     socket.on('connect', join) // re-join after any reconnect
     const onSos = (p: Omit<Sos, 'id'>) => {
-      const item: Sos = { ...p, id: `${p.workerId}-${p.at || Date.now()}` }
+      const item: Sos = { ...p, id: `${p.kind || 'worker'}-${p.workerId ?? (p as any).customerId}-${p.at || Date.now()}` }
       setAlerts((prev) => (prev.some((a) => a.id === item.id) ? prev : [item, ...prev]))
       try {
         if (Notification && Notification.permission === 'granted')
@@ -100,13 +102,14 @@ export default function SosAlert() {
           <div style={iconWrap}><AlertTriangle size={30} color="#fff" /></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 22, fontWeight: 800, color: '#B42318', letterSpacing: '-.01em' }}>Emergency SOS</div>
-            <div style={{ fontSize: 13, color: '#6b6880' }}>A worker has raised an emergency alert</div>
+            <div style={{ fontSize: 13, color: '#6b6880' }}>{a.kind === 'customer' ? 'A customer has raised an emergency alert' : 'An expert needs help'}</div>
           </div>
           {alerts.length > 1 && <span style={badge}>+{alerts.length - 1} more</span>}
         </div>
 
         <div style={rows}>
-          <Row label="Worker" value={`${a.workerName} (#${a.workerId})`} />
+          <Row label={a.kind === 'customer' ? 'Customer' : 'Expert'} value={a.kind === 'customer' ? a.workerName : `${a.workerName} (#${a.workerId})`} />
+          {a.reason && <Row label="Why" value={a.reason} />}
           <Row label="Time" value={time} />
           {a.phone
             ? <a href={`tel:${a.phone}`} style={{ ...rowLink }}><Phone size={16} /> Call {a.phone}</a>

@@ -862,3 +862,7 @@ data class CommDto(
 data class PushTokenBody(val token: String, val platform: String = "android")
 /** mode: "bridge" (masked call placed — your phone rings) or "direct" (dial [phone]). */
 data class CallResponse(val ok: Boolean = false, val mode: String = "direct", val phone: String? = null, val error: String? = null)
+data class ReferralApplyBody(val code: String)
+/** prompt: the server is asking "Are you safe?" (job ran well past its time). */
+data class SafetyState(val prompt: Boolean = false)
+data class SafetyBody(val safe: Boolean, val lat: Double? = null, val lng: Double? = null)

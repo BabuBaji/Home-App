@@ -9,7 +9,7 @@
 // them, so the admin Activity Monitor and booking timeline work without any service calling it.
 import express from 'express'
 import {
-  makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet, publishEvent, sendPush,
+  makePool, migrate, nowIso, makeAdminAuth, internalOnly, subscribeEvents, tryGet, publishEvent, sendPush, inScope, internalPost,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
@@ -23,6 +23,7 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
+const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[notification] unhandledRejection:', e?.message || e))
 
@@ -67,6 +68,10 @@ async function init() {
     `ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS promotional BOOLEAN NOT NULL DEFAULT false`,
     // Module 14 (Support): richer ticket fields + escalation.
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subcategory TEXT`,
+    // Expert (worker) tickets share the admin queue: requester='worker' + worker_id (user_id 0).
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS requester TEXT NOT NULL DEFAULT 'customer'`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS worker_id INTEGER`,
+    `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS worker_ticket_id INTEGER`,
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subject TEXT`,
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE tickets ADD COLUMN IF NOT EXISTS escalate_reason TEXT`,
@@ -170,12 +175,56 @@ app.post('/api/tickets/:id/escalate', auth, async (req, res) => {
   await logEvent({ actorType: 'customer', actorId: req.user.id, actorName: req.user.name, action: 'support.escalate', entityType: 'ticket', entityId: id, ref: rows[0].ref, detail: 'Escalated ticket' })
   res.json(rows[0])
 })
-app.get('/api/admin/tickets', adminAuth, async (_q, res) => {
-  const rows = (await pool.query('SELECT * FROM tickets ORDER BY id DESC')).rows
-  // tickets store only user_id; resolve the customer display name for the admin table/search/CSV.
+/* Worker tickets: the worker service mirrors each one here so ops works one queue. */
+app.post('/api/internal/sos-ticket', internalOnly, async (req, res) => {
+  const b = req.body || {}
+  const ref = '#SOS' + Math.floor(1000 + Math.random() * 8999)
+  const { rows } = await pool.query(
+    `INSERT INTO tickets (user_id,category,subject,message,status,ref,priority,escalated,booking_id,booking_ref)
+     VALUES ($1,'Safety','SOS during service',$2,'Open',$3,'urgent',true,$4,$5) RETURNING *`,
+    [Number(b.userId), b.message || 'SOS', ref, b.bookingId || null, b.bookingRef || null])
+  res.json(rows[0])
+})
+app.post('/api/internal/worker-tickets', internalOnly, async (req, res) => {
+  const b = req.body || {}
+  const ref = '#TW' + Math.floor(1000 + Math.random() * 8999)
+  const { rows } = await pool.query(
+    `INSERT INTO tickets (user_id,category,subject,message,status,ref,requester,worker_id,worker_ticket_id,priority)
+     VALUES (0,$1,$2,$3,'Open',$4,'worker',$5,$6,$7) RETURNING *`,
+    [b.category || 'Expert support', b.subject || null, b.message || b.subject || 'Support request', ref, Number(b.workerId), Number(b.localId) || null, b.priority || 'medium'])
+  res.json(rows[0])
+})
+app.get('/api/internal/worker-tickets/:wid', internalOnly, async (req, res) => {
+  res.json((await pool.query("SELECT id, worker_ticket_id, status, response, ref FROM tickets WHERE requester='worker' AND worker_id=$1", [Number(req.params.wid)])).rows)
+})
+
+/* Data scope for tickets: a booking-linked ticket follows the booking's zone; a worker's follows the
+ * worker's zone/city; any other customer ticket follows the customer's city. */
+async function ticketScopeFilter(req, rows) {
+  const scope = req.admin?.scope
+  if (!scope || scope.type === 'all') return rows
+  const [bookings, wres, customers] = await Promise.all([
+    tryGet(BOOKING_URL, '/api/internal/bookings', []),
+    tryGet(WORKER_URL, '/internal/workers', { workers: [] }),
+    tryGet(AUTH_URL, '/api/internal/customers', []),
+  ])
+  const bz = new Map((bookings || []).map((b) => [b.id, b.zone_id]))
+  const wz = new Map((wres.workers || []).map((w) => [w.id, w]))
+  const cc = new Map((customers || []).map((c) => [c.id, c.city]))
+  return rows.filter((t) => {
+    if (t.booking_id && bz.has(t.booking_id)) return inScope(scope, { zoneId: bz.get(t.booking_id) })
+    if (t.requester === 'worker') { const w = wz.get(t.worker_id); return !!w && inScope(scope, { zoneId: w.zone_id, city: w.city }) }
+    return inScope({ ...scope, zoneIds: [] }, { city: cc.get(t.user_id) || null })
+  })
+}
+app.get('/api/admin/tickets', adminAuth, async (req, res) => {
+  const rows = await ticketScopeFilter(req, (await pool.query('SELECT * FROM tickets ORDER BY id DESC')).rows)
+  // tickets store only user_id; resolve the customer (or expert) display name for the admin table/search/CSV.
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
   const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
-  res.json(rows.map((t) => ({ ...t, customer: nameById.get(t.user_id) || `Customer #${t.user_id}` })))
+  const wres = rows.some((t) => t.requester === 'worker') ? await tryGet(WORKER_URL, '/internal/workers', { workers: [] }) : { workers: [] }
+  const wName = new Map((wres.workers || []).map((w) => [w.id, w.name]))
+  res.json(rows.map((t) => ({ ...t, customer: t.requester === 'worker' ? `Expert: ${wName.get(t.worker_id) || '#' + t.worker_id}` : (nameById.get(t.user_id) || `Customer #${t.user_id}`) })))
 })
 // Booking-scoped tickets + KPI counts for the Support & Complaints tab. Defined before /:id so
 // "booking" isn't captured as an id.
@@ -206,6 +255,12 @@ app.get('/api/internal/alert-counts', internalOnly, async (_q, res) => {
 app.get('/api/internal/customers/:id/tickets', internalOnly, async (req, res) => {
   const rows = (await pool.query('SELECT * FROM tickets WHERE user_id=$1 ORDER BY id DESC', [Number(req.params.id)])).rows
   res.json(rows)
+})
+app.use('/api/admin/tickets/:id', adminAuth, async (req, res, next) => {
+  if (!/^\d+$/.test(req.params.id)) return next()
+  const t = (await pool.query('SELECT * FROM tickets WHERE id=$1', [Number(req.params.id)])).rows[0]
+  if (t && !(await ticketScopeFilter(req, [t])).length) return res.status(404).json({ error: 'Not found' })
+  next()
 })
 app.get('/api/admin/tickets/:id', adminAuth, async (req, res) => {
   const id = Number(req.params.id)

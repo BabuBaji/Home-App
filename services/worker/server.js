@@ -1042,7 +1042,19 @@ async function shiftPlans(wid) {
 // A worker's support tickets, newest first.
 async function ticketList(wid) {
   const { rows } = await pool.query('SELECT id, subject, message, status, created FROM support_tickets WHERE worker_id=$1 ORDER BY id DESC', [wid])
-  return rows.map((r) => ({ id: r.id, subject: r.subject || '', message: r.message || '', status: r.status, created: r.created ? new Date(r.created).toISOString().slice(0, 10) : '' }))
+  // Status and ops' reply live on the admin side (the ticket is mirrored there when raised).
+  const remote = await tryGet(NOTIFICATION_URL, `/api/internal/worker-tickets/${wid}`, [])
+  const byLocal = new Map((Array.isArray(remote) ? remote : []).map((t) => [t.worker_ticket_id, t]))
+  return rows.map((r) => {
+    const t = byLocal.get(r.id)
+    return { id: r.id, subject: r.subject || '', message: r.message || '', status: t?.status || r.status, response: t?.response || '', created: r.created ? new Date(r.created).toISOString().slice(0, 10) : '' }
+  })
+}
+/** Record a worker's ticket and put it in the ops queue (admin → Tickets). */
+async function raiseWorkerTicket(wid, subject, message, category = 'Expert support', priority = 'medium') {
+  const { rows } = await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3) RETURNING id', [wid, subject, message])
+  internalPost(NOTIFICATION_URL, '/api/internal/worker-tickets', { workerId: wid, localId: rows[0].id, subject, message, category, priority }).catch((e) => console.error('[worker] ticket mirror failed:', e.message))
+  return rows[0].id
 }
 
 // A worker's leave requests, newest first.
@@ -1755,7 +1767,7 @@ app.post('/api/worker/leave', auth, async (req, res) => {
 app.get('/api/worker/support', auth, async (req, res) => res.json(await ticketList(req.worker.id)))
 app.post('/api/worker/support', auth, async (req, res) => {
   const b = req.body || {}
-  await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3)', [req.worker.id, b.subject || 'Support request', b.message || ''])
+  await raiseWorkerTicket(req.worker.id, b.subject || 'Support request', b.message || '')
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'support.ticket', entityType: 'worker', entityId: req.worker.id, detail: `Raised a ticket: ${b.subject || ''}` })
   res.json(await ticketList(req.worker.id))
 })
@@ -1767,11 +1779,63 @@ app.post('/api/worker/sos', auth, async (req, res) => {
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'sos', entityType: 'worker', entityId: req.worker.id, detail: `🆘 SOS raised${loc}`, meta: { lat: b.lat ?? null, lng: b.lng ?? null } })
   // Real-time push to the admin control tower (siren + alert modal in the admin panel).
   publishRealtime(REDIS_URL, 'admin', 'sos', {
-    workerId: req.worker.id, workerName: w?.name || `Worker #${req.worker.id}`, phone: w?.phone || '',
+    kind: 'worker', workerId: req.worker.id, workerName: w?.name || `Worker #${req.worker.id}`, phone: w?.phone || '',
     lat: b.lat ?? null, lng: b.lng ?? null, at: new Date().toISOString(),
   })
   res.json({ ok: true, message: 'Help is on the way. Our team has been alerted.' })
 })
+
+/* ---------- Refer & Earn: apply a code (new workers, once, first 14 days) ----------
+   The referrer is paid by the wallet service once this worker completes their first jobs. */
+app.post('/api/worker/referral/apply', auth, async (req, res) => {
+  const w = await getWorker(req.worker.id)
+  const p = w.profile || {}
+  if (p.referred_by) return res.status(409).json({ ok: false, error: 'You have already used a referral code.' })
+  if (w.created && Date.now() - new Date(w.created).getTime() > 14 * 86400e3) return res.status(409).json({ ok: false, error: 'Referral codes can only be used in your first 14 days.' })
+  const m = /^HHP(\d+)$/i.exec(String(req.body?.code || '').trim())
+  const by = m ? Number(m[1]) - 1000 : NaN
+  const ref = Number.isFinite(by) && by !== w.id ? await getWorker(by) : null
+  if (!ref) return res.status(404).json({ ok: false, error: 'That code is not valid.' })
+  await pool.query("UPDATE workers SET profile = COALESCE(profile,'{}'::jsonb) || $1::jsonb WHERE id=$2", [JSON.stringify({ referred_by: ref.id }), w.id])
+  res.json({ ok: true, referrer: ref.name })
+})
+
+/* ---------- Safety check-ins ----------
+   While a worker is inside a customer's home past the booked end (+20 min), the app asks "Are you
+   safe?". No answer in 10 minutes raises the same alert as the SOS button, with their last location. */
+const safetyPrompts = new Map() // workerId -> { bookingId, askedAt }
+app.post('/api/worker/safety/checkin', auth, async (req, res) => {
+  const p = safetyPrompts.get(req.worker.id)
+  safetyPrompts.delete(req.worker.id)
+  if (req.body?.safe === false) {
+    const w = await getWorker(req.worker.id)
+    publishRealtime(REDIS_URL, 'admin', 'sos', { kind: 'worker', workerId: w.id, workerName: w.name, phone: w.phone || '', lat: req.body?.lat ?? w.lat ?? null, lng: req.body?.lng ?? w.lng ?? null, at: new Date().toISOString(), reason: 'Answered "not safe" to a check-in' })
+  }
+  res.json({ ok: true, prompted: !!p })
+})
+app.get('/api/worker/safety', auth, (req, res) => res.json({ prompt: safetyPrompts.has(req.worker.id), since: safetyPrompts.get(req.worker.id)?.askedAt || null }))
+async function safetySweep() {
+  try {
+    const active = await tryGet(BOOKING_URL, '/api/internal/ops', [])
+    const now = Date.now()
+    for (const b of (Array.isArray(active) ? active : []).filter((x) => x.status === 'in_progress' && x.worker_id)) {
+      const full = await tryGet(BOOKING_URL, `/api/internal/bookings/${b.id}`, null)
+      const end = full?.end_at || null
+      if (!end || now < end + 20 * 60000) continue
+      const p = safetyPrompts.get(b.worker_id)
+      if (!p) {
+        safetyPrompts.set(b.worker_id, { bookingId: b.id, askedAt: now })
+        publishEvent(REDIS_URL, 'worker.notify', { workerId: b.worker_id, title: 'Are you safe?', body: 'Your job ran past its time. Tap to confirm you are safe.', kind: 'safety_check' })
+      } else if (!p.escalated && now - p.askedAt > 10 * 60000) {
+        p.escalated = true
+        const w = await getWorker(b.worker_id)
+        publishRealtime(REDIS_URL, 'admin', 'sos', { kind: 'worker', workerId: w.id, workerName: w.name, phone: w.phone || '', lat: w.lat ?? null, lng: w.lng ?? null, at: new Date().toISOString(), reason: `No reply to a safety check-in (${b.ref})` })
+        publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Safety', action: 'safety.escalate', entityType: 'worker', entityId: w.id, ref: b.ref, detail: `${w.name} did not answer a safety check-in — alerted ops` })
+      }
+    }
+  } catch (e) { console.error('[worker] safety sweep:', e.message) }
+}
+setInterval(safetySweep, 60_000)
 
 /* ---------- Refer & Earn ---------- */
 const REFERRAL_BONUS = Number(process.env.REFERRAL_BONUS || 1500)
@@ -1786,24 +1850,33 @@ app.get('/api/worker/referral', auth, async (req, res) => {
     bonus: REFERRAL_BONUS,
     lifetimeEarnings: lifetime.total || 0,
     referrals: lifetime.items || [],
-    shareMessage: `Join me as a HomeHelp Pro! Use my referral code ${code} when you sign up and we both earn ₹${REFERRAL_BONUS}. Download: https://homehelp.in/pro`,
+    // The referrer earns the bonus once the new worker completes their first jobs (wallet service).
+    shareMessage: `Join me as a HomeHelp Pro! Enter my referral code ${code} in the app after you sign up. Download: https://homehelp.in/pro`,
   })
 })
 
 /* ---------- Claim Insurance / Health Card ---------- */
+// Ops records the worker's actual policy (number from the insurer) — the app shows it once set.
+app.post('/api/admin/workers/:id/insurance', adminAuth, requirePerm('workers.edit'), scopeWorker, async (req, res) => {
+  const policyNo = String(req.body?.policyNo || '').trim().slice(0, 60)
+  await pool.query("UPDATE workers SET profile = COALESCE(profile,'{}'::jsonb) || $1::jsonb WHERE id=$2",
+    [JSON.stringify({ insurance_policy_no: policyNo, insurance_activated: !!policyNo }), Number(req.params.id)])
+  res.json({ ok: true, policyNo })
+})
 app.get('/api/worker/insurance', auth, async (req, res) => {
+  // The cover, insurer and helpline are the company's actual policy (admin settings); the policy
+  // number is the one ops recorded on this worker's profile — never an invented one.
   const w = req.worker
-  const activated = !!(w.profile && w.profile.insurance_activated)
-  res.json({
-    activated,
-    coverage: '₹2,00,000 accidental cover + ₹50,000 hospitalisation',
-    policyNo: activated ? `HH-INS-${1000 + Number(w.id)}` : '',
-    helpline: '1800-123-4567',
-  })
+  const p = w.profile || {}
+  const [coverage, insurer, helpline] = await Promise.all([
+    getSetting(ADMIN_URL, 'insurance_coverage', ''), getSetting(ADMIN_URL, 'insurance_provider', ''), getSetting(ADMIN_URL, 'insurance_helpline', ''),
+  ])
+  const policyNo = String(p.insurance_policy_no || '')
+  res.json({ activated: !!(p.insurance_activated && policyNo), coverage: coverage || 'Ask your manager about your cover', insurer, policyNo, helpline })
 })
 app.post('/api/worker/insurance/claim', auth, async (req, res) => {
   const b = req.body || {}
-  await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3)', [req.worker.id, 'Insurance claim', b.reason || b.message || 'Insurance claim request'])
+  await raiseWorkerTicket(req.worker.id, 'Insurance claim', b.reason || b.message || 'Insurance claim request', 'Insurance claim', 'high')
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'insurance.claim', entityType: 'worker', entityId: req.worker.id, detail: `Raised an insurance claim: ${b.reason || ''}` })
   res.json({ ok: true, message: 'Claim submitted. Our team will contact you within 24 hours.' })
 })
@@ -1821,7 +1894,7 @@ app.get('/api/worker/merch', auth, (_req, res) => res.json({ products: MERCH }))
 app.post('/api/worker/merch/order', auth, async (req, res) => {
   const p = MERCH.find((m) => m.id === (req.body || {}).productId)
   if (!p) return res.json({ ok: false, error: 'Product not found' })
-  await pool.query('INSERT INTO support_tickets (worker_id, subject, message) VALUES ($1,$2,$3)', [req.worker.id, 'Merch order', `Ordered ${p.name} (₹${p.price})`])
+  await raiseWorkerTicket(req.worker.id, 'Merch order', `Ordered ${p.name} (₹${p.price})`, 'Merch order')
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'merch.order', entityType: 'worker', entityId: req.worker.id, detail: `Ordered merch: ${p.name} (₹${p.price})`, meta: { amount: p.price } })
   res.json({ ok: true, message: `Order placed for ${p.name}. Cost is deducted from your next payout.` })
 })

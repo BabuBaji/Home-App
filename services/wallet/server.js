@@ -9,7 +9,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import {
   makePool, migrate, internalGet, internalPost, internalOnly, tryGet, publishEvent, subscribeEvents, invalidateSettings,
-  makeAdminAuth, requirePerm, getSetting, getSettingInt, smsConfigured, sendOtpSms,
+  makeAdminAuth, requirePerm, getSetting, getSettingInt, smsConfigured, sendOtpSms, inScope,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: it carries the jsonwebtoken dep.
 import { tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
@@ -147,6 +147,43 @@ async function notify(wid, title, body) { await pool.query('INSERT INTO worker_n
 const serviceOf = (b) => (Array.isArray(b?.items) && b.items[0]?.name) || b?.type || ''
 
 // Credit a worker's earnings for a completed booking (idempotent on ref_id).
+/* Refer & earn for experts: whoever referred this worker is paid once the new worker completes
+ * REFERRAL_JOBS jobs (a signup alone earns nothing). Idempotent on the referred worker's id. */
+const REFERRAL_BONUS = Number(process.env.REFERRAL_BONUS || 1500)
+const REFERRAL_JOBS = Number(process.env.REFERRAL_JOBS || 10)
+async function referralBonus(wid) {
+  const w = await workerSnapshot(wid)
+  const by = Number(w?.profile?.referred_by)
+  if (!by || (w.jobs || 0) < REFERRAL_JOBS) return
+  const ins = await pool.query(
+    `INSERT INTO worker_income (worker_id,category,label,amount,ref_id,bucket) VALUES ($1,'Referral',$2,$3,$4,'available')
+     ON CONFLICT (worker_id, ref_id) DO NOTHING RETURNING id`,
+    [by, `Referral bonus · ${w.name || 'Worker #' + wid} completed ${REFERRAL_JOBS} jobs`, REFERRAL_BONUS, `referral:${wid}`])
+  if (!ins.rowCount) return
+  await adjustBalance(by, { balance: REFERRAL_BONUS, earnings: REFERRAL_BONUS })
+  publishEvent(REDIS_URL, 'worker.notify', { workerId: by, title: 'Referral bonus earned', body: `₹${REFERRAL_BONUS} — ${w.name || 'your referral'} completed ${REFERRAL_JOBS} jobs.` })
+}
+
+/* Recover an outstanding advance from a job's earnings: advance_recovery_percent (default 30%) of
+ * the share, oldest advance first, never more than is owed. Recorded as a deduction so the worker
+ * sees exactly what was taken and why. */
+async function recoverAdvance(wid, share, ref) {
+  if (!share) return
+  const open = (await pool.query("SELECT * FROM worker_advances WHERE worker_id=$1 AND status='Approved' AND outstanding>0 ORDER BY id", [wid])).rows
+  if (!open.length) return
+  let take = Math.floor(share * (await getSettingInt(ADMIN_URL, 'advance_recovery_percent', 30)) / 100)
+  let taken = 0
+  for (const a of open) {
+    if (take <= 0) break
+    const part = Math.min(take, a.outstanding)
+    await pool.query("UPDATE worker_advances SET outstanding=outstanding-$2, status=CASE WHEN outstanding-$2<=0 THEN 'Cleared' ELSE status END WHERE id=$1", [a.id, part])
+    take -= part; taken += part
+  }
+  if (!taken) return
+  await pool.query("INSERT INTO worker_deductions (worker_id,category,label,amount) VALUES ($1,'Advance recovery',$2,$3)", [wid, `Advance recovery · ${ref}`, taken])
+  await adjustBalance(wid, { balance: -taken, advance_outstanding: -taken })
+}
+
 async function settleBooking(b) {
   if (!b?.worker_id) return
   // Per-worker commission if one is set, else the platform rate. This is the number that decides
@@ -170,6 +207,8 @@ async function settleBooking(b) {
     [b.worker_id, category, label, share, String(b.id)])
   if (!ins.rowCount) return // already settled
   await adjustBalance(b.worker_id, { balance: share, earnings: share, jobs: 1 })
+  await recoverAdvance(b.worker_id, share, ref).catch((e) => console.error('[wallet] advance recovery:', e.message))
+  await referralBonus(b.worker_id).catch((e) => console.error('[wallet] referral bonus:', e.message))
 
   // Per Job Incentive — a flat amount from the worker's incentive plan, on top of any share.
   // Idempotent on its own ref so it can't double-credit with the share.
@@ -291,8 +330,11 @@ async function summary(wid) {
   // the withdrawable balance so a worker can't request the same money twice before it lands.
   const hold = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_withdrawals WHERE worker_id=$1 AND status IN ('Pending','Processing')")
   const ded = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_deductions WHERE worker_id=$1")
-  const advanceOutstanding = await s("SELECT COALESCE(SUM(COALESCE(outstanding, amount)),0)::int s FROM worker_advances WHERE worker_id=$1 AND status<>'Cleared'")
-  const available = Math.max(0, earned - totalWithdrawn - hold - ded)
+  const advanceOutstanding = await s("SELECT COALESCE(SUM(outstanding),0)::int s FROM worker_advances WHERE worker_id=$1 AND status='Approved'")
+  // An approved advance is money in hand (withdrawable); it comes back as 'Advance recovery'
+  // deductions from later earnings, which the deductions total already subtracts.
+  const advancesGiven = await s("SELECT COALESCE(SUM(amount),0)::int s FROM worker_advances WHERE worker_id=$1 AND status IN ('Approved','Cleared')")
+  const available = Math.max(0, earned + advancesGiven - totalWithdrawn - hold - ded)
   const freq = await getSetting(ADMIN_URL, 'payout_frequency', 'weekly')
   const payoutDay = await getSettingInt(ADMIN_URL, 'payout_day', 4)
   const minPayout = await minPayoutLimit()
@@ -553,9 +595,26 @@ app.get('/api/worker/wallet/notifications', auth, async (req, res) => {
   res.json({ items, unread: items.filter((i) => !i.read).length })
 })
 app.post('/api/worker/wallet/notifications/read', auth, async (req, res) => { await pool.query('UPDATE worker_notifications SET read=true WHERE worker_id=$1', [req.wid]); res.json({ ok: true }) })
-app.get('/api/worker/wallet/payslip', auth, async (req, res) => { const s = await summary(req.wid); res.json({ month: req.query.month || 'This month', gross: s.thisMonth, deductions: 0, net: s.thisMonth }) })
+/* A month's payslip from the real ledger: every credit (earnings, incentives, tips, bonuses, salary)
+ * as gross, every deduction (penalties, advance recovery, …) itemised, and the difference as net.
+ * `month` is YYYY-MM in IST (default: this month). */
+async function payslipFor(wid, month) {
+  const m = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : new Date(Date.now() + 330 * 60000).toISOString().slice(0, 7)
+  const inMonth = "to_char(created + interval '330 minutes', 'YYYY-MM') = $2"
+  const inc = (await pool.query(`SELECT category, COALESCE(SUM(amount),0)::int amt FROM worker_income WHERE worker_id=$1 AND ${inMonth} GROUP BY category ORDER BY 2 DESC`, [wid, m])).rows
+  const ded = (await pool.query(`SELECT category, COALESCE(SUM(amount),0)::int amt FROM worker_deductions WHERE worker_id=$1 AND ${inMonth} GROUP BY category ORDER BY 2 DESC`, [wid, m])).rows
+  const gross = inc.reduce((t, r) => t + r.amt, 0), deductions = ded.reduce((t, r) => t + r.amt, 0)
+  return { month: m, gross, deductions, net: gross - deductions, earnings: inc.map((r) => ({ label: r.category, amount: r.amt })), deductionItems: ded.map((r) => ({ label: r.category, amount: r.amt })) }
+}
+async function savePayslip(wid, month) {
+  const p = await payslipFor(wid, month)
+  await pool.query('DELETE FROM worker_payslips WHERE worker_id=$1 AND month=$2', [wid, p.month])
+  const { rows } = await pool.query('INSERT INTO worker_payslips (worker_id,month,gross,deductions,net) VALUES ($1,$2,$3,$4,$5) RETURNING *', [wid, p.month, p.gross, p.deductions, p.net])
+  return { ...rows[0], earnings: p.earnings, deductionItems: p.deductionItems }
+}
+app.get('/api/worker/wallet/payslip', auth, async (req, res) => res.json(await payslipFor(req.wid, req.query.month)))
 app.get('/api/worker/wallet/payslips', auth, async (req, res) => res.json(await rowsFor('worker_payslips', req.wid)))
-app.post('/api/worker/wallet/payslip/generate', auth, async (req, res) => { const s = await summary(req.wid); const { rows } = await pool.query('INSERT INTO worker_payslips (worker_id,month,gross,deductions,net) VALUES ($1,$2,$3,0,$3) RETURNING *', [req.wid, req.body?.month || 'This month', s.thisMonth]); res.json(rows[0]) })
+app.post('/api/worker/wallet/payslip/generate', auth, async (req, res) => res.json(await savePayslip(req.wid, req.body?.month)))
 
 // Single source for the withdraw/PIN-reset OTP — the endpoint below hands it out in dev, and
 // the PIN reset checks against the same value.
@@ -720,12 +779,49 @@ app.post('/api/worker/wallet/advance/request', auth, async (req, res) => {
   const amount = parseInt(req.body?.amount, 10)
   const max = await getSettingInt(ADMIN_URL, 'advance_max', 5000)
   if (!amount || amount <= 0 || amount > max) return res.json({ ok: false, error: `Enter an amount up to ₹${max}` })
-  await pool.query('INSERT INTO worker_advances (worker_id,amount,outstanding,status) VALUES ($1,$2,$2,$3)', [req.wid, amount, 'Approved'])
-  await adjustBalance(req.wid, { balance: amount, advance_outstanding: amount })
-  res.json({ ok: true, ...(await walletState(req.wid)) })
+  // One open request at a time, and nothing while an advance is still being recovered.
+  const w = await workerSnapshot(req.wid)
+  if ((w.advance_outstanding || 0) > 0) return res.json({ ok: false, error: 'Repay your current advance first.' })
+  if ((await pool.query("SELECT 1 FROM worker_advances WHERE worker_id=$1 AND status='Pending'", [req.wid])).rowCount) return res.json({ ok: false, error: 'Your earlier request is still being reviewed.' })
+  // An advance is money out of the company: it waits for an admin to approve it.
+  await pool.query('INSERT INTO worker_advances (worker_id,amount,outstanding,status) VALUES ($1,$2,0,$3)', [req.wid, amount, 'Pending'])
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'advance.request', entityType: 'worker', entityId: req.wid, detail: `Requested a salary advance of ₹${amount}` })
+  res.json({ ok: true, pending: true, message: 'Request sent for approval.', ...(await walletState(req.wid)) })
 })
 
 /* ---------- admin wallet ---------- */
+// A zone/city manager can only see and move money for workers in their territory.
+app.use('/api/admin/workers/:id/wallet', adminAuth, async (req, res, next) => {
+  const scope = req.admin?.scope
+  if (!scope || scope.type === 'all') return next()
+  const w = await workerSnapshot(Number(req.params.id))
+  if (!w?.id || !inScope(scope, { zoneId: w.zone_id, city: w.city })) return res.status(404).json({ error: 'Not found' })
+  next()
+})
+app.post('/api/admin/workers/:id/wallet/advances/:adv/:action(approve|reject)', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  const wid = Number(req.params.id)
+  const a = (await pool.query("SELECT * FROM worker_advances WHERE id=$1 AND worker_id=$2 AND status='Pending'", [Number(req.params.adv), wid])).rows[0]
+  if (!a) return res.status(404).json({ error: 'No pending request' })
+  if (req.params.action === 'approve') {
+    await pool.query("UPDATE worker_advances SET status='Approved', outstanding=amount WHERE id=$1", [a.id])
+    await adjustBalance(wid, { balance: a.amount, advance_outstanding: a.amount })
+    publishEvent(REDIS_URL, 'worker.notify', { workerId: wid, title: 'Advance approved', body: `₹${a.amount} is in your wallet. It is recovered from your next earnings.` })
+  } else {
+    await pool.query("UPDATE worker_advances SET status='Rejected' WHERE id=$1", [a.id])
+    publishEvent(REDIS_URL, 'worker.notify', { workerId: wid, title: 'Advance request declined', body: String(req.body?.reason || 'Please contact your manager.') })
+  }
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: req.admin?.name || req.admin?.email, action: `advance.${req.params.action}`, entityType: 'worker', entityId: wid, detail: `${req.params.action === 'approve' ? 'Approved' : 'Rejected'} advance of ₹${a.amount}` })
+  res.json(await walletState(wid))
+})
+// Move earnings still in the pending bucket (awaiting quality check) to available.
+app.post('/api/admin/workers/:id/wallet/release-pending', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  const wid = Number(req.params.id)
+  const { rows } = await pool.query("UPDATE worker_income SET bucket='available' WHERE worker_id=$1 AND bucket='pending' RETURNING amount", [wid])
+  const amt = rows.reduce((t, r) => t + (r.amount || 0), 0)
+  if (amt > 0) await adjustBalance(wid, { balance: amt, pending: -amt })
+  res.json({ released: amt, ...(await walletState(wid)) })
+})
+app.post('/api/admin/workers/:id/wallet/payslip', adminAuth, async (req, res) => res.json(await savePayslip(Number(req.params.id), req.body?.month)))
 app.get('/api/admin/workers/:id/wallet', adminAuth, async (req, res) => res.json(await walletState(Number(req.params.id))))
 // A manually granted bonus records the admin who granted it; everything else is credited by 'System'.
 app.post('/api/admin/workers/:id/wallet/bonus', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await pool.query("INSERT INTO worker_income (worker_id,category,label,amount,bucket,source) VALUES ($1,'Bonus',$2,$3,'available',$4)", [wid, req.body?.label || 'Admin bonus', amt, req.admin?.name || req.admin?.email || 'Admin']); await adjustBalance(wid, { balance: amt, earnings: amt }); res.json(await walletState(wid)) })
@@ -734,7 +830,7 @@ app.post('/api/admin/workers/:id/wallet/hold', adminAuth, requirePerm('wallet.ad
 app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id), amt = Math.max(0, parseInt(req.body?.amount, 10) || 0); await adjustBalance(wid, { balance: amt, hold: -amt }); res.json(await walletState(wid)) })
 // Approve → trigger the real payout (money is already held from the request). Status becomes
 // 'Processing'; the payout.completed/failed event finalizes it. Do NOT mark Paid directly here.
-app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })
+app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })
 app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
 
 /**

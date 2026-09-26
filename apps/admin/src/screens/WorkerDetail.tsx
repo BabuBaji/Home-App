@@ -6,7 +6,7 @@ import {
   Clock, Wifi, BatteryMedium, CalendarClock, Download, Gift, Eye, Info as InfoIcon, Landmark, Smartphone, SlidersHorizontal,
   FileText, AlertTriangle, UploadCloud, Plus, Award, Wrench, Trash2,
 } from 'lucide-react'
-import { fetchWorkerDetail, fetchZones, updateWorker, fetchWorkerComm, updateWorkerComm, addWorkerNote, fetchWorkerWallet, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone, type WorkerComm } from '../api'
+import { fetchWorkerDetail, fetchZones, updateWorker, fetchWorkerComm, updateWorkerComm, addWorkerNote, fetchWorkerWallet, approveAdvance, rejectAdvance, workerDocUrl, reviewWorkerDoc, reviewWorkerSkill, uploadWorkerDoc, toggleWorkerService, addWorkerCertification, deleteWorkerCertification, type Zone, type WorkerComm } from '../api'
 import type { WorkerDetail, WorkerNote, WalletState, WalletTxn, WalletWithdrawal } from '../types'
 import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown, Pagination, SearchBox, Modal } from '../components/UI'
 import { useStore } from '../store'
@@ -1397,6 +1397,14 @@ export default function WorkerDetail() {
 
       {tab === 'earnings' && (
         <>
+          {/* Salary advances wait for an admin: approving credits the wallet and starts recovery. */}
+          {(wal?.advances || []).filter((a: any) => a.status === 'Pending').map((a: any) => (
+            <div key={a.id} className="card" style={{ padding: 12, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, borderColor: '#f59e0b' }}>
+              <div style={{ flex: 1 }}><b>Advance request · ₹{a.amount}</b><div className="muted" style={{ fontSize: 12 }}>Requested {a.date}</div></div>
+              <button className="btn" onClick={() => approveAdvance(Number(id), a.id).then(setWal).catch((e) => alert(e.message))}>Approve</button>
+              <button className="btn line" onClick={() => { const r = window.prompt('Reason for declining?') ; if (r !== null) rejectAdvance(Number(id), a.id, r).then(setWal).catch((e) => alert(e.message)) }}>Decline</button>
+            </div>
+          ))}
           {/* Sub-tabs left, date range + statement right. The range scopes every sub-tab, so it stays
               visible on all of them rather than hiding into one. */}
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>

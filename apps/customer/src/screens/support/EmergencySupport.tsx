@@ -1,11 +1,12 @@
 // 110 · Emergency Support — 24/7 contact options. Real tel:/WhatsApp deep links; Live Chat routes
 // to the chat screen.
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Bell, Phone, MessageCircle } from 'lucide-react'
+import { ArrowLeft, Bell, Phone, MessageCircle, Siren } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
-
-const PHONE = '18001234567'   // 24/7 emergency line
-const WA = '911800123456'     // WhatsApp, no '+'
+import { useToast } from '../../components/UI'
+import { fetchBookings, getCachedPosition, raiseSos, supportContact } from '../../api'
+import { isLive } from '../../orders'
 
 async function open(url: string) {
   if (Capacitor.isNativePlatform()) { try { const { AppLauncher } = await import('@capacitor/app-launcher'); await AppLauncher.openUrl({ url }); return } catch { /* fall through */ } }
@@ -22,6 +23,22 @@ const WHEN = [
 
 export default function EmergencySupport() {
   const nav = useNavigate()
+  const toast = useToast()
+  // The company's real support lines (admin settings) — no placeholder numbers.
+  const [contact, setContact] = useState<{ phone: string; whatsapp: string }>({ phone: '', whatsapp: '' })
+  const [liveId, setLiveId] = useState<number | null>(null)
+  const [sent, setSent] = useState(false)
+  useEffect(() => {
+    supportContact().then(setContact).catch(() => {})
+    fetchBookings().then((bs) => { const b = bs.find((x) => isLive(x.status) && x.worker_id); if (b) setLiveId(b.id) }).catch(() => {})
+  }, [])
+  const PHONE = contact.phone.replace(/[^\d]/g, ''), WA = contact.whatsapp.replace(/[^\d]/g, '')
+  // SOS during a job: alerts the ops control tower with the booking, expert and your location.
+  async function sos() {
+    if (!liveId) return
+    try { const pos = getCachedPosition(); const r = await raiseSos(liveId, pos?.lat, pos?.lng); setSent(true); toast(r.message) }
+    catch (e) { toast((e as Error).message) }
+  }
   return (
     <div className="screen">
       <header className="appbar ord-appbar">
@@ -37,17 +54,22 @@ export default function EmergencySupport() {
           <div className="es-hero-d">Contact our 24/7 emergency support team for urgent issues.</div>
         </div>
 
+        {liveId && (
+          <button className="btn full" disabled={sent} onClick={sos} style={{ background: '#dc2626', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Siren size={18} /> {sent ? 'Safety team alerted' : 'SOS — alert the safety team now'}
+          </button>
+        )}
         <div className="es-actions">
-          <button className="es-act" onClick={() => open(`tel:+${PHONE}`)}>
+          {PHONE && <button className="es-act" onClick={() => open(`tel:+${PHONE}`)}>
             <span className="es-act-ico call"><Phone size={20} /></span>
             <span className="es-act-t">Call Now</span>
-            <span className="es-act-d">1800-123-4567</span>
-          </button>
-          <button className="es-act" onClick={() => open(`https://wa.me/${WA}`)}>
+            <span className="es-act-d">{contact.phone}</span>
+          </button>}
+          {WA && <button className="es-act" onClick={() => open(`https://wa.me/${WA}`)}>
             <span className="es-act-ico wa"><MessageCircle size={20} /></span>
             <span className="es-act-t">WhatsApp</span>
             <span className="es-act-d">Chat Now</span>
-          </button>
+          </button>}
           <button className="es-act" onClick={() => nav('/support/chat')}>
             <span className="es-act-ico chat"><MessageCircle size={20} /></span>
             <span className="es-act-t">Live Chat</span>

@@ -260,6 +260,15 @@ interface ApiService {
     @POST("api/worker/jobs/extras")
     suspend fun addExtra(@Body body: ExtraBody): JobStateResponse
 
+    @POST("api/worker/referral/apply")
+    suspend fun applyReferral(@Body body: ReferralApplyBody): Map<String, Any>
+
+    @GET("api/worker/safety")
+    suspend fun safety(): SafetyState
+
+    @POST("api/worker/safety/checkin")
+    suspend fun safetyCheckin(@Body body: SafetyBody): Map<String, Any>
+
     @POST("api/push/register")
     suspend fun registerPush(@Body body: PushTokenBody): Map<String, Any>
 
