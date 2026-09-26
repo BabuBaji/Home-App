@@ -379,6 +379,23 @@ app.patch('/api/admin/settings', admin, requirePerm('settings.edit'), async (req
 })
 
 /* ---------- admins management ---------- */
+// Who a worker can report to — for the Add/Edit Worker form. Anyone who can create or edit workers
+// may read it (unlike the full admin list), and a scoped manager only sees active admins whose
+// territory overlaps their own (never the whole org).
+app.get('/api/admin/admins/directory', admin, async (req, res) => {
+  const perms = req.admin?.permissions || []
+  if (req.admin?.role !== 'super' && !['workers.create', 'workers.edit', 'admins.view'].some((p) => perms.includes(p))) return res.status(403).json({ error: 'Insufficient permissions' })
+  const roster = (await pool.query("SELECT * FROM admins WHERE COALESCE(status,'active')='active' ORDER BY name")).rows
+  const me = req.admin?.scope
+  const out = []
+  for (const a of roster) {
+    const sc = await resolveScope(a, roster)
+    const visible = !me || me.type === 'all' || a.id === req.admin.id ||
+      (sc.type !== 'all' && ((sc.zoneIds || []).some((z) => (me.zoneIds || []).includes(z)) || (sc.cities || []).some((c) => (me.cities || []).includes(c))))
+    if (visible) out.push({ id: a.id, name: a.name, role: a.role })
+  }
+  res.json(out)
+})
 app.get('/api/admin/admins', admin, requirePerm('admins.view'), async (_q, res) => {
   const roster = (await pool.query('SELECT * FROM admins ORDER BY id')).rows
   const out = []

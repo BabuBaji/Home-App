@@ -477,6 +477,8 @@ export const updateSettings = (body: Settings) => req<Settings>('/settings', pat
 
 /* admin users */
 export const fetchAdmins = () => req<Admin[]>('/admins')
+/** Managers a worker can report to (allowed with worker create/edit rights; scoped to your territory). */
+export const fetchAdminDirectory = () => req<Admin[]>('/admins/directory')
 export const createAdminUser = (body: Record<string, unknown>) => req<Admin>('/admins', post('', body))
 export const updateAdminUser = (id: number, body: Record<string, unknown>) => req<Admin>(`/admins/${id}`, patch(body))
 export const deleteAdminUser = (id: number) => req<{ ok: boolean }>(`/admins/${id}`, { method: 'DELETE' })

@@ -5,7 +5,7 @@ import {
   Pencil, Settings as Cog, ShieldCheck, CheckCircle2, Circle, AlertTriangle, MessageSquare, Phone,
 } from 'lucide-react'
 import {
-  createWorker, inviteWorker, updateWorker, fetchWorkerDetail, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdmins, fetchServices, opList,
+  createWorker, inviteWorker, updateWorker, fetchWorkerDetail, fetchZones, fetchStores, fetchShiftDefs, fetchSalaryPlans, fetchIncentivePlans, fetchAdminDirectory, fetchServices, opList,
   type Zone, type Store, type ShiftDef,
 } from '../api'
 import type { SalaryPlan, IncentivePlan, Admin, AdminService } from '../types'
@@ -100,7 +100,7 @@ export default function AddWorker() {
       fetchShiftDefs().catch(() => []),
       fetchSalaryPlans().catch(() => ({ plans: [], platformCommissionPercent: 20 })),
       fetchIncentivePlans().catch(() => ({ plans: [] })),
-      fetchAdmins().catch(() => []),
+      fetchAdminDirectory().catch(() => []),
       fetchServices().catch(() => []),
     ]).then(([z, c, s, sh, sp, ip, ad, sv]) => {
       setZones(z); setClusters(c); setStores(s); setShifts(sh)
