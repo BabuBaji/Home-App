@@ -17,7 +17,10 @@ export default function Permissions() {
   const nav = useNavigate()
   const { setUser } = useStore()
   const toast = useToast()
-  const selectedCity = (useLocation().state as { city?: string } | null)?.city || ''
+  const st = useLocation().state as { city?: string; back?: boolean } | null
+  const selectedCity = st?.city || ''
+  // Opened from Profile ▸ Privacy (not onboarding): return there instead of starting at Home.
+  const done = () => (st?.back ? nav(-1) : nav('/home', { replace: true }))
   const [busy, setBusy] = useState(false)
 
   // "<street>, <locality>, <area>, <city> - <PIN>" from a reverse-geocode result.
@@ -50,12 +53,12 @@ export default function Permissions() {
     }
     try { await ensureNotifPermission() } catch { /* denied — continue */ }
     setBusy(false)
-    nav('/home', { replace: true })
+    done()
   }
 
   async function notNow() {
     if (selectedCity) try { await saveLocation(selectedCity) } catch { /* ignore */ }
-    nav('/home', { replace: true })
+    done()
   }
 
   return (

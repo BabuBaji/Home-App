@@ -16,7 +16,7 @@ export default function Login() {
   const toast = useToast()
   const lang = useLang()
   const [step, setStep] = useState<'welcome' | 'phone' | 'otp'>('welcome')
-  const [phone, setPhone] = useState('98765 43210')
+  const [phone, setPhone] = useState('')
   const [otp, setOtp] = useState('')
   const [busy, setBusy] = useState(false)
   const [gbusy, setGbusy] = useState(false)
@@ -146,8 +146,9 @@ export default function Login() {
 
           <div className="au-field">
             <span className="au-cc"><span className="au-flag">🇮🇳</span> +91</span>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('Enter mobile number')}
-              inputMode="numeric" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') sendOtp() }} />
+            {/* Digits only, 10 max; a pasted +91 / 0 prefix is dropped. */}
+            <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, '').slice(0, 10))} placeholder={t('Enter mobile number')}
+              inputMode="numeric" type="tel" maxLength={10} autoFocus onKeyDown={(e) => { if (e.key === 'Enter') sendOtp() }} />
           </div>
 
           <div className="au-safe"><ShieldCheck size={16} /> {t('Your number is safe with us')}</div>
@@ -156,7 +157,7 @@ export default function Login() {
           {GOOGLE_CLIENT_ID && <div ref={gbtnRef} className="au-google-real" />}
         </div>
         <div className="au-foot">
-          <button className="au-btn" onClick={sendOtp} disabled={busy || phone.replace(/\D/g, '').length < 10}>
+          <button className="au-btn" onClick={sendOtp} disabled={busy || !/^[6-9]\d{9}$/.test(phone)}>
             {busy ? t('Sending OTP…') : t('Send OTP')}
           </button>
           <p className="au-terms">{t('By continuing, you agree to our Terms of Service and Privacy Policy')}</p>

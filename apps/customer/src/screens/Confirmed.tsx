@@ -37,7 +37,7 @@ export default function Confirmed() {
         <h1 className="bc-title">{t('Booking Confirmed!')}</h1>
         <p className="bc-sub">{t('Your booking is confirmed.')}</p>
 
-        <button className="bc-id" onClick={() => { navigator.clipboard?.writeText(bookingId); toast(t('Booking ID copied')) }}>
+        <button className="bc-id" onClick={() => navigator.clipboard?.writeText(bookingId).then(() => toast(t('Booking ID copied')), () => toast(bookingId))}>
           <div><small>{t('Booking ID')}</small><b>{bookingId}</b></div><Copy size={16} />
         </button>
 

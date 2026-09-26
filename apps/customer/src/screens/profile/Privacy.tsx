@@ -26,7 +26,7 @@ export default function Privacy() {
   const ROWS = [
     { icon: <FileText size={17} />, t: 'Privacy Policy', d: 'Read our privacy policy', to: () => nav('/terms') },
     { icon: <Database size={17} />, t: 'Data Usage', d: 'How we use your data', to: () => nav('/terms') },
-    { icon: <MapPin size={17} />, t: 'Location Permission', d: 'Manage location access', to: () => nav('/permissions') },
+    { icon: <MapPin size={17} />, t: 'Location Permission', d: 'Manage location access', to: () => nav('/onboarding/permission', { state: { back: true } }) },
     { icon: <Share2 size={17} />, t: 'Third Party Sharing', d: 'Manage data sharing preferences', to: () => toast(t('You control what is shared. We never sell your data.')) },
   ]
 

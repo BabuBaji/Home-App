@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Star } from 'lucide-react'
-import { Loading } from '../components/UI'
+import { Loading, useToast } from '../components/UI'
 import { useStore } from '../store'
 import { fetchServices } from '../api'
 import type { Service } from '../types'
@@ -21,6 +21,7 @@ function stars(id: string): { rating: string; count: string } {
 
 export default function PopularServices() {
   const nav = useNavigate()
+  const toast = useToast()
   const { pincode } = useStore()
   const [services, setServices] = useState<Service[] | null>(null)
 
@@ -42,7 +43,7 @@ export default function PopularServices() {
             {services.map((s) => {
               const { rating, count } = stars(s.id)
               return (
-                <button key={s.id} className={`ps-card ${!s.available ? 'off' : ''}`} onClick={() => s.available && nav(`/service/${s.id}`)}>
+                <button key={s.id} className={`ps-card ${!s.available ? 'off' : ''}`} onClick={() => s.available ? nav(`/service/${s.id}`) : toast(t('{name} is coming soon to your area 🚧', { name: t(s.name) }))}>
                   <span className="ps-img">
                     <img src={s.image || `/services/${s.id}.jpg`} alt="" loading="lazy"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />

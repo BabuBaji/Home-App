@@ -1,0 +1,506 @@
+{
+  "run": "02440",
+  "zones": {
+    "A": {
+      "name": "E2E Zone A 02440",
+      "city": "Hyderabad",
+      "state": "Telangana",
+      "pins": [
+        "500081",
+        "500084"
+      ],
+      "services": [
+        "mopping",
+        "kitchen",
+        "bathroom"
+      ],
+      "price": {
+        "mopping": 149
+      },
+      "offer": "Zone A Special 02440",
+      "id": 9,
+      "mgr": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoibWFuYWdlciIsInN1YiI6IjE2IiwiYXVkIjoiYWRtaW4iLCJpYXQiOjE3OTA0MjI3MDIsImV4cCI6MTc5MDQ2NTkwMn0.wcUKyD9FrZmePUhHBp0-kRZVheVal9nk3679thQ3lk8",
+      "wPhone": "9024400001",
+      "wId": 24,
+      "wTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNCIsImF1ZCI6IndvcmtlciIsImlhdCI6MTc5MDQyMjcwMiwiZXhwIjoxNzkzMDE0NzAyfQ.eaOnxSRze7AqSSugSJu5T4Ls_lb8PhZgerxMCadRHWY",
+      "cPhone": "9024400011",
+      "cTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNiIsImF1ZCI6ImN1c3RvbWVyIiwiaWF0IjoxNzkwNDIyNzAzLCJleHAiOjE3OTMwMTQ3MDN9.9ev6f2JeqwO17HJlTBEdkD6mkPvKIq6JdjVAPaQ-zP0",
+      "cId": 16,
+      "addrId": 17,
+      "bookingId": 21
+    },
+    "B": {
+      "name": "E2E Zone B 02440",
+      "city": "Pune",
+      "state": "Maharashtra",
+      "pins": [
+        "411045",
+        "411046"
+      ],
+      "services": [
+        "mopping",
+        "dusting"
+      ],
+      "price": {
+        "mopping": 199
+      },
+      "offer": "Zone B Special 02440",
+      "id": 10,
+      "mgr": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoibWFuYWdlciIsInN1YiI6IjE3IiwiYXVkIjoiYWRtaW4iLCJpYXQiOjE3OTA0MjI3MDMsImV4cCI6MTc5MDQ2NTkwM30.lcmPhRL-uCYeFnAub9PmC8Ifi0VksMj-eZp2Xzdh76M",
+      "wPhone": "9024400002",
+      "wId": 25,
+      "wTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNSIsImF1ZCI6IndvcmtlciIsImlhdCI6MTc5MDQyMjcwMywiZXhwIjoxNzkzMDE0NzAzfQ.tuIcvlghbNdC1gd-JeQ5YtuQd81d-QDPCD7_RcTrEUM",
+      "cPhone": "9024400012",
+      "cTok": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNyIsImF1ZCI6ImN1c3RvbWVyIiwiaWF0IjoxNzkwNDIyNzAzLCJleHAiOjE3OTMwMTQ3MDN9.mANHdrEX6vO9D3HVb3f3DAyJCk2k0d2-qEP9Nbj8Ts0",
+      "cId": 17,
+      "addrId": 19,
+      "bookingId": 22
+    }
+  },
+  "results": [
+    {
+      "area": "setup",
+      "name": "Zone A created (id 9, pins 500081/500084)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "setup",
+      "name": "Manager A scoped to zone 9",
+      "pass": true,
+      "detail": "{\"type\":\"zone\",\"zoneIds\":[9],\"cities\":[\"Hyderabad\"],\"cityScopes\":[],\"storeIds\":[]}"
+    },
+    {
+      "area": "setup",
+      "name": "Worker A (id 24) onboarded, logged in, online",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "setup",
+      "name": "Customer A (id 16) registered with address in 500081",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "setup",
+      "name": "Zone B created (id 10, pins 411045/411046)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "setup",
+      "name": "Manager B scoped to zone 10",
+      "pass": true,
+      "detail": "{\"type\":\"zone\",\"zoneIds\":[10],\"cities\":[],\"cityScopes\":[],\"storeIds\":[]}"
+    },
+    {
+      "area": "setup",
+      "name": "Worker B (id 25) onboarded, logged in, online",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "setup",
+      "name": "Customer B (id 17) registered with address in 411045",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "catalogue",
+      "name": "Zone A customer sees only zone A services",
+      "pass": true,
+      "detail": "available=bathroom,kitchen,mopping"
+    },
+    {
+      "area": "catalogue",
+      "name": "Zone A mopping uses the zone price (from ₹99)",
+      "pass": true,
+      "detail": "listPrice ₹99, after offers ₹49"
+    },
+    {
+      "area": "offers",
+      "name": "Zone A customer sees zone A offer",
+      "pass": true,
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone A Special 02440"
+    },
+    {
+      "area": "offers",
+      "name": "Zone A customer does NOT see zone B offer",
+      "pass": true,
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone A Special 02440"
+    },
+    {
+      "area": "catalogue",
+      "name": "Zone B customer sees only zone B services",
+      "pass": true,
+      "detail": "available=dusting,mopping"
+    },
+    {
+      "area": "catalogue",
+      "name": "Zone B mopping uses the zone price (from ₹149)",
+      "pass": true,
+      "detail": "listPrice ₹149, after offers ₹74"
+    },
+    {
+      "area": "offers",
+      "name": "Zone B customer sees zone B offer",
+      "pass": true,
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone B Special 02440"
+    },
+    {
+      "area": "offers",
+      "name": "Zone B customer does NOT see zone A offer",
+      "pass": true,
+      "detail": "50% OFF your first booking | SNAB50 | FIRST100 | CLEAN20 | Zone B Special 02440"
+    },
+    {
+      "area": "booking",
+      "name": "Zone A quote total ₹87",
+      "pass": true,
+      "detail": "{\"subtotal\":74,\"discount\":0,\"fee\":0,\"tax\":13}"
+    },
+    {
+      "area": "booking",
+      "name": "Zone A booking #HH86300 created",
+      "pass": true,
+      "detail": "status=confirmed"
+    },
+    {
+      "area": "booking",
+      "name": "Zone A booking tagged with zone 9",
+      "pass": true,
+      "detail": "zone_id=9"
+    },
+    {
+      "area": "dispatch",
+      "name": "Zone A worker receives the offer",
+      "pass": true,
+      "detail": "{\"state\":\"PENDING\",\"bookingId\":21,\"remainingSec\":120}"
+    },
+    {
+      "area": "dispatch",
+      "name": "Zone B worker never offered zone A's job",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "job",
+      "name": "Zone A worker accepts",
+      "pass": true,
+      "detail": "{\"ok\":true,\"jobStatus\":\"ACCEPTED\",\"activeJob\":{\"id\":\"#HH86300\",\"bookingId\":21,\"customerName\":\"Customer A 02440\",\"initial"
+    },
+    {
+      "area": "job",
+      "name": "Customer A sees worker assigned",
+      "pass": true,
+      "detail": "status=worker_assigned, pro=Worker A 02440"
+    },
+    {
+      "area": "job",
+      "name": "Customer A sees \"on the way\"",
+      "pass": true,
+      "detail": "status=on_the_way"
+    },
+    {
+      "area": "job",
+      "name": "Customer A sees \"arrived\" and has the start OTP",
+      "pass": true,
+      "detail": "status=arrived, otp=yes"
+    },
+    {
+      "area": "job",
+      "name": "Zone A wrong OTP is rejected",
+      "pass": true,
+      "detail": "{\"ok\":false,\"error\":\"Incorrect OTP. Try again.\"}"
+    },
+    {
+      "area": "job",
+      "name": "Zone A correct OTP starts the service",
+      "pass": true,
+      "detail": "{\"ok\":true,\"jobStatus\":\"IN_PROGRESS\",\"activeJob\":{\"id\":\"#HH86300\",\"bookingId\":21,\"customerName\":\"Cus"
+    },
+    {
+      "area": "job",
+      "name": "Customer A sees \"in progress\"",
+      "pass": true,
+      "detail": "status=in_progress"
+    },
+    {
+      "area": "job",
+      "name": "Customer A sees \"completed\"",
+      "pass": true,
+      "detail": "status=completed"
+    },
+    {
+      "area": "job",
+      "name": "Zone A worker settle call",
+      "pass": true,
+      "detail": "{\"ok\":true,\"wallet\":{\"balance\":85,\"pending\":0,\"hold\":0,\"withdrawn\":0}}"
+    },
+    {
+      "area": "booking",
+      "name": "Zone B quote total ₹117",
+      "pass": true,
+      "detail": "{\"subtotal\":99,\"discount\":0,\"fee\":0,\"tax\":18}"
+    },
+    {
+      "area": "booking",
+      "name": "Zone B booking #HH14485 created",
+      "pass": true,
+      "detail": "status=confirmed"
+    },
+    {
+      "area": "booking",
+      "name": "Zone B booking tagged with zone 10",
+      "pass": true,
+      "detail": "zone_id=10"
+    },
+    {
+      "area": "dispatch",
+      "name": "Zone B worker receives the offer",
+      "pass": true,
+      "detail": "{\"state\":\"PENDING\",\"bookingId\":22,\"remainingSec\":120}"
+    },
+    {
+      "area": "dispatch",
+      "name": "Zone A worker never offered zone B's job",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "job",
+      "name": "Zone B worker accepts",
+      "pass": true,
+      "detail": "{\"ok\":true,\"jobStatus\":\"ACCEPTED\",\"activeJob\":{\"id\":\"#HH14485\",\"bookingId\":22,\"customerName\":\"Customer B 02440\",\"initial"
+    },
+    {
+      "area": "job",
+      "name": "Customer B sees worker assigned",
+      "pass": true,
+      "detail": "status=worker_assigned, pro=Worker B 02440"
+    },
+    {
+      "area": "job",
+      "name": "Customer B sees \"on the way\"",
+      "pass": true,
+      "detail": "status=on_the_way"
+    },
+    {
+      "area": "job",
+      "name": "Customer B sees \"arrived\" and has the start OTP",
+      "pass": true,
+      "detail": "status=arrived, otp=yes"
+    },
+    {
+      "area": "job",
+      "name": "Zone B wrong OTP is rejected",
+      "pass": true,
+      "detail": "{\"ok\":false,\"error\":\"Incorrect OTP. Try again.\"}"
+    },
+    {
+      "area": "job",
+      "name": "Zone B correct OTP starts the service",
+      "pass": true,
+      "detail": "{\"ok\":true,\"jobStatus\":\"IN_PROGRESS\",\"activeJob\":{\"id\":\"#HH14485\",\"bookingId\":22,\"customerName\":\"Cus"
+    },
+    {
+      "area": "job",
+      "name": "Customer B sees \"in progress\"",
+      "pass": true,
+      "detail": "status=in_progress"
+    },
+    {
+      "area": "job",
+      "name": "Customer B sees \"completed\"",
+      "pass": true,
+      "detail": "status=completed"
+    },
+    {
+      "area": "job",
+      "name": "Zone B worker settle call",
+      "pass": true,
+      "detail": "{\"ok\":true,\"wallet\":{\"balance\":109,\"pending\":0,\"hold\":0,\"withdrawn\":0}}"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A worker list includes own worker",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A worker list excludes zone B worker",
+      "pass": true,
+      "detail": "sees 2 workers: 24,5"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A cannot open zone B worker profile",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A bookings include own zone booking",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A bookings exclude zone B booking",
+      "pass": true,
+      "detail": "sees 1 bookings"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A cannot open zone B booking",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A customers include own customer",
+      "pass": true,
+      "detail": "sees 1"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A customers exclude zone B customer",
+      "pass": true,
+      "detail": "sees 1"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A cannot open zone B customer",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A cannot edit zone B customer",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A campaigns exclude zone B offer",
+      "pass": true,
+      "detail": "sees 5 campaigns"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A shifts exclude zone B worker",
+      "pass": true,
+      "detail": "HTTP 403, 0 rows"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A cannot create a worker in zone B",
+      "pass": true,
+      "detail": "HTTP 403"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager A cannot move own worker into zone B",
+      "pass": true,
+      "detail": "PATCH HTTP 403, zone now 9"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B worker list includes own worker",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B worker list excludes zone A worker",
+      "pass": true,
+      "detail": "sees 2 workers: 25,3"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B cannot open zone A worker profile",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B bookings include own zone booking",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B bookings exclude zone A booking",
+      "pass": true,
+      "detail": "sees 1 bookings"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B cannot open zone A booking",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B customers include own customer",
+      "pass": true,
+      "detail": "sees 1"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B customers exclude zone A customer",
+      "pass": true,
+      "detail": "sees 1"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B cannot open zone A customer",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B cannot edit zone A customer",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B campaigns exclude zone A offer",
+      "pass": true,
+      "detail": "sees 5 campaigns"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B shifts exclude zone A worker",
+      "pass": true,
+      "detail": "HTTP 403, 0 rows"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B cannot create a worker in zone A",
+      "pass": true,
+      "detail": "HTTP 403"
+    },
+    {
+      "area": "isolation",
+      "name": "Manager B cannot move own worker into zone A",
+      "pass": true,
+      "detail": "PATCH HTTP 403, zone now 10"
+    },
+    {
+      "area": "isolation",
+      "name": "Customer A cannot read customer B's booking",
+      "pass": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "area": "isolation",
+      "name": "Customer token rejected on worker API",
+      "pass": true,
+      "detail": "HTTP 401"
+    }
+  ]
+}

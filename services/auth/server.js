@@ -481,7 +481,9 @@ async function auth(req, res, next) {
 /* ---------- login ---------- */
 app.post('/api/auth/request-otp', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
-  if (phone.length < 6) return res.status(400).json({ error: 'Enter a valid mobile number' })
+  // An Indian mobile number: 10 digits starting 6–9, optionally written with +91. Anything else
+  // would create an account nobody can reach (and send an SMS to a number that isn't a phone).
+  if (!/^(\+?91)?[6-9]\d{9}$/.test(phone.replace(/[\s-]/g, ''))) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number' })
   const prev = otpStore.get(phone)
   const now = Date.now()
   if (prev) {
