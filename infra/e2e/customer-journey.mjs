@@ -1,7 +1,9 @@
 // A new customer's journey through the real customer-app screens (phone-sized browser, mock
 // payments): sign up with OTP → pick a city → Home → bottom tabs → book a service and pay by UPI
 // → track it → see it in My Bookings → cancel it → refund to UPI shows in Refund History and in
-// UPI & Card Payments → add money to the wallet → switch language → log out.
+// UPI & Card Payments → add money to the wallet → a second booking's whole life (expert accepts,
+// on the way, arrives, customer shares the start OTP, service completes, 5★ rating, tip, receipt
+// and invoice; the expert is played through the worker API) → switch language → log out.
 // Needs the stack (payment_gateway=mock) and the customer app's dev server running.
 //
 //   node infra/e2e/customer-journey.mjs    # APP=http://127.0.0.1:5173 BASE=http://localhost:8080 ADMIN_PW=… SHOTS=dir
@@ -154,6 +156,103 @@ await step('Add money to wallet (UPI)', async () => {
   const w1 = (await api('GET', '/api/wallet')).total
   if (!(w1 > w0)) throw new Error(`wallet ₹${w0} → ₹${w1}`); return `wallet ₹${w0} → ₹${w1}`
 })
+// ---- A booking's whole life. The expert side is played through the worker API; everything the
+// customer does or sees happens in the real screens.
+const RUN = Date.now().toString().slice(-5)
+const adm = async (m, p, body) => { const r = await fetch(BASE + p, { method: m, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sup }, body: body ? JSON.stringify(body) : undefined }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`${m} ${p} → ${r.status} ${JSON.stringify(j).slice(0, 120)}`); return j }
+const wapi = async (m, p, body, wt) => { const r = await fetch(BASE + p, { method: m, headers: { 'content-type': 'application/json', ...(wt ? { authorization: 'Bearer ' + wt } : {}) }, body: body ? JSON.stringify(body) : undefined }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`${m} ${p} → ${r.status} ${JSON.stringify(j).slice(0, 120)}`); return j }
+const lpin = `5${RUN}`, llat = 17.40, llng = 78.45
+const lzone = await adm('POST', '/api/admin/zones', { name: `Journey ${RUN}`, city: 'Hyderabad', state: 'Telangana', pincodes: lpin, status: 'live',
+  config: { services: ['mopping', 'kitchen', 'bathroom', 'dusting'], workingHours: { is247: true }, coverage: { lat: llat, lng: llng, radiusKm: 5 } } })
+const wphone = `9${RUN}6666`
+const wk = await adm('POST', '/api/admin/workers', { name: `Lakshmi ${RUN}`, phone: wphone, city: 'Hyderabad', zone_id: lzone.id, status: 'active', services: ['Sweeping & Mopping', 'Kitchen Cleaning', 'Dusting Furniture', 'Bathroom Cleaning'] })
+await adm('POST', '/api/admin/shifts', { worker_id: wk.id || wk.worker?.id, zone_id: lzone.id, weekdays: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' })
+const wo = await wapi('POST', '/api/worker/auth/request-otp', { phone: wphone })
+const W = (await wapi('POST', '/api/worker/auth/verify', { phone: wphone, otp: wo.devOtp || '1234' })).token
+await wapi('POST', '/api/worker/status', { state: 'Available' }, W)
+await api('POST', '/api/addresses', { label: 'Work', house: 'Flat 7', street: 'Road No. 12, Banjara Hills', city: 'Hyderabad', pincode: lpin, lat: llat, lng: llng, makeDefault: true })
+const jobText = () => page.evaluate(() => document.body.innerText)
+const waitText = async (re, ms = 20000) => { const end = Date.now() + ms; while (Date.now() < end) { if (re.test(await jobText())) return true; await sleep(1000) } return false }
+let lifeId = null
+await step('Life: book + pay by UPI in the new zone', async () => {
+  await page.goto(APP + '/service/mopping', { waitUntil: 'networkidle0' }); await sleep(1500)
+  await tap(/^book now$/)
+  for (let i = 0; i < 12 && !(await url()).startsWith('/confirmed'); i++) {
+    if (/Review & pay/.test(await jobText())) await page.evaluate(() => { const b = document.querySelector('.sf-switch.on[aria-label]'); if (b) b.click() })
+    if (/Demo mode|Choose a payment method/.test(await jobText()) && await tap(/^pay ₹/, { optional: true })) { await settle(2500); continue }
+    await tap(/^(now|instant|asap)/, { optional: true })
+    if (!(await tap(/^continue|^proceed|^pay |place order|book now|^confirm booking/, { optional: true }))) throw new Error('stuck on ' + await url())
+  }
+  if (!(await url()).startsWith('/confirmed')) throw new Error('no confirmation')
+  lifeId = Number((await url()).split('/').pop()); await shot('life-confirmed'); return `booking ${lifeId}`
+})
+await step('Life: expert accepts → customer sees the expert assigned', async () => {
+  const end = Date.now() + 30000
+  while (Date.now() < end && (await wapi('GET', '/api/worker/jobs/offer', null, W))?.state !== 'PENDING') await sleep(1000)
+  await wapi('POST', '/api/worker/jobs/accept', null, W)
+  await page.goto(APP + `/job/${lifeId}`, { waitUntil: 'networkidle0' }); await sleep(2500)
+  if (!(await waitText(/Lakshmi|getting ready|assigned/i))) throw new Error('tracking screen does not show the expert'); await shot('life-assigned'); return 'shown'
+})
+await step('Life: on the way → arrived shown live', async () => {
+  await wapi('POST', '/api/worker/jobs/on-the-way', null, W)
+  if (!(await waitText(/on the way/i))) throw new Error('"on the way" not shown')
+  await wapi('POST', '/api/worker/jobs/arrived', null, W)
+  // On arrival the app moves the customer to the Share OTP screen by itself.
+  if (!(await waitText(/arrived|arrives|Share this OTP/i))) throw new Error('arrival not shown'); await shot('life-arrived'); return `both shown, now on ${await url()}`
+})
+await step('Life: customer shares the start OTP; expert starts with it', async () => {
+  await page.goto(APP + `/job/${lifeId}/otp`, { waitUntil: 'networkidle0' }); await sleep(2000); await shot('life-otp')
+  // The code is shown one digit per box.
+  const otpText = await jobText()
+  const code = otpText.match(/(\d)\s+(\d)\s+(\d)\s+(\d)/)?.slice(1).join('') || otpText.match(/\b(\d{4})\b/)?.[1]
+  if (!code) throw new Error('no OTP on the Share OTP screen')
+  // Completing before the service has started must be refused (the expert would otherwise get
+  // paid for a job the customer never let them start).
+  const early = await fetch(BASE + '/api/worker/jobs/end', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + W }, body: '{}' })
+  if (early.ok) throw new Error('expert could complete the job before starting it')
+  const wrong = await wapi('POST', '/api/worker/jobs/verify-otp', { otp: code === '0000' ? '1111' : '0000' }, W)
+  if (wrong.ok) throw new Error('a wrong OTP started the job')
+  await wapi('POST', '/api/worker/jobs/verify-otp', { otp: code }, W)
+  await page.goto(APP + `/job/${lifeId}`, { waitUntil: 'networkidle0' }); await sleep(2000)
+  if (!(await waitText(/in progress|underway|started/i))) throw new Error('screen does not show service started'); await shot('life-started'); return `early completion refused (HTTP ${early.status}), wrong OTP refused, OTP ${code} started it`
+})
+await step('Life: expert finishes → customer sees Service Completed', async () => {
+  await wapi('POST', '/api/worker/jobs/end', {}, W); await sleep(1500)
+  await page.goto(APP + `/job/${lifeId}/completed`, { waitUntil: 'networkidle0' }); await sleep(2000)
+  if (!/Service Completed/i.test(await jobText())) throw new Error('not shown'); await shot('life-completed'); return (await url())
+})
+await step('Life: rate 5 stars with feedback', async () => {
+  const star5 = () => page.evaluate(() => { const s = [...document.querySelectorAll('body *')].filter((b) => b.children.length === 0 && b.textContent.trim() === '★'); s[4]?.click(); return s.length })
+  await star5(); await settle(1000)
+  if (!(await url()).startsWith(`/rate/${lifeId}`)) throw new Error('stars did not open rating: ' + await url())
+  await star5()
+  const ta = await page.$('textarea'); if (ta) await ta.type('Very thorough, on time.')
+  await tap(/^continue$/); await shot('life-photos'); await tap(/^continue$/); await settle(1500); await shot('life-rated')
+  const b = await api('GET', `/api/bookings/${lifeId}`)
+  if (Number(b.rating) !== 5) throw new Error('rating saved as ' + b.rating); return `saved ${b.rating}★, now on ${await url()}`
+})
+await step('Life: tip the expert ₹20 from the wallet', async () => {
+  await page.goto(APP + `/tip/${lifeId}`, { waitUntil: 'networkidle0' }); await sleep(2000)
+  await tap(/^₹20$/, { optional: true }); await shot('life-tip')
+  await tap(/add tip/); await settle(1000); await shot('life-tip-2')
+  for (let k = 0; k < 3 && await tap(/^pay ₹|^confirm|^pay from wallet|^use wallet/, { optional: true }); k++) await settle(1500)
+  await shot('life-tip-3')
+  const b = await api('GET', `/api/bookings/${lifeId}`)
+  if (!(Number(b.tip) > 0)) throw new Error('tip not recorded (tip=' + b.tip + ')'); return `tip ₹${b.tip}`
+})
+await step('Life: booking details show paid + transaction id; invoice opens', async () => {
+  await page.goto(APP + `/booking-details/${lifeId}`, { waitUntil: 'networkidle0' }); await sleep(2500); await shot('life-details')
+  const t = await jobText()
+  if (!/pay_[a-z]+_\w+/.test(t)) throw new Error('no gateway transaction id on booking details')
+  await page.goto(APP + `/invoice/${lifeId}`, { waitUntil: 'networkidle0' }); await sleep(2500); await shot('life-invoice')
+  // The invoice is rendered in an iframe.
+  const inv = await page.evaluate(() => document.querySelector('iframe')?.contentDocument?.body?.innerText || '')
+  if (!/TAX\s*INVOICE/i.test(inv)) throw new Error('invoice did not render')
+  if (!/pay_[a-z]+_\w+/.test(inv)) throw new Error('invoice shows no gateway transaction id')
+  return 'details + invoice show the payment id'
+})
+try { await wapi('POST', '/api/worker/status', { state: 'Offline' }, W) } catch {}
+
 await step('Switch language to Hindi and back', async () => {
   await page.goto(APP + '/profile/language', { waitUntil: 'networkidle0' }); await sleep(3000)
   await tap(/हिन्दी|hindi/); await tap(/save|apply|continue|done/, { optional: true }); await settle(1500)

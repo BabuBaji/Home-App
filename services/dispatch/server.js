@@ -443,10 +443,16 @@ app.post('/api/worker/jobs/reject', auth, async (req, res) => {
   res.json({ ok: true, jobStatus: 'NONE' })
 })
 
+// Move the booking to the expert's next step. The booking service refuses out-of-order steps
+// (409); pass its reason back instead of letting the request hang on an unhandled rejection.
+async function setStatus(res, b, status) {
+  try { await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status }); return true }
+  catch (e) { res.status(e.status && e.status < 500 ? e.status : 502).json({ ok: false, error: e.message }); return false }
+}
 async function advance(req, res, status) {
   const b = await activeBooking(req.worker.id)
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
-  await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status })
+  if (!(await setStatus(res, b, status))) return
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.status', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Status → ${status.replace(/_/g, ' ')}`, meta: { status } })
   res.json({ ok: true, jobStatus: STATUS_TO_ENUM[status] || status, activeJob: await jobFromBooking({ ...b, status }) })
 }
@@ -473,7 +479,7 @@ app.post('/api/worker/jobs/verify-otp', auth, async (req, res) => {
   const expected = String(b.service_otp ?? '').trim()
   // A blank on either side must never pass — otherwise an empty field would start the job.
   if (!given || !expected || given !== expected) return res.json({ ok: false, error: 'Incorrect OTP. Try again.' })
-  await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'in_progress' })
+  if (!(await setStatus(res, b, 'in_progress'))) return
   // Domain event: the wallet service uses this to decide the on-time-start incentive vs late penalty.
   publishEvent(REDIS_URL, 'job.start', { bookingId: b.id, workerId: req.worker.id, ref: b.ref })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.start', entityType: 'booking', entityId: b.id, ref: b.ref, detail: 'Service started (OTP verified)' })
@@ -485,10 +491,11 @@ app.post('/api/worker/jobs/end', auth, async (req, res) => {
   if (!b) return res.status(409).json({ ok: false, error: 'No active job' })
   // The proof photo now comes from the after-photo set captured at step 7; an explicit body photo
   // is still honoured so an older client keeps working.
+  if (b.status !== 'in_progress') return res.status(409).json({ ok: false, error: 'Start the service with the customer\'s OTP before completing it.' })
   const st = await jobState(b)
   const proof = req.body?.photo || (st.after_photos || [])[0]?.url || null
   if (proof) await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/work-photo`, { url: proof })
-  await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/status`, { status: 'completed' }) // booking emits booking.completed → wallet settles
+  if (!(await setStatus(res, b, 'completed'))) return // booking emits booking.completed → wallet settles
   const shots = (st.after_photos || []).length
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.complete', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Job completed${shots ? ` (${shots} after photo${shots > 1 ? 's' : ''})` : ''}${st.signature ? ' · customer signed' : ''}`, meta: { status: 'completed' } })
   res.json({ ok: true, jobStatus: 'COMPLETED', activeJob: await jobFromBooking({ ...b, status: 'completed' }) })

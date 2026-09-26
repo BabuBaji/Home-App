@@ -1696,11 +1696,30 @@ app.post('/api/internal/bookings/:id/assign', internalOnly, async (req, res) => 
   res.json({ ok: true, booking: rowTo(upd.rows[0]) })
 })
 // Dispatch: advance status / update worker position.
+/* The expert's steps, in order. A step may only follow the ones listed — so a job can't be
+ * completed (and the expert paid) without having started via the customer's OTP, and a cancelled
+ * or already-finished booking can't be moved back into service. Repeating the current step is a
+ * harmless retry. The check and the write are one UPDATE, so two racing calls can't both pass. */
+const STATUS_FROM = {
+  on_the_way: ['worker_assigned'],
+  arrived: ['worker_assigned', 'on_the_way'],
+  in_progress: ['worker_assigned', 'on_the_way', 'arrived'],
+  completed: ['in_progress'],
+}
 app.post('/api/internal/bookings/:id/status', internalOnly, async (req, res) => {
   const id = Number(req.params.id), status = String(req.body?.status || '')
-  if (status === 'completed') await pool.query('UPDATE bookings SET status=$1, completed_at=COALESCE(completed_at, $2) WHERE id=$3', [status, nowIso(), id])
-  else if (status === 'in_progress') await pool.query('UPDATE bookings SET status=$1, started_at=COALESCE(started_at, $2) WHERE id=$3', [status, nowIso(), id])
-  else await pool.query('UPDATE bookings SET status=$1 WHERE id=$2', [status, id])
+  const from = STATUS_FROM[status]
+  if (!from) return res.status(400).json({ error: `Unknown status ${status}` })
+  const stampCol = { completed: 'completed_at', in_progress: 'started_at' }[status]
+  const moved = stampCol
+    ? await pool.query(`UPDATE bookings SET status=$2, ${stampCol}=COALESCE(${stampCol}, $4) WHERE id=$1 AND status = ANY($3::text[]) RETURNING id`, [id, status, from, nowIso()])
+    : await pool.query('UPDATE bookings SET status=$2 WHERE id=$1 AND status = ANY($3::text[]) RETURNING id', [id, status, from])
+  if (!moved.rowCount) {
+    const cur = await getBooking(id)
+    if (!cur) return res.status(404).json({ error: 'Not found' })
+    if (cur.status === status) return res.json(cur) // retry of the step already done
+    return res.status(409).json({ error: status === 'completed' ? 'Start the service with the customer\'s OTP before completing it.' : `This booking is ${cur.status.replace(/_/g, ' ')} — it can't move to ${status.replace(/_/g, ' ')}.` })
+  }
   const b = await getBooking(id)
   await emitBookingUpdate(id)
   if (status === 'completed') publishEvent(REDIS_URL, 'booking.completed', { booking: b })

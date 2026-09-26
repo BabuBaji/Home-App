@@ -21,8 +21,10 @@ export const COMPANY = {
 }
 
 // Stable transaction reference derived from the booking (no gateway id is persisted).
+// The gateway's own payment id (Razorpay pay_…) when the booking was paid online — the id the
+// customer's bank statement and support can look up. Cash/wallet bookings get a HomeHelp reference.
 export const txnRef = (b: Booking) =>
-  `TXN-${new Date(b.created).toISOString().slice(0, 10).replace(/-/g, '')}-${String(b.id).padStart(6, '0')}`
+  b.payment_ref || `TXN-${new Date(b.created).toISOString().slice(0, 10).replace(/-/g, '')}-${String(b.id).padStart(6, '0')}`
 
 // en-IN renders "02:35 pm"; the design shows "11:20 AM".
 export const dt = (s?: string | null) =>

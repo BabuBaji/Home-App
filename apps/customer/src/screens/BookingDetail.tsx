@@ -204,9 +204,7 @@ export default function BookingDetail() {
           )}
           <Row k={t('Method')} v={`${(b.payment || '').toUpperCase()} · ${b.payment_status}`} />
           {/* The real gateway payment id when paid online — the id Razorpay and support look up. */}
-          {b.payment_ref
-            ? <Row k={t('Transaction ID')} v={b.payment_ref} />
-            : b.status === 'completed' && <Row k={t('Transaction ID')} v={txnRef(b)} />}
+          {(b.payment_ref || b.status === 'completed') && <Row k={t('Transaction ID')} v={txnRef(b)} />}
           {(b.refund ?? 0) > 0 && (() => {
             const toSource = Math.min(b.refund || 0, b.refund_to_source || 0), toWallet = (b.refund || 0) - toSource
             return (
