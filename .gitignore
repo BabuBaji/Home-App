@@ -56,3 +56,6 @@ Thumbs.db
 docs/CUSTOMER/
 docs/WORKER/
 *.docx
+
+# zone-e2e.mjs output when run from the repo root
+/e2e-results.json
