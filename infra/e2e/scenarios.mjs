@@ -37,12 +37,19 @@ const Z = {}, W = {}, C = {}, M = {}
 const created = []   // every booking id we make, for cleanup
 
 // ── actors ─────────────────────────────────────────────────────────────────────────────────────
-async function mkZone(key, name, city, state, pins) {
+async function mkZone(key, name, city, state, pins, coverage) {
+  // `coverage` is the zone's area on the map (the wizard's centre + radius); it is what splits two
+  // zones that share a pincode.
   const z = await must(`zone ${key}`, api('POST', '/api/admin/zones', { token: SUPER, body: {
     name: `E2E ${name} ${RUN}`, city, state, pincodes: pins.join(','), status: 'live',
-    config: { services: ['mopping', 'kitchen', 'bathroom', 'dusting'], workingHours: { is247: true } },
+    config: { services: ['mopping', 'kitchen', 'bathroom', 'dusting'], workingHours: { is247: true }, ...(coverage ? { coverage } : {}) },
   } }))
   Z[key] = { id: z.id, name: z.name, city, pins }
+  const offer = `E2E Offer ${key} ${RUN}`
+  const cm = await must(`offer ${key}`, api('POST', '/api/admin/campaigns', { token: SUPER, body: {
+    campaign_name: offer, banner_title: offer, campaign_type: 'zone', discount_type: 'flat', discount_value: 10, status: 'active', zoneIds: [z.id],
+  } }))
+  Z[key].offer = offer; Z[key].campaign = cm.campaign_id
 }
 async function mkManager(key, zoneKey) {
   const email = `m${key.toLowerCase()}${RUN}@e2e.test`
@@ -120,8 +127,8 @@ async function main() {
   await api('PATCH', '/api/admin/settings', { token: SUPER, body: { dispatch_timeout_min: '2', auto_assign: 'true' } })
 
   // City Hyderabad with two zones that SHARE pincode 500081 (West created first), plus Pune.
-  await mkZone('W', 'Hyd West', 'Hyderabad', 'Telangana', ['500081', '500032'])
-  await mkZone('E', 'Hyd East', 'Hyderabad', 'Telangana', ['500081', '500039'])
+  await mkZone('W', 'Hyd West', 'Hyderabad', 'Telangana', ['500081', '500032'], { lat: 17.4435, lng: 78.3772, radiusKm: 9 })
+  await mkZone('E', 'Hyd East', 'Hyderabad', 'Telangana', ['500081', '500039'], { lat: 17.4062, lng: 78.5591, radiusKm: 9 })
   await mkZone('P', 'Pune Baner', 'Pune', 'Maharashtra', ['411045'])
   await mkManager('W', 'W'); await mkManager('E', 'E'); await mkManager('P', 'P')
   await mkWorker('W1', 'W', 1); await mkWorker('W2', 'W', 2); await mkWorker('E1', 'E', 3); await mkWorker('P1', 'P', 4)
@@ -130,7 +137,7 @@ async function main() {
   await mkCustomer('P', 'P', 13, '411045', 18.559, 73.7868)
   await mkCustomer('X', 'W', 14, '560300', 12.97, 77.59)              // pincode served by no zone
   scenario = 'Setup'
-  check('3 zones (2 in Hyderabad sharing 500081, 1 in Pune), 4 workers, 4 customers, 3 zone managers', true)
+  check('3 zones (2 in Hyderabad sharing 500081, 1 in Pune), 4 workers, 4 customers, 3 zone managers, 1 offer per zone', true)
 
   // S1 — happy path, in-zone offer and completion.
   scenario = 'S1 Happy path (in-zone)'
@@ -151,8 +158,10 @@ async function main() {
   check('Booking from East side of shared 500081 is tagged Hyd East', Number(r.json?.zone_id) === Z.E.id, `tagged zone ${r.json?.zone_id} (${Number(r.json?.zone_id) === Z.W.id ? 'Hyd West' : 'other'}); East=${Z.E.id}`)
   got = await waitFor(() => whoIsOffered(id), 15000)
   check('Offer goes to the East worker', got === 'E1', `offered to ${got || 'nobody'}`)
-  const qE = (await api('GET', `/api/services?pincode=500081`, { token: C.E.tok })).json
-  check('East customer is priced/served by East zone', true, `catalogue for 500081 resolves by pincode only (no location input)`, 'info')
+  const svE = (await api('GET', `/api/serviceable?pincode=500081&lat=${C.E.lat}&lng=${C.E.lng}`)).json
+  check('Catalogue resolves the East location of 500081 to Hyd East', Number(svE?.zoneId) === Z.E.id, `zoneId=${svE?.zoneId}`)
+  const svW = (await api('GET', `/api/serviceable?pincode=500081&lat=17.4401&lng=78.3489`)).json
+  check('…and the West location of 500081 to Hyd West', Number(svW?.zoneId) === Z.W.id, `zoneId=${svW?.zoneId}`)
   await cleanup()
 
   // S3 — nobody online in the zone: must NOT go to another zone; waits, then auto-cancels.
@@ -342,12 +351,46 @@ async function main() {
     check(`Mgr ${mk}: no other-zone orders`, bl.every((x) => Number(x.zone_id) === Z[zk].id), `${bl.filter((x) => Number(x.zone_id) !== Z[zk].id).length} foreign of ${bl.length}`)
     const cl = list((await api('GET', '/api/admin/customers', { token: M[mk] })).json).map((c) => c.id)
     const foreignC = Object.keys(C).filter((k) => C[k].zone !== zk && cl.includes(C[k].id))
-    check(`Mgr ${mk}: no other-zone customers`, !foreignC.length, `sees ${foreignC.join(',') || 'none'} (customers are scoped by city)`)
+    check(`Mgr ${mk}: no other-zone customers`, !foreignC.length, `sees ${foreignC.join(',') || 'none'}`)
     const cm = (await api('GET', '/api/admin/campaigns', { token: M[mk] })).json
     const foreignCamp = (Array.isArray(cm) ? cm : []).filter((c) => (c.zoneIds || []).length && !(c.zoneIds || []).includes(Z[zk].id))
     check(`Mgr ${mk}: no other-zone offers`, !foreignCamp.length, `${foreignCamp.length} foreign campaigns visible`)
     const sh = list((await api('GET', '/api/admin/shifts', { token: M[mk] })).json)
     check(`Mgr ${mk}: no other-zone shifts`, sh.every((s) => s.zone_id == null || Number(s.zone_id) === Z[zk].id), `${sh.filter((s) => s.zone_id != null && Number(s.zone_id) !== Z[zk].id).length} foreign shifts`)
+  }
+
+  // S16 — a zone manager cannot change anything outside their zone.
+  scenario = 'S16 Manager write isolation'
+  const n1 = await api('PATCH', `/api/admin/campaigns/${Z.P.campaign}`, { token: M.W, body: { discount_value: 99 } })
+  check("Can't edit another zone's offer", !n1.ok, `HTTP ${n1.status}`)
+  const n2 = await api('POST', '/api/admin/campaigns', { token: M.W, body: { campaign_name: `rogue ${RUN}`, campaign_type: 'zone', discount_type: 'flat', discount_value: 5, zoneIds: [] } })
+  check("Can't create an all-zones offer", !n2.ok, `HTTP ${n2.status}`)
+  const n3 = await api('POST', '/api/admin/campaigns', { token: M.W, body: { campaign_name: `own ${RUN}`, campaign_type: 'zone', discount_type: 'flat', discount_value: 5, zoneIds: [Z.W.id] } })
+  check('Can create an offer for own zone', n3.ok, `HTTP ${n3.status}`)
+  if (n3.ok) await api('DELETE', `/api/admin/campaigns/${n3.json.campaign_id}`, { token: SUPER })
+  const n4 = await api('GET', `/api/admin/customers/${C.E.id}`, { token: M.W })
+  check("Can't open another zone's customer (same city)", n4.status === 404, `HTTP ${n4.status}`)
+  const n5 = await api('PATCH', `/api/admin/customers/${C.E.id}`, { token: M.W, body: { name: 'hijack' } })
+  check("Can't edit another zone's customer", !n5.ok, `HTTP ${n5.status}`)
+  const n6 = await api('GET', `/api/admin/customers/${C.W.id}`, { token: M.W })
+  check('Can open own zone customer', n6.ok, `HTTP ${n6.status}`)
+  const n7 = await api('POST', '/api/admin/shifts', { token: M.W, body: { worker_id: W.E1.id, weekdays: [1], start: '09:00', end: '10:00' } })
+  check("Can't add a shift for another zone's worker", !n7.ok, `HTTP ${n7.status}`)
+  const n8 = await api('PATCH', `/api/admin/workers/${W.W1.id}`, { token: M.W, body: { zone_id: Z.P.id } })
+  check("Can't move own worker into another zone", !n8.ok, `HTTP ${n8.status}`)
+  const n9 = await api('POST', '/api/admin/workers', { token: M.W, body: { name: `rogue ${RUN}`, phone: phone(99), city: 'Pune', zone_id: Z.P.id } })
+  check("Can't onboard a worker into another zone", !n9.ok, `HTTP ${n9.status}`)
+  const n10 = await api('GET', '/api/admin/zones', { token: M.W })
+  check('Sees only own zone in the zone list', list(n10.json).every((z) => z.id === Z.W.id), `${list(n10.json).map((z) => z.id).join(',')}`)
+  const n11 = await api('GET', '/api/admin/banners', { token: M.W })
+  check('Banner list excludes other zones', list(n11.json).every((b) => b.zone_id == null || b.zone_id === Z.W.id), `HTTP ${n11.status}`)
+  // S17 — customer offers are zone-local.
+  scenario = 'S17 Customer offers by zone'
+  for (const ck of ['W', 'E', 'P']) {
+    const c = C[ck], zk = c.zone
+    const offers = JSON.stringify((await api('GET', `/api/offers?pincode=${c.pin}&lat=${c.lat}&lng=${c.lng}`, { token: c.tok })).json || '')
+    const foreign = ['W', 'E', 'P'].filter((k) => k !== zk && offers.includes(Z[k].offer))
+    check(`Customer ${ck} sees no other zone's offer`, !foreign.length, foreign.length ? `sees ${foreign.join(',')}` : 'ok')
   }
 
   await api('PATCH', '/api/admin/settings', { token: SUPER, body: { dispatch_timeout_min: '5' } })

@@ -1900,6 +1900,7 @@ body { line-height: 1.45; }
   display: grid; place-items: center; color: #fff; }
 .au-radio.on { border-color: var(--av); background: var(--av); }
 .au-empty { color: var(--asub); font-size: 14px; padding: 18px 4px; }
+.au-soon { color: var(--asub); font-size: 12px; margin-right: 10px; }
 
 /* 6. Permission */
 .auth-perm .au-body { display: flex; flex-direction: column; }

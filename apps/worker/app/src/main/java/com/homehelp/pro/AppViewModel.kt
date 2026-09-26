@@ -1363,6 +1363,8 @@ class AppViewModel : ViewModel() {
         sync {
             val r = api.settle()
             r.walletSummary?.let { applyWalletSummary(it) }
+            // Swap the optimistic row for the server's history (and today's counts).
+            applyBootstrap(api.bootstrap())
         }
     }
 

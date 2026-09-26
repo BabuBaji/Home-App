@@ -49,9 +49,9 @@ const phone = (n) => `9${RUN}${String(n).padStart(4, '0')}`
 async function main() {
   const superTok = (await must('super login', api('POST', '/api/admin/login', { body: { email: 'admin@homehelp.in', password: process.env.ADMIN_PW || 'Admin@12345' } }))).token
 
-  // Remove zones left by earlier runs (they hold the same pincodes; the first match would win).
+  // Remove zones left by earlier runs of either suite (they hold the same pincodes).
   const prev = (await api('GET', '/api/admin/zones', { token: superTok })).json
-  for (const z of prev.filter((z) => z.name.startsWith('E2E Zone'))) await api('DELETE', `/api/admin/zones/${z.id}`, { token: superTok })
+  for (const z of prev.filter((z) => z.name.startsWith('E2E '))) await api('DELETE', `/api/admin/zones/${z.id}`, { token: superTok })
 
   for (const [k, z] of Object.entries(ZONES)) {
     const zr = await must(`create zone ${k}`, api('POST', '/api/admin/zones', { token: superTok, body: {

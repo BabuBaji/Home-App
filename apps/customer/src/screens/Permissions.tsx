@@ -16,7 +16,7 @@ export default function Permissions() {
   const nav = useNavigate()
   const { setUser } = useStore()
   const toast = useToast()
-  const selectedCity = (useLocation().state as { city?: string } | null)?.city || 'Hyderabad'
+  const selectedCity = (useLocation().state as { city?: string } | null)?.city || ''
   const [busy, setBusy] = useState(false)
 
   // "<street>, <locality>, <area>, <city> - <PIN>" from a reverse-geocode result.
@@ -43,7 +43,7 @@ export default function Permissions() {
       try { localStorage.setItem('hh_geo', JSON.stringify({ lat: pos.lat, lng: pos.lng, ts: Date.now() })) } catch { /* ignore */ }
       toast(g ? `Location set: ${line}` : 'Location captured')
     } catch (e) {
-      try { await saveLocation(selectedCity) } catch { /* ignore */ }   // fall back to the chosen city
+      if (selectedCity) try { await saveLocation(selectedCity) } catch { /* ignore */ }   // fall back to the chosen city
       const denied = e instanceof GeoError && e.reason === 'permission'
       toast(denied ? 'Location off — using your city; set exact address later.' : 'Could not get GPS — using your city.')
     }
@@ -53,7 +53,7 @@ export default function Permissions() {
   }
 
   async function notNow() {
-    try { await saveLocation(selectedCity) } catch { /* ignore */ }
+    if (selectedCity) try { await saveLocation(selectedCity) } catch { /* ignore */ }
     nav('/home', { replace: true })
   }
 

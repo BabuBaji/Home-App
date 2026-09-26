@@ -1,22 +1,35 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Search, MapPin, Check } from 'lucide-react'
+import { ArrowLeft, Search, Check } from 'lucide-react'
+import { fetchLiveAreas } from '../api'
 
 /* Module-1 #5 — Select City. Carries the chosen city forward to the Permission screen,
    which captures the exact GPS address and stores it as the profile's default address.
    City is only the fallback if the user denies location. No backend write here. */
-const POPULAR = ['Bangalore', 'Mumbai', 'Delhi', 'Pune', 'Chennai', 'Kolkata', 'Ahmedabad']
+// Cities we're expanding to — listed after the live ones, so nobody is silently dropped into a city
+// they didn't pick.
+const EXPANSION = ['Hyderabad', 'Bangalore', 'Mumbai', 'Delhi', 'Pune', 'Chennai', 'Kolkata', 'Ahmedabad']
 
 export default function SelectCity() {
   const nav = useNavigate()
   const [q, setQ] = useState('')
-  const detected = 'Hyderabad'
-  const [picked, setPicked] = useState('Hyderabad')
+  const [live, setLive] = useState<string[]>([])
+  const [picked, setPicked] = useState('')
+
+  // The cities we actually serve come from the live zones; with only one, it's preselected.
+  useEffect(() => {
+    fetchLiveAreas().then((zs) => {
+      const cs = [...new Set(zs.map((z) => z.city).filter(Boolean))]
+      setLive(cs)
+      if (cs.length === 1) setPicked((p) => p || cs[0])
+    }).catch(() => {})
+  }, [])
 
   const cities = useMemo(() => {
+    const all = [...live, ...EXPANSION.filter((c) => !live.includes(c))]
     const s = q.trim().toLowerCase()
-    return s ? POPULAR.filter((c) => c.toLowerCase().includes(s)) : POPULAR
-  }, [q])
+    return s ? all.filter((c) => c.toLowerCase().includes(s)) : all
+  }, [q, live])
 
   function cont() {
     nav('/onboarding/permission', { state: { city: picked } })
@@ -36,22 +49,12 @@ export default function SelectCity() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search for your city" />
         </div>
 
-        {!q && (
-          <>
-            <div className="au-eyebrow">Current Location</div>
-            <button className={`au-city current ${picked === detected ? 'sel' : ''}`} onClick={() => setPicked(detected)}>
-              <MapPin size={18} className="au-city-pin" />
-              <b className="grow">{detected}</b>
-              {picked === detected && <span className="au-tick"><Check size={14} /></span>}
-            </button>
-          </>
-        )}
-
-        <div className="au-eyebrow">{q ? 'Results' : 'Popular Cities'}</div>
+        <div className="au-eyebrow">{q ? 'Results' : 'Cities'}</div>
         <div className="au-city-list">
           {cities.map((c) => (
             <button key={c} className={`au-city ${picked === c ? 'sel' : ''}`} onClick={() => setPicked(c)}>
               <b className="grow">{c}</b>
+              {!live.includes(c) && <small className="au-soon">Coming soon</small>}
               <span className={`au-radio ${picked === c ? 'on' : ''}`}>{picked === c && <Check size={13} />}</span>
             </button>
           ))}
