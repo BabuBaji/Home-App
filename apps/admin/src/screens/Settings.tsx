@@ -24,30 +24,30 @@ const NAV = [
 type Section = (typeof NAV)[number]['k']
 
 // Integration key fields. `secret` ones come back masked from the server.
-type Key = { k: string; label: string; hint: string; secret: boolean }
-const K = (k: string, label: string, hint: string, secret = false): Key => ({ k, label, hint, secret })
+type Key = { k: string; label: string; hint: string; secret: boolean; ph?: string }
+const K = (k: string, label: string, hint: string, secret = false, ph?: string): Key => ({ k, label, hint, secret, ph })
 const RAZORPAY_KEYS = [
-  K('razorpay_key_id', 'Razorpay Key ID', 'rzp_live_… / rzp_test_…'),
+  K('razorpay_key_id', 'Razorpay Key ID', 'From Razorpay ▸ Account & Settings ▸ API keys.', false, 'rzp_live_… or rzp_test_…'),
   K('razorpay_key_secret', 'Razorpay Key Secret', 'Stored securely, enables live payments', true),
   K('razorpay_webhook_secret', 'Razorpay Webhook Secret', 'Same secret as the webhook in Razorpay ▸ Webhooks. Payment & refund webhooks are refused while this is empty.', true),
 ]
 const PAYOUT_KEYS = [
-  K('razorpayx_account_number', 'RazorpayX Account Number', 'Source account for expert payouts & penny-drop. Enables real payouts.'),
-  K('payout_mode', 'Payout Mode', 'IMPS / NEFT / UPI (default IMPS)'),
+  K('razorpayx_account_number', 'RazorpayX Account Number', 'Source account for expert payouts & penny-drop. Enables real payouts.', false, 'e.g. 2323230012345678'),
+  K('payout_mode', 'Payout Mode', 'IMPS, NEFT or UPI. Empty means IMPS.', false, 'IMPS'),
   K('payout_webhook_secret', 'Payout Webhook Secret', 'Verifies RazorpayX payout & account-validation webhooks', true),
 ]
 const SMS_KEYS = [
   K('msg91_key', 'MSG91 / SMS Key', 'Sends login OTPs. While empty, codes are returned in the API response (dev only).', true),
-  K('msg91_otp_template_id', 'MSG91 OTP Template ID', 'Required once the key is set — India needs a DLT-registered template.'),
-  K('msg91_sender_id', 'MSG91 Sender ID', '6-character DLT-approved sender, e.g. HHELP'),
+  K('msg91_otp_template_id', 'MSG91 OTP Template ID', 'Required once the key is set — India needs a DLT-registered template.', false, 'e.g. 64f1c2…'),
+  K('msg91_sender_id', 'MSG91 Sender ID', '6-character DLT-approved sender.', false, 'HHELP'),
 ]
 const EMAIL_KEYS = [
-  K('smtp_host', 'SMTP Host', 'e.g. smtp.gmail.com'),
-  K('smtp_user', 'SMTP Username', 'Email sender address'),
-  K('smtp_pass', 'SMTP Password', 'App password', true),
+  K('smtp_host', 'SMTP Host', 'Your mail provider’s SMTP server.', false, 'smtp.gmail.com'),
+  K('smtp_user', 'SMTP Username', 'The address emails are sent from.', false, 'no-reply@homehelp.in'),
+  K('smtp_pass', 'SMTP Password', 'Use an app password, not your login password.', true),
 ]
-const PUSH_KEYS = [K('firebase_server_key', 'Firebase Server Key', 'Push notifications (FCM)', true)]
-const MAP_KEYS = [K('google_maps_key', 'Google Maps API Key', 'Geocoding & live tracking maps', true)]
+const PUSH_KEYS = [K('firebase_server_key', 'Firebase Server Key', 'From Firebase ▸ Project settings ▸ Cloud Messaging. Without it no push notifications are sent.', true)]
+const MAP_KEYS = [K('google_maps_key', 'Google Maps API Key', 'Used for address lookup and live tracking maps.', true)]
 
 export default function SettingsScreen() {
   const toast = useToast()
@@ -93,7 +93,7 @@ export default function SettingsScreen() {
     <div className="form-grid">
       {keys.map((f) => (
         <Field key={f.k} label={f.label}>
-          <input className="keyrow" disabled={!editable} type={f.secret ? 'password' : 'text'} placeholder={f.hint}
+          <input className="keyrow" disabled={!editable} type={f.secret ? 'password' : 'text'} placeholder={f.ph || (f.secret ? 'Not set' : '')}
             value={s[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
             onFocus={() => { if (f.secret && (s[f.k] || '').startsWith('••••')) set(f.k, '') }} />
           <small className="muted" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>{f.hint}</small>
@@ -160,8 +160,8 @@ export default function SettingsScreen() {
             </select>
           </Field>
           <Field label="Timezone">
-            <select disabled={!editable} value={s.timezone || 'Asia/Kolkata'} onChange={(e) => set('timezone', e.target.value)}>
-              {!['Asia/Kolkata', 'UTC'].includes(s.timezone || 'Asia/Kolkata') && <option value={s.timezone}>{s.timezone}</option>}
+            <select disabled={!editable} value={/IST|\+5:30|Kolkata/i.test(s.timezone || 'IST') ? 'Asia/Kolkata' : s.timezone} onChange={(e) => set('timezone', e.target.value)}>
+              {!/IST|\+5:30|Kolkata|^UTC$/i.test(s.timezone || 'IST') && <option value={s.timezone}>{s.timezone}</option>}
               <option value="Asia/Kolkata">(GMT +05:30) Asia/Kolkata</option>
               <option value="UTC">(GMT +00:00) UTC</option>
             </select>
@@ -313,14 +313,20 @@ export default function SettingsScreen() {
           </div>
           {editable && (
             <div className="head-actions">
-              {dirty && <span className="muted" style={{ fontSize: 12.5 }}>Unsaved changes</span>}
-              {dirty && <button className="btn line" onClick={() => setS(JSON.parse(saved))}>Discard</button>}
               <button className="btn" disabled={busy || !dirty} onClick={save}><Save size={15} /> {busy ? 'Saving…' : 'Save changes'}</button>
             </div>
           )}
         </div>
         {!editable && <p className="muted" style={{ margin: '0 0 12px' }}>You can view settings but not change them — that needs the “Edit settings” permission.</p>}
-        {BODY[section]}
+        <div className="settings-body">{BODY[section]}</div>
+        {editable && dirty && (
+          <div className="settings-savebar">
+            <span>You have unsaved changes</span>
+            <div className="tb-spacer" />
+            <button className="btn line" onClick={() => setS(JSON.parse(saved))}>Discard</button>
+            <button className="btn" disabled={busy} onClick={save}><Save size={15} /> {busy ? 'Saving…' : 'Save changes'}</button>
+          </div>
+        )}
       </Card>
     </div>
   )
