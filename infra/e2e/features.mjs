@@ -49,6 +49,7 @@ async function main() {
   const [W, W2] = workers
   await api('POST', '/api/worker/status', { token: W2.tok, body: { state: 'Offline' } })
   await api('POST', '/api/worker/status', { token: W.tok, body: { state: 'Available' } })
+  await api('POST', '/api/worker/heartbeat', { token: W.tok, body: { battery: 80, network: 'wifi' } }) // dispatch only offers to experts whose app checked in lately
   const cphone = `8${RUN}7777`
   const co = await must('c otp', api('POST', '/api/auth/request-otp', { body: { phone: cphone } }))
   const cv = await must('c verify', api('POST', '/api/auth/verify-otp', { body: { phone: cphone, otp: co.devOtp || '4321' } }))

@@ -5,7 +5,7 @@ import { useToast } from '../components/UI'
 import { fetchMapsKey } from '../api'
 import { loadPickerMap } from '../maps'
 import { t } from '../i18n'
-import { getCurrentPosition, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
+import { getCurrentPosition, getCurrentPositionWithin, reverseGeocodeFull, searchPlaces, placeDetails, checkServiceable, GeoError, type Place } from '../geo'
 
 const HYD = { lat: 17.4483, lng: 78.3915 } // default centre (Hyderabad) when GPS is unavailable
 
@@ -49,7 +49,9 @@ export default function LocationSelect() {
         const { key } = await fetchMapsKey()
         // a search result passes an explicit centre; otherwise use the live GPS fix (fall back to Hyderabad)
         let centre = initCentre || HYD
-        if (!initCentre) { try { centre = await getCurrentPosition() } catch { /* keep default centre */ } }
+        // Cap the GPS wait: a fix can take many seconds indoors (or never arrive), and the map
+        // must not sit on "Loading map…" behind it. "Go to current location" recentres later.
+        if (!initCentre) { try { centre = await getCurrentPositionWithin(4000) } catch { /* keep default centre */ } }
         if (cancelled || !mapDiv.current) return
         const map = await loadPickerMap(mapDiv.current, centre, key)
         if (cancelled) return

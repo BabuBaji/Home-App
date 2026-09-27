@@ -56,6 +56,10 @@ export default function Home() {
   const [walletBal, setWalletBal] = useState<number | null>(null)
   const [banners, setBanners] = useState<HomeBanner[]>([])
   const [active, setActive] = useState(0)
+  const [paused, setPaused] = useState(false)   // manual interaction pauses the auto-rotate
+  const [dir, setDir] = useState(1)             // 1 = forward, -1 = back (drives the slide-in)
+  const swipe = useRef<{ x: number; y: number } | null>(null)
+  const resume = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [scrolled, setScrolled] = useState(false)   // past the hero → collapse the header to white
   const [addrSheet, setAddrSheet] = useState(false) // saved-address picker, opened from the header
 
@@ -97,10 +101,37 @@ export default function Home() {
   // Keep the active index in range, and auto-rotate through the slides.
   useEffect(() => { if (active >= slides.length) setActive(0) }, [slides.length, active])
   useEffect(() => {
-    if (slides.length < 2) return
-    const id = setInterval(() => setActive((i) => (i + 1) % slides.length), 5000)
+    if (slides.length < 2 || paused) return
+    const id = setInterval(() => { setDir(1); setActive((i) => (i + 1) % slides.length) }, 5000)
     return () => clearInterval(id)
-  }, [slides.length])
+  }, [slides.length, paused])
+  useEffect(() => () => { if (resume.current) clearTimeout(resume.current) }, [])
+
+  // Any manual move pauses the carousel, then hands control back after a breather — so a swipe
+  // isn't yanked away a moment later, but the hero still rotates if the screen is left alone.
+  function holdAuto() {
+    setPaused(true)
+    if (resume.current) clearTimeout(resume.current)
+    resume.current = setTimeout(() => setPaused(false), 8000)
+  }
+  function go(step: number) {
+    if (slides.length < 2) return
+    setDir(step)
+    setActive((i) => (i + step + slides.length) % slides.length)
+    holdAuto()
+  }
+  // Horizontal drags move the carousel; anything more vertical than horizontal is left alone so
+  // the page keeps scrolling normally (the hero also sets touch-action: pan-y).
+  function onSwipeStart(e: React.PointerEvent) { swipe.current = { x: e.clientX, y: e.clientY } }
+  function onSwipeEnd(e: React.PointerEvent) {
+    const s0 = swipe.current
+    swipe.current = null
+    if (!s0) return
+    const dx = e.clientX - s0.x
+    const dy = e.clientY - s0.y
+    if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return   // a tap, or a vertical scroll
+    go(dx < 0 ? 1 : -1)
+  }
 
   // Status-bar icons: white over the purple header at the top, dark once it turns white on scroll.
   // (Capacitor Style.Dark = white icons, Style.Light = dark icons.)
