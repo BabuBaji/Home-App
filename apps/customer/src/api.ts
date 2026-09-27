@@ -123,7 +123,12 @@ export const fetchZoneHours = (pincode: string) => req<ZoneHours>(`/api/zone-hou
 // Live service areas (for the "we are live in" coming-soon screen).
 export const fetchLiveAreas = () => req<{ name: string; state: string; city: string }[]>('/api/zones')
 // Authoritative bookable slots for a date: zone working hours + per-slot availability (capacity).
-export interface SlotInfo { hour: number; time: string; booked: number; available: boolean }
+/** One bookable start. `min` = minutes of day (half-hour grid); `time` is the server's label and
+ *  must be sent back as-is — capacity is counted per label. */
+export interface SlotInfo { hour: number; min?: number; time: string; booked: number; available: boolean; past?: boolean }
+/** Instant open/closed + next bookable slot, from the SERVER clock (India time) and the zone's hours. */
+export interface InstantStatus { open: boolean; reason: 'closed' | 'busy' | null; hours: string; freeExperts: number; now: string; today: string; nextSlot: { date: string; min: number; time: string; label: string } | null }
+export const fetchInstantStatus = (pincode?: string) => req<InstantStatus>(`/api/instant-status${pinQ(pincode)}`)
 export const fetchSlots = (date: string, pincode: string, services: string) =>
   req<{ serviceable: boolean; workerCount: number; slots: SlotInfo[]; closed: boolean }>(
     `/api/slots?date=${encodeURIComponent(date)}&${locParams(pincode)}&services=${encodeURIComponent(services)}`)

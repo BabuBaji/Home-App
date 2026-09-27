@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { setCartWhen } from './cartWhen'
 import type { CartItem, User } from './types'
 import { clearToken, setToken, saveUser, loadUser, clearUser, fetchMe, fetchZoneHours, setUnauthorizedHandler, setZoneLocation } from './api'
 import { checkServiceable } from './geo'
@@ -36,7 +37,9 @@ const Ctx = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(loadUser())
-  const [cart, setCart] = useState<CartItem[]>([])
+  // The cart is kept on the phone, so closing the app doesn't empty it.
+  const [cart, setCart] = useState<CartItem[]>(() => { try { return JSON.parse(localStorage.getItem('hh_cart') || '[]') as CartItem[] } catch { return [] } })
+  useEffect(() => { try { localStorage.setItem('hh_cart', JSON.stringify(cart)) } catch { /* private mode */ } }, [cart])
   const [bookingType, setBookingType] = useState<'instant' | 'schedule'>('instant')
   const [date, setDate] = useState('16 May 2025')
   const [time, setTime] = useState('09:00 AM')
@@ -75,7 +78,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setZoneLocation(lat, lng, p); setZoneLatLng({ lat, lng }); setPincode(p)
   }, [])
   const signIn = useCallback((t: string, u: User) => { setToken(t); saveUser(u); setUserState(u) }, [])
-  const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]) }, [])
+  const signOut = useCallback(() => { clearToken(); clearUser(); setUserState(null); setCart([]); setCartWhen(null) }, [])
   const setUser = useCallback((u: User) => { saveUser(u); setUserState(u) }, [])
 
   // Any request that comes back 401 with a token present (stale/invalid session) signs the user out
@@ -83,9 +86,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { setUnauthorizedHandler(() => signOut()); return () => setUnauthorizedHandler(null) }, [signOut])
 
   const addToCart = (i: CartItem) => setCart((p) => [...p.filter((x) => x.id !== i.id), i])
-  const removeFromCart = (id: string) => setCart((p) => p.filter((x) => x.id !== id))
+  // Emptying the cart forgets its slot too.
+  const removeFromCart = (id: string) => setCart((p) => { const n = p.filter((x) => x.id !== id); if (!n.length) setCartWhen(null); return n })
   const inCart = (id: string) => cart.some((x) => x.id === id)
-  const clearCart = () => { setCart([]); setCoupon('') }
+  const clearCart = () => { setCart([]); setCoupon(''); setCartWhen(null) }
 
   const subtotal = useMemo(() => Math.max(0, cart.reduce((s, x) => s + x.price, 0)), [cart])
 

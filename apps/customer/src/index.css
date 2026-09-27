@@ -4041,3 +4041,307 @@ body { line-height: 1.45; }
 
 /* Inline text links: finger-sized hit area without changing how they look or sit */
 .ord-viewall, .nt2-mark, .ad2-addnew, .au-link { padding: 10px 4px; margin: -10px -4px; }
+
+/* Home: Instant / Schedule cards (the choice carries into the booking flow). */
+.hd-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 4px; }
+.hd-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 14px; border-radius: 18px; background: #fff; border: 1.6px solid #ece9fb; box-shadow: 0 4px 14px rgba(40,24,120,.06); transition: border-color .15s, transform .12s; }
+.hd-mode:active { transform: scale(.98); }
+.hd-mode.on { border-color: var(--v); background: #f6f3ff; }
+.hd-mode.off { opacity: .6; }
+.hd-mode b { display: inline-flex; align-items: center; gap: 2px; font-size: 16px; color: var(--ink, #1b1740); margin-top: 6px; }
+.hd-mode small { font-size: 12.5px; color: var(--muted); }
+.hd-mode-ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; }
+.hd-mode-ic.sched { background: #eef2ff; color: #4f46e5; }
+.hd-mode-ic.now { background: #fff1e6; color: #ea580c; }
+
+/* Booking: duration grid on the main screen + inline "Pay using". */
+.bf-durgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 4px; }
+.bf-dur { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: 12px; border-radius: 14px; background: #fff; border: 1.6px solid #ece9fb; text-align: left; min-height: 84px; }
+.bf-dur.on { border-color: var(--v); background: #f6f3ff; }
+.bf-dur b { font-size: 14.5px; color: var(--ink, #1b1740); }
+.bf-dur span { font-size: 14px; font-weight: 700; color: var(--ink, #1b1740); }
+.bf-dur s { font-size: 11.5px; color: var(--muted); font-weight: 400; margin-left: 5px; }
+.bf-payusing { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 0 8px 0 2px; background: none; border: 0; min-width: 110px; }
+.bf-payusing small { font-size: 11.5px; color: var(--muted); }
+.bf-payusing b { font-size: 14px; color: var(--ink, #1b1740); white-space: nowrap; }
+
+/* Home typography matched to Snabbit's scale (measured from their Home): bigger, bolder headings,
+   a readable address line, and service names that wrap instead of being cut off. */
+.hd-loc-title b { font-size: 18px; font-weight: 700; }
+.hd-loc-full { font-size: 13.5px; font-weight: 500; opacity: .92; }
+.hd-mode b { font-size: 17px; font-weight: 700; letter-spacing: -.2px; }
+.hd-mode small { font-size: 13.5px; }
+.hd-sec-head h3 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+.hd-pop-name { font-size: 14.5px; font-weight: 400; white-space: normal; line-height: 1.3; text-align: center; }
+.hd-pop-price { text-align: center; }
+
+/* Home header buttons sized like Snabbit's: small white circles, thin border, 18px icons. */
+.hd-top-r { gap: 10px; }
+.hd-wallet, .hd-bell, .hd-prof { width: 36px; height: 36px; min-width: 36px; padding: 0; border-radius: 50%;
+  background: #fff; color: var(--ink); border: 1px solid #ebe8f5; box-shadow: 0 2px 8px rgba(30,20,70,.08); display: grid; place-items: center; }
+.hd-wallet { color: var(--v); }
+.hd-prof { color: #6b6880; }
+/* …in every header state (over the hero and once scrolled) — white circles, coloured icons. */
+.rain-sky .hd-wallet, .rain-sky .hd-bell, .rain-sky .hd-prof,
+.rain-sky .hd-top.solid .hd-wallet, .rain-sky .hd-top.solid .hd-bell, .rain-sky .hd-top.solid .hd-prof {
+  background: #fff; border: 1px solid #ebe8f5; box-shadow: 0 2px 8px rgba(30,20,70,.08); }
+.rain-sky .hd-wallet svg, .rain-sky .hd-top.solid .hd-wallet svg { color: var(--v, #6d4ee6); }
+.rain-sky .hd-bell svg, .rain-sky .hd-top.solid .hd-bell svg { color: var(--ink, #1c2033); }
+.rain-sky .hd-prof svg, .rain-sky .hd-top.solid .hd-prof svg { color: #6b6880; }
+
+/* Home header like Snabbit's: a plain white bar with dark text (not blended into the hero),
+   no pin, a solid caret, and the address flush under the label. */
+.rain-sky .hd-top, .rain-sky .hd-top.solid { background: #fff; box-shadow: none; }
+.rain-sky .hd-top.solid { box-shadow: 0 2px 14px rgba(20,16,40,.07); }
+.rain-sky .hd-loc, .rain-sky .hd-loc b, .rain-sky .hd-loc svg,
+.rain-sky .hd-top.solid .hd-loc, .rain-sky .hd-top.solid .hd-loc b, .rain-sky .hd-top.solid .hd-loc svg { color: var(--ink, #1c2033); }
+.hd-caret { flex: 0 0 auto; margin-left: 4px; }
+.hd-loc-full, .rain-sky .hd-loc-full, .rain-sky .hd-top.solid .hd-loc-full { padding-left: 0; color: #4a4760; opacity: 1; font-weight: 500; }
+
+/* ===== Home top, Pronto layout in HomeHelp purple =====
+   Purple header flowing into a rounded-bottom hero; Instant / Schedule cards ride its bottom edge.
+   (Overrides the earlier white-header rules; the header still turns white on scroll.) */
+.rain-sky .hd-top { background: #5b3fd9; box-shadow: none; }
+.rain-sky .hd-top .hd-loc, .rain-sky .hd-top .hd-loc b, .rain-sky .hd-top .hd-loc svg { color: #fff; }
+.rain-sky .hd-top .hd-loc-full { color: #fff; opacity: .9; font-size: 13.5px; font-weight: 500; }
+.rain-sky .hd-top.solid { background: #fff; box-shadow: 0 2px 14px rgba(20,16,40,.07); }
+.rain-sky .hd-top.solid .hd-loc, .rain-sky .hd-top.solid .hd-loc b, .rain-sky .hd-top.solid .hd-loc svg { color: var(--ink, #1c2033); }
+.rain-sky .hd-top.solid .hd-loc-full { color: #4a4760; opacity: 1; }
+.hd-loc-title b { font-size: 19px; }
+.hd-loc-full { max-width: calc(100% - 150px); }
+/* round icons: white circles, bigger like Pronto's */
+.hd-top-r { gap: 10px; }
+.hd-wallet, .hd-gift, .hd-prof,
+.rain-sky .hd-wallet, .rain-sky .hd-prof, .rain-sky .hd-top.solid .hd-wallet, .rain-sky .hd-top.solid .hd-prof {
+  width: 40px; height: 40px; min-width: 40px; border-radius: 50%; background: #fff; border: 0;
+  box-shadow: 0 2px 8px rgba(30,20,70,.14); display: grid; place-items: center; position: relative; padding: 0; }
+.rain-sky .hd-wallet svg { color: #6d4ee6; }
+.hd-gift { color: #e8590c; }
+.rain-sky .hd-prof svg, .rain-sky .hd-top.solid .hd-prof svg { color: #1c2033; }
+.hd-gift-amt { position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%); background: #fff; color: #1c2033;
+  font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px; box-shadow: 0 1px 4px rgba(0,0,0,.18); white-space: nowrap; }
+/* hero */
+.hd-content { padding-top: 0; }
+.hd-brand { background: linear-gradient(180deg, #5b3fd9 0%, #4a2fc4 100%); margin: 0 -16px; padding: 10px 16px 18px;
+  border-radius: 0 0 28px 28px; }
+.hd-brand-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; min-height: 150px; }
+.hd-brand-h { color: #fff; font-size: 25px; line-height: 1.22; font-weight: 700; letter-spacing: -.4px; margin: 0 0 18px; flex: 1 1 58%; }
+.hd-brand-img { width: 40%; max-width: 160px; aspect-ratio: 1; object-fit: cover; object-position: 50% 20%; border-radius: 20px 20px 0 0; align-self: flex-end; }
+.hd-brand-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: -2px; }
+.hd-bcard { position: relative; min-height: 112px; background: #fff; border-radius: 22px; padding: 14px; text-align: left;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; box-shadow: 0 8px 22px rgba(30,15,90,.18); border: 2px solid transparent; }
+.hd-bcard.on { border-color: #fbbf24; }
+.hd-bcard.off { opacity: .7; }
+.hd-bcard b { font-size: 16.5px; line-height: 1.25; font-weight: 700; color: #1c2033; max-width: 78%; }
+.hd-bcard small { font-size: 12px; color: #b45309; }
+.hd-bcard-pill { font-size: 12.5px; font-weight: 600; color: #5b3fd9; background: #f3efff; border: 1px solid #ddd3ff; padding: 5px 10px; border-radius: 999px; }
+.hd-bcard-ic { position: absolute; right: 12px; bottom: 12px; }
+.hd-bcard-ic.now { color: #f59e0b; }
+.hd-bcard-ic.sched { color: #6d4ee6; }
+/* promo carousel sits below the cards now, like Pronto's refer banner */
+.hd-brand + .hd-hero { margin-top: 18px; }
+.hd-brand { margin: 0 -18px; padding: 10px 18px 18px; }
+.hd-brand-img { object-position: 42% 18%; }
+/* promo carousel as a rounded card with margins (Pronto's refer banner), not full-bleed */
+.rain-sky .hd-brand + .hd-hero { margin: 18px 0 0; border-radius: 20px; min-height: 150px; padding-bottom: 26px; }
+/* taller-than-wide frame so the square photo's plain side edges are cropped away */
+.hd-brand-img { aspect-ratio: .82; width: 38%; object-position: 50% 16%; }
+/* expert.jpg has a plain white band on its right ~9%: a frame narrower than the photo, anchored
+   left, crops it off (object-fit: cover trims the overflow from the right). */
+.hd-brand-img { aspect-ratio: .6; width: 34%; object-position: 0% 12%; }
+.hd-brand-img { height: 168px; width: auto; max-width: 42%; }
+.hd-brand-top { min-height: 0; }
+
+/* Slides under the Instant/Schedule cards — Pronto's slim refer-banner layout. */
+.hd-promo { margin-top: 18px; touch-action: pan-y; }
+.hd-promo-card { position: relative; overflow: hidden; width: 100%; height: 84px; border-radius: 20px; display: flex; align-items: center; gap: 12px;
+  padding: 0 14px 0 0; text-align: left; color: #fff; box-shadow: 0 6px 18px rgba(40,20,110,.16); }
+.hd-promo-art { flex: 0 0 34%; height: 100%; position: relative; display: grid; place-items: center; overflow: hidden;
+  background: rgba(255,255,255,.14); border-radius: 0 44px 44px 0; }
+.hd-promo-art img { width: 100%; height: 100%; object-fit: cover; object-position: 0% 18%; }
+.hd-promo-emoji { font-size: 38px; line-height: 1; filter: drop-shadow(0 3px 6px rgba(0,0,0,.2)); }
+.hd-promo-txt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; position: relative; }
+.hd-promo-txt b { font-size: 17px; font-weight: 700; line-height: 1.2; letter-spacing: -.2px; }
+.hd-promo-txt small { font-size: 12.5px; opacity: .9; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hd-promo-go { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.22); color: #fff; position: relative; }
+.hd-promo .hd-skyrain { position: absolute; inset: 0; pointer-events: none; }
+.hd-promo-dots { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+.hd-promo-dot { width: 7px; height: 7px; border-radius: 50%; background: #d7d3ea; padding: 0; transition: width .2s, background .2s; }
+.hd-promo-dot.on { width: 18px; border-radius: 4px; background: #6d4ee6; }
+/* Instant / Schedule card titles: smaller, closer to Pronto's */
+.hd-bcard b { font-size: 14.5px; font-weight: 700; line-height: 1.3; }
+.hd-bcard { min-height: 100px; }
+.hd-bcard-ic svg { width: 26px; height: 26px; }
+/* Compact brand hero: shorter photo, smaller headline, tighter spacing. */
+.hd-brand { padding-top: 4px; padding-bottom: 16px; }
+.hd-brand-img { height: 128px; }
+.hd-brand-h { font-size: 22px; margin-bottom: 12px; }
+.hd-bcard { min-height: 92px; padding: 12px 14px; }
+
+/* Schedule-for-later screen (Pronto layout): day chips bar, card with duration chips,
+   Morning/Afternoon/Evening switch and a slot grid, then a note. */
+.bf-daybar { display: flex; gap: 10px; overflow-x: auto; padding: 4px 18px 14px; scrollbar-width: none; background: #fff; border-bottom: 1px solid #eeecf6; }
+.bf-daybar::-webkit-scrollbar, .bf-chiprow::-webkit-scrollbar { display: none; }
+.bf-day { flex: 0 0 auto; padding: 10px 18px; border-radius: 12px; border: 1.5px solid #e6e3f2; background: #fff; font-size: 14.5px; font-weight: 500; color: #2a2740; white-space: nowrap; }
+.bf-day.on { border-color: var(--v); background: #f3efff; color: var(--v); font-weight: 700; }
+.bf-sched { background: #f6f5fb; }
+.bf-card { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 4px 16px rgba(30,20,70,.07); margin-top: 12px; }
+.bf-card-h { font-size: 14.5px; font-weight: 600; color: #5b5873; margin-bottom: 10px; }
+.bf-chiprow { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.bf-chip { flex: 0 0 auto; padding: 8px 14px; border-radius: 999px; border: 1.5px solid #e6e3f2; background: #fff; font-size: 13.5px; font-weight: 500; color: #2a2740; white-space: nowrap; }
+.bf-chip.on { border-color: var(--v); background: #f3efff; color: var(--v); font-weight: 700; }
+.bf-durchip { flex: 0 0 auto; min-width: 84px; padding: 10px 12px; border-radius: 14px; border: 1.5px solid #e6e3f2; background: #fff; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.bf-durchip.on { border-color: var(--v); background: #f3efff; }
+.bf-durchip b { font-size: 15px; color: #1c2033; }
+.bf-durchip span { font-size: 13.5px; font-weight: 600; color: #1c2033; }
+.bf-durchip s { font-size: 11px; color: #9a97ad; font-weight: 400; margin-left: 4px; }
+.bf-parts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 999px; border: 1px solid #ebe8f5; background: #fff; }
+.bf-part { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 6px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: #2a2740; }
+.bf-part.on { background: var(--v); color: #fff; }
+.bf-part.dim:not(.on) { color: #b3b0c4; }
+.bf-slotbox { margin-top: 14px; border-radius: 16px; background: #faf9fe; border: 1px solid #efedf7; padding: 12px; }
+.bf-slotgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.bf-slotgrid .bf-slot { padding: 10px 2px; border-radius: 12px; border: 1.5px solid #e6e3f2; background: #fff; font-size: 13px; font-weight: 500; color: #1c2033; }
+.bf-slotgrid .bf-slot.on { border-color: var(--v); background: var(--v); color: #fff; font-weight: 700; }
+.bf-slotgrid .bf-slot:disabled { opacity: .4; text-decoration: line-through; }
+.bf-note { margin-top: 18px; }
+.bf-note small { font-size: 11.5px; letter-spacing: .12em; color: #8a87a0; font-weight: 600; }
+.bf-note p { font-size: 13.5px; color: #5b5873; margin: 4px 0 0; }
+.bf-busy { display: flex; align-items: center; gap: 12px; background: #eeecfb; color: #2a2740; border-radius: 16px; padding: 14px 16px; margin-top: 12px; font-size: 14px; line-height: 1.4; }
+.bf-busy svg { flex: 0 0 auto; }
+.bf-slotbox { padding: 0; overflow: hidden; }
+.bf-slotbox-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; font-size: 14.5px; font-weight: 600; color: #1c2033; background: #f3f2f9; }
+.bf-slotbox-go { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #cfcbe0; display: grid; place-items: center; background: #fff; }
+.bf-slotbox .bf-slotgrid, .bf-slotbox .ad2-hint { padding: 12px; }
+.bf-sched ~ .au-foot .au-btn:disabled { background: #d9d7e3; color: #fff; box-shadow: none; opacity: 1; }
+/* Instant / review screen: address on one line (ellipsis) with Change beside it. */
+.bf-addr { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 6px; max-width: 72%; min-width: 0; }
+.bf-addr-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.bf-addr .au-link { flex: 0 0 auto; margin-left: 0; }
+/* Booking flow header: left-aligned title like Pronto ("← Schedule for later"). */
+.bf-top { justify-content: flex-start; gap: 10px; }
+.bf-top b { flex: 1 1 auto; text-align: left; font-size: 18px; }
+.bf-top > span { display: none; }
+.ps-top.bf-top > b { position: static; transform: none; max-width: none; left: auto; }
+
+/* Schedule / Instant screens sized to Pronto's (measured from their screenshot): lighter title,
+   slimmer day chips, 14px single-line slots. */
+.ps-top.bf-top > b { font-size: 17px; font-weight: 500; }
+.bf-day { padding: 7px 16px; font-size: 15px; font-weight: 500; border-radius: 10px; }
+.bf-day.on { font-weight: 600; }
+.bf-card-h { font-size: 15px; font-weight: 500; color: #5f5d70; }
+.bf-durchip { min-width: 78px; padding: 9px 10px; border-radius: 12px; }
+.bf-durchip b { font-size: 15.5px; font-weight: 600; }
+.bf-durchip span { font-size: 13.5px; font-weight: 500; }
+.bf-part { font-size: 15px; font-weight: 500; padding: 8px 6px; }
+.bf-slotbox-h { font-size: 15px; font-weight: 600; }
+.bf-slotgrid { gap: 8px; }
+.bf-slotgrid .bf-slot { font-size: 14px; font-weight: 400; padding: 9px 0; white-space: nowrap; letter-spacing: -.1px; }
+.bf-note small { font-size: 11px; }
+.bf-note p { font-size: 13.5px; }
+
+/* ===== Schedule / Instant screens: exact sizes measured from the Pronto reference =====
+   (same phone, 360px CSS width; every value = Pronto pixel / 715 × 360). Selected chips keep dark
+   text on a tint like Pronto; only the colour is HomeHelp purple instead of green. */
+.ps-top.bf-top { padding: 8px 12px 8px 14px; }
+.ps-top.bf-top > b { font-size: 15.5px; font-weight: 500; }
+.bf-daybar { gap: 12px; padding: 4px 16px 12px; }
+.bf-day { height: 31px; min-width: 79px; padding: 0 14px; font-size: 12.5px; font-weight: 500; border-radius: 8px; border-width: 1px; color: #1c1b22; }
+.bf-day.on { color: #1c1b22; font-weight: 500; border-width: 1.5px; }
+.content.bf-sched { padding-left: 12px; padding-right: 12px; }
+.bf-card { padding: 12px; border-radius: 12px; margin-top: 12px; box-shadow: 0 1px 6px rgba(30,20,70,.08); }
+.bf-card-h { font-size: 13.5px; font-weight: 500; color: #5f5d70; margin: 4px 4px 10px; }
+.bf-chiprow { gap: 12px; }
+.bf-durchip { min-width: 80px; width: 80px; height: 51px; padding: 0; gap: 3px; justify-content: center; border-radius: 8px; border-width: 1px; }
+.bf-durchip.on { border-width: 1.5px; }
+.bf-durchip b { font-size: 13px; font-weight: 500; color: #1c1b22; }
+.bf-durchip span { font-size: 12px; font-weight: 500; color: #1c1b22; }
+.bf-durchip s { font-size: 10px; margin-left: 3px; }
+.bf-card-h[style*="18px"] { margin-top: 26px !important; }
+.bf-parts { height: 34px; padding: 3px; gap: 2px; }
+.bf-part { font-size: 12px; font-weight: 500; padding: 0 4px; height: 26px; gap: 5px; }
+.bf-part svg { width: 14px; height: 14px; }
+.bf-slotbox { margin-top: 12px; border-radius: 10px; }
+.bf-slotbox-h { height: 37px; padding: 0 12px; font-size: 13px; font-weight: 600; gap: 8px; }
+.bf-slotbox-go { width: 20px; height: 20px; }
+.bf-slotbox-go svg { width: 11px; height: 11px; }
+.bf-slotbox .bf-slotgrid { padding: 9px; gap: 9px; grid-template-columns: repeat(4, 1fr); }
+.bf-slotgrid .bf-slot { height: 35px; padding: 0; font-size: 11.5px; font-weight: 400; border-radius: 8px; border-width: 1px; }
+.bf-note { margin: 18px 4px 0; }
+.bf-note small { font-size: 10px; letter-spacing: .1em; }
+.bf-note p { font-size: 12.5px; margin-top: 3px; }
+.bf-busy { padding: 12px 14px; border-radius: 12px; font-size: 12.5px; gap: 10px; }
+.bf-sched ~ .au-foot { padding: 12px 20px calc(14px + env(safe-area-inset-bottom)); }
+.bf-sched ~ .au-foot .au-btn { height: 46px; font-size: 17px; font-weight: 500; border-radius: 12px; }
+/* Home header cart button (same white circle as wallet / gift / profile) with a count badge. */
+.hd-cart { width: 40px; height: 40px; min-width: 40px; border-radius: 50%; background: #fff; border: 0; position: relative;
+  box-shadow: 0 2px 8px rgba(30,20,70,.14); display: grid; place-items: center; color: #6d4ee6; padding: 0; }
+.hd-cart-n { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: #e8590c; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px #fff; }
+/* Schedule card pill stays on one line and clear of the calendar icon (e.g. "Tomorrow, 6:00 am"). */
+.hd-bcard-pill { white-space: nowrap; font-size: 11.5px; padding: 4px 9px; max-width: calc(100% - 38px); overflow: hidden; text-overflow: ellipsis; }
+.hd-bcard-pill { font-size: 11px; padding: 3px 7px; max-width: calc(100% - 26px); }
+.hd-bcard-ic.sched { right: 10px; }
+.hd-bcard-ic.sched svg { width: 22px; height: 22px; }
+
+/* ===== My Cart (Pronto layout, measured from their screenshot; HomeHelp purple) ===== */
+.content.mc { background: #f2f2f6; padding: 10px 12px 20px; }
+.mc-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 5px; background: #fff; border: 1px solid #e6e4ee; border-radius: 999px; box-shadow: 0 2px 8px rgba(30,20,70,.06); }
+.mc-tab { height: 36px; border-radius: 999px; font-size: 13.5px; font-weight: 500; color: #2a2833; }
+.mc-tab.on { background: #3b1fa8; color: #fff; }
+.mc-freq { display: flex; gap: 8px; overflow-x: auto; padding: 10px 2px 0; scrollbar-width: none; }
+.mc-fchip { flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; border: 1px solid #ddd8f3; background: #fff; font-size: 12.5px; color: #2a2833; }
+.mc-fchip.on { border-color: var(--v); background: #f1ecff; color: var(--v); font-weight: 600; }
+.mc-h { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 2px 8px; }
+.mc-h b { font-size: 16px; font-weight: 600; color: #1c1b22; }
+.mc-h span { font-size: 12.5px; color: #1c1b22; font-weight: 500; }
+.mc-card { display: block; width: 100%; background: #fff; border-radius: 14px; padding: 12px; box-shadow: 0 1px 4px rgba(30,20,70,.05); text-align: left; }
+.mc-card + .mc-card { margin-top: 12px; }
+.mc-item { display: grid; grid-template-columns: 40px 1fr auto auto; align-items: center; gap: 10px; }
+.mc-item + .mc-item { margin-top: 14px; }
+.mc-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; object-position: 50% 20%; background: #f1eefb; }
+.mc-iname { font-size: 13.5px; line-height: 1.3; color: #1c1b22; }
+.mc-iprice { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+.mc-iprice s { font-size: 10.5px; color: #8b8998; }
+.mc-iprice b { font-size: 14.5px; font-weight: 600; color: #1c1b22; }
+.mc-step { position: relative; display: flex; align-items: center; justify-content: space-between; width: 96px; height: 40px; padding: 0 6px; border: 1.5px solid var(--v); border-radius: 10px; background: #f7f4ff; }
+.mc-step button { width: 26px; height: 26px; display: grid; place-items: center; color: var(--v); }
+.mc-step button:disabled { opacity: .35; }
+.mc-step b { font-size: 16px; font-weight: 600; color: #1c1b22; }
+.mc-step small { position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%); background: #fff; padding: 0 4px; font-size: 9.5px; color: #6f6d7d; line-height: 1.2; }
+.mc-info { display: flex; align-items: flex-start; gap: 8px; margin-top: 18px; padding: 10px 12px; background: #f3f3f7; border-radius: 10px; font-size: 11.5px; line-height: 1.45; color: #45434f; }
+.mc-info svg { flex: 0 0 auto; margin-top: 1px; }
+.mc-more { margin-top: 12px; padding-top: 12px; border-top: 1px solid #ecebf1; text-align: center; font-size: 13px; color: #5b5966; }
+.mc-more button { color: var(--v); font-weight: 600; font-size: 13px; }
+.mc-row { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding: 16px 12px; }
+.mc-row b { font-size: 14.5px; font-weight: 500; color: #1c1b22; }
+.mc-coupons { display: flex; flex-direction: column; gap: 8px; }
+.mc-details { padding: 4px 12px; }
+.mc-drow { display: flex; align-items: flex-start; gap: 14px; width: 100%; padding: 12px 0; text-align: left; color: #1c1b22; }
+.mc-drow + .mc-drow { border-top: 1px solid #ecebf1; }
+.mc-drow > svg:first-child { flex: 0 0 auto; color: #45434f; margin-top: 2px; }
+.mc-drow > svg:last-child:not(:first-child) { flex: 0 0 auto; color: #6f6d7d; align-self: center; }
+.mc-drow .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mc-drow span { font-size: 14px; font-weight: 500; }
+.mc-drow b { font-size: 13.5px; font-weight: 500; }
+.mc-drow small { font-size: 12.5px; color: #5b5966; }
+.mc-addr { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mc-link { align-self: flex-start; font-size: 12.5px; color: var(--v); text-decoration: underline; font-weight: 500; }
+.mc-bill { padding: 12px 14px 4px; }
+.mc-bill-top { display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left; padding-bottom: 10px; border-bottom: 1px solid #ecebf1; }
+.mc-bill-top .grow { display: flex; flex-direction: column; gap: 3px; }
+.mc-bill-top b { font-size: 14.5px; font-weight: 600; color: #1c1b22; }
+.mc-bill-top small { font-size: 13px; color: #2563eb; font-weight: 500; }
+.mc-bill-top svg { color: #45434f; background: #f1f1f5; border-radius: 50%; padding: 2px; }
+.mc-brow { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; font-size: 13px; color: #1c1b22; border-bottom: 1px dashed #dcdae4; }
+.mc-brow:last-child { border-bottom: 0; }
+.mc-brow span { display: inline-flex; align-items: center; gap: 5px; }
+.mc-brow b { font-weight: 500; }
+.mc-brow.disc b { color: #15803d; }
+.mc-brow.total { font-size: 14px; }
+.mc-brow.total b { font-weight: 600; }
+.mc-i { display: inline-grid; place-items: center; color: #45434f; }
+.mc ~ .au-foot { padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); }
+.au-btn.mc-pay { height: 48px; border-radius: 12px; font-size: 16px; font-weight: 600; }
+/* 2) Instant card when closed: the note stays clear of the ⚡ icon */
+.hd-bcard small { font-size: 11px; max-width: calc(100% - 34px); line-height: 1.3; }

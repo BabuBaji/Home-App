@@ -1,33 +1,38 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
-import { ArrowLeft, Star, Check, Wallet as WalletIcon, Zap, CalendarDays, MapPin, Repeat, Heart, Tag, X } from 'lucide-react'
+import { ArrowLeft, Star, Check, Wallet as WalletIcon, MapPin, Repeat, Heart, Tag, X, Sunrise, Sun, Moon, Info, ArrowRight, CalendarDays, Phone, ChevronRight, ChevronDown, ChevronUp, Minus, Plus, Trash2 } from 'lucide-react'
 import { Loading, useToast } from '../components/UI'
 import PaymentSheet from '../components/PaymentSheet'
 import AddressSheet from '../components/AddressSheet'
-import Calendar, { startOfDay, fmtDate, slotLabel, isSlotDisabled, isZoneOpenNow, todayHoursLabel } from '../components/Calendar'
+import { startOfDay, fmtDate, todayHoursLabel } from '../components/Calendar'
 import { useStore } from '../store'
 import {
-  fetchService, fetchQuote, fetchSlots, fetchCoupons, validateCoupon, fetchWallet, fetchMe, createBookingApi,
+  fetchService, fetchQuote, fetchInstantStatus, type InstantStatus, fetchSlots, fetchCoupons, validateCoupon, fetchWallet, fetchMe, createBookingApi,
   fetchServiceWorkers, createRecurring, setActivePackage, type SlotInfo,
 } from '../api'
 import type { ServiceDetail, Duration, Quote, Coupon, Address, CartItem } from '../types'
 import { t, tDur, dateLocale } from '../i18n'
 import { useAppConfig } from '../appConfig'
+import { getBookMode } from '../bookMode'
+import { shortAddress, fullAddress } from '../addressText'
+import { getCartWhen, setCartWhen } from '../cartWhen'
 
 /*
  * THE booking flow. Every way into a booking ends up here:
  *   /booking/:serviceId   one service (from Service details, Rebook, recommendations, old /book + /configure links)
  *   /booking/cart         the services in the cart (a package from Home)
  *
- *   duration → when (now, or a date + slot, optionally repeating) → address (shown, changeable)
- *   → expert (favourites first; only when experts are listed for this service) → summary (price
- *   breakdown, coupon, wallet, note) → PaymentSheet → /confirmed/:id → /job/:id.
+ *   One screen does the work: duration + when/address/expert rows + price, coupon, wallet → Pay
+ *   → PaymentSheet → /confirmed/:id → /job/:id. Sensible defaults mean most bookings never leave it
+ *   (Now when the zone is open, the default address, any expert). When / address / expert are
+ *   detours opened from their row's Change — or automatically when Pay finds one missing — and each
+ *   returns to the main screen. Schedule (from Home or the service page) opens on the slot picker.
  *
  * All prices come from the server quote; the booking itself is priced again server-side.
  */
 type Step = 'duration' | 'when' | 'address' | 'expert' | 'summary'
 const TITLES: Record<Step, string> = {
-  duration: 'Choose duration', when: 'When do you need it?', address: 'Service address', expert: 'Choose your expert', summary: 'Review & pay',
+  duration: 'Choose duration', when: 'Schedule for later', address: 'Service address', expert: 'Choose your expert', summary: 'Book service',
 }
 interface SvcWorker { id: number; name: string; rating: number; jobs: number; km: number | null; favourite?: boolean }
 
@@ -40,25 +45,52 @@ const FREQ = [
   { id: 'monthly', label: 'Monthly' },
 ]
 
+type Part = 'Morning' | 'Afternoon' | 'Evening'
 function groupSlots(slots: { h: number; label: string; disabled: boolean }[]) {
-  const g = { Morning: [] as typeof slots, Afternoon: [] as typeof slots, Evening: [] as typeof slots, Night: [] as typeof slots }
-  for (const s of slots) {
-    if (s.h < 12) g.Morning.push(s); else if (s.h < 16) g.Afternoon.push(s); else if (s.h < 20) g.Evening.push(s); else g.Night.push(s)
-  }
+  const g: Record<Part, typeof slots> = { Morning: [], Afternoon: [], Evening: [] }
+  for (const s of slots) { if (s.h < 12 * 60) g.Morning.push(s); else if (s.h < 16 * 60) g.Afternoon.push(s); else g.Evening.push(s) }
   return g
 }
-const nowAt = () => { const n = new Date(); return `${n.getHours()}:${String(n.getMinutes()).padStart(2, '0')}` }
+const PART_ICON = { Morning: Sunrise, Afternoon: Sun, Evening: Moon }
+// Today, Tomorrow, then weekday names - the next 7 days as chips (Pronto-style).
+function nextDays(n = 7) {
+  const today = startOfDay(new Date())
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(today); d.setDate(today.getDate() + i)
+    return { d, label: i === 0 ? t('Today') : i === 1 ? t('Tomorrow') : d.toLocaleDateString(dateLocale(), { weekday: 'long' }) }
+  })
+}
+// Slots are minutes-of-day on a half-hour grid. The server's label format ("01:30 PM") is what a
+// booking stores and what capacity is counted by, so send exactly that.
+// Duration in hours like Pronto's chips: "30 min" → "0.5 hr", "90 min" → "1.5 hr", "2 hrs" → "2 hr".
+function hrLabel(label: string) {
+  const m = String(label).match(/([\d.]+)\s*(hr|hour)?/i)
+  if (!m) return label
+  const hrs = parseFloat(m[1]) / (m[2] ? 1 : 60)
+  return `${Number(hrs.toFixed(2))} hr`
+}
+const minAt = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
+const serverTime = (m: number) => { const h = Math.floor(m / 60); return `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
+const niceTime = (m: number) => { const h = Math.floor(m / 60); return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}` }
 
 // Leaving the flow to add a new address unmounts it; these few choices are restored on the way back.
 const RESUME_KEY = 'hh_flow_resume'
 interface Saved { key: string; durId?: string; mode: 'now' | 'schedule' | null; date: string; slot: number | null; freq: string; worker: string; note: string; added?: boolean }
 
-export default function BookingFlow() {
+// /booking/hourly → /booking/cart (Add to cart) is the same route, so React would keep this screen's
+// state (still on the slot step). Keying by the id makes each one a fresh screen: the cart always
+// opens on My Cart.
+export default function BookingFlowRoute() {
+  const { id } = useParams()
+  return <BookingFlow key={id} />
+}
+
+function BookingFlow() {
   const { id } = useParams()
   const nav = useNavigate()
   const { promoCodes } = useAppConfig()
   const toast = useToast()
-  const { pincode, zoneHours, cart, clearCart, setServiceLocation } = useStore()
+  const { user, pincode, zoneHours, cart, clearCart, addToCart, removeFromCart, setServiceLocation } = useStore()
   const navState = useLocation().state as { durationId?: string; freq?: string; mode?: 'now' | 'schedule' } | null
   const cartMode = id === 'cart'
   const flowKey = cartMode ? 'cart' : String(id)
@@ -75,13 +107,29 @@ export default function BookingFlow() {
 
   const [s, setS] = useState<ServiceDetail | null>(null)
   const [dur, setDur] = useState<Duration | null>(null)
-  const [mode, setMode] = useState<'now' | 'schedule' | null>(saved?.mode ?? navState?.mode ?? null)
-  const [date, setDate] = useState<Date>(saved?.date ? new Date(saved.date) : startOfDay(new Date()))
-  const [slot, setSlot] = useState<number | null>(saved?.slot ?? null)
+  const cartWhen = cartMode ? getCartWhen() : null
+  // Adding another service while the cart already has a visit booked: start on that day + slot, so
+  // everything stays one visit (changing it here moves the whole cart's slot).
+  const heldWhen = !cartMode && cart.length > 0 ? getCartWhen() : null
+  const initMode = saved?.mode ?? (cartWhen ? cartWhen.mode : null) ?? navState?.mode ?? getBookMode() ?? null
+  const [mode, setMode] = useState<'now' | 'schedule' | null>(initMode)
+  const visit = cartWhen || heldWhen
+  const [date, setDate] = useState<Date>(saved?.date ? new Date(saved.date) : visit ? new Date(visit.date) : startOfDay(new Date()))
+  const [slot, setSlot] = useState<number | null>(saved?.slot ?? (visit?.mode === 'schedule' ? visit.min : null) ?? null)
   const [slotData, setSlotData] = useState<SlotInfo[] | null>(null)
-  const [freq, setFreq] = useState(saved?.freq || (navState?.freq && FREQ.some((f) => f.id === navState.freq) ? navState.freq : 'one-time'))
+  const [freq, setFreq] = useState(saved?.freq || cartWhen?.freq || (navState?.freq && FREQ.some((f) => f.id === navState.freq) ? navState.freq : 'one-time'))
   const [worker, setWorker] = useState(saved?.worker || 'any')
   const [workers, setWorkers] = useState<SvcWorker[] | null>(null)
+  // My Cart: each item's duration menu (from the API) so the − / + stepper can move through it.
+  const [itemDurs, setItemDurs] = useState<Record<string, Duration[]>>({})
+  const [billOpen, setBillOpen] = useState(true)
+  const cartIdsKey = cart.map((c) => c.id).join(',')
+  useEffect(() => {
+    if (!cartMode) return
+    Promise.all(cart.map((c) => fetchService(c.id, pincode || undefined).then((d) => [c.id, d.durations] as const).catch(() => null)))
+      .then((list) => setItemDurs(Object.fromEntries(list.filter(Boolean) as [string, Duration[]][])))
+  }, [cartIdsKey, pincode])
+  const [part, setPart] = useState<Part | null>(null)
   const [addrs, setAddrs] = useState<Address[] | null>(null)
   const [addr, setAddr] = useState<Address | null>(null)
   const [addrSheet, setAddrSheet] = useState(false)
@@ -96,8 +144,13 @@ export default function BookingFlow() {
   // moment Pay was tapped — the customer never saw a payment step. They can still switch it on.
   const [useWallet, setUseWallet] = useState(false)
   const [note, setNote] = useState(saved?.note || '')
-  const [step, setStep] = useState<Step>(saved ? 'address' : cartMode ? 'when' : 'duration')
+  // Main screen is 'summary'; Schedule opens on the slot picker so the time is picked first.
+  // Instant and Schedule both open on the Pronto-style selection screen; Continue → Review & pay.
+  const [step, setStep] = useState<Step>(saved || cartWhen ? 'summary' : 'when')
   const [sheet, setSheet] = useState(false)
+  // "Pay using" remembers the last choice, so Pay goes straight to it (Razorpay, or cash).
+  const [payPref, setPayPref] = useState<'online' | 'cash'>(() => { try { return localStorage.getItem('hh_last_pay') === 'cash' ? 'cash' : 'online' } catch { return 'online' } })
+  const [autoPay, setAutoPay] = useState(false)
   const [placing, setPlacing] = useState(false)
   const [loadErr, setLoadErr] = useState(false)
 
@@ -148,22 +201,40 @@ export default function BookingFlow() {
   const itemsKey = JSON.stringify(items)
   useEffect(() => {
     if (!items.length) return
-    const at = mode === 'now' ? nowAt() : slot !== null ? `${slot}:00` : undefined
+    // Instant is priced at the server's current time ('now'), never the phone clock.
+    const at = mode === 'now' ? 'now' : slot !== null ? minAt(slot) : undefined
     fetchQuote(items, coupon || undefined, pincode || undefined, at).then(setQuote).catch(() => {})
   }, [itemsKey, coupon, slot, mode, pincode])
 
+  // The server marks today's already-started slots `past` (India time) — no phone-clock maths here.
   const slots = useMemo(() => (slotData || [])
-    .filter((x) => !isSlotDisabled(date, x.hour))
-    .map((x) => ({ h: x.hour, label: x.time, disabled: !x.available })), [slotData, date])
+    .filter((x) => !x.past)
+    .map((x) => ({ h: x.min ?? x.hour * 60, label: x.time, disabled: !x.available })), [slotData])
   const grouped = useMemo(() => groupSlots(slots), [slots])
+  // Open on the first part of the day that still has a free slot.
+  useEffect(() => {
+    // Keep the selected slot's part of day in view (e.g. the cart's existing visit).
+    if (slot !== null) { const own = (['Morning', 'Afternoon', 'Evening'] as Part[]).find((k) => grouped[k].some((x) => x.h === slot)); if (own) { setPart(own); return } }
+    if (part && grouped[part].some((x) => !x.disabled)) return
+    const first = (['Morning', 'Afternoon', 'Evening'] as Part[]).find((k) => grouped[k].some((x) => !x.disabled))
+    setPart(first || 'Morning')
+  }, [grouped])
 
-  const openNow = isZoneOpenNow(zoneHours)
+  // Is Instant possible right now? Asked of the server (India time + zone hours), not the phone.
+  const [instantInfo, setInstantInfo] = useState<InstantStatus | null>(null)
+  useEffect(() => { fetchInstantStatus(pincode || undefined).then(setInstantInfo).catch(() => {}) }, [pincode])
+  const openNow = instantInfo?.open ?? true
+  // Why Instant isn't possible — the server says which: outside working hours, or nobody free.
+  const busyText = instantInfo?.reason === 'closed'
+    ? t('Instant service is available {hours}. Please schedule this booking for later.', { hours: instantInfo.hours || t('during working hours') })
+    : t('All our partners are busy right now. Please schedule this booking for later.')
   const hoursLabel = todayHoursLabel(zoneHours)
   const orderTotal = quote?.total ?? (cartMode ? cart.reduce((n, c) => n + c.price, 0) : dur?.price ?? 0)
   const walletUsed = useWallet ? Math.min(wallet, orderTotal) : 0
   const payable = Math.max(0, orderTotal - walletUsed)
   const hasExperts = !cartMode && (workers?.length || 0) > 0
-  const steps: Step[] = [...(cartMode ? [] : ['duration' as Step]), 'when', 'address', ...(hasExperts ? ['expert' as Step] : []), 'summary']
+  // Nothing chosen yet and the zone is open → Now, so an instant booking never needs the When screen.
+  useEffect(() => { if (mode === null && openNow) setMode('now') }, [openNow])
 
   // ---------- empty / loading states ----------
   const top = (title: string, onBack: () => void) => (
@@ -175,7 +246,7 @@ export default function BookingFlow() {
   if (cartMode && cart.length === 0) {
     return (
       <div className="screen m2">
-        {top(t('Your Booking'), () => nav('/home', { replace: true }))}
+        {top(t('My Cart'), () => nav('/home', { replace: true }))}
         <div className="state"><div className="ico">🛒</div><h3>{t('Your cart is empty')}</h3><p>{t('Browse services and add them to your booking.')}</p>
           <button className="btn" style={{ maxWidth: 220 }} onClick={() => nav('/home', { replace: true })}>{t('Browse services')}</button></div>
       </div>
@@ -192,19 +263,49 @@ export default function BookingFlow() {
   }
   if (!cartMode && (!s || !dur)) return <div className="screen m2">{top(t('Book a service'), () => nav(-1))}<Loading /></div>
 
-  const idx = Math.max(0, steps.indexOf(step))
-  const back = () => { if (idx === 0) nav(-1); else setStep(steps[idx - 1]) }
-  const next = () => setStep(steps[Math.min(steps.length - 1, idx + 1)])
+  // Detours (when / address / expert) always return to the main screen.
+  const back = () => { if (step === 'summary') nav(-1); else setStep('summary') }
+  const done = () => setStep('summary')
 
+  const instant = mode === 'now' && openNow
+  const slotWhen = (m: number) => ({ mode: 'schedule' as const, date: date.toISOString(), min: m, time: serverTime(m), label: `${date.toLocaleDateString(dateLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}, ${niceTime(m)}`, freq })
   function continueWhen() {
-    if (!mode) return toast(t('Choose Now or Schedule'))
-    if (mode === 'now' && !openNow) return toast(t('Instant slots are not available right now — please Schedule for later'))
-    if (mode === 'schedule' && slot === null) return toast(t('Pick a time slot'))
-    next()
+    // Pronto-style: the service goes into the cart (with its slot, or Instant); My Cart is checkout.
+    if (!cartMode && s && dur) {
+      if (!instant && slot === null) return toast(t('Pick a time slot'))
+      addToCart({ id: s.id, name: s.name, icon: s.icon || '', category: s.category || '', durationId: dur.id, durationLabel: dur.label, price: dur.price, listPrice: dur.original })
+      setCartWhen(instant ? { mode: 'now', date: '', min: 0, time: '', label: '', freq: 'one-time' } : slotWhen(slot!))
+      return nav('/booking/cart')
+    }
+    if (instant) { setCartWhen({ mode: 'now', date: '', min: 0, time: '', label: '', freq: 'one-time' }); return done() }
+    if (slot === null) return toast(t('Pick a time slot'))
+    setMode('schedule'); setCartWhen(slotWhen(slot))
+    done()
   }
+  // My Cart tabs: Instant / Scheduled / Recurring.
+  function pickTab(tab: 'now' | 'schedule' | 'recurring') {
+    if (tab === 'now') {
+      if (!openNow) return toast(busyText)
+      setMode('now'); setFreq('one-time'); setCartWhen({ mode: 'now', date: '', min: 0, time: '', label: '', freq: 'one-time' }); return
+    }
+    setMode('schedule')
+    setFreq(tab === 'recurring' ? (freq === 'one-time' ? 'weekly' : freq) : 'one-time')
+    if (slot === null) setStep('when')
+  }
+  // − / + on a cart item: previous / next duration from that service's menu.
+  function stepDuration(c: CartItem, dir: -1 | 1) {
+    const list = itemDurs[c.id] || []
+    const i = list.findIndex((d) => d.id === c.durationId)
+    // − on the shortest duration removes the service (the button shows a bin there).
+    if (dir === -1 && i <= 0) { removeFromCart(c.id); toast(t('{name} removed from cart', { name: t(c.name) })); return }
+    const nd = list[i + dir]
+    if (!nd) return
+    addToCart({ ...c, durationId: nd.id, durationLabel: nd.label, price: nd.price, listPrice: nd.original })
+  }
+
   function continueAddress() {
     if (!addr) return toast(t('Add an address to continue'))
-    next()
+    done()
   }
   function addAddress() {
     try {
@@ -225,20 +326,21 @@ export default function BookingFlow() {
     } catch (e) { toast((e as Error).message) }
   }
 
-  const whenText = mode === 'now'
+  const whenText = !mode ? t('Choose a time') : mode === 'now'
     ? t('Now (ASAP)')
-    : `${date.toLocaleDateString(dateLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}${slot !== null ? `, ${slotLabel(slot)}` : ''}`
+    : slot === null ? t('Pick a time slot') : `${date.toLocaleDateString(dateLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}${slot !== null ? `, ${niceTime(slot)}` : ''}`
   const chosenWorker = workers?.find((w) => String(w.id) === worker)
 
   async function place(method: string, txnId?: string) {
     if (placing) return
     setPlacing(true)
     const cash = method === 'cash'
+    try { localStorage.setItem('hh_last_pay', cash ? 'cash' : 'online') } catch { /* private mode */ }
     try {
       const b = await createBookingApi({
         items,
         type: mode === 'now' ? 'instant' : 'schedule',
-        ...(mode === 'now' ? { at: nowAt() } : { date: dateStr, time: slot !== null ? slotLabel(slot) : '', at: slot !== null ? `${slot}:00` : undefined }),
+        ...(mode === 'now' ? {} : { date: dateStr, time: slot !== null ? serverTime(slot) : '', at: slot !== null ? minAt(slot) : undefined }),
         payment: !cash && payable === 0 ? 'wallet' : method,
         coupon: coupon || undefined,
         note: note.trim() || undefined,
@@ -253,7 +355,7 @@ export default function BookingFlow() {
       if (mode === 'schedule' && freq !== 'one-time') {
         try {
           await createRecurring({
-            items, startDate: dateStr, time: slot !== null ? slotLabel(slot) : '', freq,
+            items, startDate: dateStr, time: slot !== null ? serverTime(slot) : '', freq,
             payment: !cash && (payable === 0 || method === 'wallet') ? 'wallet' : 'cash',
             addressId: addr?.id, pincode: addr?.pincode || pincode || undefined, lat: addr?.lat, lng: addr?.lng,
             ...(worker !== 'any' ? { workerId: Number(worker) } : {}),
@@ -261,11 +363,20 @@ export default function BookingFlow() {
           toast(t('Repeat visits set up — manage them in Profile → Repeat bookings'))
         } catch (e) { toast(t('Booked, but repeat visits could not be set up: {msg}', { msg: (e as Error).message })) }
       }
-      if (cartMode) { clearCart(); setActivePackage(null) }
+      if (cartMode) { clearCart(); setActivePackage(null); setCartWhen(null) }
       nav(`/confirmed/${b.id}`, { replace: true })
     } catch (e) { toast((e as Error).message); setPlacing(false); setSheet(false) }
   }
-  const pay = () => { if (payable === 0) place('wallet'); else setSheet(true) }
+  const pay = () => {
+    // Anything the defaults couldn't fill is asked for now, then Pay again from the main screen.
+    if (!mode || (mode === 'now' && !openNow)) { toast(t('Choose when you need the service')); return setStep('when') }
+    if (mode === 'schedule' && slot === null) { toast(t('Pick a time slot')); return setStep('when') }
+    if (!addr) { toast(t('Add an address to continue')); return setStep('address') }
+    if (payable === 0) place('wallet')
+    else if (payPref === 'cash') place('cash')
+    else { setAutoPay(true); setSheet(true) }
+  }
+  const changePayment = () => { setAutoPay(false); setSheet(true) }
 
   // ---------- shared bits ----------
   const cartItems: CartItem[] = cartMode ? cart : []
@@ -286,74 +397,89 @@ export default function BookingFlow() {
 
   return (
     <div className="screen m2">
-      <div className="ps-top">
+      <div className="ps-top bf-top">
         <button className="au-back" onClick={back} aria-label={t('Back')}><ArrowLeft size={20} /></button>
-        <b>{t(TITLES[step])}</b><span style={{ width: 42 }} />
-      </div>
-      <div className="bf-progress" aria-label={t('Step {n} of {total}', { n: idx + 1, total: steps.length })}>
-        {steps.map((st, i) => <span key={st} className={i <= idx ? 'on' : ''} />)}
+        <b>{step === 'summary' ? (cartMode ? t('My Cart') : t('Review & pay')) : step === 'when' && instant ? t('Get instant service') : t(TITLES[step])}</b><span style={{ width: 42 }} />
       </div>
 
-      {/* 1 · Duration */}
-      {step === 'duration' && s && dur && (<>
-        <div className="content">
-          {itemCards}
-          <p className="sf-q">{t('How many hours do you need?')}</p>
-          {s.durations.map((d) => (
-            <button key={d.id} className={`sf-opt ${dur.id === d.id ? 'on' : ''}`} onClick={() => setDur(d)}>
-              <div className="grow"><div className="sf-opt-t">{tDur(d.label)}</div></div>
-              <div className="sf-opt-p">₹{d.price}{d.original && d.original > d.price ? <s className="muted" style={{ marginLeft: 6, fontWeight: 400, fontSize: 12 }}>₹{d.original}</s> : null}</div>
-              <span className={`sf-radio ${dur.id === d.id ? 'on' : ''}`}>{dur.id === d.id && <Check size={13} />}</span>
-            </button>
-          ))}
-        </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
-      </>)}
-
-      {/* 2 · When */}
+      {/* 2 · When - Pronto-style: day chips, duration, part of day, slot grid. */}
       {step === 'when' && (<>
-        <div className="content">
-          {itemCards}
-          <button className={`sf-opt ${mode === 'now' ? 'on' : ''}`} onClick={() => (openNow ? setMode('now') : toast(t('Instant slots are not available right now — please Schedule for later')))} aria-disabled={!openNow} style={openNow ? undefined : { opacity: 0.6 }}>
-            <span className="sf-freq-ic"><Zap size={16} /></span>
-            <div className="grow">
-              <div className="sf-opt-t">{t('Now')}</div>
-              <div className="sf-opt-s">{openNow ? t('We assign the nearest available expert right away') : `${t('Instant slots are not available right now')}${hoursLabel ? ` · ${hoursLabel}` : ''}`}</div>
+        {!instant && <div className="bf-daybar">
+          {nextDays().map(({ d, label }) => (
+            <button key={d.toISOString()} className={`bf-day ${fmtDate(d) === dateStr ? 'on' : ''}`} onClick={() => { setDate(d); setSlot(null) }}>{label}</button>
+          ))}
+        </div>}
+        <div className="content bf-sched">
+          {/* One note at most: Pronto's "busy" note wins; otherwise the cart's shared-visit note. */}
+          {!instant && heldWhen && openNow && (
+            <div className="bf-busy"><Info size={20} /><span>{t('Your cart is booked for {when}. This service is added to the same visit — changing the slot moves the whole visit.', { when: heldWhen.label })}</span></div>
+          )}
+          {!instant && !openNow && (
+            <div className="bf-busy"><Info size={20} /><span>{busyText}</span></div>
+          )}
+          <div className="bf-card">
+            {!cartMode && s && dur && (<>
+              <div className="bf-card-h">{t('Service duration')}</div>
+              <div className="bf-chiprow">
+                {s.durations.map((d) => (
+                  <button key={d.id} className={`bf-durchip ${dur.id === d.id ? 'on' : ''}`} onClick={() => setDur(d)}>
+                    <b>{hrLabel(d.label)}</b>
+                    <span>₹{d.price}{d.original && d.original > d.price ? <s>₹{d.original}</s> : null}</span>
+                  </button>
+                ))}
+              </div>
+            </>)}
+            {/* From My Cart (Change slot / Scheduled tab): same duration row, for each cart item, so
+                this screen looks the same whichever way it was opened. */}
+            {cartMode && cart.map((c) => (itemDurs[c.id] || []).length > 0 && (
+              <div key={c.id}>
+                <div className="bf-card-h">{cart.length > 1 ? `${t(c.name)} · ` : ''}{t('Service duration')}</div>
+                <div className="bf-chiprow">
+                  {itemDurs[c.id].map((d) => (
+                    <button key={d.id} className={`bf-durchip ${c.durationId === d.id ? 'on' : ''}`}
+                      onClick={() => addToCart({ ...c, durationId: d.id, durationLabel: d.label, price: d.price, listPrice: d.original })}>
+                      <b>{hrLabel(d.label)}</b>
+                      <span>₹{d.price}{d.original && d.original > d.price ? <s>₹{d.original}</s> : null}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {!instant && (<>
+            <div className="bf-card-h" style={{ marginTop: cartMode && !cart.some((c) => (itemDurs[c.id] || []).length) ? 4 : 18 }}>{t('Service start time')}</div>
+            <div className="bf-parts">
+              {(['Morning', 'Afternoon', 'Evening'] as Part[]).map((k) => {
+                const Ic = PART_ICON[k]
+                const none = slotData != null && !grouped[k].some((x) => !x.disabled)
+                return (
+                  <button key={k} className={`bf-part ${part === k ? 'on' : ''}${none ? ' dim' : ''}`} onClick={() => setPart(k)}>
+                    <Ic size={16} /> {t(k)}
+                  </button>
+                )
+              })}
             </div>
-            <span className={`sf-radio ${mode === 'now' ? 'on' : ''}`}>{mode === 'now' && <Check size={13} />}</span>
-          </button>
-          <button className={`sf-opt ${mode === 'schedule' ? 'on' : ''}`} onClick={() => setMode('schedule')}>
-            <span className="sf-freq-ic"><CalendarDays size={16} /></span>
-            <div className="grow"><div className="sf-opt-t">{t('Schedule')}</div><div className="sf-opt-s">{t('Pick a date and time')}</div></div>
-            <span className={`sf-radio ${mode === 'schedule' ? 'on' : ''}`}>{mode === 'schedule' && <Check size={13} />}</span>
-          </button>
-
-          {mode === 'schedule' && (<>
-            <div className="bf-lbl">{t('Select Date')}</div>
-            <Calendar value={date} onChange={(d) => { setDate(d); setSlot(null) }} zh={zoneHours} />
-            <div className="bf-lbl">{t('Available Slots')}</div>
-            {slotData == null ? <div className="ad2-hint">{t('Loading slots…')}</div>
-              : slots.length === 0 ? <div className="ad2-hint">{t('No slots left on this day — please pick another date.')}</div>
-                : Object.entries(grouped).map(([g, list]) => list.length === 0 ? null : (
-                  <div key={g} className="bf-slotgrp">
-                    <div className="bf-slot-h">{t(g)}</div>
-                    <div className="bf-slots">
-                      {list.map((x) => (
-                        <button key={x.h} className={`bf-slot ${slot === x.h ? 'on' : ''}`} disabled={x.disabled} onClick={() => setSlot(x.h)}>{x.label}</button>
+            <div className="bf-slotbox">
+              <div className="bf-slotbox-h">{t('Standard slots')} <span className="bf-slotbox-go"><ArrowRight size={13} /></span></div>
+              {slotData == null ? <div className="ad2-hint">{t('Loading slots…')}</div>
+                : !part || grouped[part].length === 0 ? <div className="ad2-hint">{t('No slots at this time of day - try another time or date.')}</div>
+                  : (
+                    <div className="bf-slotgrid">
+                      {grouped[part].map((x) => (
+                        <button key={x.h} className={`bf-slot ${slot === x.h ? 'on' : ''}`} disabled={x.disabled} onClick={() => {
+                          setSlot(x.h); setMode('schedule')
+                          // From My Cart the service is already added — picking a time applies it and goes back.
+                          if (cartMode) { setCartWhen(slotWhen(x.h)); done() }
+                        }}>{niceTime(x.h)}</button>
                       ))}
                     </div>
-                  </div>
-                ))}
-            <div className="bf-lbl" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Repeat size={14} /> {t('Repeat this visit')}</div>
-            <div className="ord-chips" style={{ flexWrap: 'wrap' }}>
-              {FREQ.map((f) => (
-                <button key={f.id} className={`ord-chip ${freq === f.id ? 'active' : ''}`} onClick={() => setFreq(f.id)}>{t(f.label)}</button>
-              ))}
+                  )}
             </div>
-            {freq !== 'one-time' && <p className="ad2-hint">{t('Repeat visits are booked automatically and paid by wallet or cash. Manage them in Profile → Repeat bookings.')}</p>}
-          </>)}
+            </>)}
+          </div>
+
+          {!instant && <div className="bf-note"><small>{t('NOTE')}</small><p>{t('Professionals arrive within 30 minutes of the selected slot.')}</p></div>}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={continueWhen} disabled={!mode || (mode === 'schedule' && slot === null)}>{t('Continue')}</button></div>
+        {!cartMode && <div className="au-foot"><button className="au-btn" onClick={continueWhen} disabled={!instant && slot === null}>{instant ? t('Continue · ₹{amt}', { amt: orderTotal }) : t('Add to cart')}</button></div>}
       </>)}
 
       {/* 3 · Address */}
@@ -388,17 +514,131 @@ export default function BookingFlow() {
           {(workers || []).some((w) => !w.favourite) && <div className="bf-lbl">{t('Experts near you')}</div>}
           {(workers || []).filter((w) => !w.favourite).map((w) => <WorkerRow key={w.id} w={w} sel={worker} onPick={setWorker} />)}
         </div>
-        <div className="au-foot"><button className="au-btn" onClick={next}>{t('Continue')}</button></div>
+        <div className="au-foot"><button className="au-btn" onClick={done}>{t('Continue')}</button></div>
+      </>)}
+
+      {/* My Cart (Pronto layout): booking type tabs, items with a duration stepper, coupons,
+          booking details, bill details, Pay now. Everything priced by the server quote. */}
+      {step === 'summary' && cartMode && (<>
+        <div className="content mc">
+          <div className="mc-tabs">
+            {([['now', t('Instant')], ['schedule', t('Scheduled')], ['recurring', t('Recurring')]] as const).map(([k, label]) => {
+              const on = k === 'now' ? mode === 'now' : k === 'recurring' ? mode === 'schedule' && freq !== 'one-time' : mode === 'schedule' && freq === 'one-time'
+              return <button key={k} className={`mc-tab${on ? ' on' : ''}`} onClick={() => pickTab(k)}>{label}</button>
+            })}
+          </div>
+          {mode === 'schedule' && freq !== 'one-time' && (
+            <div className="mc-freq">
+              {FREQ.filter((f) => f.id !== 'one-time').map((f) => (
+                <button key={f.id} className={`mc-fchip${freq === f.id ? ' on' : ''}`} onClick={() => setFreq(f.id)}>{t(f.label)}</button>
+              ))}
+            </div>
+          )}
+
+          <div className="mc-h"><b>{t('Review booking')}</b><span>{cart.length === 1 ? t('1 service') : t('{n} services', { n: cart.length })}</span></div>
+          <div className="mc-card">
+            {cart.map((c) => {
+              const list = itemDurs[c.id] || []
+              const i = list.findIndex((d) => d.id === c.durationId)
+              const mins = list[i]?.minutes ?? (parseInt(c.durationLabel, 10) || 0)
+              return (
+                <div key={c.id} className="mc-item">
+                  <img className="mc-thumb" src={`/services/${c.id}.jpg`} alt="" onError={(e) => { const im = e.currentTarget as HTMLImageElement; if (!im.src.endsWith('/expert.jpg')) im.src = '/expert.jpg' }} />
+                  <div className="mc-iname">{t(c.name)}</div>
+                  <div className="mc-iprice">{c.listPrice && c.listPrice > c.price ? <s>₹{c.listPrice}</s> : null}<b>₹{c.price}</b></div>
+                  <div className="mc-step">
+                    <button onClick={() => stepDuration(c, -1)} aria-label={i <= 0 ? t('Remove') : t('Less time')}>{i <= 0 ? <Trash2 size={16} /> : <Minus size={16} />}</button>
+                    <b>{mins}</b>
+                    <button onClick={() => stepDuration(c, 1)} disabled={i < 0 || i >= list.length - 1} aria-label={t('More time')}><Plus size={16} /></button>
+                    <small>{t('Minutes')}</small>
+                  </div>
+                </div>
+              )
+            })}
+            <div className="mc-info"><Info size={16} /><span>{t('Slots may vary based on partner availability and the selected service.')}</span></div>
+            <div className="mc-more">{t('Missed something?')} <button onClick={() => nav('/home')}>{t('Add more services.')}</button></div>
+          </div>
+
+          {promoCodes && (<>
+            <button className="mc-card mc-row" onClick={() => setShowCoupons((v) => !v)}>
+              <b>{coupon ? t('Coupon {code} applied', { code: coupon }) : t('View all coupons')}</b>{showCoupons ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+            </button>
+            {showCoupons && (
+              <div className="mc-card mc-coupons">
+                {coupon && <div className="bf-coupon on"><Tag size={16} /><div className="grow"><b>{coupon}</b><small>{(quote?.discount || 0) > 0 ? t('You save ₹{amt}', { amt: quote!.discount }) : t('Applied')}</small></div><button className="au-link" onClick={() => setCoupon('')} aria-label={t('Remove coupon')}><X size={16} /></button></div>}
+                <div className="bf-coupon-in"><input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={t('Enter coupon code')} /><button onClick={() => applyCoupon()}>{t('Apply')}</button></div>
+                {coupons.map((c) => (
+                  <div key={c.code} className="bf-coupon">
+                    <div className="grow"><b>{c.code}</b><small>{c.label}</small>{c.min ? <small className="bf-cmin">{t('Min order ₹{amt}', { amt: c.min })}</small> : null}</div>
+                    <button className="au-link" onClick={() => applyCoupon(c.code)}>{t('Apply')}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>)}
+
+          <div className="mc-h"><b>{t('Booking details')}</b></div>
+          <div className="mc-card mc-details">
+            <div className="mc-drow">
+              <CalendarDays size={22} />
+              <div className="grow">
+                <span>{mode === 'now' ? t('Instant') : freq !== 'one-time' ? t('Repeats {f}, starting', { f: t(FREQ.find((f) => f.id === freq)!.label).toLowerCase() }) : t('Scheduled for')}</span>
+                <b>{mode === 'now' ? t('Expert arrives as soon as possible') : slot === null ? t('Pick a time slot') : whenText}</b>
+                {mode === 'schedule' && <button className="mc-link" onClick={() => setStep('when')}>{t('Change slot')}</button>}
+              </div>
+            </div>
+            <button className="mc-drow" onClick={() => setAddrSheet(true)}>
+              <MapPin size={22} />
+              <div className="grow"><span>{t('Location')}</span><small className="mc-addr">{fullAddress(addr) || t('Add address')}</small></div>
+              <ChevronRight size={20} />
+            </button>
+            <button className="mc-drow" onClick={() => nav('/profile')}>
+              <Phone size={22} />
+              <div className="grow"><span>{user?.name || t('You')}</span><small>{user?.phone ? `+91 ${user.phone}` : ''}</small></div>
+              <ChevronRight size={20} />
+            </button>
+          </div>
+
+          <div className="mc-h"><b>{t('Bill details')}</b></div>
+          <div className="mc-card mc-bill">
+            <button className="mc-bill-top" onClick={() => setBillOpen((v) => !v)}>
+              <div className="grow">
+                <b>{t('To pay ₹{amt}', { amt: payable })}</b>
+                {(() => { const saved = cart.reduce((n, c) => n + Math.max(0, (c.listPrice || c.price) - c.price), 0) + (quote?.discount || 0) + (quote?.memberDiscount || 0); return saved > 0 ? <small>{t('₹{amt} saved on the total!', { amt: saved })}</small> : null })()}
+              </div>
+              {billOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </button>
+            {billOpen && (!quote ? <div className="ad2-hint">{t('Calculating price…')}</div> : (<>
+              <div className="mc-brow"><span>{t('Item total')}</span><b>₹{quote.subtotal}</b></div>
+              {(quote.discount || 0) > 0 && <div className="mc-brow disc"><span>{t('Discount')}{quote.coupon ? ` (${quote.coupon})` : ''}</span><b>−₹{quote.discount}</b></div>}
+              {(quote.memberDiscount || 0) > 0 && <div className="mc-brow disc"><span>{t('Membership benefit')}</span><b>−₹{quote.memberDiscount}</b></div>}
+              {(quote.peakSurcharge || 0) > 0 && <div className="mc-brow"><span>{t('Peak-hour surcharge')}</span><b>+₹{quote.peakSurcharge}</b></div>}
+              {(quote.surgeAmount || 0) > 0 && <div className="mc-brow"><span>{t('Demand surge')}</span><b>+₹{quote.surgeAmount}</b></div>}
+              <div className="mc-brow"><span>{t('GST & Service Fees')} <button className="mc-i" onClick={() => toast(t('GST ₹{g} · Platform fee ₹{f}', { g: quote.tax || 0, f: quote.fee || 0 }))} aria-label={t('Fee breakdown')}><Info size={14} /></button></span><b>₹{(quote.gstIncluded ? 0 : (quote.tax || 0)) + (quote.fee || 0)}</b></div>
+              <div className="mc-brow total"><span>{t('To pay')}</span><b>₹{payable}</b></div>
+            </>))}
+          </div>
+        </div>
+        <div className="au-foot"><button className="au-btn mc-pay" onClick={pay} disabled={placing || !quote}>{placing ? t('Please wait…') : t('Pay now | ₹{amt}', { amt: payable })}</button></div>
       </>)}
 
       {/* 5 · Summary + pay */}
-      {step === 'summary' && (<>
+      {step === 'summary' && !cartMode && (<>
         <div className="content">
-          <div className="bf-lbl">{t('Service Details')}</div>
           {itemCards}
+          {!cartMode && <button className="au-link" style={{ marginTop: 6 }} onClick={() => setStep('when')}>{t('Change duration')}</button>}
+          <div className="bf-div" />
           <div className="bf-sumrow"><span>{t('When')}</span><b>{whenText} <button className="au-link" onClick={() => setStep('when')}>{t('Change')}</button></b></div>
-          {mode === 'schedule' && freq !== 'one-time' && <div className="bf-sumrow"><span>{t('Repeat')}</span><b>{t(FREQ.find((f) => f.id === freq)!.label)}</b></div>}
-          <div className="bf-sumrow"><span>{t('Address')}</span><b className="bf-addr">{addr?.line || '—'} <button className="au-link" onClick={() => setStep('address')}>{t('Change')}</button></b></div>
+          {mode === 'schedule' && (<>
+            <div className="bf-lbl" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Repeat size={14} /> {t('Repeat this visit')}</div>
+            <div className="ord-chips" style={{ flexWrap: 'wrap' }}>
+              {FREQ.map((f) => (
+                <button key={f.id} className={`ord-chip ${freq === f.id ? 'active' : ''}`} onClick={() => setFreq(f.id)}>{t(f.label)}</button>
+              ))}
+            </div>
+            {freq !== 'one-time' && <p className="ad2-hint">{t('Repeat visits are booked automatically and paid by wallet or cash. Manage them in Profile → Repeat bookings.')}</p>}
+          </>)}
+          <div className="bf-sumrow"><span>{t('Address')}</span><b className="bf-addr"><span className="bf-addr-t">{shortAddress(addr) || t('Add address')}</span> <button className="au-link" onClick={() => setStep('address')}>{t('Change')}</button></b></div>
           {hasExperts && <div className="bf-sumrow"><span>{t('Expert')}</span><b>{chosenWorker ? chosenWorker.name : t('Any available')} <button className="au-link" onClick={() => setStep('expert')}>{t('Change')}</button></b></div>}
 
           <div className="bf-lbl">{t('Instructions for the expert (optional)')}</div>
@@ -454,15 +694,22 @@ export default function BookingFlow() {
           </>)}
           <div className="bf-sumrow total"><span>{t('To pay')}</span><b>₹{payable}</b></div>
         </div>
-        <div className="au-foot">
-          <button className="au-btn" onClick={pay} disabled={placing || !quote}>
+        <div className="au-foot" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {payable > 0 && (
+            <button className="bf-payusing" onClick={changePayment}>
+              <small>{t('Pay using')}</small>
+              <b>{payPref === 'cash' ? t('Cash after service') : t('UPI / Card')} ▴</b>
+            </button>
+          )}
+          <button className="au-btn" style={{ flex: 1 }} onClick={pay} disabled={placing || !quote}>
             {placing ? t('Please wait…') : payable === 0 ? t('Confirm booking') : t('Pay ₹{amt}', { amt: payable })}
           </button>
         </div>
       </>)}
 
       <AddressSheet open={addrSheet} onClose={() => setAddrSheet(false)} onSelect={(a) => setAddr(a)} onAdd={addAddress} />
-      <PaymentSheet open={sheet} amount={payable} onClose={() => setSheet(false)} onPaid={(m, txn) => { setSheet(false); place(m, txn) }} />
+      <PaymentSheet open={sheet} amount={payable} autoStart={autoPay} onClose={() => { setSheet(false); setAutoPay(false) }}
+        onPaid={(m, txn) => { setSheet(false); setAutoPay(false); setPayPref(m === 'cash' ? 'cash' : 'online'); place(m, txn) }} />
     </div>
   )
 }

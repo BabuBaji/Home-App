@@ -30,7 +30,6 @@ import ServiceDetails from './screens/ServiceDetails'
 import BookingFlow from './screens/BookingFlow'
 import Confirmed from './screens/Confirmed'
 import Notifications from './screens/Notifications'
-import Cart from './screens/Cart'
 import Reschedule from './screens/Reschedule'
 import Cancel from './screens/Cancel'
 import Bookings from './screens/Bookings'
@@ -336,7 +335,8 @@ export default function App() {
               <Route path="/book/:id" element={<ParamRedirect to={(id) => `/booking/${id}`} />} />
               <Route path="/confirmed/:id" element={<Confirmed />} />
               <Route path="/notifications" element={<Notifications />} />
-              <Route path="/cart" element={<Cart />} />
+              {/* One cart: the Pronto-style My Cart inside the booking flow. */}
+              <Route path="/cart" element={<Navigate to="/booking/cart" replace />} />
               {/* The cart's old address → schedule → summary → payment pages are now steps of the
                   booking flow; the cart screen shows its contents (or an empty state) and continues there. */}
               <Route path="/address" element={<Navigate to="/cart" replace />} />

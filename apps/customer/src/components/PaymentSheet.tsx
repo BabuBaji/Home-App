@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { fetchPaymentMethods, createOrder, chargePayment, fetchPaymentConfig, createPaymentsOrder, verifyPayment, mockPay, reportPaymentFailed } from '../api'
 import { useToast } from './UI'
@@ -13,6 +13,9 @@ interface Props {
   amount: number
   onClose: () => void
   onPaid: (method: string, txnId: string) => void
+  /** Skip the method list and go straight to Razorpay checkout (it shows UPI / cards itself).
+   *  Only applies when Razorpay is configured; the demo methods still need the list. */
+  autoStart?: boolean
 }
 
 // Load Razorpay Checkout once, on demand.
@@ -123,7 +126,7 @@ function rzpErrorText(raw: string, testMode: boolean): string {
   return testMode && !cancelled ? `${base} ${t('Test mode: pay with UPI ID success@razorpay or a Razorpay test card.')}` : base
 }
 
-export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
+export default function PaymentSheet({ open, amount, onClose, onPaid, autoStart }: Props) {
   const toast = useToast()
   const [groups, setGroups] = useState<PaymentGroup[]>([])
   const [method, setMethod] = useState('upi')
@@ -158,6 +161,14 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
         .then((r) => setIcons(r.apps || {})).catch(() => {})
     }
   }, [open])
+  // Auto-start once per opening, as soon as the config says Razorpay.
+  const autoFired = useRef(false)
+  useEffect(() => { if (!open) autoFired.current = false }, [open])
+  useEffect(() => {
+    if (!open || !autoStart || provider !== 'razorpay' || autoFired.current) return
+    autoFired.current = true
+    payViaRazorpay()
+  }, [open, autoStart, provider])
 
   if (!open) return null
   const cash = method === 'cash'

@@ -3,8 +3,8 @@ import { API_BASE } from './api'
 
 // Feature switches from Settings ▸ General (served by GET /api/app-config). Defaults keep the app
 // fully usable when the config can't be fetched (offline, older backend).
-export type AppConfig = { maintenance: boolean; signups: boolean; promoCodes: boolean; reviews: boolean; supportPhone: string }
-let cfg: AppConfig = { maintenance: false, signups: true, promoCodes: true, reviews: true, supportPhone: '' }
+export type AppConfig = { maintenance: boolean; signups: boolean; promoCodes: boolean; reviews: boolean; supportPhone: string; instantServiceId: string }
+let cfg: AppConfig = { maintenance: false, signups: true, promoCodes: true, reviews: true, supportPhone: '', instantServiceId: '' }
 const subs = new Set<() => void>()
 const emit = () => subs.forEach((f) => f())
 

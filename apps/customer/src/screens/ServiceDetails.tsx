@@ -81,7 +81,7 @@ export default function ServiceDetails() {
             <div className="wi-chips">
               {siblings.map((c) => (
                 <button key={c.id} className={`wi-chip ${c.id === s.id ? 'sel' : ''}`} onClick={() => c.id !== s.id && nav(`/service/${c.id}`)}>
-                  <img src={c.image || `/services/${c.id}.jpg`} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+                  <img src={c.image || `/services/${c.id}.jpg`} alt="" onError={(e) => { const im = e.currentTarget as HTMLImageElement; if (!im.src.endsWith('/expert.jpg')) im.src = '/expert.jpg'; else im.style.visibility = 'hidden' }} />
                   <span>{c.name}</span>
                 </button>
               ))}
@@ -124,9 +124,10 @@ export default function ServiceDetails() {
         </div>
       </div>
 
-      {/* One way to book: the unified flow picks duration, time (now or later), address and expert. */}
+      {/* Instant opens the flow on duration & pay; Schedule opens it on the date + slot picker. */}
       <div className="au-foot wi-foot">
-        <button className="wi-instant" style={{ flex: 1 }} onClick={() => nav(`/booking/${s.id}`)}>{t('Book Now')}</button>
+        <button className="wi-schedule" onClick={() => nav(`/booking/${s.id}`, { state: { mode: 'schedule' } })}>{t('Schedule')}</button>
+        <button className="wi-instant" onClick={() => nav(`/booking/${s.id}`, { state: { mode: 'now' } })}>{t('Book Instant')}</button>
       </div>
     </div>
   )
