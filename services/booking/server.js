@@ -90,6 +90,10 @@ async function init() {
       started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Which notifications a customer has read. A booking's key carries its status ("b5:on_the_way"),
+    // so each new status shows as unread again; inbox messages ("n12") are read once.
+    `CREATE TABLE IF NOT EXISTS notif_reads (user_id INTEGER NOT NULL, key TEXT NOT NULL,
+      read_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (user_id, key))`,
     `CREATE TABLE IF NOT EXISTS favourites (
       user_id INTEGER NOT NULL, service_id TEXT NOT NULL, created TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, service_id)
@@ -317,11 +321,12 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
     const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zid}&services=${encodeURIComponent(serviceNames)}`, { workers: [] })
     cands = (feed.workers || []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.available, lat: w.last?.lat, lng: w.last?.lng, jobs: 0 }))
   }
-  // Fall back to any qualified active expert when the zone has nobody rostered. The sweep asks for
-  // requireZone so it never assigns outside the zone; the create path prefers serving the customer.
+  // Fall back to any qualified active expert when the zone has nobody rostered.
   // The fallback stays inside the zone: it widens "on shift" to "any active worker of this zone", it
   // never reaches into another zone. A booking with no zone has nobody to fall back to.
-  if (!cands.length && !requireZone && zid) {
+  // The sweep used to skip this (requireZone) — but the list is already zone-filtered, so skipping
+  // it only meant a zone with no shift roster got ONE attempt at booking time and was never retried.
+  if (!cands.length && zid) {
     const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}&zone_id=${zid}`, [])
     cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0 }))
   }
@@ -944,8 +949,10 @@ app.post('/api/bookings', auth, async (req, res) => {
     // booking to the next available expert (see offerSweep). The booking stays 'confirmed' until
     // somebody accepts, which is what the customer's "finding your expert" state reflects.
     if (!dueForDispatch(booking, await scheduleLeadMs())) console.log(`[booking] ${booking.ref}: scheduled — held until shortly before the slot`)
-    else if (pick) await offerTo(booking, pick)
-    else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
+    else if (pick) {
+      if ((await getSetting(ADMIN_URL, 'dispatch_mode', 'offer')) === 'assign') await assignDirect(booking, pick)
+      else await offerTo(booking, pick)
+    } else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
   }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
@@ -996,8 +1003,14 @@ app.post('/api/bookings/:id/verify-otp', auth, async (req, res) => {
 app.post('/api/bookings/:id/complete', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  const firstCompletion = b.status !== 'completed'
-  await pool.query('UPDATE bookings SET status=$1, completed_at=COALESCE(completed_at, $2) WHERE id=$3', ['completed', nowIso(), b.id])
+  if (b.status === 'completed') return res.json(b)   // already done — a harmless retry
+  // Same rule as the expert's Complete (STATUS_FROM.completed): only a service that was started
+  // with the OTP can be completed. Without it a still-unassigned booking could be marked completed,
+  // paying the expert and crediting cashback for work that never happened. Check + write are one
+  // UPDATE so a racing expert Complete can't double-settle.
+  const moved = await pool.query("UPDATE bookings SET status='completed', completed_at=COALESCE(completed_at, $2) WHERE id=$1 AND status='in_progress' RETURNING id", [b.id, nowIso()])
+  if (!moved.rowCount) return res.status(409).json({ error: 'The service has not started yet.' })
+  const firstCompletion = true
   if (b.payment === 'cash') await pool.query('UPDATE bookings SET payment_status=$1 WHERE id=$2', ['paid', b.id])
   const done = await getBooking(b.id)
   await emitBookingUpdate(b.id)
@@ -1308,11 +1321,25 @@ app.get('/api/notifications', auth, async (req, res) => {
   // Booking notifications auto-clear once the service is finished: a completed or cancelled booking
   // drops out of the feed automatically, so only live/in-progress bookings show up.
   const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
-  const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
+  res.json(await notificationFeed(req.user.id, rows))
+})
+async function notificationFeed(userId, rows) {
+  const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, readKey: `b${b.id}:${b.status}`, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
   // Plus the customer's real inbox (announcements and offers the admin broadcast, job updates).
+  const inbox = await tryGet(NOTIFICATION_URL, `/api/internal/inbox/customer/${userId}`, [])
+  for (const m of (Array.isArray(inbox) ? inbox : [])) items.push({ id: 'n' + m.id, readKey: 'n' + m.id, type: m.type || 'announcement', title: m.title, body: m.body || '', time: m.created, bookingId: m.booking_id || undefined })
+  const read = new Set((await pool.query('SELECT key FROM notif_reads WHERE user_id=$1', [userId])).rows.map((r) => r.key))
+  return items.map(({ readKey, ...n }) => ({ ...n, read: read.has(readKey) }))
+}
+// Mark read: { ids: ['b5', 'n12'] } for specific ones, or no ids for everything in the current feed.
+app.post('/api/notifications/read', auth, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
+  const want = Array.isArray(req.body?.ids) ? new Set(req.body.ids.map(String)) : null
+  const keys = rows.map(rowTo).filter((b) => !want || want.has('b' + b.id)).map((b) => `b${b.id}:${b.status}`)
   const inbox = await tryGet(NOTIFICATION_URL, `/api/internal/inbox/customer/${req.user.id}`, [])
-  for (const m of (Array.isArray(inbox) ? inbox : [])) items.push({ id: 'n' + m.id, type: m.type || 'announcement', title: m.title, body: m.body || '', time: m.created, bookingId: m.booking_id || undefined })
-  res.json(items)
+  for (const m of (Array.isArray(inbox) ? inbox : [])) if (!want || want.has('n' + m.id)) keys.push('n' + m.id)
+  if (keys.length) await pool.query('INSERT INTO notif_reads (user_id, key) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING', [req.user.id, keys])
+  res.json(await notificationFeed(req.user.id, rows))
 })
 app.get('/api/support/contact', async (_q, res) => res.json({
   phone: await getSetting(ADMIN_URL, 'support_phone', ''), whatsapp: await getSetting(ADMIN_URL, 'support_whatsapp', ''),
@@ -1340,7 +1367,7 @@ app.get('/api/admin/bookings', adminAuth, requireAnyPerm('bookings.view', 'cance
   // Enrich with customer name from the auth service (best-effort).
   const ids = [...new Set(bookings.map((b) => b.user_id))]
   const names = {}
-  await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name }))
+  await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name || u.user.phone }))
   // Admin Bookings list reads `pro` (worker name) and `service` (joined item names) directly.
   res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer', pro: b.pro_name || '', service: (b.items || []).map((i) => i.name).join(', ') })))
 })
@@ -1386,7 +1413,7 @@ app.get('/api/admin/bookings/:id', adminAuth, requireAnyPerm('bookings.view', 'c
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   // Extensions ride along with the booking: an admin looking at what was charged needs to see the
   // extra time too, not just the base service.
-  res.json({ ...b, customer: u?.user?.name || 'Customer', extensions: await extensionsFor(b.id) })
+  res.json({ ...b, customer: u?.user?.name || u?.user?.phone || 'Customer', extensions: await extensionsFor(b.id) })
 })
 // Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
 // actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp
@@ -1819,6 +1846,22 @@ async function offerTo(b, w) {
   return true
 }
 
+/** dispatch_mode 'assign': claim `b` for `w` outright — the same atomic write as an accepted offer
+ *  (/api/internal/bookings/:id/assign), so a concurrent accept or sweep can't double-assign. */
+async function assignDirect(b, w) {
+  const upd = await pool.query(
+    `UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned',
+       offer_worker_id=NULL, offer_at=NULL, zone_id=COALESCE($4, zone_id)
+      WHERE id=$5 AND worker_id IS NULL AND status='confirmed' RETURNING *`,
+    [w.id, w.name || 'Expert', w.rating || 4.8, w.zoneId || b.zone_id, b.id])
+  if (!upd.rowCount) return false
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'job.accepted', { bookingId: b.id, workerId: w.id, ref: b.ref })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'job.assign', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Auto-assigned to ${w.name}` })
+  console.log(`[booking] auto-assigned ${b.ref} -> ${w.name}`)
+  return true
+}
+
 /** Record that `workerId` will not take `bookingId`, and free it for the next expert. */
 async function declineOffer(bookingId, workerId, why) {
   await pool.query(
@@ -1832,7 +1875,10 @@ async function declineOffer(bookingId, workerId, why) {
 async function offerSweep() {
   try {
     if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
-    const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
+    // dispatch_mode 'assign': give the job straight to the picked expert (no accept step).
+    // Default 'offer' keeps the one-expert-at-a-time offer chain.
+    const directAssign = (await getSetting(ADMIN_URL, 'dispatch_mode', 'offer')) === 'assign'
+    const open =(await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
     if (!open.length) return
     // Track who we offer to inside this pass: pickWorker reads committed rows, so without this two
     // bookings in the same sweep could both land on the same idle expert.
@@ -1861,6 +1907,7 @@ async function offerSweep() {
       })
       if (!w) continue   // nobody left right now; autoCancelNoService is the backstop
       takenThisPass.add(w.id)
+      if (directAssign) { if (!(await assignDirect(b, w))) takenThisPass.delete(w.id); continue }
       if (!(await offerTo(b, w))) takenThisPass.delete(w.id)
     }
   } catch (e) { console.error('[booking] offerSweep:', e.message) }

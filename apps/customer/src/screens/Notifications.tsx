@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Bell, CalendarCheck, Tag, Coins } from 'lucide-react'
 import { Loading } from '../components/UI'
-import { fetchNotifications } from '../api'
+import { fetchNotifications, markNotificationsRead } from '../api'
 import type { AppNotification } from '../types'
 import { t } from '../i18n'
 
 // Module 2 · #14 — Notifications. UI redesigned to the mock; data via fetchNotifications.
-// "Mark all as read" is a local visual state (no backend notion of read yet).
+// Read state lives on the server, so the Home bell badge counts only what's still unread.
 const ICONS = {
   booking: { Icon: CalendarCheck, cls: 'nt-booking' },
   offer: { Icon: Tag, cls: 'nt-offer' },
@@ -27,7 +27,6 @@ function ago(ts: string | null) {
 export default function Notifications() {
   const nav = useNavigate()
   const [items, setItems] = useState<AppNotification[] | null>(null)
-  const [read, setRead] = useState<Set<string>>(new Set())
 
   function load() { fetchNotifications().then(setItems).catch(() => setItems([])) }
   useEffect(() => { load() }, [])
@@ -39,7 +38,10 @@ export default function Notifications() {
       <div className="ps-top">
         <button className="au-back" onClick={() => nav(-1)} aria-label={t('Back')}><ArrowLeft size={20} /></button>
         <b>{t('Notifications')}</b>
-        <button className="nt2-mark" onClick={() => setRead(new Set(items.map((n) => n.id)))}>{t('Mark all as read')}</button>
+        <button className="nt2-mark" onClick={() => {
+          setItems(items.map((n) => ({ ...n, read: true })))
+          markNotificationsRead().then(setItems).catch(() => {})
+        }}>{t('Mark all as read')}</button>
       </div>
 
       <div className="content">
@@ -50,9 +52,12 @@ export default function Notifications() {
         <div className="nt2-list">
           {items.map((n) => {
             const m = ICONS[n.type] || ICONS.offer
-            const isRead = read.has(n.id)
+            const isRead = !!n.read
             return (
-              <button key={n.id} className={`nt2-row ${isRead ? 'read' : ''}`} onClick={() => n.bookingId && nav(`/job/${n.bookingId}`)}>
+              <button key={n.id} className={`nt2-row ${isRead ? 'read' : ''}`} onClick={() => {
+                if (!isRead) markNotificationsRead([n.id]).catch(() => {})
+                if (n.bookingId) nav(`/job/${n.bookingId}`)
+              }}>
                 <span className={`nt2-ic ${m.cls}`}><m.Icon size={20} /></span>
                 <span className="nt2-main">
                   <span className="nt2-title">{n.title}{!isRead && <i className="nt2-dot" />}</span>

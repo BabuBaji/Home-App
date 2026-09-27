@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS = {
   // operational / marketing rates are the org's allocated per-booking costs — set to 0 to disable.
   pg_fee_percent: '2.36', pg_fee_gst_percent: '18',
   worker_incentive_percent: '3', operational_cost_percent: '2', marketing_cost_percent: '1',
-  auto_assign: 'true', maintenance_mode: 'false', dispatch_timeout_min: '5', schedule_dispatch_lead_min: '120',
+  auto_assign: 'true', dispatch_mode: 'offer', maintenance_mode: 'false', dispatch_timeout_min: '5', schedule_dispatch_lead_min: '120',
   gst_inclusive: 'false',   // GST is added on top of the shown price (exclusive) — the market norm; toggle in Settings
   // Seller details printed on the customer tax invoice (edit to your registered company).
   company_name: 'HomeHelp Services Pvt. Ltd.', company_gstin: '36AABCH1234M1Z7',
@@ -966,7 +966,7 @@ app.get('/api/admin/control-tower', admin, requireAnyPerm('liveops.view'), async
       return {
         id: b.id, ref: b.ref || `#${b.id}`, status: b.status,
         service: (Array.isArray(b.items) ? b.items.map((i) => i.name).join(', ') : '') || b.type || '—',
-        customer: cu.name || 'Customer', customerPhone: cu.phone || '',
+        customer: cu.name || cu.phone || 'Customer', customerPhone: cu.phone || '',
         worker: b.pro_name || (w && w.name) || '', workerPhone: w ? (w.phone || '') : '', workerId: b.worker_id || null,
         zoneId: b.zone_id || null, zone: zById.get(b.zone_id)?.name || (b.zone_id ? `Zone ${b.zone_id}` : 'Unzoned'),
         date: b.date || '', time: b.time || '', total: b.total || 0,
@@ -1010,7 +1010,7 @@ app.get('/api/admin/dashboard', admin, requireAnyPerm('dashboard.view'), async (
   const revenue = bookings.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0)
   const rated = customers.filter((c) => c.rating > 0)
   const avgRating = rated.length ? +(rated.reduce((a, c) => a + c.rating, 0) / rated.length).toFixed(1) : 0
-  const nameById = new Map(customers.map((c) => [c.id, c.name]))
+  const nameById = new Map(customers.map((c) => [c.id, c.name || c.phone]))
   const dayOf = (d) => String(d || '').slice(0, 10)
 
   // 7-day trend (oldest → newest) for the line/bar charts

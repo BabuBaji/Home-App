@@ -32,6 +32,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 
 /**
@@ -310,7 +311,22 @@ fun AppRoot() {
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    val startDestination = if (Session.isLoggedIn) Routes.HOME else Routes.LOGIN
+    // Keep checking in while the app stays open, not just on resume: dispatch only counts an expert
+    // as online if they've been seen in the last few minutes, so an expert sitting on the Home
+    // screen waiting for work must keep proving they're there.
+    androidx.compose.runtime.LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            while (true) {
+                kotlinx.coroutines.delay(60_000)
+                if (Session.isLoggedIn) {
+                    val (batt, net) = readDeviceState(hbCtx)
+                    val loc = lastKnownLoc(hbCtx)
+                    vm.sendHeartbeat(batt, net, loc?.first, loc?.second)
+                }
+            }
+        }
+    }
+    val startDestination =if (Session.isLoggedIn) Routes.HOME else Routes.LOGIN
 
     /* Send a still-onboarding worker to the wizard rather than a home built around jobs they can't
      * accept. Status arrives with bootstrap, so this can't be decided at composition — it runs once

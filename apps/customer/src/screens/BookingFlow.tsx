@@ -92,7 +92,9 @@ export default function BookingFlow() {
   useEffect(() => { if (!promoCodes) setCoupon('') }, [promoCodes])
   const [quote, setQuote] = useState<Quote | null>(null)
   const [wallet, setWallet] = useState(0)
-  const [useWallet, setUseWallet] = useState(true)
+  // Off by default: on, a wallet that covered the total (welcome bonus, refunds) booked the job the
+  // moment Pay was tapped — the customer never saw a payment step. They can still switch it on.
+  const [useWallet, setUseWallet] = useState(false)
   const [note, setNote] = useState(saved?.note || '')
   const [step, setStep] = useState<Step>(saved ? 'address' : cartMode ? 'when' : 'duration')
   const [sheet, setSheet] = useState(false)

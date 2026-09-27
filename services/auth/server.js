@@ -1243,7 +1243,18 @@ app.post('/api/internal/users/:id/referral-complete', internalOnly, async (req, 
 // Admin customer management (called by the admin BFF).
 app.get('/api/internal/customers', internalOnly, async (_q, res) => {
   const { rows } = await pool.query('SELECT * FROM users ORDER BY id DESC')
-  res.json(rows.map(publicUser))
+  // Customers rarely fill in users.city (OTP sign-up never asks), so admin lists showed "—". Fall
+  // back to their saved address's city, then the city part of their location text
+  // ("Borabanda, Hyderabad - 500018" → "Hyderabad").
+  const addr = await pool.query(
+    `SELECT DISTINCT ON (user_id) user_id, city FROM addresses
+      WHERE NOT archived AND COALESCE(city,'') <> '' ORDER BY user_id, is_default DESC, id DESC`)
+  const addrCity = new Map(addr.rows.map((a) => [a.user_id, a.city]))
+  const cityFromLocation = (loc) => String(loc || '').replace(/\s*-\s*\d{6}\s*$/, '').split(',').pop().trim()
+  res.json(rows.map((u) => {
+    const p = publicUser(u)
+    return { ...p, city: p.city || addrCity.get(u.id) || cityFromLocation(u.location) || '' }
+  }))
 })
 // Whitelisted columns an admin may patch. Booleans are coerced so a JSON `false` isn't lost.
 const PATCHABLE = { name: 0, email: 0, phone: 0, city: 0, status: 0, gender: 0, language: 0,

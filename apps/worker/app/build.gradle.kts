@@ -17,6 +17,9 @@ android {
         versionCode = 16
         versionName = "1.15"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Backend base URL baked in at build time: `-PapiBase=http://<wifi-ip>:8080/` (build-apk.ps1
+        // passes the PC's Wi-Fi IP). Blank keeps RetrofitClient's localhost/adb-reverse default.
+        buildConfigField("String", "API_BASE", "\"${project.findProperty("apiBase") ?: ""}\"")
     }
 
     buildTypes {

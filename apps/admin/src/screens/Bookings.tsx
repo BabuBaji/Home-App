@@ -22,7 +22,22 @@ const attentionReason = (b: AdminBooking): string => {
   if (pay === 'failed') return 'Payment failed'
   if (pay === 'pending') return 'Payment pending'
   if ((b as any).escalated) return 'Escalated'
+  if (overrunMin(b) > OVERRUN_GRACE_MIN) return `Running ${overrunMin(b)} min over`
   return ''
+}
+
+/* A job in service is only closed by the expert tapping Complete — nothing ends it on time — so one
+ * the expert forgot sits "In Progress" indefinitely. Flag it once it passes its booked time plus any
+ * approved extension by more than the grace period. */
+const OVERRUN_GRACE_MIN = 15
+function overrunMin(b: AdminBooking): number {
+  const x = b as any
+  if (b.status !== 'in_progress' || !x.started_at) return 0
+  // "30 min", "1 hr", "2.5 hrs"
+  const m = String(x.duration || '').match(/([\d.]+)\s*(hr|hour)?/i)
+  const booked = m ? Math.round(parseFloat(m[1]) * (m[2] ? 60 : 1)) : 0
+  const endMs = Date.parse(x.started_at) + (booked + (Number(x.extension_minutes) || 0)) * 60000
+  return Math.max(0, Math.floor((Date.now() - endMs) / 60000))
 }
 
 const paymentTone = (p: string): string => {
