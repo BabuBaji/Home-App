@@ -32,7 +32,7 @@ export interface Referral { code: string; reward: number; label: string }
 export interface TrustBadge { icon: string; label: string }
 export interface HomeContent { referral: Referral; trust: TrustBadge[]; instantEta: number }
 
-export interface AppNotification { id: string; type: 'booking' | 'offer' | 'cashback'; title: string; body: string; time: string | null; bookingId?: number }
+export interface AppNotification { id: string; type: 'booking' | 'offer' | 'cashback'; title: string; body: string; time: string | null; bookingId?: number; read?: boolean }
 
 export interface PaymentOption { id: string; name: string; icon: string; sub?: string }
 export interface PaymentGroup { group: string; recommended?: boolean; options: PaymentOption[] }

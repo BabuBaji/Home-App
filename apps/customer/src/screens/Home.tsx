@@ -49,7 +49,7 @@ export default function Home() {
   useEffect(() => {
     fetchBookings().then(setBookings).catch(() => {})
     fetchMe().then(({ addresses }) => setAddr(addresses.find((a) => a.is_default) || addresses[0] || null)).catch(() => {})
-    fetchNotifications().then((n) => setNotifCount(n.length)).catch(() => {})
+    fetchNotifications().then((n) => setNotifCount(n.filter((x) => !x.read).length)).catch(() => {})
     fetchWallet().then((w) => setWalletBal(typeof w?.available === 'number' ? w.available : null)).catch(() => {})
   }, [])
   useEffect(() => {

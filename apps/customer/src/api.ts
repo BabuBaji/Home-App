@@ -130,6 +130,9 @@ export const fetchSlots = (date: string, pincode: string, services: string) =>
 // Google Maps JS key for the interactive map location picker.
 export const fetchMapsKey = () => req<{ key: string }>('/api/maps-key')
 export const fetchNotifications = () => req<AppNotification[]>('/api/notifications')
+/** Mark notifications read (server-side, so the bell badge agrees). No ids = everything in the feed. */
+export const markNotificationsRead = (ids?: string[]) =>
+  req<AppNotification[]>('/api/notifications/read', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) })
 
 /* favourites */
 export const fetchFavourites = () => req<string[]>('/api/favourites')

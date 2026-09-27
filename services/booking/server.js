@@ -90,6 +90,10 @@ async function init() {
       started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ,
       created TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    // Which notifications a customer has read. A booking's key carries its status ("b5:on_the_way"),
+    // so each new status shows as unread again; inbox messages ("n12") are read once.
+    `CREATE TABLE IF NOT EXISTS notif_reads (user_id INTEGER NOT NULL, key TEXT NOT NULL,
+      read_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (user_id, key))`,
     `CREATE TABLE IF NOT EXISTS favourites (
       user_id INTEGER NOT NULL, service_id TEXT NOT NULL, created TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, service_id)
@@ -1317,11 +1321,25 @@ app.get('/api/notifications', auth, async (req, res) => {
   // Booking notifications auto-clear once the service is finished: a completed or cancelled booking
   // drops out of the feed automatically, so only live/in-progress bookings show up.
   const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
-  const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
+  res.json(await notificationFeed(req.user.id, rows))
+})
+async function notificationFeed(userId, rows) {
+  const items = rows.map(rowTo).map((b) => ({ id: 'b' + b.id, readKey: `b${b.id}:${b.status}`, type: 'booking', title: STATUS_TITLES[b.status] || 'Booking update', body: `${b.items.map((i) => i.name).join(', ')} · ${b.ref}`, time: b.created, bookingId: b.id }))
   // Plus the customer's real inbox (announcements and offers the admin broadcast, job updates).
+  const inbox = await tryGet(NOTIFICATION_URL, `/api/internal/inbox/customer/${userId}`, [])
+  for (const m of (Array.isArray(inbox) ? inbox : [])) items.push({ id: 'n' + m.id, readKey: 'n' + m.id, type: m.type || 'announcement', title: m.title, body: m.body || '', time: m.created, bookingId: m.booking_id || undefined })
+  const read = new Set((await pool.query('SELECT key FROM notif_reads WHERE user_id=$1', [userId])).rows.map((r) => r.key))
+  return items.map(({ readKey, ...n }) => ({ ...n, read: read.has(readKey) }))
+}
+// Mark read: { ids: ['b5', 'n12'] } for specific ones, or no ids for everything in the current feed.
+app.post('/api/notifications/read', auth, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM bookings WHERE user_id=$1 AND status NOT IN ('completed','cancelled') ORDER BY id DESC LIMIT 6", [req.user.id])
+  const want = Array.isArray(req.body?.ids) ? new Set(req.body.ids.map(String)) : null
+  const keys = rows.map(rowTo).filter((b) => !want || want.has('b' + b.id)).map((b) => `b${b.id}:${b.status}`)
   const inbox = await tryGet(NOTIFICATION_URL, `/api/internal/inbox/customer/${req.user.id}`, [])
-  for (const m of (Array.isArray(inbox) ? inbox : [])) items.push({ id: 'n' + m.id, type: m.type || 'announcement', title: m.title, body: m.body || '', time: m.created, bookingId: m.booking_id || undefined })
-  res.json(items)
+  for (const m of (Array.isArray(inbox) ? inbox : [])) if (!want || want.has('n' + m.id)) keys.push('n' + m.id)
+  if (keys.length) await pool.query('INSERT INTO notif_reads (user_id, key) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING', [req.user.id, keys])
+  res.json(await notificationFeed(req.user.id, rows))
 })
 app.get('/api/support/contact', async (_q, res) => res.json({
   phone: await getSetting(ADMIN_URL, 'support_phone', ''), whatsapp: await getSetting(ADMIN_URL, 'support_whatsapp', ''),
