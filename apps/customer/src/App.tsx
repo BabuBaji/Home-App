@@ -82,6 +82,9 @@ import SavedAddresses from './screens/SavedAddresses'
 import DefaultAddress from './screens/DefaultAddress'
 import CancelPolicy from './screens/CancelPolicy'
 import PersonalInfo from './screens/PersonalInfo'
+// Settings screen for location access. Distinct from screens/Permissions, which is the
+// one-time onboarding step at /onboarding/permission.
+import LocationPermission from './screens/profile/LocationPermission'
 import Terms from './screens/Terms'
 // Module 6 — Live Job Tracking
 import JobTracking from './screens/job/JobTracking'
@@ -126,7 +129,9 @@ export default function App() {
 
   // Capture the customer's GPS as soon as the app opens with a signed-in user (and right
   // after they log in). Cached + sent to their profile so bookings/worker/admin use it.
-  useEffect(() => { if (user) captureLocationOnOpen() }, [user?.id])
+  // The fix is cached locally; it's written to the profile only for a user with no location yet —
+  // saving it on every open overwrote the address (and pincode) the customer had chosen.
+  useEffect(() => { if (user) captureLocationOnOpen(!user.location) }, [user?.id, user?.location])
   // The saved language lives on the profile too — adopt it on sign-in (e.g. a fresh install).
   // If the language was picked on the welcome screen before signing in, push that choice to the
   // profile instead of letting the profile's (older) value overwrite it.
@@ -441,6 +446,7 @@ export default function App() {
               <Route path="/addresses/default" element={<DefaultAddress />} />
               <Route path="/cancellation-policy" element={<CancelPolicy />} />
               <Route path="/personal" element={<PersonalInfo />} />
+              <Route path="/permissions" element={<LocationPermission />} />
               <Route path="/terms" element={<Terms />} />
             </Route>
             <Route path="*" element={<Navigate to={user ? '/home' : '/login'} replace />} />

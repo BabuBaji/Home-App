@@ -78,7 +78,7 @@ export default function MyProfile() {
 
         <div className="ws-card">
           {ROWS.map((r) => (
-            <button key={r.t} className="ws-row" onClick={() => nav(r.to)}>
+            <button key={r.to} className="ws-row" onClick={() => nav(r.to)}>
               <span className="ws-ico">{r.icon}</span>
               <span className="ws-main"><span className="ws-t">{t(r.t)}</span></span>
               {r.sub && <span className="mp-count">{r.sub}</span>}
