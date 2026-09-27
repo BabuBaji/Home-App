@@ -396,14 +396,37 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .stat-value { font-size: 17px; }
 }
 
-/* Settings: nav · form · summary rail. Below 1500px the rail moves under the form so the form
-   keeps a readable width (fields and toggles were wrapping and spilling at laptop sizes). */
-.settings-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
-.settings-navitem { white-space: nowrap; }
+/* Settings: section nav · section form */
+.settings-layout { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 16px; align-items: start; }
+.settings-nav-card { position: sticky; top: 16px; padding: 10px; }
+.settings-nav { display: grid; gap: 2px; }
+.settings-navitem { box-sizing: border-box; display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; white-space: nowrap; padding: 10px 12px;
+  border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--ink-2); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
 .settings-navitem svg { flex-shrink: 0; }
-@media (max-width: 1500px) {
-  .settings-layout { grid-template-columns: 236px minmax(0, 1fr); }
-  .settings-layout > .col-rail { grid-column: 2; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.settings-navitem span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.settings-nav > * { min-width: 0; }
+.settings-navitem .nav-go { color: var(--muted); opacity: .7; }
+.settings-navitem:hover { background: var(--line-2); }
+.settings-navitem.active { background: var(--violet-50); color: var(--violet); font-weight: 700; }
+.settings-navitem.active .nav-go { color: var(--violet); }
+.settings-head { align-items: flex-start; }
+.settings-group { padding: 18px 0; border-top: 1px solid var(--line); }
+.settings-group:first-of-type { border-top: 0; padding-top: 6px; }
+.settings-group h4 { font-size: 14px; font-weight: 700; margin: 0 0 12px; }
+.toggle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 32px; }
+.soon-tag { margin-left: 8px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; color: #b97400; background: var(--amber-bg); vertical-align: 1px; white-space: nowrap; }
+.settings-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 10px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); font: inherit; text-align: left; cursor: pointer; color: var(--ink); }
+.settings-link:hover { border-color: var(--violet-100); background: var(--violet-50); }
+.settings-link strong { display: block; font-size: 13.5px; }
+.settings-link small { display: block; font-size: 12px; margin-top: 2px; }
+.settings-link svg { color: var(--muted); flex-shrink: 0; }
+@media (max-width: 900px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav-card { position: static; }
+  .settings-nav { display: flex; overflow-x: auto; gap: 4px; }
+  .settings-navitem { width: auto; }
+  .settings-navitem .nav-go { display: none; }
 }
 
 /* Summary row directly on the page (pages that return a fragment) keeps its distance from the cards */

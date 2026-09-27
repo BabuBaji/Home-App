@@ -246,7 +246,7 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 }
 
 /* ---------- field ---------- */
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>
 }
 
