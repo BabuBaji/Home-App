@@ -1340,7 +1340,7 @@ app.get('/api/admin/bookings', adminAuth, requireAnyPerm('bookings.view', 'cance
   // Enrich with customer name from the auth service (best-effort).
   const ids = [...new Set(bookings.map((b) => b.user_id))]
   const names = {}
-  await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name }))
+  await Promise.all(ids.map(async (id) => { const u = await tryGet(AUTH_URL, `/api/internal/users/${id}`, null); if (u?.user) names[id] = u.user.name || u.user.phone }))
   // Admin Bookings list reads `pro` (worker name) and `service` (joined item names) directly.
   res.json(bookings.map((b) => ({ ...b, customer: names[b.user_id] || 'Customer', pro: b.pro_name || '', service: (b.items || []).map((i) => i.name).join(', ') })))
 })
@@ -1386,7 +1386,7 @@ app.get('/api/admin/bookings/:id', adminAuth, requireAnyPerm('bookings.view', 'c
   const u = await tryGet(AUTH_URL, `/api/internal/users/${b.user_id}`, null)
   // Extensions ride along with the booking: an admin looking at what was charged needs to see the
   // extra time too, not just the base service.
-  res.json({ ...b, customer: u?.user?.name || 'Customer', extensions: await extensionsFor(b.id) })
+  res.json({ ...b, customer: u?.user?.name || u?.user?.phone || 'Customer', extensions: await extensionsFor(b.id) })
 })
 // Settlement breakdown for a booking — real money math: the payment-gateway fee + its GST are the
 // actual charges a UPI/card payment incurs (0 on wallet); worker payout comes from the stored comp

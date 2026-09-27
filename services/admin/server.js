@@ -966,7 +966,7 @@ app.get('/api/admin/control-tower', admin, requireAnyPerm('liveops.view'), async
       return {
         id: b.id, ref: b.ref || `#${b.id}`, status: b.status,
         service: (Array.isArray(b.items) ? b.items.map((i) => i.name).join(', ') : '') || b.type || '—',
-        customer: cu.name || 'Customer', customerPhone: cu.phone || '',
+        customer: cu.name || cu.phone || 'Customer', customerPhone: cu.phone || '',
         worker: b.pro_name || (w && w.name) || '', workerPhone: w ? (w.phone || '') : '', workerId: b.worker_id || null,
         zoneId: b.zone_id || null, zone: zById.get(b.zone_id)?.name || (b.zone_id ? `Zone ${b.zone_id}` : 'Unzoned'),
         date: b.date || '', time: b.time || '', total: b.total || 0,
@@ -1010,7 +1010,7 @@ app.get('/api/admin/dashboard', admin, requireAnyPerm('dashboard.view'), async (
   const revenue = bookings.filter(isPaid).reduce((s, b) => s + (b.total || 0), 0)
   const rated = customers.filter((c) => c.rating > 0)
   const avgRating = rated.length ? +(rated.reduce((a, c) => a + c.rating, 0) / rated.length).toFixed(1) : 0
-  const nameById = new Map(customers.map((c) => [c.id, c.name]))
+  const nameById = new Map(customers.map((c) => [c.id, c.name || c.phone]))
   const dayOf = (d) => String(d || '').slice(0, 10)
 
   // 7-day trend (oldest → newest) for the line/bar charts
