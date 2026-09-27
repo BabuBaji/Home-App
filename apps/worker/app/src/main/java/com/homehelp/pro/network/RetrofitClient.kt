@@ -42,8 +42,13 @@ object RetrofitClient {
      * The durable fix is to publish the right apiBase — update app-config.json on the `Baji`
      * branch (the repo root copy is already correct) — and then blank this constant, which
      * restores normal config-driven behaviour. Blank it before any release build.
+     *
+     * A build-time `-PapiBase=…` (BuildConfig.API_BASE — build-apk.ps1 passes the PC's Wi-Fi IP)
+     * takes precedence, so the phone reaches the backend over Wi-Fi with no cable.
      */
-    private const val PINNED_BASE_URL = "http://localhost:8080/"
+    private val PINNED_BASE_URL = com.homehelp.pro.BuildConfig.API_BASE.trim()
+        .let { if (it.isNotEmpty() && !it.endsWith("/")) "$it/" else it }
+        .ifBlank { "http://localhost:8080/" }
 
     /** Current backend base URL — updated by [refreshBaseUrl] unless [PINNED_BASE_URL] is set. */
     @Volatile var baseUrl: String = PINNED_BASE_URL.ifBlank { FALLBACK_URL }
