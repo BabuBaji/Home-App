@@ -1980,9 +1980,9 @@ body { line-height: 1.45; }
    read as though the address continued underneath the wallet/bell/profile cluster. Long Indian
    addresses (flat + society + locality + city + pin) ellipsise - the full text is one tap away. */
 .hd-loc-full { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  text-align: left; width: 100%; max-width: calc(100% - 52px); padding: 0 0 0 23px; font-size: 11.5px;
-  font-weight: 500; letter-spacing: .1px; line-height: 1.35; opacity: .78; }
-.hd-loc b { font-weight: 600; }
+  text-align: left; width: 100%; max-width: calc(100% - 52px); padding: 0 0 0 23px; font-size: 12.5px;
+  font-weight: 400; letter-spacing: 0; line-height: 1.35; opacity: .85; }
+.hd-loc b { font-size: 16.5px; font-weight: 700; letter-spacing: -.2px; }
 .hd-bell { position: relative; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); }
 .hd-bell:active { background: var(--vsoft); }
 .hd-badge { position: absolute; top: 3px; right: 3px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
@@ -2089,7 +2089,7 @@ body { line-height: 1.45; }
 
 /* section head */
 .hd-sec-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 2px 12px; }
-.hd-sec-head h3 { font-size: 16.5px; font-weight: 600; color: var(--ink); }
+.hd-sec-head h3 { font-size: 20px; font-weight: 700; letter-spacing: -.4px; line-height: 1.2; color: var(--ink); }
 .hd-seeall { font-size: 13px; font-weight: 600; color: var(--v); }
 
 /* quick actions */
@@ -2111,8 +2111,10 @@ body { line-height: 1.45; }
 .hd-pop-card { flex: 0 0 128px; display: flex; flex-direction: column; text-align: left; }
 .hd-pop-img { display: block; height: 92px; border-radius: 14px; overflow: hidden; background: linear-gradient(135deg, #efeafe, #e2dbf8); }
 .hd-pop-img img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 34%; }
-.hd-pop-name { font-size: 13px; font-weight: 500; color: var(--ink); margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hd-pop-price { font-size: 12.5px; font-weight: 600; color: var(--v); margin-top: 2px; }
+.hd-pop-name { font-size: 14px; font-weight: 500; letter-spacing: -.1px; line-height: 1.3; color: var(--ink); margin-top: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* in the 2-column grid a long name wraps to a second line instead of being cut off */
+.hd-pop-all .hd-pop-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hd-pop-price { font-size: 13px; font-weight: 600; color: var(--v); margin-top: 3px; }
 /* "All Services" — full 2-column grid instead of a horizontal scroll */
 .hd-pop-all { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; overflow: visible; margin: 0; }
 .hd-pop-all .hd-pop-card { flex: initial; width: auto; }
