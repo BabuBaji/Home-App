@@ -82,7 +82,8 @@ async function mkCustomer(key, zoneKey, n, pin, lat, lng) {
   const a = await must('addr', api('POST', '/api/addresses', { token: v.token, body: { label: 'Home', house: '1', street: `${key} street`, city: Z[zoneKey].city, pincode: pin, lat, lng, makeDefault: true } }))
   C[key] = { id: v.user.id, tok: v.token, addr: a.id, pin, lat, lng, zone: zoneKey }
 }
-const online = (k, on) => api('POST', '/api/worker/status', { token: W[k].tok, body: { state: on ? 'Available' : 'Offline' } })
+// Going online also sends the app's heartbeat — dispatch only offers to experts whose app checked in lately.
+const online = async (k, on) => { const r = await api('POST', '/api/worker/status', { token: W[k].tok, body: { state: on ? 'Available' : 'Offline' } }); if (on) await api('POST', '/api/worker/heartbeat', { token: W[k].tok, body: { battery: 80, network: 'wifi' } }); return r }
 const offerOf = async (k) => { const o = (await api('GET', '/api/worker/jobs/offer', { token: W[k].tok })).json; return o?.state === 'PENDING' ? Number(o.bookingId) : null }
 const bookingAdmin = async (id) => (await api('GET', `/api/admin/bookings/${id}`, { token: SUPER })).json
 async function book(ck, extra = {}) {

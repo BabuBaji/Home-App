@@ -257,6 +257,10 @@ interface ApiService {
     @GET("api/worker/jobs/extensions")
     suspend fun jobExtensions(): ExtensionsResponse
 
+    /** Add-ons sellable on the active job, priced for its zone by the catalogue. */
+    @GET("api/worker/jobs/addons")
+    suspend fun jobAddons(): AddonsResponse
+
     @POST("api/worker/jobs/extras")
     suspend fun addExtra(@Body body: ExtraBody): JobStateResponse
 

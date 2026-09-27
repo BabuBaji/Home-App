@@ -81,6 +81,19 @@ await step('Onboarding: permissions (Not now)', async () => {
   const u = await url()
   if (u.includes('/onboarding/permission')) { await shot('perm'); await tap(/not now/) }
   else if (u.includes('/onboarding/')) { await shot('onboard-other'); throw new Error('unexpected onboarding screen ' + u) }
+  const w = await url(); if (w !== '/home' && w !== '/address-details') throw new Error('landed on ' + w); return w
+})
+// A first-time customer is asked for flat details (house, building, home size, receiver phone)
+// after the location step, then lands on home.
+await step('Onboarding: flat details', async () => {
+  if ((await url()) !== '/address-details') return 'skipped (not shown)'
+  await shot('flat-details')
+  await type('input[placeholder="Flat/House No.*"]', 'Flat 12')
+  await type('input[placeholder="Apartment / Building name*"]', 'Journey Residency')
+  await tap(/^2 bhk$/)
+  const ph = await page.$eval('input.ad-fld.phone', (i) => i.value).catch(() => '')
+  if (ph.replace(/\D/g, '').length < 10) await type('input.ad-fld.phone', phone)
+  await tap(/^save address$/); await settle(1500)
   const w = await url(); if (w !== '/home') throw new Error('landed on ' + w); await shot('home'); return w
 })
 const tok = await page.evaluate(() => localStorage.getItem('hh_token'))
@@ -170,6 +183,7 @@ await adm('POST', '/api/admin/shifts', { worker_id: wk.id || wk.worker?.id, zone
 const wo = await wapi('POST', '/api/worker/auth/request-otp', { phone: wphone })
 const W = (await wapi('POST', '/api/worker/auth/verify', { phone: wphone, otp: wo.devOtp || '1234' })).token
 await wapi('POST', '/api/worker/status', { state: 'Available' }, W)
+await wapi('POST', '/api/worker/heartbeat', { battery: 80, network: 'wifi' }, W) // dispatch only offers to experts whose app checked in lately
 await api('POST', '/api/addresses', { label: 'Work', house: 'Flat 7', street: 'Road No. 12, Banjara Hills', city: 'Hyderabad', pincode: lpin, lat: llat, lng: llng, makeDefault: true })
 const jobText = () => page.evaluate(() => document.body.innerText)
 const waitText = async (re, ms = 20000) => { const end = Date.now() + ms; while (Date.now() < end) { if (re.test(await jobText())) return true; await sleep(1000) } return false }
