@@ -73,7 +73,7 @@ function pickTarget(url) {
   // in the dispatch DB alongside the worker half. Must be tested BEFORE the general rule below.
   if (/^\/api\/bookings\/[^/]+\/messages\b/.test(u)) return U.dispatch
   if (/^\/api\/bookings\/[^/]+\/call\b/.test(u)) return U.dispatch // masked call bridge
-  if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/favourites') || p('/api/favourite-experts') || p('/api/recurring') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
+  if (p('/api/bookings') || p('/api/refunds') || p('/api/slots') || p('/api/instant-status') || p('/api/favourites') || p('/api/favourite-experts') || p('/api/recurring') || p('/api/policy') || p('/api/support') || p('/api/notifications')) return U.booking
 
   // ----- support tickets -----
   if (p('/api/tickets') || p('/api/push')) return U.notification

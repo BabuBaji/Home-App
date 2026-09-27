@@ -139,6 +139,13 @@ export default function SettingsScreen() {
           {toggleRow('enable_promo', 'Promo codes', true, { hint: 'Off: the coupon box is hidden and typed codes are ignored. Automatic offers still apply.' })}
           {toggleRow('enable_reviews', 'Reviews & ratings', true, { hint: 'Off: customers aren’t asked to rate finished jobs. Existing ratings stay.' })}
         </div>
+        <div className="form-grid" style={{ marginTop: 16 }}>
+          {input('online_window_min', 'Expert counts as online for (minutes)', { type: 'number', min: 1, hint: 'After the expert app’s last contact. Offline experts get no jobs and Instant shows “partners busy”.' })}
+          {input('slot_notice_min', 'Scheduled slot notice (minutes)', { type: 'number', min: 0, hint: 'A scheduled slot must start at least this far from now.' })}
+          {input('slot_minutes', 'Slot length (minutes)', { type: 'number', min: 15, step: '15', hint: '15, 20, 30 or 60. Slots run through the zone’s working hours.' })}
+          {input('otp_lead_min', 'Show service OTP before the slot (minutes)', { type: 'number', min: 0 })}
+          {input('overrun_grace_min', 'Flag jobs running over by (minutes)', { type: 'number', min: 0, hint: 'Shown in Bookings ▸ Needs Attention.' })}
+        </div>
       </Group>
     </>,
     business: <>

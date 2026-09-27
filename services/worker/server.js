@@ -505,6 +505,8 @@ async function init() {
     )`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS site_id INTEGER`,
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS location_at TIMESTAMPTZ`,
+    // Any authenticated request from the expert app (worker or dispatch service) — "app is running".
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_name TEXT`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_lat REAL`,
@@ -828,7 +830,20 @@ async function getByPhone(phone) {
     [digits])
   return rows[0] || null
 }
-const serviceSet = (w) => new Set((w.services || []).map((s) => String(s).toLowerCase().trim()))
+// Services marked "any expert can do this" in Admin → Services (the customer picks the chores on
+// the spot, e.g. hourly help): every expert with at least one skill qualifies — nobody has to add
+// them to their skills by hand. Names come from the catalog, refreshed every minute.
+let ANY_TASK_SERVICES = []
+async function refreshServiceRules() {
+  const rules = await tryGet(CATALOG_URL, '/api/internal/service-rules', null)
+  if (Array.isArray(rules)) ANY_TASK_SERVICES = rules.filter((r) => r.anyTask).map((r) => String(r.name).toLowerCase().trim())
+}
+refreshServiceRules(); setInterval(refreshServiceRules, 60000).unref()
+const serviceSet = (w) => {
+  const set = new Set((w.services || []).map((s) => String(s).toLowerCase().trim()))
+  if (set.size) for (const n of ANY_TASK_SERVICES) set.add(n)
+  return set
+}
 
 /* ---------- shifts / roster (WFM) ---------- */
 // Current IST weekday + minutes-from-midnight (the settings timezone is GMT+5:30).
@@ -1072,10 +1087,18 @@ app.get('/health', (_q, res) => res.json({ service: 'worker', ok: true }))
 /* ---------- worker-app auth ---------- */
 // Verifies a SIGNED token. Previously this parsed the id out of the string, so `Bearer worker-6`
 // was a full session for worker 6 — which meant the login OTP protected nothing at all.
+// Stamp workers.last_seen_at at most once a minute per worker (every app request calls through here).
+const seenStamped = new Map()
+function markSeen(id) {
+  const now = Date.now()
+  if (now - (seenStamped.get(id) || 0) < 60000) return
+  seenStamped.set(id, now)
+  pool.query('UPDATE workers SET last_seen_at=now() WHERE id=$1', [id]).catch(() => {})
+}
 function auth(req, res, next) {
   const id = tokenSubject(req.headers.authorization, 'worker')
   if (!Number.isFinite(id)) return res.status(401).json({ ok: false, error: 'Not authenticated' })
-  getWorker(id).then((w) => { if (!w) return res.status(401).json({ ok: false, error: 'Not authenticated' }); req.worker = w; next() })
+  getWorker(id).then((w) => { if (!w) return res.status(401).json({ ok: false, error: 'Not authenticated' }); req.worker = w; markSeen(id); next() })
 }
 
 /* ---------- login OTP ----------
@@ -4946,8 +4969,11 @@ app.post('/api/admin/workers/:id/site', adminAuth, scopeWorker, requirePerm('wor
  * `available` defaults to true for every new account, so on its own it made people who had never
  * opened the app look online — jobs were offered to them and sat until the booking auto-cancelled.
  * The app heartbeats (location_at / profile.device.at) every minute while it is open. */
-const ONLINE_WINDOW_MS = Number(process.env.ONLINE_WINDOW_MIN || 15) * 60000
-const lastSeenMs = (w) => Math.max(Date.parse(w.location_at || '') || 0, Date.parse(w.profile?.device?.at || '') || 0)
+// Settings ▸ Operations ▸ online_window_min (default 15), refreshed every 30s.
+let ONLINE_WINDOW_MS = 15 * 60000
+async function refreshOnlineWindow() { ONLINE_WINDOW_MS = Math.max(1, await getSettingInt(ADMIN_URL, 'online_window_min', 15)) * 60000 }
+refreshOnlineWindow(); setInterval(refreshOnlineWindow, 30000).unref()
+const lastSeenMs = (w) => Math.max(Date.parse(w.last_seen_at || '') || 0, Date.parse(w.location_at || '') || 0, Date.parse(w.profile?.device?.at || '') || 0)
 const isOnline = (w) => !!w.available && Date.now() - lastSeenMs(w) <= ONLINE_WINDOW_MS
 
 app.get('/internal/on-shift', internalOnly, async (req, res) => {
@@ -5044,7 +5070,7 @@ app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
   const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
   const rows = (await pool.query(
-    `SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng, zone_id, location_at, profile FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''} ORDER BY jobs DESC NULLS LAST, rating DESC`,
+    `SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng, zone_id, location_at, last_seen_at, profile FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''} ORDER BY jobs DESC NULLS LAST, rating DESC`,
     zoneId ? [zoneId] : [])).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
   res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: isOnline(w), lat: w.last_lat, lng: w.last_lng })))
@@ -5105,6 +5131,7 @@ app.post('/internal/workers/:id/offer-outcome', internalOnly, async (req, res) =
   ).catch((e) => console.error('[worker] offer-outcome:', e?.message || e))
   res.json({ ok: true })
 })
+app.post('/internal/workers/:id/seen', internalOnly, (req, res) => { markSeen(Number(req.params.id)); res.json({ ok: true }) })
 app.post('/internal/workers/:id/location', internalOnly, async (req, res) => { await pool.query('UPDATE workers SET last_lat=$1, last_lng=$2, location_at=now() WHERE id=$3', [req.body?.lat, req.body?.lng, Number(req.params.id)]); res.json({ ok: true }) })
 app.get('/internal/workers/:id/public-profile', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); res.json(w ? { id: w.id, name: w.name, rating: w.rating, jobs: w.jobs, phone: w.phone, avatar: w.avatar, verified: !!w.verified, city: w.city, services: Array.isArray(w.services) ? w.services : [] } : null) })
 app.patch('/internal/workers/:id', internalOnly, async (req, res) => res.json(await patchWorker(Number(req.params.id), req.body || {}, res)))

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { LayoutGrid, CheckCircle2, PauseCircle, Tag, Funnel, Plus, Eye, Pencil, Trash2 } from 'lucide-react'
+import { LayoutGrid, CheckCircle2, PauseCircle, Tag, Funnel, Plus, Eye, Pencil, Trash2, Clock } from 'lucide-react'
+import ServicePricingModal from './ServicePricingModal'
 import { fetchServices, createService, updateService, deleteService } from '../api'
 import type { AdminService } from '../types'
 import { Card, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money } from '../components/UI'
@@ -30,6 +31,7 @@ export default function Services() {
   const [pageSize, setPageSize] = useState(10)
 
   const [modal, setModal] = useState<null | 'add' | 'edit' | 'view'>(null)
+  const [pricingFor, setPricingFor] = useState<AdminService | null>(null)
   const [active, setActive] = useState<AdminService | null>(null)
   const [draft, setDraft] = useState<Draft>(emptyDraft)
   const [saving, setSaving] = useState(false)
@@ -146,6 +148,7 @@ export default function Services() {
                     <div className="actions">
                       <button className="iconbtn" title="View" onClick={() => openView(r)}><Eye size={16} /></button>
                       <button className="iconbtn" title="Edit" onClick={() => openEdit(r)}><Pencil size={16} /></button>
+                      <button className="iconbtn" title="Durations & prices" onClick={() => setPricingFor(r)}><Clock size={16} /></button>
                       <button className="iconbtn" title="Delete" style={{ color: 'var(--red)' }} onClick={() => remove(r)}><Trash2 size={16} /></button>
                     </div>
                   </td>
@@ -158,6 +161,7 @@ export default function Services() {
         <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="services" onPage={setPage} onSize={(s) => { setPageSize(s); setPage(1) }} />
       </Card>
 
+      {pricingFor && <ServicePricingModal service={pricingFor} onClose={() => { setPricingFor(null); load() }} />}
       {(modal === 'add' || modal === 'edit') && (
         <Modal
           title={modal === 'edit' ? 'Edit Service' : 'Add Service'}

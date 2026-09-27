@@ -155,7 +155,14 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
   const [city, setCity] = useState(zone?.city || '')
   const [state, setState] = useState(zone?.state || '')
   const [status, setStatus] = useState(zone?.status === 'live' ? 'Active' : zone?.status === 'paused' ? 'Inactive' : 'Active')
-  const [cfg, setCfg] = useState<ZoneConfig>({ ...defaultConfig(), ...(zone?.config || {}) })
+  // A zone created outside the wizard (API / older data) has pincodes but no coverage config. Start
+  // coverage from those pincodes — the default (a radius with no pincodes) would otherwise be saved
+  // over them and the zone would stop matching customers by pincode.
+  const [cfg, setCfg] = useState<ZoneConfig>(() => {
+    const base = { ...defaultConfig(), ...(zone?.config || {}) }
+    if (zone && !zone.config?.coverage && zone.pincodeList?.length) base.coverage = { ...base.coverage!, mode: 'pincodes', pincodes: zone.pincodeList }
+    return base
+  })
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
@@ -254,7 +261,8 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
           )
         })}
       </div>
-      <div className="zo-wiz2">
+      {/* Full-width steps (the summary rail duplicated Next and only showed estimates). */}
+      <div>
         <div>
           <div className="zo-panel zo-wrap">
             <div className="zo-panel-h">
@@ -273,67 +281,11 @@ function ZoneWizard({ zone, onDone, onCancel }: { zone: BZone | null; onDone: ()
               : <button className="zo-btn" disabled={saving || !ready} title={ready ? 'Publish this zone live' : 'Complete first: ' + missing.join(', ')} onClick={goLive}><Rocket size={16} /> Go Live</button>}
           </div>
         </div>
-        <ZoneSummary name={name} code={code} city={city} state={state} status={status} cfg={cfg} step={step} saving={saving} ready={ready} onNext={next} onGoLive={goLive} />
       </div>
     </div>
   )
 }
 
-/* ───────── zone summary rail ───────── */
-function ZoneSummary({ name, code, city, state, status, cfg, step, saving, ready, onNext, onGoLive }: {
-  name: string; code: string; city: string; state: string; status: string
-  cfg: ZoneConfig; step: number; saving: boolean; ready: boolean; onNext: () => void; onGoLive: () => void
-}) {
-  const cov = cfg.coverage
-  // Serviceable area: πr² for a radius zone, ~4 km² per pincode otherwise. Reach is an estimate
-  // from area density (~620 households/km²) plus mapped apartment units.
-  const areaKm2 = cov?.mode === 'pincodes' ? cov.pincodes.length * 4 : cov ? Math.PI * cov.radiusKm * cov.radiusKm : 0
-  const units = (cfg.apartments || []).reduce((a, x) => a + (x.units || 0), 0)
-  const reach = Math.round(areaKm2 * 620) + units * 2
-  const apts = cfg.apartments?.length || 0
-  const svc = cfg.services?.length || 0
-  const nextStep = STEPS[step + 1]
-  const inactive = status === 'Inactive'
-  const rows = [
-    { Icon: Building2, l: 'Zone Name', v: name || '—' },
-    { Icon: Hash, l: 'Zone Code', v: code || '—' },
-    { Icon: MapPin, l: 'City', v: [city, state].filter(Boolean).join(', ') || '—' },
-    { Icon: Maximize2, l: 'Area Size', v: areaKm2 ? `${areaKm2.toFixed(1)} km²` : '—' },
-    { Icon: Users, l: 'Estimated Reach', v: reach ? `${reach.toLocaleString('en-IN')} Customers` : '—' },
-    { Icon: Layers, l: 'Apartments / Localities', v: `${apts} Added` },
-    { Icon: Sparkles, l: 'Services', v: `${svc} Selected` },
-  ]
-  return (
-    <aside className="zo-sum">
-      <h3>Zone Summary</h3>
-      {rows.map((r) => (
-        <div key={r.l} className="zo-sum-row">
-          <span className="zo-sum-ic"><r.Icon size={16} /></span>
-          <div><div className="l">{r.l}</div><div className="v">{r.v}</div></div>
-        </div>
-      ))}
-      <div className="zo-sum-row">
-        <span className="zo-sum-ic" style={{ background: inactive ? '#F1F5F9' : '#DCFCE7', color: inactive ? '#64748B' : '#15803D' }}><CheckCircle2 size={16} /></span>
-        <div><div className="l">Status</div><div style={{ marginTop: 3 }}><span className={'zo-chip ' + (inactive ? 'inactive' : 'active')}><i />{status}</span></div></div>
-      </div>
-      <div className="zo-next">
-        {nextStep ? (
-          <>
-            <div className="k">Next Step</div>
-            <div className="d">Define the <b>{nextStep.title.toLowerCase()}</b> for this zone.</div>
-            <button className="zo-btn" style={{ width: '100%', justifyContent: 'center' }} disabled={saving} onClick={onNext}>Continue <ChevronRight size={15} /></button>
-          </>
-        ) : (
-          <>
-            <div className="k">Ready to launch</div>
-            <div className="d">{ready ? 'All checks complete — you can go live.' : 'Complete the checklist to go live.'}</div>
-            <button className="zo-btn" style={{ width: '100%', justifyContent: 'center' }} disabled={saving || !ready} onClick={onGoLive}><Rocket size={15} /> Go Live</button>
-          </>
-        )}
-      </div>
-    </aside>
-  )
-}
 
 /* ───────── step panels ───────── */
 const F = ({ label, children }: { label: string; children: ReactNode }) => <label className="zo-f"><span>{label}</span>{children}</label>

@@ -56,6 +56,8 @@ const DEFAULT_SETTINGS = {
   pg_fee_percent: '2.36', pg_fee_gst_percent: '18',
   worker_incentive_percent: '3', operational_cost_percent: '2', marketing_cost_percent: '1',
   auto_assign: 'true', dispatch_mode: 'offer', maintenance_mode: 'false', dispatch_timeout_min: '5', schedule_dispatch_lead_min: '120',
+  // Booking & expert timing (Settings ▸ Operations): minutes.
+  online_window_min: '15', slot_notice_min: '60', otp_lead_min: '60', overrun_grace_min: '15', slot_minutes: '30',
   gst_inclusive: 'false',   // GST is added on top of the shown price (exclusive) — the market norm; toggle in Settings
   // Seller details printed on the customer tax invoice (edit to your registered company).
   company_name: 'HomeHelp Services Pvt. Ltd.', company_gstin: '36AABCH1234M1Z7',

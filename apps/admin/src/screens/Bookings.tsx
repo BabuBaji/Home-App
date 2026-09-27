@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { CalendarCheck, CheckCircle2, Clock, CalendarClock, XCircle, Funnel, Download, Eye, MoreVertical, UserX, AlertTriangle } from 'lucide-react'
-import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones } from '../api'
+import { fetchBookings, fetchBooking, updateBooking, fetchWorkers, fetchZones, fetchSettings } from '../api'
 import type { AdminBooking } from '../types'
 import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Modal, Field, useToast, useConfirm, money, shortDate, MiniMap, parseLatLng, TabPill } from '../components/UI'
 import { useStore, has } from '../store'
@@ -29,7 +29,7 @@ const attentionReason = (b: AdminBooking): string => {
 /* A job in service is only closed by the expert tapping Complete — nothing ends it on time — so one
  * the expert forgot sits "In Progress" indefinitely. Flag it once it passes its booked time plus any
  * approved extension by more than the grace period. */
-const OVERRUN_GRACE_MIN = 15
+let OVERRUN_GRACE_MIN = 15   // Settings ▸ Operations ▸ overrun_grace_min, loaded with the page
 function overrunMin(b: AdminBooking): number {
   const x = b as any
   if (b.status !== 'in_progress' || !x.started_at) return 0
@@ -72,6 +72,8 @@ export default function Bookings() {
   const [zone, setZone] = useState('all')
   const [zoneNames, setZoneNames] = useState<Record<number, string>>({})
   useEffect(() => { fetchZones().then((zs) => setZoneNames(Object.fromEntries(zs.map((z) => [z.id, z.name])))).catch(() => {}) }, [])
+  const [, setGraceTick] = useState(0)
+  useEffect(() => { fetchSettings().then((st) => { const n = parseInt(String((st as Record<string, unknown>).overrun_grace_min ?? ''), 10); if (Number.isFinite(n)) { OVERRUN_GRACE_MIN = n; setGraceTick((x) => x + 1) } }).catch(() => {}) }, [])
 
   const [modal, setModal] = useState<null | 'view' | 'more'>(null)
   const [active, setActive] = useState<AdminBooking | null>(null)

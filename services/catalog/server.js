@@ -212,6 +212,22 @@ async function init() {
     `ALTER TABLE home_banners ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS duration_min INTEGER`,
     `ALTER TABLE services ADD COLUMN IF NOT EXISTS gst_pct INTEGER`,   // GST rate per service (SAC-based); default 18%
+    // Admin-managed duration menu per service (label, minutes, price, strike price). A service with
+    // rows here is sold exactly at these; one without falls back to the built-in ±₹50 ladder.
+    `CREATE TABLE IF NOT EXISTS service_durations (
+      service_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, minutes INTEGER NOT NULL,
+      price INTEGER NOT NULL, original INTEGER, active BOOLEAN NOT NULL DEFAULT true, sort INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (service_id, id))`,
+    // Editable "what's included / not included" + description; NULL = the built-in text.
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS includes JSONB`,
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS excludes JSONB`,
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS description TEXT`,
+    // "Any expert can do this — the customer picks the tasks" (hourly help): every expert with at
+    // least one skill qualifies. Plus the expert-app checklist / required photos for the service
+    // (NULL = the built-in list for that kind of service).
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS any_task BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS checklist JSONB`,
+    `ALTER TABLE services ADD COLUMN IF NOT EXISTS photo_slots JSONB`,
     // Time & Extension Rules — per service, what extra time may be sold once the booked duration
     // runs out, at what price, and how much of it the worker keeps. `blocks` is the ordered menu
     // the apps offer: [{ mins, price, payout }]. A service with no row (or enabled=false) simply
@@ -351,6 +367,26 @@ const rawServiceRow = async (id) =>
   (await pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services WHERE id=$1', [id])).rows[0] || null
 const zoneBase = (s, zmap) => (zmap[s.id] && zmap[s.id].price > 0 ? zmap[s.id].price : s.price)
 
+/* A service's duration menu. Admin-set rows (service_durations) win; a zone price for the service
+ * scales them by the same ratio the zone applies to its base price, so zone pricing keeps working.
+ * Services with no rows use the built-in ladder off the (zone) base — unchanged behaviour. */
+async function durationMap() {
+  const { rows } = await pool.query('SELECT * FROM service_durations WHERE active ORDER BY service_id, sort, minutes')
+  const m = {}
+  for (const r of rows) (m[r.service_id] ||= []).push(r)
+  return m
+}
+function serviceDurations(s, zmap, dmap) {
+  const rows = dmap[s.id]
+  if (!rows || !rows.length) return durationsFor(zoneBase(s, zmap))
+  const ratio = zmap[s.id] && zmap[s.id].price > 0 && s.price > 0 ? zmap[s.id].price / s.price : 1
+  return rows.map((r) => {
+    const price = Math.max(0, Math.round(r.price * ratio))
+    const original = r.original ? Math.max(price, Math.round(r.original * ratio)) : Math.ceil((price * 1.5) / 100) * 100 - 1
+    return { id: r.id, label: r.label, minutes: r.minutes, price, original }
+  })
+}
+
 // The customer id from a (possibly absent) Bearer token — no network hop.
 function customerIdFromReq(req) { const id = parseToken(req); return Number.isFinite(id) ? id : null }
 
@@ -404,8 +440,9 @@ async function catalogueFor(zoneId, customerId) {
     campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId),
     pool.query('SELECT id,name,icon,price,category,available,duration_min,gst_pct FROM services ORDER BY sort, name'),
   ])
+  const dmap = await durationMap()
   return rows.map((s) => {
-    const cheapest = durationsFor(zoneBase(s, zmap))[0]
+    const cheapest = serviceDurations(s, zmap, dmap)[0]
     const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: cheapest.id, listPrice: cheapest.price }], campaigns, ctx, applyCoupons: false })
     const it = r.items[0]
     const available = !!s.available && (!zoneConfigured || zmap[s.id] != null)
@@ -421,6 +458,12 @@ async function serviceDetail(id, zoneId, customerId) {
   const [campaigns, ctx] = await Promise.all([campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId)])
   const base = zoneBase(s, zmap)
   const details = detailsFor(s.id, base)
+  details.durations = serviceDurations(s, zmap, await durationMap())
+  // Admin-edited copy overrides the built-in text.
+  const ed = (await pool.query('SELECT includes, excludes, description FROM services WHERE id=$1', [s.id])).rows[0] || {}
+  if (Array.isArray(ed.includes)) details.includes = ed.includes
+  if (Array.isArray(ed.excludes)) details.excludes = ed.excludes
+  if (ed.description) details.description = ed.description
   const durations = details.durations.map((d) => {
     const r = resolvePricing({ items: [{ serviceId: s.id, category: s.category, durationId: d.id, listPrice: d.price }], campaigns, ctx, applyCoupons: false })
     const it = r.items[0]
@@ -440,11 +483,12 @@ const promoCodesOn = async () => (await getSetting(ADMIN_URL, 'enable_promo', 't
 async function priceCart({ items: rawItems, coupon, zoneId, customerId, applyCoupons = true }) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) return { error: 'Select at least one service' }
   const zmap = await zonePriceMap(zoneId)
+  const dmap = await durationMap()
   const normItems = []
   for (const it of rawItems) {
     const s = await rawServiceRow(it.id)
     if (!s || !s.available) return { error: `"${it.id}" is not available` }
-    const durs = durationsFor(zoneBase(s, zmap))
+    const durs = serviceDurations(s, zmap, dmap)
     const dur = durs.find((d) => d.id === (it.durationId || '60m')) || durs[0]
     normItems.push({ serviceId: s.id, name: s.name, icon: s.icon, category: s.category, durationId: dur.id, durationLabel: dur.label, listPrice: dur.price })
   }
@@ -637,7 +681,10 @@ app.get('/api/services/:id', async (req, res) => {
 
 /* ---------- pricing / coupons / home ---------- */
 app.post('/api/quote', async (req, res) => {
-  const r = await quote({ ...(req.body || {}), customerId: customerIdFromReq(req) })
+  const body = { ...(req.body || {}) }
+  // Instant quote: price at the server's India time, not a time the phone sends.
+  if (body.at === 'now') { const d = new Date(Date.now() + 5.5 * 3600000); body.at = `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, '0')}` }
+  const r = await quote({ ...body, customerId: customerIdFromReq(req) })
   res.status(r.status).json(r.body)
 })
 // Public coupon list (manual-entry codes) for the checkout "available offers" panel — from the DB,
@@ -702,6 +749,8 @@ app.get('/api/app-config', async (_q, res) => {
     promoCodes: await on('enable_promo', true),
     reviews: await on('enable_reviews', true),
     supportPhone: await getSetting(ADMIN_URL, 'support_phone', ''),
+    // Service booked by Home's "Get Instant Service" / "Schedule for Later" (Settings ▸ instant_service_id).
+    instantServiceId: await getSetting(ADMIN_URL, 'instant_service_id', 'hourly'),
   })
 })
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
@@ -1067,6 +1116,10 @@ function resolveZoneFrom(zones, pincode, lat, lng) {
   const liveFirst = (list) => [...list].sort((a, b) => (b.status === 'live') - (a.status === 'live'))
   if (/^\d{6}$/.test(pin)) {
     const cands = zones.filter((z) => normPins(z.pincodes).includes(pin))
+    // No zone lists this pincode, but we know where the customer is → the zone whose drawn area
+    // (radius / polygon) contains them. A radius-mode zone has an empty pincode list, so without
+    // this a pincode+location lookup found nothing and the customer fell out of every zone.
+    if (!cands.length && hasPt) return liveFirst(zones.filter((z) => inArea(z.area, la, ln)))[0] || null
     if (cands.length <= 1 || !hasPt) return liveFirst(cands)[0] || null
     const inside = cands.filter((z) => inArea(z.area, la, ln))
     if (inside.length) return liveFirst(inside)[0]
@@ -1179,6 +1232,12 @@ app.get('/api/zone-hours', async (req, res) => {
 })
 
 // Internal: which zone covers a pincode — booking stamps booking.zone_id from this on create.
+// Per-service rules other services need: which are "any task" (every expert qualifies), and the
+// expert-app checklist / photos set in admin. Worker + dispatch cache this briefly.
+app.get('/api/internal/service-rules', internalOnly, async (_q, res) => {
+  const { rows } = await pool.query('SELECT id, name, any_task, checklist, photo_slots FROM services')
+  res.json(rows.map((r) => ({ id: r.id, name: r.name, anyTask: !!r.any_task, checklist: Array.isArray(r.checklist) ? r.checklist : null, photoSlots: Array.isArray(r.photo_slots) ? r.photo_slots : null })))
+})
 app.get('/api/internal/zone-for', internalOnly, async (req, res) => {
   const z = await resolveZone(...locOf(req.query))
   const configured = (await pool.query('SELECT 1 FROM zones LIMIT 1')).rowCount > 0
@@ -1307,6 +1366,50 @@ app.post('/api/admin/services', adminAuth, requirePerm('services.create'), async
   await broadcastServices()
   res.status(201).json({ ok: true, id })
 })
+// Duration menu for one service: the admin-set rows, or (if none yet) the built-in ladder so the
+// editor starts from what customers currently see.
+app.get('/api/admin/services/:id/durations', adminAuth, async (req, res) => {
+  const s = await rawServiceRow(req.params.id)
+  if (!s) return res.status(404).json({ error: 'Not found' })
+  const rows = (await pool.query('SELECT id,label,minutes,price,original,active,sort FROM service_durations WHERE service_id=$1 ORDER BY sort, minutes', [s.id])).rows
+  // Current customer-facing copy too (admin edits, else the built-in text), for the same editor.
+  const ed = (await pool.query('SELECT includes, excludes, description, any_task, checklist, photo_slots FROM services WHERE id=$1', [s.id])).rows[0] || {}
+  const builtIn = detailsFor(s.id, s.price)
+  res.json({
+    anyTask: !!ed.any_task, checklist: Array.isArray(ed.checklist) ? ed.checklist : [], photoSlots: Array.isArray(ed.photo_slots) ? ed.photo_slots : [],
+    custom: rows.length > 0, durations: rows.length ? rows : durationsFor(s.price).map((d, i) => ({ ...d, active: true, sort: i })),
+    description: ed.description || builtIn.description || '',
+    includes: Array.isArray(ed.includes) ? ed.includes : builtIn.includes, excludes: Array.isArray(ed.excludes) ? ed.excludes : builtIn.excludes,
+  })
+})
+// Replace the whole menu. Empty list = go back to the built-in ladder.
+app.put('/api/admin/services/:id/durations', adminAuth, requirePerm('services.edit'), async (req, res) => {
+  const s = await rawServiceRow(req.params.id)
+  if (!s) return res.status(404).json({ error: 'Not found' })
+  const list = Array.isArray(req.body?.durations) ? req.body.durations : []
+  const clean = []
+  for (const [i, d] of list.entries()) {
+    const minutes = Math.round(Number(d.minutes)), price = Math.round(Number(d.price))
+    if (!(minutes >= 5)) return res.status(400).json({ error: `Row ${i + 1}: duration must be at least 5 minutes` })
+    if (!(price >= 0)) return res.status(400).json({ error: `Row ${i + 1}: price cannot be negative` })
+    const original = d.original != null && d.original !== '' ? Math.round(Number(d.original)) : null
+    if (original != null && !(original >= price)) return res.status(400).json({ error: `Row ${i + 1}: strike-through price must be at least the price` })
+    const id = String(d.id || `${minutes}m`).replace(/[^a-z0-9]/gi, '').slice(0, 12) || `${minutes}m`
+    const label = String(d.label || '').trim() || (minutes % 60 ? `${minutes} min` : `${minutes / 60} hr${minutes > 60 ? 's' : ''}`)
+    clean.push([s.id, id, label, minutes, price, original, d.active !== false, i])
+  }
+  if (new Set(clean.map((c) => c[1])).size !== clean.length) return res.status(400).json({ error: 'Two rows have the same duration id' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('DELETE FROM service_durations WHERE service_id=$1', [s.id])
+    for (const c of clean) await client.query('INSERT INTO service_durations (service_id,id,label,minutes,price,original,active,sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', c)
+    await client.query('COMMIT')
+  } catch (e) { await client.query('ROLLBACK'); throw e } finally { client.release() }
+  await broadcastServices()
+  res.json({ ok: true, custom: clean.length > 0 })
+})
+
 app.patch('/api/admin/services/:id', adminAuth, requirePerm('services.edit'), async (req, res) => {
   const b = req.body || {}
   const cur = await pool.query('SELECT * FROM services WHERE id=$1', [req.params.id])
@@ -1319,6 +1422,14 @@ app.patch('/api/admin/services/:id', adminAuth, requirePerm('services.edit'), as
     b.name ?? s.name, b.icon ?? s.icon, b.price ?? s.price, b.category ?? s.category,
     b.available === undefined ? s.available : !!b.available, b.duration_min ?? null, b.gst_pct ?? null, req.params.id,
   ])
+  // Editable customer-facing copy: arrays of lines (null/[] resets includes/excludes to the built-in text).
+  const lines = (v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean).slice(0, 20) : null)
+  if (b.includes !== undefined) await pool.query('UPDATE services SET includes=$1::jsonb WHERE id=$2', [lines(b.includes)?.length ? JSON.stringify(lines(b.includes)) : null, req.params.id])
+  if (b.excludes !== undefined) await pool.query('UPDATE services SET excludes=$1::jsonb WHERE id=$2', [lines(b.excludes)?.length ? JSON.stringify(lines(b.excludes)) : null, req.params.id])
+  if (b.description !== undefined) await pool.query('UPDATE services SET description=$1 WHERE id=$2', [String(b.description || '').trim() || null, req.params.id])
+  if (b.any_task !== undefined) await pool.query('UPDATE services SET any_task=$1 WHERE id=$2', [!!b.any_task, req.params.id])
+  if (b.checklist !== undefined) await pool.query('UPDATE services SET checklist=$1::jsonb WHERE id=$2', [lines(b.checklist)?.length ? JSON.stringify(lines(b.checklist)) : null, req.params.id])
+  if (b.photo_slots !== undefined) await pool.query('UPDATE services SET photo_slots=$1::jsonb WHERE id=$2', [lines(b.photo_slots)?.length ? JSON.stringify(lines(b.photo_slots)) : null, req.params.id])
   await broadcastServices()
   res.json({ ok: true })
 })

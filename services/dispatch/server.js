@@ -79,12 +79,21 @@ const CHECKLIST_BY_SERVICE = [
   [/fridge|refrigerator/i, ['Empty & discard expired', 'Wipe shelves & trays', 'Clean door seals']],
   [/sofa|upholstery/i, ['Vacuum cushions', 'Spot-treat stains', 'Deodorise fabric']],
 ]
+// Checklist / photos set per service in Admin → Services (catalog), refreshed every minute; the
+// built-in lists below are the fallback for services without their own.
+let SERVICE_RULES = {}
+async function refreshServiceRules() {
+  const rules = await tryGet(CATALOG_URL, '/api/internal/service-rules', null)
+  if (Array.isArray(rules)) SERVICE_RULES = Object.fromEntries(rules.map((r) => [String(r.name).toLowerCase().trim(), r]))
+}
+refreshServiceRules(); setInterval(refreshServiceRules, 60000).unref()
+const ruleFor = (name) => SERVICE_RULES[String(name || '').toLowerCase().trim()] || null
 function defaultChecklist(b) {
   const names = (b.items || []).map((i) => String(i.name || ''))
   const tasks = []
   for (const n of names) {
     const hit = CHECKLIST_BY_SERVICE.find(([re]) => re.test(n))
-    const list = hit ? hit[1] : ['Complete the service', 'Tidy the work area']
+    const list = ruleFor(n)?.checklist || (hit ? hit[1] : ['Complete the service', 'Tidy the work area'])
     for (const label of list) tasks.push({ label, service: n, done: false })
   }
   if (tasks.length === 0) tasks.push({ label: 'Complete the service', service: '', done: false })
@@ -106,7 +115,7 @@ const PHOTO_SLOTS_BY_SERVICE = [
 function defaultPhotoSlots(b) {
   const first = (b.items || [])[0]?.name || ''
   const hit = PHOTO_SLOTS_BY_SERVICE.find(([re]) => re.test(first))
-  return hit ? hit[1] : ['Overall View', 'Work Area']
+  return ruleFor(first)?.photoSlots || (hit ? hit[1] : ['Overall View', 'Work Area'])
 }
 
 // Reads a job's state, seeding the row (its checklist + photo slots) on first touch.
@@ -306,8 +315,13 @@ async function auth(req, res, next) {
   const w = await tryGet(WORKER_URL, `/internal/workers/${id}/service-set`, null)
   if (!w || w.status !== 'active') return res.status(401).json({ ok: false, error: 'Not authenticated' })
   req.worker = { id, ...w }
+  // The app's background alert service polls offers here every few seconds while the expert is
+  // Online — that is the proof they're reachable, so pass it on (throttled) as "last seen".
+  const now = Date.now()
+  if (now - (seenSent.get(id) || 0) > 60000) { seenSent.set(id, now); internalPost(WORKER_URL, `/internal/workers/${id}/seen`, {}).catch(() => {}) }
   next()
 }
+const seenSent = new Map()
 
 // Customer auth, for the customer half of the job chat below. The messages live in THIS service's
 // database, so the customer's routes belong here next to the worker's rather than being proxied

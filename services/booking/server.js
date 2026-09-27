@@ -68,7 +68,11 @@ async function aiSupportReply(messages) {
   return String(j?.choices?.[0]?.message?.content || '').trim() || null
 }
 
-const OTP_LEAD_MS = 60 * 60 * 1000
+// Settings ▸ Operations ▸ otp_lead_min (default 60): how long before a scheduled slot the service
+// OTP is shown. Kept in a variable (refreshed every 30s) because it's read synchronously.
+let OTP_LEAD_MS = 60 * 60 * 1000
+async function refreshOtpLead() { OTP_LEAD_MS = Math.max(0, await getSettingInt(ADMIN_URL, 'otp_lead_min', 60)) * 60000 }
+refreshOtpLead(); setInterval(refreshOtpLead, 30000).unref()
 const ref = () => '#HH' + Math.floor(10000 + Math.random() * 89999)
 const otp4 = () => String(Math.floor(1000 + Math.random() * 9000))
 
@@ -443,6 +447,9 @@ async function anyActiveWorker(serviceNames) {
 // config. When the zone defines working hours, the bookable grid is derived from them instead.
 const SLOT_HOURS = Array.from({ length: 12 }, (_, i) => 8 + i)
 const slotLabel = (h) => `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:00 ${h >= 12 ? 'PM' : 'AM'}`
+// Half-hour slot label from minutes-of-day. For :00 it is identical to slotLabel(h), so bookings
+// already stored under hourly labels still count against the same slot.
+const slotLabelMin = (min) => { const h = Math.floor(min / 60); return `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:${String(min % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
 const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 
 // ── zone working-hours enforcement ──
@@ -455,6 +462,16 @@ const IST_MS = 5.5 * 3600000
 const istNow = () => new Date(Date.now() + IST_MS)
 const istMinutes = () => { const d = istNow(); return d.getUTCHours() * 60 + d.getUTCMinutes() }
 const istDateStr = () => istNow().toISOString().slice(0, 10)
+// "Now" for an instant booking, from the SERVER clock in India time — never the phone's.
+const istAt = () => { const m = istMinutes(); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` }
+const IST_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// A booking-style date ("28 Sep 2026") for today + n days, India time.
+const istBookingDate = (n = 0) => { const d = new Date(istNow().getTime() + n * 86400000); return `${d.getUTCDate()} ${IST_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` }
+// Settings ▸ Operations: slot_notice_min (a scheduled slot must start at least this far out) and
+// slot_minutes (slot length). Defaults 60 and 30.
+const slotNoticeMin = () => getSettingInt(ADMIN_URL, 'slot_notice_min', 60)
+const slotStepMin = async () => { const n = await getSettingInt(ADMIN_URL, 'slot_minutes', 30); return [15, 20, 30, 60].includes(n) ? n : 30 }
+const isIstToday = (dateStr) => !!dateStr && (dateStr === istBookingDate(0) || dateStr === istDateStr())
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']   // JS getDay() 0=Sun … 6=Sat
 // Resolve a date's effective open window from a zone's working-hours config.
 // A special-hours entry for that exact date overrides the weekday schedule.
@@ -480,14 +497,14 @@ function withinWindow(win, tMin) {
 // Bookable hour-slots for a date given a zone's working hours.
 //  • explicit 24×7 → every hour   • no zone / no hours configured → the default grid
 //  • configured weekday → open→close minus break   • closed weekday → []
-function slotHoursFor(hours, dateStr) {
-  if (hours && hours.is247) return Array.from({ length: 24 }, (_, i) => i)
-  if (!hours || !hours.days) return SLOT_HOURS
+// Every half hour the zone is open on dateStr (minutes-of-day): 1:00, 1:30, 2:00 …
+function slotMinsFor(hours, dateStr, step = 30) {
+  const grid = (from, to) => { const o = []; for (let m = from; m < to; m += step) o.push(m); return o }
+  if (hours && hours.is247) return grid(0, 24 * 60)
+  if (!hours || !hours.days) return grid(SLOT_HOURS[0] * 60, (SLOT_HOURS[SLOT_HOURS.length - 1] + 1) * 60)
   const win = dayWindow(hours, dateStr)
   if (win.closed) return []
-  const out = []
-  for (let h = 0; h < 24; h++) if (withinWindow(win, h * 60)) out.push(h)
-  return out
+  return grid(0, 24 * 60).filter((m) => withinWindow(win, m))
 }
 
 // Capacity check for a scheduled slot: pincode served + at least one qualified worker not already
@@ -740,6 +757,48 @@ app.get('/api/bookings/:id', auth, async (req, res) => {
 // Slot availability for the Schedule screen: per-hour capacity for a date, given the pincode + services.
 // Public: slot availability is not user-specific (uses only date/pincode/services), and gating it
 // behind a token meant a stale/invalid session silently showed "no slots" instead of the grid.
+/* Instant availability + the next bookable slot, both from the SERVER clock (India time) and the
+ * zone's working hours. The app shows these as-is ("Get Instant Service" enabled or not, the
+ * "Today, 7:00 pm" pill) instead of reading the phone's clock. */
+app.get('/api/instant-status', async (req, res) => {
+  const pincode = String(req.query.pincode || '')
+  const lq = locQ(pincode, req.query.lat ?? null, req.query.lng ?? null)
+  const hours = lq ? await tryGet(CATALOG_URL, `/api/zone-hours?${lq}`, null) : null
+  const nowMin = istMinutes()
+  const today = istBookingDate(0)
+  const win = dayWindow(hours, today)
+  const inHours = !win.closed && (win.open247 || withinWindow(win, nowMin))
+  // …and someone must actually be able to come: an expert of this zone who is online right now
+  // (app checked in lately + Available on) and not already on a job.
+  let freeExperts = 0
+  if (inHours) {
+    const zr = lq ? await tryGet(CATALOG_URL, `/api/internal/zone-for?${lq}`, null) : null
+    if (zr?.zoneId) {
+      const svc = String(req.query.services || 'Hourly Help')
+      const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(svc)}&zone_id=${zr.zoneId}`, [])
+      const busy = await busyWorkerIds()
+      freeExperts = (Array.isArray(list) ? list : []).filter((w) => w.online && !busy.has(Number(w.id))).length
+    }
+  }
+  const open = inHours && freeExperts > 0
+  const reason = open ? null : !inHours ? 'closed' : 'busy'
+  const fmt = (m) => { const h = Math.floor(m / 60); return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}` }
+  const hoursLabel = win.open247 ? '24×7' : !win.closed && win.openMin != null ? `${fmt(win.openMin)} – ${fmt(win.closeMin)}` : ''
+  // Earliest half-hour start at least an hour out, within working hours, today or the next 6 days.
+  let nextSlot = null
+  const [notice, step] = [await slotNoticeMin(), await slotStepMin()]
+  for (let d = 0; d < 7 && !nextSlot; d++) {
+    const date = istBookingDate(d)
+    const min = slotMinsFor(hours, date, step).find((m) => d > 0 || m >= nowMin + notice)
+    if (min != null) {
+      const h = Math.floor(min / 60), mm = String(min % 60).padStart(2, '0')
+      const day = d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : date
+      nextSlot = { date, min, time: slotLabelMin(min), label: `${day}, ${h % 12 || 12}:${mm} ${h < 12 ? 'am' : 'pm'}` }
+    }
+  }
+  res.json({ open, reason, hours: hoursLabel, freeExperts, now: istAt(), today, nextSlot })
+})
+
 app.get('/api/slots', async (req, res) => {
   const date = String(req.query.date || ''), pincode = String(req.query.pincode || ''), services = String(req.query.services || '')
   const lq = locQ(pincode, req.query.lat ?? null, req.query.lng ?? null)
@@ -752,9 +811,13 @@ app.get('/api/slots', async (req, res) => {
   const booked = Object.fromEntries(rows.map((r) => [r.time, r.n]))
   // Bookable hours come from the serving zone's working hours (falls back to the default grid).
   const hours = lq ? await tryGet(CATALOG_URL, `/api/zone-hours?${lq}`, null) : null
-  const hourList = slotHoursFor(hours, date || '')
-  const slots = hourList.map((h) => { const time = slotLabel(h); const m = booked[time] || 0; return { hour: h, time, booked: m, available: !!srv.serviceable && workerCount > m } })
-  const closed = !!hours && !hours.is247 && hourList.length === 0
+  // Half-hour slots; `hour` stays for older app builds, `min` is the exact start (minutes of day).
+  const minList = slotMinsFor(hours, date || '', await slotStepMin())
+  // Today's slots starting within the next hour are gone (same notice as /api/instant-status's next
+  // slot, so the Home pill and the first slot on the screen agree) — on the server's India time.
+  const cutoff = isIstToday(date) ? istMinutes() + await slotNoticeMin() : -1
+  const slots = minList.map((min) => { const time = slotLabelMin(min); const m = booked[time] || 0; const past = min < cutoff; return { hour: Math.floor(min / 60), min, time, booked: m, past, available: !past && !!srv.serviceable && workerCount > m } })
+  const closed = !!hours && !hours.is247 && minList.length === 0
   res.json({ serviceable: !!srv.serviceable, workerCount, slots, closed })
 })
 
@@ -805,7 +868,7 @@ app.post('/api/bookings', auth, async (req, res) => {
 
   // Authoritative pricing from the catalog service, for the resolved zone.
   let priced
-  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode, lat: custLat, lng: custLng, zoneId, customerId: req.user.id, at: body.at, packageId: body.packageId || null }) }
+  try { priced = await internalPost(CATALOG_URL, '/api/internal/price', { items: body.items, coupon: body.coupon, pincode, lat: custLat, lng: custLng, zoneId, customerId: req.user.id, at: (body.type || 'instant') !== 'schedule' ? istAt() : body.at, packageId: body.packageId || null }) }
   catch { return res.status(409).json({ error: 'Could not price these items' }) }
   if (priced.error) return res.status(priced.error.includes('available') ? 409 : 400).json(priced)
 
@@ -1616,15 +1679,19 @@ app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
   const zoneIds = req.query.zone_id != null && req.query.zone_id !== '' ? String(req.query.zone_id).split(',').map(Number).filter(Number.isFinite) : null
   const zw = zoneIds ? ' AND zone_id = ANY($1)' : ''
   const params = zoneIds ? [zoneIds] : []
+  // Days, times and "today" are India time: the database runs in UTC, so grouping by created::date
+  // put anything booked between midnight and 05:30 IST on the previous day.
+  const IST_DAY = "(created AT TIME ZONE 'Asia/Kolkata')::date"
+  const IST_TODAY = "(now() AT TIME ZONE 'Asia/Kolkata')::date"
   const trend = (await pool.query(
-    `SELECT to_char(created::date, 'Dy') AS day, created::date AS d, COUNT(*)::int AS bookings,
+    `SELECT to_char(${IST_DAY}, 'Dy') AS day, ${IST_DAY} AS d, COUNT(*)::int AS bookings,
        COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS revenue
-     FROM bookings WHERE created >= CURRENT_DATE - INTERVAL '6 days'${zw}
-     GROUP BY created::date ORDER BY created::date`, params)).rows
+     FROM bookings WHERE ${IST_DAY} >= ${IST_TODAY} - 6${zw}
+     GROUP BY ${IST_DAY} ORDER BY ${IST_DAY}`, params)).rows
   const revenueDaily = (await pool.query(
-    `SELECT to_char(created::date, 'DD Mon') AS d, COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS rev
-     FROM bookings WHERE created >= CURRENT_DATE - INTERVAL '13 days'${zw}
-     GROUP BY created::date ORDER BY created::date`, params)).rows
+    `SELECT to_char(${IST_DAY}, 'DD Mon') AS d, COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int AS rev
+     FROM bookings WHERE ${IST_DAY} >= ${IST_TODAY} - 13${zw}
+     GROUP BY ${IST_DAY} ORDER BY ${IST_DAY}`, params)).rows
   const rating = (await pool.query(`SELECT COALESCE(ROUND(AVG(rating), 1), 0)::float AS r FROM bookings WHERE rating IS NOT NULL${zw}`, params)).rows[0].r
   const items = (await pool.query(`SELECT items FROM bookings WHERE 1=1${zw}`, params)).rows
   const counts = {}
@@ -1632,7 +1699,7 @@ app.get('/api/internal/ops-stats', internalOnly, async (req, res) => {
   const topServices = Object.entries(counts).map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count)
   // Real recent-bookings feed (latest 6).
   const recentRows = (await pool.query(
-    `SELECT ref, type, items, status, zone_id, to_char(created, 'HH12:MI AM') AS time
+    `SELECT ref, type, items, status, zone_id, to_char(created AT TIME ZONE 'Asia/Kolkata', 'HH12:MI AM') AS time
      FROM bookings WHERE 1=1${zw} ORDER BY created DESC LIMIT 6`, params)).rows
   const recent = recentRows.map((r) => {
     let svc = r.type; try { const arr = JSON.parse(r.items); if (arr[0] && arr[0].name) svc = arr[0].name } catch { /* ignore */ }

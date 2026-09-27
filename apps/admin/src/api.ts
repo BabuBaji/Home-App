@@ -319,6 +319,12 @@ export const fetchInvoiceInfo = () => fetch(API_BASE + '/api/invoice-info', { he
 export const createService = (body: Record<string, unknown>) => req<{ ok: boolean; id: string }>('/services', post('', body))
 export const updateService = (id: string, body: Record<string, unknown>) => req<{ ok: boolean }>(`/services/${id}`, patch(body))
 export const deleteService = (id: string) => req<{ ok: boolean }>(`/services/${id}`, { method: 'DELETE' })
+// Per-service duration menu (what the customer app shows and charges) + its customer-facing copy.
+export interface ServiceDurationRow { id: string; label: string; minutes: number; price: number; original: number | null; active?: boolean; sort?: number }
+export const fetchServiceDurations = (id: string) =>
+  req<{ custom: boolean; durations: ServiceDurationRow[]; description: string; includes: string[]; excludes: string[]; anyTask: boolean; checklist: string[]; photoSlots: string[] }>(`/services/${id}/durations`)
+export const saveServiceDurations = (id: string, durations: ServiceDurationRow[]) =>
+  req<{ ok: boolean; custom: boolean }>(`/services/${id}/durations`, { method: 'PUT', body: JSON.stringify({ durations }) })
 
 /* service zones (area-by-area onboarding) */
 export interface Zone {
