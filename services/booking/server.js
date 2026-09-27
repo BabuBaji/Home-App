@@ -999,8 +999,14 @@ app.post('/api/bookings/:id/verify-otp', auth, async (req, res) => {
 app.post('/api/bookings/:id/complete', auth, async (req, res) => {
   const b = await getBooking(Number(req.params.id))
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
-  const firstCompletion = b.status !== 'completed'
-  await pool.query('UPDATE bookings SET status=$1, completed_at=COALESCE(completed_at, $2) WHERE id=$3', ['completed', nowIso(), b.id])
+  if (b.status === 'completed') return res.json(b)   // already done — a harmless retry
+  // Same rule as the expert's Complete (STATUS_FROM.completed): only a service that was started
+  // with the OTP can be completed. Without it a still-unassigned booking could be marked completed,
+  // paying the expert and crediting cashback for work that never happened. Check + write are one
+  // UPDATE so a racing expert Complete can't double-settle.
+  const moved = await pool.query("UPDATE bookings SET status='completed', completed_at=COALESCE(completed_at, $2) WHERE id=$1 AND status='in_progress' RETURNING id", [b.id, nowIso()])
+  if (!moved.rowCount) return res.status(409).json({ error: 'The service has not started yet.' })
+  const firstCompletion = true
   if (b.payment === 'cash') await pool.query('UPDATE bookings SET payment_status=$1 WHERE id=$2', ['paid', b.id])
   const done = await getBooking(b.id)
   await emitBookingUpdate(b.id)

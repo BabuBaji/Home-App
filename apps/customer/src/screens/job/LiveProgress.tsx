@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Phone, MessageCircle, Star, BadgeCheck, MapPin, Sparkles, CheckCircle2, Headset } from 'lucide-react'
-import { Loading, useBack } from '../../components/UI'
-import { fetchExtensions, type ExtensionState } from '../../api'
+import { Loading, useBack, useToast } from '../../components/UI'
+import { fetchExtensions, completeBooking, type ExtensionState } from '../../api'
 import { useJob, useAutoAdvance, proName, proRating } from './useJob'
 import { WorkerAvatar } from './parts'
 import ExtrasPrompt from '../../components/ExtrasPrompt'
@@ -20,6 +20,9 @@ export default function LiveProgress() {
   const { b } = useJob(id)
   // The expert ended the job → show the completion screen (rate / tip) once.
   useAutoAdvance(b, 'completed', (bid) => `/job/${bid}/completed`)
+  const toast = useToast()
+  const [ending, setEnding] = useState(false)   // "End service" tapped once — waiting for confirm
+  const [busy, setBusy] = useState(false)
   const [, tick] = useState(0)
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(i) }, [])
 
@@ -71,6 +74,15 @@ export default function LiveProgress() {
   const jobs = b.pro?.jobs ?? b.pro?.servicesDone ?? 0
   const verified = !!b.pro?.verified
   const assigned = !!(b.pro?.name || (b.pro_name && b.pro_name.trim()))
+  // The expert normally taps Complete. If they forget, the customer would be stuck on "in progress"
+  // forever — so once the booked time is up the customer can end it themselves (server allows this
+  // only for a started service, same as the expert's Complete).
+  const endService = async () => {
+    if (busy) return
+    setBusy(true)
+    try { await completeBooking(b.id); nav(`/job/${b.id}/completed`, { replace: true }) }
+    catch (e) { toast((e as Error).message); setBusy(false); setEnding(false) }
+  }
   const call = () => nav(`/job/${b.id}/call`)
   const chat = () => nav(`/job/${b.id}/chat`)
 
@@ -137,6 +149,21 @@ export default function LiveProgress() {
             <span>{t('Booked')} <b>{t('{n} min', { n: bookedMin })}</b>{extraMin > 0 && <> +<b>{extraMin}</b></>}</span>
           </div>
         </div>
+
+        {timeUp && b.status === 'in_progress' && (
+          <div className="jt-card" style={{ borderColor: '#6D4AFF' }}>
+            <b style={{ display: 'block' }}>{ending ? t('End the service now?') : t('Is your service finished?')}</b>
+            <span className="muted" style={{ fontSize: 12.5, display: 'block', marginBottom: 10 }}>
+              {ending ? t('Only do this if {name} has finished the work.', { name: proName(b) }) : t('The booked time is over. If the work is done, you can end the service.')}
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {ending && <button className="jt-btn ghost" style={{ flex: 1 }} disabled={busy} onClick={() => setEnding(false)}>{t('Not yet')}</button>}
+              <button className="jt-btn" style={{ flex: 1 }} disabled={busy} onClick={() => (ending ? endService() : setEnding(true))}>
+                <CheckCircle2 size={16} /> {ending ? (busy ? t('Ending…') : t('Yes, end service')) : t('End service')}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* who's working */}
         {assigned && (
