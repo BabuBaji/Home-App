@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Activity as ActivityIcon, Users, HardHat, UserCog, Cpu, Funnel, Download } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { fetchActivity, fetchActivityStats } from '../api'
-import { Card, Badge, Avatar, SearchBox, Pagination, Loading, ErrorState, Empty, SumBars, shortDate } from '../components/UI'
-import { Donut } from '../components/Charts'
+import { Card, SearchBox, Pagination, Loading, ErrorState, shortDate, FilterTabs } from '../components/UI'
 
 type Evt = {
   id: number; actor_type: string; actor_id: number | null; actor_name: string | null
@@ -10,53 +9,51 @@ type Evt = {
   detail: string | null; meta: any; created: string
 }
 type Stats = { total: number; since: string; byActor: { actor_type: string; n: number }[]; byAction: { action: string; n: number }[] }
+type Source = 'all' | 'customer' | 'worker' | 'admin' | 'system'
 
-const ACTOR_TONE: Record<string, string> = { customer: 'blue', worker: 'violet', admin: 'amber', system: 'gray' }
-const prettyAction = (a: string) => (a || '').replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+const SOURCE_LABEL: Record<string, string> = { customer: 'Customer', worker: 'Expert', admin: 'Admin', system: 'System' }
+const PERIODS = [{ days: 1, label: 'Last 24 hours' }, { days: 7, label: 'Last 7 days' }, { days: 30, label: 'Last 30 days' }, { days: 0, label: 'All time' }]
+const prettyAction = (a: string) => (a || '').replace(/^admin[._](?=\w+[._])/, '').replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bSos\b/g, 'SOS')
 const timeOf = (s: string) => new Date(s).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 
 export default function Activity() {
   const [rows, setRows] = useState<Evt[] | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [err, setErr] = useState('')
-  const [actor, setActor] = useState('all')
+  const [source, setSource] = useState<Source>('all')
+  const [days, setDays] = useState(7)
   const [action, setAction] = useState('all')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(20)
 
+  // The list and the tab counts come from the same period, so the numbers agree.
   const load = () => {
     setErr('')
-    fetchActivity({ actorType: actor, limit: 500 }).then((d) => setRows(d.items)).catch((e: Error) => setErr(e.message))
-    fetchActivityStats(7).then(setStats).catch(() => {})
+    const since = days > 0 ? new Date(Date.now() - days * 864e5).toISOString() : ''
+    fetchActivity({ actorType: source, limit: 500, ...(since ? { since } : {}) }).then((d) => setRows(d.items)).catch((e: Error) => setErr(e.message))
+    fetchActivityStats(days).then(setStats).catch(() => {})
   }
-  // refetch from server when the actor filter changes (server-side filter)
-  useEffect(load, [actor])
+  useEffect(load, [source, days])
+  useEffect(() => setPage(1), [source, days, action, q])
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!rows) return <Loading />
 
-  const actorCount = (t: string) => stats?.byActor.find((a) => a.actor_type === t)?.n || 0
-  const actions = Array.from(new Set(rows.map((r) => r.action))).sort()
-
-  const TABS: { k: string; label: string; n: number }[] = [
-    { k: 'all', label: 'All', n: stats?.total ?? rows.length },
-    { k: 'customer', label: 'Customer', n: actorCount('customer') },
-    { k: 'worker', label: 'Worker', n: actorCount('worker') },
-    { k: 'admin', label: 'Admin', n: actorCount('admin') },
-    { k: 'system', label: 'System', n: actorCount('system') },
-  ]
+  const count = (t: string) => stats?.byActor.find((a) => a.actor_type === t)?.n || 0
+  const actions = Array.from(new Set([...(stats?.byAction || []).map((a) => a.action), ...rows.map((r) => r.action)])).sort()
 
   const ql = q.trim().toLowerCase()
   const filtered = rows
     .filter((r) => action === 'all' || r.action === action)
-    .filter((r) => !ql || (r.actor_name || '').toLowerCase().includes(ql) || (r.detail || '').toLowerCase().includes(ql) || (r.ref || '').toLowerCase().includes(ql) || (r.action || '').toLowerCase().includes(ql))
+    .filter((r) => !ql || [r.actor_name, r.detail, r.ref, r.action].some((v) => (v || '').toLowerCase().includes(ql)))
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const capped = rows.length >= 500
 
   const exportCsv = () => {
-    const cols = ['Time', 'Actor Type', 'Actor', 'Action', 'Entity', 'Reference', 'Detail']
+    const cols = ['Time', 'Source', 'Actor', 'Action', 'Entity', 'Reference', 'Detail']
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const lines = [cols.join(',')].concat(
-      filtered.map((r) => [r.created, r.actor_type, r.actor_name || '', r.action, r.entity_type || '', r.ref || '', r.detail || ''].map(esc).join(','))
+      filtered.map((r) => [r.created, SOURCE_LABEL[r.actor_type] || r.actor_type, r.actor_name || '', prettyAction(r.action), r.entity_type || '', r.ref || '', r.detail || ''].map(esc).join(','))
     )
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -64,93 +61,68 @@ export default function Activity() {
     URL.revokeObjectURL(url)
   }
 
-  const ACTOR_COLORS: Record<string, string> = { customer: '#2e90fa', worker: '#5b51e8', admin: '#f59e0b', system: '#98a2b3' }
-  const DONUT = (stats?.byActor || []).map((a) => ({ label: prettyAction(a.actor_type), value: a.n, color: ACTOR_COLORS[a.actor_type] || '#98a2b3' }))
-  const totalEvents = stats?.total || 1
-  const TOP_ACTIONS = (stats?.byAction || []).slice(0, 6).map((a, i) => ({
-    label: prettyAction(a.action), value: `${a.n}`, pct: a.n,
-    color: ['#5b51e8', '#2e90fa', '#16a34a', '#f59e0b', '#ef4444', '#98a2b3'][i % 6],
-  }))
-
   return (
     <div className="grid" style={{ gap: 16 }}>
+      <Card>
+        <div className="card-head lg">
+          <h3>Activity<span className="count">{(stats?.total ?? rows.length).toLocaleString('en-IN')} events</span></h3>
+          <div className="head-actions">
+            <select className="select flt" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+              {PERIODS.map((p) => <option key={p.days} value={p.days}>{p.label}</option>)}
+            </select>
+            <button className="btn line" onClick={exportCsv}><Download size={15} /> Export</button>
+          </div>
+        </div>
 
-      <div className="cols">
-        <Card>
-          <div className="toolbar">
-            <SearchBox value={q} onChange={(v) => { setQ(v); setPage(1) }} placeholder="Search by actor, action, reference or detail…" />
-            <div className="tb-spacer" />
-            <select className="select flt" value={action} onChange={(e) => { setAction(e.target.value); setPage(1) }}>
-              <option value="all">All Actions</option>
+        <FilterTabs value={source} onChange={setSource} tabs={[
+          { key: 'all', label: 'All', count: stats?.total ?? rows.length },
+          { key: 'admin', label: 'Admin', count: count('admin') },
+          { key: 'worker', label: 'Expert', count: count('worker') },
+          { key: 'customer', label: 'Customer', count: count('customer') },
+          { key: 'system', label: 'System', count: count('system') },
+        ]} />
+
+        <div className="toolbar">
+          <SearchBox value={q} onChange={setQ} placeholder="Search actor, action, reference or detail" />
+          {actions.length > 1 && (
+            <select className="select flt" value={action} onChange={(e) => setAction(e.target.value)}>
+              <option value="all">All actions</option>
               {actions.map((a) => <option key={a} value={a}>{prettyAction(a)}</option>)}
             </select>
-            <button className="btn line"><Funnel size={16} /> Filters</button>
-            <button className="btn line" onClick={exportCsv}><Download size={16} /> Export</button>
-          </div>
-
-          <div className="tabs">
-            {TABS.map((t) => (
-              <button key={t.k} className={'tab' + (actor === t.k ? ' active' : '')} onClick={() => { setActor(t.k); setPage(1) }}>
-                {t.label}
-                <span style={{
-                  marginLeft: 8, padding: '1px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-                  background: actor === t.k ? '#eef0ff' : '#eeeef5',
-                  color: actor === t.k ? '#5b51e8' : '#6b7090',
-                }}>{t.n.toLocaleString('en-IN')}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="tablewrap">
-            <table className="tbl">
-              <thead><tr>
-                <th>Time</th><th>Source</th><th>Actor</th><th>Action</th><th>Detail</th><th>Reference</th>
-              </tr></thead>
-              <tbody>
-                {pageRows.map((r) => (
-                  <tr key={r.id}>
-                    <td className="muted" style={{ whiteSpace: 'nowrap' }}>{shortDate(r.created)}<br /><span style={{ fontSize: 12 }}>{timeOf(r.created)}</span></td>
-                    <td><Badge tone={ACTOR_TONE[r.actor_type] || 'gray'}>{r.actor_type}</Badge></td>
-                    <td>
-                      <div className="cell-user">
-                        <Avatar name={r.actor_name || r.actor_type} size={34} />
-                        <div><strong style={{ display: 'block' }}>{r.actor_name || '—'}</strong></div>
-                      </div>
-                    </td>
-                    <td><Badge tone={ACTOR_TONE[r.actor_type] || 'gray'} dot={false}>{prettyAction(r.action)}</Badge></td>
-                    <td style={{ maxWidth: 320 }}>{r.detail || '—'}</td>
-                    <td className="muted">{r.ref || (r.entity_type ? `${r.entity_type} #${r.entity_id}` : '—')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filtered.length === 0 && <Empty msg="No activity matches your filters yet." />}
-          </div>
-          <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="events" onPage={setPage} onSize={(s) => { setPageSize(s); setPage(1) }} />
-        </Card>
-
-        <div className="col-rail">
-          <Card title="Events by Source">
-            {DONUT.length ? (
-              <div className="row" style={{ alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
-                <Donut data={DONUT} legend={false} />
-                {/* wraps under the ring when the rail is too narrow for both side by side */}
-                <div className="grid" style={{ gap: 8, flex: '1 1 180px' }}>
-                  {DONUT.map((d) => (
-                    <div key={d.label} className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="sumbar-label"><i className="bdot" style={{ background: d.color, marginRight: 7 }} />{d.label}</span>
-                      <span className="muted" style={{ fontSize: 12 }}>{d.value} ({((d.value / totalEvents) * 100).toFixed(1)}%)</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : <p className="muted">No activity yet.</p>}
-          </Card>
-          <Card title="Top Actions (7 days)">
-            {TOP_ACTIONS.length ? <SumBars rows={TOP_ACTIONS} /> : <p className="muted">No activity yet.</p>}
-          </Card>
+          )}
         </div>
-      </div>
+
+        <div className="tablewrap">
+          <table className="tbl">
+            <thead><tr>
+              <th>Time</th><th>Actor</th><th>Action</th><th>Detail</th><th>Reference</th>
+            </tr></thead>
+            <tbody>
+              {pageRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="nowrap">{shortDate(r.created)}<small className="muted" style={{ display: 'block', fontSize: 12 }}>{timeOf(r.created)}</small></td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+                      <span className={r.actor_name ? '' : 'muted'}>{r.actor_name || '—'}</span>
+                      <span className={'req-tag' + (r.actor_type === 'worker' ? ' expert' : '')}>{SOURCE_LABEL[r.actor_type] || r.actor_type}</span>
+                    </div>
+                  </td>
+                  <td className="nowrap" style={{ fontWeight: 600 }}>{prettyAction(r.action)}</td>
+                  <td style={{ maxWidth: 360 }}>{r.detail || <span className="muted">—</span>}</td>
+                  <td className="muted nowrap">{r.ref || (r.entity_type ? `${r.entity_type} #${r.entity_id}` : '—')}</td>
+                </tr>
+              ))}
+              {!pageRows.length && (
+                <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: '36px 0' }}>
+                  {rows.length ? 'No activity matches these filters.' : 'No activity in this period.'}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {capped && <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>Showing the latest 500 events — narrow the period or source to see older ones.</p>}
+        <Pagination page={page} pageSize={pageSize} total={filtered.length} noun="events" onPage={setPage} onSize={(s) => { setPageSize(s); setPage(1) }} />
+      </Card>
     </div>
   )
 }

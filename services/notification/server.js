@@ -133,11 +133,13 @@ async function listActivity(query) {
   const items = (await pool.query(`SELECT * FROM activity_log ${clause} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`, params)).rows
   return { total, items }
 }
+// Counts for one period (days=0 → all time), so the per-source counts always add up to the total.
 async function statsActivity(days) {
-  const since = new Date(Date.now() - (Number(days) || 7) * 864e5).toISOString()
+  const d = days === undefined || days === '' ? 7 : Number(days) || 0
+  const since = d > 0 ? new Date(Date.now() - d * 864e5).toISOString() : '1970-01-01T00:00:00Z'
   const byActor = (await pool.query('SELECT actor_type, COUNT(*)::int n FROM activity_log WHERE created>=$1 GROUP BY actor_type', [since])).rows
   const byAction = (await pool.query('SELECT action, COUNT(*)::int n FROM activity_log WHERE created>=$1 GROUP BY action ORDER BY n DESC LIMIT 12', [since])).rows
-  const total = (await pool.query('SELECT COUNT(*)::int n FROM activity_log')).rows[0].n
+  const total = byActor.reduce((a, r) => a + r.n, 0)
   return { total, since, byActor, byAction }
 }
 
