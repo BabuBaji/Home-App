@@ -92,6 +92,7 @@ async function main() {
     const vw = await must(`worker ${k} verify`, api('POST', '/api/worker/auth/verify', { body: { phone: z.wPhone, otp: otpW.devOtp || '1234' } }))
     z.wTok = vw.token
     await must(`worker ${k} online`, api('POST', '/api/worker/status', { token: z.wTok, body: { state: 'Available' } }))
+    await api('POST', '/api/worker/heartbeat', { token: z.wTok, body: { battery: 80, network: 'wifi' } }) // dispatch only offers to experts whose app checked in lately
     check('setup', `Worker ${k} (id ${z.wId}) onboarded, logged in, online`, z.wTok)
 
     // Customer with an address inside the zone.

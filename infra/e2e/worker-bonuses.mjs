@@ -66,6 +66,7 @@ async function main() {
     const job = async () => {
       const b = await must('book', api('POST', '/api/bookings', { token: C, body: { items: [{ id: 'mopping', durationId: '60m' }], type: 'instant', addressId: addr, pincode: pin, lat, lng, payment: 'cash' } }))
       await api('POST', '/api/worker/status', { token: NEW.tok, body: { state: 'Available' } })
+      await api('POST', '/api/worker/heartbeat', { token: NEW.tok, body: { battery: 80, network: 'wifi' } }) // dispatch only offers to experts whose app checked in lately
       const off = await waitFor(async () => (await api('GET', '/api/worker/jobs/offer', { token: NEW.tok })).json?.state === 'PENDING', 25000)
       if (!off) throw new Error('no offer reached the new worker')
       await must('accept', api('POST', '/api/worker/jobs/accept', { token: NEW.tok }))

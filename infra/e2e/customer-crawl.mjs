@@ -41,6 +41,7 @@ async function setup() {
   const book = () => api('POST', '/api/bookings', { token: C, body: { items: [{ id: 'mopping', durationId: '60m' }], type: 'instant', addressId: addr, pincode: pin, lat, lng, payment: 'cash' } })
   const runTo = async (id, finish) => {
     await api('POST', '/api/worker/status', { token: W, body: { state: 'Available' } })
+    await api('POST', '/api/worker/heartbeat', { token: W, body: { battery: 80, network: 'wifi' } }) // dispatch only offers to experts whose app checked in lately
     await waitFor(async () => (await api('GET', '/api/worker/jobs/offer', { token: W }))?.state === 'PENDING', 20000)
     await api('POST', '/api/worker/jobs/accept', { token: W })
     await api('POST', '/api/worker/jobs/on-the-way', { token: W })
