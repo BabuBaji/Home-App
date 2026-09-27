@@ -317,11 +317,12 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
     const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zid}&services=${encodeURIComponent(serviceNames)}`, { workers: [] })
     cands = (feed.workers || []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.available, lat: w.last?.lat, lng: w.last?.lng, jobs: 0 }))
   }
-  // Fall back to any qualified active expert when the zone has nobody rostered. The sweep asks for
-  // requireZone so it never assigns outside the zone; the create path prefers serving the customer.
+  // Fall back to any qualified active expert when the zone has nobody rostered.
   // The fallback stays inside the zone: it widens "on shift" to "any active worker of this zone", it
   // never reaches into another zone. A booking with no zone has nobody to fall back to.
-  if (!cands.length && !requireZone && zid) {
+  // The sweep used to skip this (requireZone) — but the list is already zone-filtered, so skipping
+  // it only meant a zone with no shift roster got ONE attempt at booking time and was never retried.
+  if (!cands.length && zid) {
     const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}&zone_id=${zid}`, [])
     cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0 }))
   }
@@ -944,8 +945,10 @@ app.post('/api/bookings', auth, async (req, res) => {
     // booking to the next available expert (see offerSweep). The booking stays 'confirmed' until
     // somebody accepts, which is what the customer's "finding your expert" state reflects.
     if (!dueForDispatch(booking, await scheduleLeadMs())) console.log(`[booking] ${booking.ref}: scheduled — held until shortly before the slot`)
-    else if (pick) await offerTo(booking, pick)
-    else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
+    else if (pick) {
+      if ((await getSetting(ADMIN_URL, 'dispatch_mode', 'offer')) === 'assign') await assignDirect(booking, pick)
+      else await offerTo(booking, pick)
+    } else console.log(`[booking] ${booking.ref}: no free expert right now — leaving for offerSweep`)
   }
 
   // Record campaign redemptions (per-customer usage caps + coupon counts). Best-effort — a
@@ -1819,6 +1822,22 @@ async function offerTo(b, w) {
   return true
 }
 
+/** dispatch_mode 'assign': claim `b` for `w` outright — the same atomic write as an accepted offer
+ *  (/api/internal/bookings/:id/assign), so a concurrent accept or sweep can't double-assign. */
+async function assignDirect(b, w) {
+  const upd = await pool.query(
+    `UPDATE bookings SET worker_id=$1, pro_name=$2, pro_rating=$3, status='worker_assigned',
+       offer_worker_id=NULL, offer_at=NULL, zone_id=COALESCE($4, zone_id)
+      WHERE id=$5 AND worker_id IS NULL AND status='confirmed' RETURNING *`,
+    [w.id, w.name || 'Expert', w.rating || 4.8, w.zoneId || b.zone_id, b.id])
+  if (!upd.rowCount) return false
+  await emitBookingUpdate(b.id)
+  publishEvent(REDIS_URL, 'job.accepted', { bookingId: b.id, workerId: w.id, ref: b.ref })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'System', action: 'job.assign', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `Auto-assigned to ${w.name}` })
+  console.log(`[booking] auto-assigned ${b.ref} -> ${w.name}`)
+  return true
+}
+
 /** Record that `workerId` will not take `bookingId`, and free it for the next expert. */
 async function declineOffer(bookingId, workerId, why) {
   await pool.query(
@@ -1832,7 +1851,10 @@ async function declineOffer(bookingId, workerId, why) {
 async function offerSweep() {
   try {
     if ((await getSetting(ADMIN_URL, 'auto_assign', 'true')) !== 'true') return
-    const open = (await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
+    // dispatch_mode 'assign': give the job straight to the picked expert (no accept step).
+    // Default 'offer' keeps the one-expert-at-a-time offer chain.
+    const directAssign = (await getSetting(ADMIN_URL, 'dispatch_mode', 'offer')) === 'assign'
+    const open =(await pool.query("SELECT * FROM bookings WHERE status='confirmed' AND worker_id IS NULL AND (zone_id IS NOT NULL OR pincode IS NOT NULL) ORDER BY created ASC LIMIT 50")).rows.map(rowTo)
     if (!open.length) return
     // Track who we offer to inside this pass: pickWorker reads committed rows, so without this two
     // bookings in the same sweep could both land on the same idle expert.
@@ -1861,6 +1883,7 @@ async function offerSweep() {
       })
       if (!w) continue   // nobody left right now; autoCancelNoService is the backstop
       takenThisPass.add(w.id)
+      if (directAssign) { if (!(await assignDirect(b, w))) takenThisPass.delete(w.id); continue }
       if (!(await offerTo(b, w))) takenThisPass.delete(w.id)
     }
   } catch (e) { console.error('[booking] offerSweep:', e.message) }

@@ -4942,6 +4942,14 @@ app.post('/api/admin/workers/:id/site', adminAuth, scopeWorker, requirePerm('wor
 })
 
 /* Internal: on-shift qualified workers now (for auto-assign / live-ops). */
+/* "Online" for dispatch = the expert's Available switch is on AND their app has checked in lately.
+ * `available` defaults to true for every new account, so on its own it made people who had never
+ * opened the app look online — jobs were offered to them and sat until the booking auto-cancelled.
+ * The app heartbeats (location_at / profile.device.at) every minute while it is open. */
+const ONLINE_WINDOW_MS = Number(process.env.ONLINE_WINDOW_MIN || 15) * 60000
+const lastSeenMs = (w) => Math.max(Date.parse(w.location_at || '') || 0, Date.parse(w.profile?.device?.at || '') || 0)
+const isOnline = (w) => !!w.available && Date.now() - lastSeenMs(w) <= ONLINE_WINDOW_MS
+
 app.get('/internal/on-shift', internalOnly, async (req, res) => {
   const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
@@ -4954,7 +4962,7 @@ app.get('/internal/on-shift', internalOnly, async (req, res) => {
   if (zoneId) { vals.push(zoneId); sql += ` AND (s.zone_id=$3 OR (s.zone_id IS NULL AND w.zone_id=$3))` }
   const rows = (await pool.query(sql, vals)).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.length === 0 || names.some((n) => set.has(n)) })
-  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, rating: w.rating, available: !!w.available, zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
+  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, rating: w.rating, available: isOnline(w), zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
 })
 
 async function patchWorker(id, b, res) {
@@ -5036,10 +5044,10 @@ app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
   const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
   const rows = (await pool.query(
-    `SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng, zone_id FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''} ORDER BY jobs DESC NULLS LAST, rating DESC`,
+    `SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng, zone_id, location_at, profile FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''} ORDER BY jobs DESC NULLS LAST, rating DESC`,
     zoneId ? [zoneId] : [])).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
-  res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: !!w.available, lat: w.last_lat, lng: w.last_lng })))
+  res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: isOnline(w), lat: w.last_lat, lng: w.last_lng })))
 })
 // Live map: every worker's last known position and state (for the admin control tower).
 app.get('/internal/workers/locations', internalOnly, async (_q, res) => {

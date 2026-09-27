@@ -125,6 +125,14 @@ export default function SettingsScreen() {
       <Group title="Operations">
         <div className="toggle-grid">
           {toggleRow('auto_assign', 'Auto-assign jobs to on-shift experts', false, { hint: 'New bookings are offered to the nearest available expert automatically.' })}
+          <div className="toggle">
+            <div className="toggle-info">
+              <strong style={{ fontSize: 13.5 }}>Assign without asking the expert</strong>
+              <small className="muted" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>On: the job goes straight to the nearest online expert. Off: it’s offered one expert at a time and they have 2 minutes to accept.</small>
+            </div>
+            <button className={'switch' + (s.dispatch_mode === 'assign' ? ' on' : '')} disabled={!editable}
+              onClick={() => set('dispatch_mode', s.dispatch_mode === 'assign' ? 'offer' : 'assign')} />
+          </div>
           {toggleRow('maintenance_mode', 'Maintenance mode', false, { hint: 'The customer app shows “We’ll be back shortly” and takes no bookings or payments — including tracking a job in progress. The expert app and this panel keep working.' })}
           {toggleRow('allow_registration', 'Allow new customer sign-ups', true, { hint: 'Off: existing customers still sign in; new numbers can’t create an account. Admins can still add customers.' })}
           {toggleRow('service_available_default', 'New services available by default', true, { soon: true })}
