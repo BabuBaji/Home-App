@@ -6,12 +6,14 @@ import { speak, speakOnce } from '../../notify'
 import { useStore } from '../../store'
 import { useJob, serviceNames } from './useJob'
 import { t, tEn, dateLocale } from '../../i18n'
+import { useAppConfig } from '../../appConfig'
 
 // Module 6 · #51 — Service Completed. Uses the real completed_at timestamp. The star row seeds the
 // rating and jumps into the Module-7 rating flow; Pay & Tip opens the tip screen.
 export default function ServiceCompleted() {
   const { id } = useParams()
   const nav = useNavigate()
+  const { reviews } = useAppConfig()
   const { user } = useStore()
   const goBack = useBack('/bookings')
   const { b } = useJob(id, false)
@@ -47,14 +49,14 @@ export default function ServiceCompleted() {
         <div className="jt-card jt-kv"><span>{t('Completed At')}</span><b>{completedAt}</b></div>
         <button className="au-link" onClick={() => nav(`/booking-details/${b.id}`)}>{t('View receipt & details')}</button>
 
-        <div className="jt-sc-rate">
+        {reviews && <div className="jt-sc-rate">
           <div className="jt-sc-rate-q">{t('How was your experience?')}</div>
           <div className="jt-stars">
             {[1, 2, 3, 4, 5].map((n) => (
               <button key={n} type="button" aria-label={t('{n} stars', { n })} className={n <= stars ? 'on' : ''} onClick={() => { setStars(n); nav(`/rate/${b.id}?stars=${n}`) }}>★</button>
             ))}
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className="jt-foot col">

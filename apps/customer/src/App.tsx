@@ -13,6 +13,8 @@ import { serviceEndMs, serviceNames } from './screens/job/useJob'
 import { runTopBackHandler } from './backStack'
 
 import Login from './screens/Login'
+import Maintenance from './screens/Maintenance'
+import { loadAppConfig, useAppConfig } from './appConfig'
 import NameSelect from './screens/NameSelect'
 import SelectCity from './screens/SelectCity'
 import Permissions from './screens/Permissions'
@@ -291,6 +293,16 @@ export default function App() {
     return () => { stopped = true; clearInterval(iv) }
   }, [user?.id])
 
+  // Feature switches (Settings ▸ General): load at start, then every minute and on return to foreground.
+  const appCfg = useAppConfig()
+  useEffect(() => {
+    loadAppConfig()
+    const iv = setInterval(loadAppConfig, 60000)
+    const onVis = () => { if (document.visibilityState === 'visible') loadAppConfig() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis) }
+  }, [])
+
   const showSplash = !minTime || !booted
 
   return (
@@ -299,7 +311,7 @@ export default function App() {
         <BackButtonHandler />
         {user && <ChatNotifier key={user.id} />}
         <Splash visible={showSplash} />
-        {(
+        {appCfg.maintenance ? <Maintenance /> : (
           <Routes>
             <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
             <Route element={<Guard authed={!!user} />}>
@@ -349,8 +361,8 @@ export default function App() {
               <Route path="/job/:id/progress" element={<LiveProgress />} />
               <Route path="/job/:id/completed" element={<ServiceCompleted />} />
               {/* Module 7 — Rating */}
-              <Route path="/rate/:id" element={<RateWorker />} />
-              <Route path="/rate/:id/photos" element={<UploadPhotos />} />
+              <Route path="/rate/:id" element={appCfg.reviews ? <RateWorker /> : <ParamRedirect to={(id) => `/booking-details/${id}`} />} />
+              <Route path="/rate/:id/photos" element={appCfg.reviews ? <UploadPhotos /> : <ParamRedirect to={(id) => `/booking-details/${id}`} />} />
               <Route path="/complaint/:id" element={<Complaint />} />
               <Route path="/tip/:id" element={<TipWorker />} />
               <Route path="/rebook/:id" element={<Rebook />} />

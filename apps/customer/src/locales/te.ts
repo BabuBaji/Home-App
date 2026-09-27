@@ -1513,5 +1513,9 @@ const D: Record<string, string> = {
   "Oct": "అక్టో",
   "Nov": "నవం",
   "Dec": "డిసెం",
+  "We'll be back shortly": "మేము త్వరలో తిరిగి వస్తాము",
+  "HomeHelp is down for scheduled maintenance.": "షెడ్యూల్ చేసిన నిర్వహణ కోసం HomeHelp తాత్కాలికంగా ఆగింది.",
+  "Your bookings and wallet are safe.": "మీ బుకింగ్‌లు మరియు వాలెట్ సురక్షితంగా ఉన్నాయి.",
+  "Call support": "సపోర్ట్‌కు కాల్ చేయండి",
 }
 export default D

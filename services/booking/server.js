@@ -1095,6 +1095,8 @@ app.post('/api/bookings/:id/review', auth, async (req, res) => {
   if (!b || b.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' })
   // Only a finished job can be rated — and rating one used to trigger the worker's payout.
   if (b.status !== 'completed') return res.status(409).json({ error: 'You can rate the service once it is completed.' })
+  // Settings ▸ General ▸ Reviews & ratings off → no new ratings (settlement already ran at job end).
+  if ((await getSetting(ADMIN_URL, 'enable_reviews', 'true')) === 'false') return res.status(403).json({ error: 'Ratings are turned off right now.', reviewsOff: true })
   const rating = Math.min(5, Math.max(1, Math.round(Number(req.body?.rating) || 5)))
   await pool.query('UPDATE bookings SET rating=$1, review=$2, photo=$3 WHERE id=$4', [rating, req.body?.review ?? null, req.body?.photo ?? null, b.id])
   publishEvent(REDIS_URL, 'booking.completed', { booking: await getBooking(b.id) }) // review confirms completion → settle if not already

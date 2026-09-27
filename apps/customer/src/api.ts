@@ -71,7 +71,11 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     onUnauthorized?.()
     throw new Error(t('Your session expired — please sign in again.'))
   }
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || t('Request failed ({status})', { status: res.status })) }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    if (res.status === 503 && (e as any).maintenance) import('./appConfig').then((m) => m.markMaintenance())
+    throw new Error((e as any).error || t('Request failed ({status})', { status: res.status }))
+  }
   return res.json()
 }
 

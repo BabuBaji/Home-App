@@ -1,9 +1,11 @@
 import { useNavigate } from 'react-router-dom'
 import { Header, FooterCTA } from '../components/UI'
 import { useStore } from '../store'
+import { useAppConfig } from '../appConfig'
 import { t } from '../i18n'
 
 export default function Cart() {
+  const { promoCodes } = useAppConfig()
   const nav = useNavigate()
   const { cart, removeFromCart, subtotal } = useStore()
 
@@ -39,7 +41,7 @@ export default function Cart() {
 
         <div className="card pad mt">
           <div className="kv"><span className="k">{t('Subtotal')}</span><span className="v">₹{subtotal}</span></div>
-          <p className="muted sm" style={{ marginTop: 4 }}>{t('Coupons applied at summary.')}</p>
+          {promoCodes && <p className="muted sm" style={{ marginTop: 4 }}>{t('Coupons applied at summary.')}</p>}
         </div>
       </div>
 

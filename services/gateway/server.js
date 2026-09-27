@@ -66,7 +66,7 @@ function pickTarget(url) {
     || p('/api/reminders') || p('/api/plans') || p('/api/membership')) return U.auth
 
   // ----- catalogue / pricing / address search -----
-  if (p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info') || p('/api/surge') || p('/api/home-banners') || p('/api/banner-media') || p('/api/packages')) return U.catalog
+  if (p('/api/app-config') || p('/api/services') || p('/api/quote') || p('/api/coupons') || p('/api/offers') || p('/api/home') || p('/api/referral') || p('/api/places') || p('/api/geocode') || p('/api/reverse-geocode') || p('/api/maps-key') || p('/api/serviceable') || p('/api/eta') || p('/api/zones') || p('/api/zone-hours') || p('/api/invoice-info') || p('/api/surge') || p('/api/home-banners') || p('/api/banner-media') || p('/api/packages')) return U.catalog
 
   // ----- bookings / favourites / policy / support feed -----
   // The job chat is the one /api/bookings path the booking service does NOT own: the messages live
@@ -110,6 +110,24 @@ app.use((req, res, next) => {
   }
   req._target = target
   next()
+})
+
+// Maintenance mode (Settings ▸ General). The gateway polls the public app-config and, while it's on,
+// answers customer-app requests with 503 so the app shows its maintenance screen and no new bookings
+// or payments start. Admin, expert-app and payment/payout webhook traffic still flows, so the team
+// can work and in-flight payments settle. Fails open: if the config can't be read, nothing is held.
+let maintenance = false
+async function pollMaintenance() {
+  try {
+    const r = await fetch(U.catalog + '/api/app-config', { signal: AbortSignal.timeout(3000) })
+    if (r.ok) maintenance = !!(await r.json()).maintenance
+  } catch { /* keep last known */ }
+}
+pollMaintenance(); setInterval(pollMaintenance, 10000).unref()
+const HOLD_EXEMPT = (u) => u.startsWith('/api/admin') || u.startsWith('/api/worker') || u.startsWith('/api/app-config') || /^\/api\/payments?\/[^?]*webhook/.test(u)
+app.use((req, res, next) => {
+  if (!maintenance || !req.url.startsWith('/api') || HOLD_EXEMPT(req.url.split('?')[0])) return next()
+  res.status(503).json({ error: "HomeHelp is down for scheduled maintenance. We'll be back shortly.", maintenance: true })
 })
 
 const onError = (err, req, res) => {

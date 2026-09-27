@@ -10,7 +10,7 @@
 // debit/credit, admin customer management). No monolith involved.
 import express from 'express'
 import crypto from 'node:crypto'
-import { makePool, migrate, nowIso, internalOnly, internalPost, publishEvent, smsConfigured, sendOtpSms, getSetting } from '@homehelp/shared'
+import { makePool, migrate, nowIso, internalOnly, internalPost, publishEvent, smsConfigured, sendOtpSms, getSetting, subscribeEvents, invalidateSettings } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 
 assertJwtSecret('auth') // refuse to boot without a signing secret rather than issue forgeable sessions
@@ -298,6 +298,14 @@ async function provisionExtras(uid) {
     [uid, 'credit', 'Welcome bonus', bonus, bonus, nowIso(), 'WELCOME_BONUS', 'promo'])
 }
 
+// Settings ▸ General ▸ Allow new customer sign-ups. Off → existing customers still sign in, but a
+// phone/Google account we haven't seen can't create one from the app. (Admin "Add customer" uses the
+// internal find-or-create route and is not affected.)
+const signupsOpen = async () => (await getSetting(ADMIN_URL, 'allow_registration', 'true')) !== 'false'
+// Bust the settings cache the moment an admin saves, so the sign-up switch applies immediately.
+subscribeEvents(REDIS_URL, 'auth', (type) => { if (type === 'settings.updated') invalidateSettings() })
+const SIGNUPS_CLOSED = 'New sign-ups are paused right now. If you already have an account, sign in with the same number.'
+
 async function findOrCreateUser(phone) {
   const cur = await pool.query('SELECT * FROM users WHERE phone=$1', [phone])
   if (cur.rows[0]) return cur.rows[0]
@@ -527,6 +535,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   const ok = otp.length === 4 && crypto.timingSafeEqual(Buffer.from(hashOtp(phone, otp), 'hex'), Buffer.from(rec.hash, 'hex'))
   if (!ok) { rec.attempts += 1; return res.status(401).json({ error: 'Invalid OTP' }) }
   otpStore.delete(phone) // single use
+  if (!(await signupsOpen()) && !(await pool.query('SELECT 1 FROM users WHERE phone=$1', [phone])).rowCount) return res.status(403).json({ error: SIGNUPS_CLOSED, signupsClosed: true })
   const u = await findOrCreateUser(phone)
   await recordIdentity(u, 'phone')
   publishEvent(REDIS_URL, 'customer.login', { userId: u.id, name: u.name, detail: `Signed in (${phone})` })
@@ -540,6 +549,7 @@ app.post('/api/auth/google', async (req, res) => {
   const j = await verifyGoogleIdToken(req.body.credential)
   if (!j) return res.status(401).json({ error: 'Invalid Google credential' })
   const p = { email: j.email, name: j.name || 'Google User', avatar: j.picture }
+  if (!(await signupsOpen()) && !(await pool.query('SELECT 1 FROM users WHERE email=$1', [p.email])).rowCount) return res.status(403).json({ error: SIGNUPS_CLOSED, signupsClosed: true })
   const u = await findOrCreateGoogleUser(p)
   await recordIdentity(u, 'google')
   publishEvent(REDIS_URL, 'customer.login', { userId: u.id, name: u.name, detail: `Signed in with Google (${u.email || ''})` })

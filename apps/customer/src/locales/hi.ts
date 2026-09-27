@@ -1513,5 +1513,9 @@ const D: Record<string, string> = {
   "Oct": "अक्तू॰",
   "Nov": "नव॰",
   "Dec": "दिस॰",
+  "We'll be back shortly": "हम जल्द ही वापस आएँगे",
+  "HomeHelp is down for scheduled maintenance.": "HomeHelp निर्धारित मेंटेनेंस के लिए अभी बंद है।",
+  "Your bookings and wallet are safe.": "आपकी बुकिंग और वॉलेट सुरक्षित हैं।",
+  "Call support": "सपोर्ट को कॉल करें",
 }
 export default D

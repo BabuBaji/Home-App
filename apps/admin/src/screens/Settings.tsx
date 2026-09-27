@@ -125,11 +125,11 @@ export default function SettingsScreen() {
       <Group title="Operations">
         <div className="toggle-grid">
           {toggleRow('auto_assign', 'Auto-assign jobs to on-shift experts', false, { hint: 'New bookings are offered to the nearest available expert automatically.' })}
-          {toggleRow('maintenance_mode', 'Maintenance mode', false, { soon: true })}
-          {toggleRow('allow_registration', 'Allow new customer sign-ups', true, { soon: true })}
+          {toggleRow('maintenance_mode', 'Maintenance mode', false, { hint: 'The customer app shows “We’ll be back shortly” and takes no bookings or payments — including tracking a job in progress. The expert app and this panel keep working.' })}
+          {toggleRow('allow_registration', 'Allow new customer sign-ups', true, { hint: 'Off: existing customers still sign in; new numbers can’t create an account. Admins can still add customers.' })}
           {toggleRow('service_available_default', 'New services available by default', true, { soon: true })}
-          {toggleRow('enable_promo', 'Promo codes', true, { soon: true })}
-          {toggleRow('enable_reviews', 'Reviews & ratings', true, { soon: true })}
+          {toggleRow('enable_promo', 'Promo codes', true, { hint: 'Off: the coupon box is hidden and typed codes are ignored. Automatic offers still apply.' })}
+          {toggleRow('enable_reviews', 'Reviews & ratings', true, { hint: 'Off: customers aren’t asked to rate finished jobs. Existing ratings stay.' })}
         </div>
       </Group>
     </>,

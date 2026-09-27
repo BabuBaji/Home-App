@@ -12,6 +12,7 @@ import {
 } from '../api'
 import type { ServiceDetail, Duration, Quote, Coupon, Address, CartItem } from '../types'
 import { t, tDur, dateLocale } from '../i18n'
+import { useAppConfig } from '../appConfig'
 
 /*
  * THE booking flow. Every way into a booking ends up here:
@@ -55,6 +56,7 @@ interface Saved { key: string; durId?: string; mode: 'now' | 'schedule' | null; 
 export default function BookingFlow() {
   const { id } = useParams()
   const nav = useNavigate()
+  const { promoCodes } = useAppConfig()
   const toast = useToast()
   const { pincode, zoneHours, cart, clearCart, setServiceLocation } = useStore()
   const navState = useLocation().state as { durationId?: string; freq?: string; mode?: 'now' | 'schedule' } | null
@@ -87,6 +89,7 @@ export default function BookingFlow() {
   const [code, setCode] = useState('')
   const [coupons, setCoupons] = useState<Coupon[]>([])
   const [showCoupons, setShowCoupons] = useState(false)
+  useEffect(() => { if (!promoCodes) setCoupon('') }, [promoCodes])
   const [quote, setQuote] = useState<Quote | null>(null)
   const [wallet, setWallet] = useState(0)
   const [useWallet, setUseWallet] = useState(true)
@@ -401,7 +404,7 @@ export default function BookingFlow() {
 
           <div className="bf-div" />
           {/* coupon */}
-          {coupon ? (
+          {!promoCodes ? null : coupon ? (
             <div className="bf-coupon on">
               <Tag size={16} />
               <div className="grow"><b>{coupon}</b><small>{(quote?.discount || 0) > 0 ? t('You save ₹{amt}', { amt: quote!.discount }) : t('Applied')}</small></div>

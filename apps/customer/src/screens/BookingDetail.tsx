@@ -15,10 +15,12 @@ import { actualDuration, money, txnRef, dt } from '../invoiceDoc'
 import { chipClass, isLive, medallion, scheduleDisplay, STATUS_LABEL, whenLine } from '../orders'
 import type { Booking } from '../types'
 import { t } from '../i18n'
+import { useAppConfig } from '../appConfig'
 
 export default function BookingDetail() {
   const { id } = useParams()
   const nav = useNavigate()
+  const { reviews } = useAppConfig()
   const goBack = useBack('/bookings')
   const toast = useToast()
   const [b, setB] = useState<Booking | null>(null)
@@ -236,7 +238,7 @@ export default function BookingDetail() {
 
         {/* secondary actions — unchanged behaviour, restyled */}
         <div className="bd-acts">
-          {b.status === 'completed' && !b.rating && <button className="bd-act" onClick={() => nav(`/rate/${b.id}`)}><Star size={15} /> {t('Rate')}</button>}
+          {reviews && b.status === 'completed' && !b.rating && <button className="bd-act" onClick={() => nav(`/rate/${b.id}`)}><Star size={15} /> {t('Rate')}</button>}
           {(b.status === 'completed' || b.status === 'cancelled') && <button className="bd-act" onClick={() => nav(`/rebook/${b.id}`)}><RotateCcw size={15} /> {t('Rebook')}</button>}
           {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/tip/${b.id}`)}><Heart size={15} /> {t('Tip')}</button>}
           {b.status === 'completed' && <button className="bd-act" onClick={() => nav(`/complaint/${b.id}`)}><Flag size={15} /> {t('Report')}</button>}

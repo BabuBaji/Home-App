@@ -434,6 +434,8 @@ async function serviceDetail(id, zoneId, customerId) {
   return withImage({ ...s, ...details, available, price: durations[0].price, listPrice: durations[0].listPrice, durations, zoneDiscount: durations[0].price < durations[0].listPrice ? Math.round((1 - durations[0].price / durations[0].listPrice) * 100) : off })
 }
 
+const promoCodesOn = async () => (await getSetting(ADMIN_URL, 'enable_promo', 'true')) !== 'false'
+
 // Authoritative cart pricing → the shape the customer/booking flow expects (items + bill breakdown).
 async function priceCart({ items: rawItems, coupon, zoneId, customerId, applyCoupons = true }) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) return { error: 'Select at least one service' }
@@ -447,7 +449,9 @@ async function priceCart({ items: rawItems, coupon, zoneId, customerId, applyCou
     normItems.push({ serviceId: s.id, name: s.name, icon: s.icon, category: s.category, durationId: dur.id, durationLabel: dur.label, listPrice: dur.price })
   }
   const [campaigns, ctx] = await Promise.all([campaignsForZone(zoneId, zmap, customerId), buildCtx(customerId)])
-  const r = resolvePricing({ items: normItems, campaigns, ctx, couponCode: coupon, applyCoupons })
+  // Settings ▸ General ▸ Promo codes off → typed codes are ignored (automatic offers still apply).
+  const codesOn = await promoCodesOn()
+  const r = resolvePricing({ items: normItems, campaigns, ctx, couponCode: codesOn ? coupon : null, applyCoupons })
   const items = r.items.map((it) => ({ id: it.serviceId, name: it.name, icon: it.icon, category: it.category, durationId: it.durationId, durationLabel: it.durationLabel, price: it.price, listPrice: it.listPrice, zoneDiscount: it.zoneDiscount }))
   return { items, subtotal: r.subtotal, discount: r.discount, total: r.total, coupon: r.coupon, savings: r.savings, appliedCampaignIds: r.appliedCampaignIds }
 }
@@ -639,6 +643,7 @@ app.post('/api/quote', async (req, res) => {
 // Public coupon list (manual-entry codes) for the checkout "available offers" panel — from the DB,
 // falling back to the legacy static list only if the coupon table is empty.
 app.get('/api/coupons', async (_q, res) => {
+  if (!(await promoCodesOn())) return res.json([])
   const { rows } = await pool.query(
     `SELECT c.coupon_code, c.expiry, m.discount_type, m.discount_value, m.max_discount, m.min_subtotal, m.banner_subtitle, m.banner_title
        FROM coupon c JOIN campaign_master m ON m.campaign_id = c.campaign_id
@@ -650,6 +655,7 @@ app.get('/api/coupons', async (_q, res) => {
   })))
 })
 app.post('/api/coupons/validate', async (req, res) => {
+  if (!(await promoCodesOn())) return res.status(400).json({ error: 'Promo codes are not available right now' })
   const r = await validateCouponDb(String(req.body?.code || ''), Number(req.body?.subtotal) || 0)
   if (r.error) return res.status(400).json(r)
   res.json(r)
@@ -684,6 +690,19 @@ app.get('/api/internal/customers/:id/offers', internalOnly, async (req, res) => 
     }
   })
   res.json({ totalOffers: new Set(camps.rows.map((r) => r.campaign_id)).size, coupons })
+})
+// Public feature switches the customer app follows (Settings ▸ General). The gateway polls this
+// too, to hold customer traffic while maintenance mode is on.
+app.get('/api/app-config', async (_q, res) => {
+  // default-on switches are off only when explicitly 'false'; default-off ones are on only when 'true'
+  const on = async (k, def) => { const v = await getSetting(ADMIN_URL, k, ''); return def ? v !== 'false' : v === 'true' }
+  res.json({
+    maintenance: await on('maintenance_mode', false),
+    signups: await on('allow_registration', true),
+    promoCodes: await on('enable_promo', true),
+    reviews: await on('enable_reviews', true),
+    supportPhone: await getSetting(ADMIN_URL, 'support_phone', ''),
+  })
 })
 app.get('/api/home', (_q, res) => res.json({ referral: REFERRAL, trust: TRUST_BADGES, instantEta: 5 }))
 // Live surge for the customer's zone (public, pincode-keyed) — powers the "rain incoming" heads-up
