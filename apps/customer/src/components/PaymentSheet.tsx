@@ -111,6 +111,18 @@ function BrandCluster({ id }: { id: string }) {
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>{marks}</span>
 }
 
+/* The native SDK rejects with the gateway's raw JSON ({"error":{"description":"undefined",...}}),
+ * which the customer saw verbatim. Pull out a readable reason; in test mode, say how to pay —
+ * real UPI apps and cards always fail against rzp_test_ keys. */
+function rzpErrorText(raw: string, testMode: boolean): string {
+  let desc = '', code = ''
+  try { const j = JSON.parse(raw); desc = j?.error?.description || ''; code = j?.error?.code || '' } catch { desc = raw }
+  if (!desc || desc === 'undefined' || desc === 'null') desc = ''
+  const cancelled = /cancel/i.test(desc) || (!desc && !code)
+  const base = cancelled ? t('Payment cancelled') : desc || t('Payment failed. Please try again.')
+  return testMode && !cancelled ? `${base} ${t('Test mode: pay with UPI ID success@razorpay or a Razorpay test card.')}` : base
+}
+
 export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
   const toast = useToast()
   const [groups, setGroups] = useState<PaymentGroup[]>([])
@@ -169,9 +181,9 @@ export default function PaymentSheet({ open, amount, onClose, onPaid }: Props) {
           })
         } catch (e) {
           // Checkout failed or was closed — record the attempt so it shows as failed, not pending.
-          const msg = (e as Error).message || t('Payment cancelled')
-          reportPaymentFailed(order.orderId, msg).catch(() => {})
-          toast(msg); setPhase('select'); return
+          const raw = (e as Error).message || ''
+          reportPaymentFailed(order.orderId, raw || 'cancelled').catch(() => {})
+          toast(rzpErrorText(raw, (order.keyId || keyId || '').startsWith('rzp_test_'))); setPhase('select'); return
         }
         try {
           await verifyPayment({ razorpay_order_id: r.razorpay_order_id || order.orderId, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })
