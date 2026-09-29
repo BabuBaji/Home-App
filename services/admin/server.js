@@ -13,6 +13,7 @@ import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, requ
   PERMISSION_CATALOG, ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, isSystemRole, inScope } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
 import { installApprovalCenter } from './approvalCenter.js'
+import { installBusiness } from './business.js'
 
 assertJwtSecret('admin') // refuse to boot without a signing secret rather than issue forgeable sessions
 
@@ -1524,6 +1525,7 @@ app.post('/internal/audit', internalOnly, async (req, res) => {
 })
 
 const ac = installApprovalCenter({ app, pool, admin, resolvePermissions, resolveScope, U, REDIS_URL })
+installBusiness({ app, admin, U })
 
 init()
   .then(() => ac.migrateAc())

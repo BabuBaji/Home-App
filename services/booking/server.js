@@ -1725,6 +1725,60 @@ app.get('/api/internal/ops', internalOnly, async (_q, res) => {
      WHERE status = ANY($1) ORDER BY created DESC LIMIT 500`, [ACTIVE_STATES])
   res.json(rows)
 })
+/* ---------- business performance (admin ▸ Insights) ---------- */
+// IST calendar range → [from 00:00 IST, day after `to` 00:00 IST)
+const bizRange = (q) => {
+  const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
+  const today = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10)
+  const from = ok(q.from) ? q.from : today, to = ok(q.to) ? q.to : from
+  return [new Date(`${from}T00:00:00+05:30`), new Date(new Date(`${to}T00:00:00+05:30`).getTime() + 86400000)]
+}
+app.get('/internal/business/zones', internalOnly, async (req, res) => {
+  const [a, b] = bizRange(req.query)
+  const rows = (await pool.query(
+    `SELECT zone_id, COUNT(*)::int orders,
+            COUNT(*) FILTER (WHERE status='completed')::int completed,
+            COUNT(*) FILTER (WHERE status='cancelled')::int cancelled,
+            COALESCE(SUM(total) FILTER (WHERE status<>'cancelled'),0)::int gmv,
+            COALESCE(SUM(total) FILTER (WHERE status='completed'),0)::int revenue,
+            -- every rupee received (a booking later refunded was still paid first); refunds taken off once
+            COALESCE(SUM(total) FILTER (WHERE payment_status IN ('paid','refunded')),0)::int collected,
+            COALESCE(SUM(COALESCE(refund,0)) FILTER (WHERE payment_status='refunded'),0)::int refunds,
+            COUNT(DISTINCT user_id)::int customers
+       FROM bookings WHERE created >= $1 AND created < $2 GROUP BY zone_id`, [a, b])).rows
+  // A customer is "new" in the zone of their first-ever booking, if that booking falls in range.
+  const fresh = (await pool.query(
+    `SELECT zone_id, COUNT(*)::int n FROM (SELECT DISTINCT ON (user_id) user_id, zone_id, created FROM bookings ORDER BY user_id, created) f
+      WHERE created >= $1 AND created < $2 GROUP BY zone_id`, [a, b])).rows
+  const nf = new Map(fresh.map((r) => [r.zone_id, r.n]))
+  res.json(rows.map((r) => ({ ...r, newCustomers: nf.get(r.zone_id) || 0 })))
+})
+app.get('/internal/business/trend', internalOnly, async (req, res) => {
+  const [a, b] = bizRange(req.query)
+  const ids = String(req.query.zoneIds || '').split(',').filter(Boolean).map((x) => (x === 'none' ? null : Number(x)))
+  const wantNull = ids.includes(null), zids = ids.filter((x) => x != null)
+  const where = ids.length ? `AND (zone_id = ANY($3::int[])${wantNull ? ' OR zone_id IS NULL' : ''})` : ''
+  const params = ids.length ? [a, b, zids] : [a, b]
+  const days = (await pool.query(
+    `SELECT to_char(created + interval '330 minutes', 'YYYY-MM-DD') d, COUNT(*)::int orders,
+            COUNT(*) FILTER (WHERE status='completed')::int completed,
+            COALESCE(SUM(total) FILTER (WHERE status<>'cancelled'),0)::int gmv
+       FROM bookings WHERE created >= $1 AND created < $2 ${where} GROUP BY 1 ORDER BY 1`, params)).rows
+  const items = (await pool.query(`SELECT items, total, status FROM bookings WHERE created >= $1 AND created < $2 AND status<>'cancelled' ${where}`, params)).rows
+  const svc = {}
+  for (const r of items) {
+    let list = []; try { list = JSON.parse(r.items || '[]') } catch {}
+    for (const it of list) { const k = it.name || it.id || 'Service'; const e = svc[k] || (svc[k] = { name: k, orders: 0, revenue: 0 }); e.orders++; e.revenue += Number(it.price) || 0 }
+  }
+  res.json({ days, services: Object.values(svc).sort((x, y) => y.revenue - x.revenue).slice(0, 8) })
+})
+app.post('/internal/business/booking-zones', internalOnly, async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Number.isFinite)
+  if (!ids.length) return res.json({})
+  const rows = (await pool.query('SELECT id, zone_id FROM bookings WHERE id = ANY($1::int[])', [ids])).rows
+  res.json(Object.fromEntries(rows.map((r) => [r.id, r.zone_id])))
+})
+
 app.get('/api/internal/bookings', internalOnly, async (req, res) => {
   const { worker_id, status } = req.query
   const where = [], vals = []

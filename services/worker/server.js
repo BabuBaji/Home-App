@@ -5280,6 +5280,11 @@ function runCore(core, params, body, by) {
     Promise.resolve(core(req, res)).catch((e) => resolve({ status: 500, body: { error: e.message } }))
   })
 }
+// Business performance: every expert with zone + whether they're online right now.
+app.get('/internal/business/experts', internalOnly, async (_q, res) => {
+  const rows = (await pool.query("SELECT * FROM workers WHERE status <> 'inactive'")).rows
+  res.json(rows.map((w) => ({ id: w.id, name: w.name, phone: w.phone, zoneId: w.zone_id ?? null, city: w.city ?? null, status: w.status, online: isOnline(w) })))
+})
 app.get('/internal/workers/:id/approval-context', internalOnly, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   if (!w) return res.status(404).json({ error: 'Not found' })

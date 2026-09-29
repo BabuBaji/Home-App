@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Download, Eye, IndianRupee, Clock, Undo2, Gift } from 'lucide-react'
-import { fetchPayments, runShaktiSettlement } from '../api'
-import { Card, StatCard, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, money, shortDate, useToast, FilterTabs } from '../components/UI'
+import { fetchPayments, runShaktiSettlement, fetchZones, type Zone } from '../api'
+import { Card, StatCard, Badge, SearchBox, Pagination, Loading, ErrorState, Modal, Field, money, shortDate, useToast, FilterTabs, Dropdown } from '../components/UI'
 
 type Txn = { id: number; type: string; status?: string; title: string; amount: number; created: string; ref?: string; customer: string; paymentId?: string | null; refunded?: number; method?: string | null }
 type Summary = { revenue: number; successful: number; pending: number; refunded: number; failed?: number }
@@ -32,8 +33,14 @@ export default function Payments() {
   const [settleOpen, setSettleOpen] = useState(false)
   const [settling, setSettling] = useState(false)
 
-  const load = () => { setErr(''); fetchPayments().then(setD).catch((e: Error) => setErr(e.message)) }
-  useEffect(load, [])
+  // Zone filter (by the booking's zone) — also set from ?zoneId= when opened from Business Performance.
+  const [params, setParams] = useSearchParams()
+  const zoneId = params.get('zoneId') || ''
+  const [zones, setZones] = useState<Zone[]>([])
+  useEffect(() => { fetchZones().then(setZones).catch(() => {}) }, [])
+  const setZone = (v: string) => { const p = new URLSearchParams(params); if (v) p.set('zoneId', v); else p.delete('zoneId'); setParams(p, { replace: true }) }
+  const load = () => { setErr(''); setD(null); fetchPayments(zoneId).then(setD).catch((e: Error) => setErr(e.message)) }
+  useEffect(load, [zoneId])
   useEffect(() => setPage(1), [queue, method, q])
   if (err) return <ErrorState msg={err} onRetry={load} />
   if (!d) return <Loading />
@@ -81,6 +88,10 @@ export default function Payments() {
         <div className="card-head lg">
           <h3>Transactions<span className="count">{txns.length.toLocaleString('en-IN')}</span></h3>
           <div className="head-actions">
+            <div style={{ width: 200 }}>
+              <Dropdown value={zoneId} width="100%" onChange={setZone}
+                options={[{ value: '', label: 'All zones' }, ...zones.map((z) => ({ value: String(z.id), label: `${z.name} · ${z.city}` })), { value: 'none', label: 'No zone' }]} />
+            </div>
             <button className="btn line" onClick={exportCsv}><Download size={15} /> Export</button>
             <button className="btn line" onClick={() => setSettleOpen(true)}><Gift size={15} /> Run bonus settlement</button>
           </div>

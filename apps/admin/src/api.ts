@@ -438,7 +438,7 @@ export const savePricingRules = (body: PricingRules) => req<PricingRules>('/pric
 export const campaignUsage = (id: number) => req<{ total: number; customers: number; recent: { customer_id: number; booking_id: number; created: string }[] }>(`/campaigns/${id}/usage`)
 
 /* payments / refunds */
-export const fetchPayments = () => req<any>('/payments')
+export const fetchPayments = (zoneId = '') => req<any>(`/payments${zoneId ? `?zoneId=${zoneId}` : ''}`)
 export type WalletTxn = { id: number; user_id: number; type: string; title: string; amount: number; balance: number; ref?: string | null; created: string; balance_type?: string; customer: string | null; phone: string | null }
 export const fetchWalletTxns = () => req<WalletTxn[]>('/wallet/transactions')
 export const fetchRefunds = () => req<any[]>('/refunds')
@@ -509,6 +509,25 @@ export interface ShiftBoardExpert {
 }
 export interface ShiftBoard { date: string; total: number; coming: number; checkedIn: number; notComing: number; leave: number; noReply: number; noShow: number; experts: ShiftBoardExpert[] }
 export interface ShiftRequest { workerId: number; name: string; phone: string; currentShiftId: number | null; currentShift: string; requestedShiftId: number | null; requestedShift: string; assignedTo: { id: number; name: string; roleName: string } | null; mine: boolean }
+export interface BizNums {
+  orders: number; completed: number; cancelled: number; gmv: number; revenue: number; collected: number; refunds: number; customers: number; newCustomers: number
+  experts: number; online: number; expertEarnings: number; incentives: number; salary: number; paidOut: number; payoutsPending: number
+  aov: number; cancelRate: number; expertCost: number; net: number; prev: { orders: number; gmv: number; collected: number; completed: number }
+}
+export interface BizRow extends BizNums { zoneId: number | null; zone: string; city: string; state: string; status: string }
+export interface BizPerformance {
+  range: { from: string; to: string; days: number; prevFrom: string; prevTo: string }
+  totals: BizNums
+  states: (BizNums & { state: string; cities: (BizNums & { city: string; zones: BizRow[] })[] })[]
+}
+export interface BizTrend { days: { d: string; orders: number; completed: number; gmv: number }[]; services: { name: string; orders: number; revenue: number }[] }
+export interface BizPayouts {
+  summary: { paid: number; pending: number; processing: number; failed: number; count: number }
+  payouts: { id: number; workerId: number; workerName: string; phone: string; zoneId: number | null; zone: string; city: string; amount: number; method: string; status: string; reference: string; destination: string; utr: string | null; created: string }[]
+}
+export const fetchBusiness = (from: string, to: string) => req<BizPerformance>(`/business/performance?from=${from}&to=${to}`)
+export const fetchBusinessTrend = (from: string, to: string, zoneIds: string) => req<BizTrend>(`/business/trend?from=${from}&to=${to}&zoneIds=${zoneIds}`)
+export const fetchBusinessPayouts = (from: string, to: string, status = '') => req<BizPayouts>(`/business/payouts?from=${from}&to=${to}${status ? `&status=${status}` : ''}`)
 export interface AcLevel { level: string; label: string; state: 'approved' | 'rejected' | 'skipped' | 'current' | 'waiting'; by: string; at: string | null; comment: string }
 export interface AcItem {
   id: number; type: string; typeLabel: string; ref: string; title: string; summary: string; amount: number | null

@@ -9,7 +9,7 @@ import express from 'express'
 import crypto from 'node:crypto'
 import {
   makePool, migrate, makeAdminAuth, requirePerm, requireAnyPerm, internalOnly, subscribeEvents, invalidateSettings,
-  publishEvent, getSetting, getSettingInt, tryGet, internalPost,
+  publishEvent, getSetting, getSettingInt, tryGet, internalPost, inScope,
 } from '@homehelp/shared'
 // Imported directly, not via the shared index: they carry the jsonwebtoken dep.
 import { makeCustomerAuth } from '@homehelp/shared/customer-auth.js'
@@ -23,6 +23,7 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const ADMIN_URL = (process.env.ADMIN_URL || 'http://localhost:4010').replace(/\/$/, '')
 const AUTH_URL = (process.env.AUTH_URL || 'http://localhost:4002').replace(/\/$/, '')
 const BOOKING_URL = (process.env.BOOKING_URL || 'http://localhost:4006').replace(/\/$/, '')
+const CATALOG_URL = (process.env.CATALOG_URL || 'http://localhost:4001').replace(/\/$/, '')
 const WORKER_URL = (process.env.WORKER_URL || 'http://localhost:4004').replace(/\/$/, '')
 
 process.on('unhandledRejection', (e) => console.error('[payment] unhandledRejection:', e?.message || e))
@@ -597,8 +598,23 @@ app.post('/api/payments/bank-validation/webhook', async (req, res) => {
 
 /* ---------- admin finance ---------- */
 // Admin Payments screen expects { summary, methods, transactions } — not a raw row array.
-app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'wallet.view'), async (_q, res) => {
-  const rows = (await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows
+app.get('/api/admin/payments', adminAuth, requireAnyPerm('payments.view', 'wallet.view'), async (req, res) => {
+  let rows = (await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 500')).rows
+  // Zone of each payment = its booking's zone. Used for the ?zoneId filter and to keep a zone/city
+  // manager to their own territory (a wallet top-up has no booking → only whole-company admins see it).
+  const scope = req.admin?.scope
+  const zoneFilter = req.query.zoneId ? String(req.query.zoneId) : ''
+  if (zoneFilter || (scope && scope.type !== 'all')) {
+    const zmap = await internalPost(BOOKING_URL, '/internal/business/booking-zones', { ids: [...new Set(rows.map((r) => r.booking_id).filter(Boolean))] }).catch(() => ({}))
+    const zones = await tryGet(CATALOG_URL, '/api/internal/zones', [])
+    const cityOf = new Map((zones || []).map((z) => [z.id, z.city]))
+    rows = rows.filter((r) => {
+      const z = r.booking_id ? (zmap[r.booking_id] ?? null) : undefined
+      if (zoneFilter && String(z ?? 'none') !== zoneFilter) return false
+      if (scope && scope.type !== 'all') return z != null && inScope(scope, { zoneId: z, city: cityOf.get(z) })
+      return true
+    })
+  }
   const customers = await tryGet(AUTH_URL, '/api/internal/customers', [])
   const nameById = new Map((customers || []).map((c) => [c.id, c.name]))
   // VERIFIED (captured) and CLAIMED (captured and attached to a booking / top-up) are collected money too.

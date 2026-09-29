@@ -78,6 +78,7 @@ const NAV: NavEntry[] = [
     { to: '/zones/inventory', label: 'Inventory', Icon: Package, perm: 'zones.view' },
   ] },
   { key: 'insights', label: 'Insights', Icon: BarChart3, items: [
+    { to: '/business', label: 'Business Performance', Icon: IndianRupee, perm: 'reports.view' },
     { to: '/reports', label: 'Reports', Icon: BarChart3, perm: 'reports.view' },
     { to: '/analytics', label: 'Analytics', Icon: PieChart, perm: 'analytics.view' },
     { to: '/activity', label: 'Activity Monitor', Icon: ActivityIcon, perm: 'activity.view' },
@@ -97,7 +98,7 @@ const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', packages: 'Service Packages', payments: 'Payments', refunds: 'Refunds',
   zones: 'Zone Operations', 'command-center': 'Operations Command Center', 'control-tower': 'Control Tower', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', 'compensation-rules': 'Compensation Rules', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
-  reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals', reliability: 'Reliability & Penalties', 'shift-confirmations': 'Shift Confirmations', 'approval-center': 'Approval Center',
+  reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals', reliability: 'Reliability & Penalties', 'shift-confirmations': 'Shift Confirmations', 'approval-center': 'Approval Center', business: 'Business Performance',
 }
 
 // Every menu item's label by its path — so a page never shows "Dashboard" as its title just

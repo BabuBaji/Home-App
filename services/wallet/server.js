@@ -580,6 +580,42 @@ function runCore(core, params, body, by) {
     Promise.resolve(core({ params, body, admin: { name: by, role: 'super', permissions: [], scope: { type: 'all' } } }, res)).catch((e) => resolve({ status: 500, body: { error: e.message } }))
   })
 }
+// IST calendar range → [from 00:00 IST, day after `to` 00:00 IST)
+const bizRange = (q) => {
+  const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
+  const today = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10)
+  const from = ok(q.from) ? q.from : today, to = ok(q.to) ? q.to : from
+  return [new Date(`${from}T00:00:00+05:30`), new Date(new Date(`${to}T00:00:00+05:30`).getTime() + 86400000)]
+}
+// Business performance: money paid out / owed to experts in the range, per expert.
+app.get('/internal/business/money', internalOnly, async (req, res) => {
+  const [a, b] = bizRange(req.query)
+  const inc = (await pool.query(`SELECT worker_id, category, COALESCE(SUM(amount),0)::int s FROM worker_income WHERE created >= $1 AND created < $2 GROUP BY 1,2`, [a, b])).rows
+  const wd = (await pool.query(`SELECT worker_id, status, COALESCE(SUM(amount),0)::int s, COUNT(*)::int n FROM worker_withdrawals WHERE created >= $1 AND created < $2 GROUP BY 1,2`, [a, b])).rows
+  const ded = (await pool.query(`SELECT worker_id, COALESCE(SUM(amount),0)::int s FROM worker_deductions WHERE created >= $1 AND created < $2 GROUP BY 1`, [a, b])).rows
+  const adv = (await pool.query(`SELECT worker_id, COALESCE(SUM(amount),0)::int s FROM worker_advances WHERE status='Approved' AND created >= $1 AND created < $2 GROUP BY 1`, [a, b])).rows
+  const by = {}
+  const e = (id) => by[id] || (by[id] = { workerId: id, earnings: 0, incentives: 0, salary: 0, other: 0, paidOut: 0, payoutsPending: 0, deductions: 0, advances: 0 })
+  for (const r of inc) {
+    const x = e(r.worker_id)
+    if (/job/i.test(r.category)) x.earnings += r.s
+    else if (/incentive|bonus|tip/i.test(r.category)) x.incentives += r.s
+    else if (/salary/i.test(r.category)) x.salary += r.s
+    else x.other += r.s
+  }
+  for (const r of wd) { const x = e(r.worker_id); if (r.status === 'Paid') x.paidOut += r.s; else if (['Pending', 'Processing'].includes(r.status)) x.payoutsPending += r.s }
+  for (const r of ded) e(r.worker_id).deductions += r.s
+  for (const r of adv) e(r.worker_id).advances += r.s
+  res.json(Object.values(by))
+})
+app.get('/internal/business/withdrawals', internalOnly, async (req, res) => {
+  const [a, b] = bizRange(req.query)
+  const st = String(req.query.status || '')
+  const rows = (await pool.query(
+    `SELECT * FROM worker_withdrawals WHERE created >= $1 AND created < $2 ${st ? 'AND status = $3' : ''} ORDER BY id DESC LIMIT 1000`, st ? [a, b, st] : [a, b])).rows
+  res.json(rows.map((w) => ({ id: w.id, workerId: w.worker_id, amount: w.amount, method: w.method, status: w.status, reference: w.reference, destination: w.destination, utr: w.utr, created: w.created })))
+})
+
 app.post('/internal/approvals/execute', internalOnly, async (req, res) => {
   const { type, ref, approve, comment = '', by = 'Approval Center' } = req.body || {}
   let r

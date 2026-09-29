@@ -205,6 +205,7 @@ services:
     environment:
       PORT: 4008
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@payment-db:5432/payment
+      CATALOG_URL: http://catalog:4001
       REDIS_URL: redis://redis:6379
       INTERNAL_KEY: ${INTERNAL_KEY}
       JWT_SECRET: ${JWT_SECRET}

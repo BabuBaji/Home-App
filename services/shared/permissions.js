@@ -237,7 +237,7 @@ const ADMIN = dedupe([
 // zone_manager — runs a zone: its experts, roster, attendance, shift approvals, SOS and jobs there.
 const ZONE_MANAGER = dedupe(['dashboard.view', 'workers.view', 'workers.edit', 'bookings.view', 'bookings.assign', 'customers.view',
   'zones.view', 'roster.view', 'roster.edit', 'attendance.view', 'shifts.approve', 'liveops.view', 'safety.view', 'safety.respond',
-  'complaints.view', 'tickets.view', 'approvals.decide'])
+  'complaints.view', 'tickets.view', 'approvals.decide', 'reports.view'])
 // team_lead — looks after a small team of experts: sees them, their roster and attendance, and
 // approves their shift change requests. Nothing else.
 const TEAM_LEAD = dedupe(['dashboard.view', 'workers.view', 'roster.view', 'attendance.view', 'shifts.approve', 'safety.view', 'approvals.decide'])
