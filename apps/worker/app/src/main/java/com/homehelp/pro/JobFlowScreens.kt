@@ -560,8 +560,9 @@ fun JobDetailsScreen(vm: AppViewModel, nav: NavHostController) {
             SafetyCard()
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
-            Box(Modifier.padding(Space.l)) {
-                PrimaryButton(tr("Start On The Way")) {
+            Row(Modifier.padding(Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                CancelJobButton(vm, nav, Modifier.weight(1f), BEFORE_ARRIVAL_REASONS)
+                PrimaryButton(tr("Start On The Way"), modifier = Modifier.weight(1.4f)) {
                     vm.startOnTheWay(); nav.navigate(Routes.ON_THE_WAY)
                 }
             }
@@ -717,7 +718,8 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
         Surface(color = Color.White, shadowElevation = 12.dp) {
-            Box(Modifier.padding(Space.l)) {
+            Row(Modifier.padding(Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                CancelJobButton(vm, nav, Modifier.weight(1f), BEFORE_ARRIVAL_REASONS)
                 /* Distance-aware, but never a hard block: below 150 m this is the plain
                  * "Reached Location" call to action; further out it still works but says how far
                  * off the GPS thinks the worker is. Refusing outright would strand anyone whose
@@ -725,7 +727,8 @@ fun OnTheWayScreen(vm: AppViewModel, nav: NavHostController) {
                 val nearCustomer = distKm != null && distKm <= 0.15
                 PrimaryButton(
                     if (nearCustomer || distKm == null) tr("Reached Location")
-                    else "Reached Location (%.1f km away)".format(distKm),
+                    else "Reached (%.1f km)".format(distKm),
+                    modifier = Modifier.weight(1.4f),
                 ) {
                     vm.markArrived(); nav.navigate(Routes.ARRIVED)
                 }
@@ -2208,8 +2211,11 @@ private fun MapPlaceholder() {
 }
 
 @Composable
-private fun CancelDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    val reasons = listOf("Customer not available", "Wrong address", "Safety concern", "Other")
+private fun CancelDialog(
+    onDismiss: () -> Unit,
+    reasons: List<String> = listOf("Customer not available", "Wrong address", "Safety concern", "Other"),
+    onConfirm: (String) -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
@@ -2217,6 +2223,8 @@ private fun CancelDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
         title = { Text(tr("Cancel Job"), fontWeight = FontWeight.Bold) },
         text = {
             Column {
+                Text(tr("Cancelling an accepted job adds a Red Card to your record."), color = RedCancel, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(Space.s))
                 Text(tr("Select a reason:"), color = TextGray, fontSize = 13.sp)
                 Spacer(Modifier.height(Space.s))
                 reasons.forEach { r ->
@@ -2296,3 +2304,22 @@ private fun CancelDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
  * checklistFor, bitmapToDataUrl, launchNavigation, dialNumber, lastKnownLatLng).
  * ─────────────────────────────────────────────────────────────────────────────
  */
+
+private val BEFORE_ARRIVAL_REASONS = listOf("Personal emergency", "Can't reach on time", "Vehicle problem", "Health issue", "Other")
+
+/** "Cancel Job" for the steps after accepting (Job Details, On The Way): pick a reason, drop the
+ *  job back to dispatch (the server records the Red Card), return Home. */
+@Composable
+private fun CancelJobButton(vm: AppViewModel, nav: NavHostController, modifier: Modifier, reasons: List<String>) {
+    val ctx = LocalContext.current
+    var show by remember { mutableStateOf(false) }
+    OutlineButton(tr("Cancel Job"), modifier = modifier) { show = true }
+    if (show) {
+        CancelDialog(onDismiss = { show = false }, reasons = reasons) { reason ->
+            show = false
+            vm.cancelJobWithReason(reason)
+            toast(ctx, "Job cancelled: $reason")
+            nav.popBackStack(Routes.HOME, inclusive = false)
+        }
+    }
+}

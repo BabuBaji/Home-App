@@ -4,11 +4,11 @@ import {
   LayoutDashboard, Users, HardHat, CalendarDays, Sparkles, Tag, CreditCard, RotateCcw,
   AlertOctagon, Ban, Wallet, Bell, LifeBuoy, BarChart3, PieChart, Settings as Cog,
   UserCog, ShieldCheck, Menu, X, LogOut, ChevronRight, Calendar, ChevronDown, Home as HomeIcon, Activity as ActivityIcon, MapPin, Radio, CalendarClock, Timer, Boxes, GraduationCap,
-  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain, Crown, Images, Clock, Siren,
+  Building2, Layers, Package, Map as MapIcon, Store, Ticket, IndianRupee, UserPlus, Gift, Stamp, Network, Gauge, RadioTower, CloudRain, Crown, Images, Clock, Siren, CalendarCheck,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore, has } from '../store'
-import { fetchAlerts } from '../api'
+import { fetchAlerts, fetchShiftRequests, fetchAcCount } from '../api'
 import { Avatar } from './UI'
 
 type NavItem = { to: string; label: string; Icon: LucideIcon; perm?: string; end?: boolean }
@@ -19,6 +19,7 @@ const isGroup = (e: NavEntry): e is NavGroup => 'items' in e
 
 const NAV: NavEntry[] = [
   { to: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard, perm: 'dashboard.view' },
+  { to: '/approval-center', label: 'Approval Center', Icon: Stamp, perm: 'approvals.decide' },
   { key: 'live', label: 'Live Operations', Icon: Gauge, items: [
     // The SOS queue + phone-first field app (opens full screen). Managers are first responders.
     { to: '/field/sos', label: 'SOS & Field App', Icon: Siren, perm: 'safety.view' },
@@ -37,6 +38,8 @@ const NAV: NavEntry[] = [
     { to: '/workers', label: 'Workers (Pros)', Icon: HardHat, perm: 'workers.view' },
     { to: '/roster', label: 'Shifts / Roster', Icon: CalendarClock, perm: 'roster.view' },
     { to: '/shift-plans', label: 'Shift Plans & Attendance', Icon: Timer, perm: 'attendance.view' },
+    { to: '/shift-confirmations', label: 'Shift Confirmations', Icon: CalendarCheck, perm: 'roster.view' },
+    { to: '/reliability', label: 'Reliability & Penalties', Icon: ShieldCheck, perm: 'workers.view' },
     { to: '/training', label: 'Training & Assessment', Icon: GraduationCap, perm: 'training.view' },
     { to: '/equipment', label: 'Equipment', Icon: Package, perm: 'equipment.view' },
   ] },
@@ -84,7 +87,7 @@ const NAV: NavEntry[] = [
     { to: '/admins', label: 'Admin Users', Icon: UserCog, perm: 'admins.view' },
     { to: '/organization', label: 'Organization', Icon: Network, perm: 'admins.view' },
     { to: '/roles', label: 'Roles & Permissions', Icon: ShieldCheck, perm: 'roles.view' },
-    { to: '/approvals', label: 'Approvals', Icon: Stamp, perm: 'approvals.review' },
+    { to: '/approvals', label: 'Money Approval Rules', Icon: Stamp, perm: 'approvals.review' },
   ] },
 ]
 
@@ -94,14 +97,14 @@ const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', packages: 'Service Packages', payments: 'Payments', refunds: 'Refunds',
   zones: 'Zone Operations', 'command-center': 'Operations Command Center', 'control-tower': 'Control Tower', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', 'compensation-rules': 'Compensation Rules', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
-  reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals',
+  reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals', reliability: 'Reliability & Penalties', 'shift-confirmations': 'Shift Confirmations', 'approval-center': 'Approval Center',
 }
 
 // Every menu item's label by its path — so a page never shows "Dashboard" as its title just
 // because it's missing from TITLES (Time & Extensions, Membership, Home Banners did).
 const NAV_LABEL: Record<string, string> = Object.fromEntries(NAV.flatMap((e) => (isGroup(e) ? e.items : [e]).map((it) => [it.to, it.label])))
 
-const ROLE_LABEL: Record<string, string> = { super: 'Super Admin', admin: 'Admin', manager: 'Manager', support: 'Support', dispatcher: 'Dispatcher', finance: 'Finance', safety: 'Safety Response', recruiter: 'Recruiter', trainer: 'Trainer', marketing: 'Marketing', auditor: 'Auditor' }
+const ROLE_LABEL: Record<string, string> = { super: 'Super Admin', admin: 'Admin', manager: 'Manager', support: 'Support', dispatcher: 'Dispatcher', finance: 'Finance', safety: 'Safety Response', recruiter: 'Recruiter', trainer: 'Trainer', marketing: 'Marketing', auditor: 'Auditor', zone_manager: 'Zone Manager', team_lead: 'Team Lead' }
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { admin, signOut } = useStore()
@@ -112,6 +115,20 @@ export default function Layout({ children }: { children: ReactNode }) {
   const toggleCollapsed = () => setCollapsed((c) => { const n = !c; try { localStorage.setItem('hha_nav_collapsed', n ? '1' : '0') } catch { /* ignore */ } return n })
   const [alerts, setAlerts] = useState(0)
   useEffect(() => { fetchAlerts().then((a) => setAlerts(a.count)).catch(() => {}) }, [pathname])
+  // Shift change requests this admin can decide — a count on the menu so nobody has to go looking.
+  const [shiftReqs, setShiftReqs] = useState(0)
+  useEffect(() => {
+    if (!has(admin, 'shifts.approve')) return
+    const load = () => fetchShiftRequests().then((l) => setShiftReqs(l.length)).catch(() => {})
+    load(); const t = setInterval(load, 60000); return () => clearInterval(t)
+  }, [pathname, admin])
+  const [acCount, setAcCount] = useState(0)
+  useEffect(() => {
+    if (!has(admin, 'approvals.decide') && !has(admin, 'approvals.review')) return
+    const load = () => fetchAcCount().then((c) => setAcCount(c.total)).catch(() => {})
+    load(); const t = setInterval(load, 60000); return () => clearInterval(t)
+  }, [pathname, admin])
+  const badgeFor = (to: string) => (to === '/shift-confirmations' ? shiftReqs : to === '/approval-center' ? acCount : 0)
   const seg = pathname.split('/')[1] || 'dashboard'
   // Most specific first: a sub-page's own menu label (/zones/cities → "Cities"), then the section.
   const title = NAV_LABEL[pathname] || TITLES[seg] || NAV_LABEL['/' + seg] || 'Dashboard'
@@ -135,6 +152,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               if (e.perm && !has(admin, e.perm)) return null
               return <NavLink key={e.to} to={e.to} end={e.end} title={e.label} className={({ isActive }) => 'navitem' + (isActive ? ' active' : '')} onClick={() => setOpen(false)}>
                 <e.Icon size={19} /> <span>{e.label}</span>
+                {badgeFor(e.to) > 0 && <span className="nav-badge">{badgeFor(e.to)}</span>}
               </NavLink>
             }
             const items = e.items.filter((it) => !it.perm || has(admin, it.perm))
@@ -146,12 +164,14 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <button type="button" title={e.label} className={'navitem navgroup-btn' + (hasActive ? ' has-active' : '')}
                   onClick={() => { if (collapsed) { toggleCollapsed(); setOpenGroup(e.key) } else setOpenGroup(isOpen ? null : e.key) }}>
                   <e.Icon size={19} /> <span>{e.label}</span>
+                  {!isOpen && items.reduce((n, it) => n + badgeFor(it.to), 0) > 0 && <span className="nav-badge">{items.reduce((n, it) => n + badgeFor(it.to), 0)}</span>}
                   <ChevronDown className="nav-chev" size={15} />
                 </button>
                 {isOpen && <div className="navgroup-items">
                   {items.map((it) => (
                     <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => 'navitem navsub' + (isActive ? ' active' : '')} onClick={() => setOpen(false)}>
                       <span>{it.label}</span>
+                      {badgeFor(it.to) > 0 && <span className="nav-badge">{badgeFor(it.to)}</span>}
                     </NavLink>
                   ))}
                 </div>}

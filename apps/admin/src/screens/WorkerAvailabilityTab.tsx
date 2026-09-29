@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, Clock, Coffee, Timer, AlertTriangle, CheckCircle2, Info as InfoIcon } from 'lucide-react'
 import { Card, Badge, Loading, ErrorState, Modal, Dropdown, useToast, shortDate } from '../components/UI'
-import { fetchAvailabilityOverview, fetchWorkerAvailability, createWorkerLeave, reviewWorkerLeave, reviewWorkerAvailability, fetchZones, type Zone } from '../api'
+import { fetchAvailabilityOverview, fetchWorkerAvailability, createWorkerLeave, reviewWorkerLeave, reviewWorkerAvailability, fetchZones, fetchTeamLeadOptions, setWorkerTeamLead, type Zone, type TeamLeadOption } from '../api'
 import type { AvailabilityOverview, WorkerAvailabilityState } from '../types'
+import { useStore, has } from '../store'
 
 /* Availability tab — schedule, week summary, month calendar, leaves and the change trail. Every
  * figure is derived server-side from real attendance / shift / leave rows. Actions: record a leave,
@@ -29,6 +30,7 @@ function OverviewCard({ icon, label, value, sub, tone }: { icon: React.ReactNode
   )
 }
 
+const acMsg = (r: unknown, fallback: string) => { const x = r as { approvalCenter?: boolean; message?: string } | null; return x?.approvalCenter && x.message ? x.message : fallback }
 export default function WorkerAvailabilityTab({ workerId }: { workerId: number }) {
   const toast = useToast()
   const [month, setMonth] = useState('')
@@ -65,9 +67,33 @@ export default function WorkerAvailabilityTab({ workerId }: { workerId: number }
       toast('Availability updated'); setChgOpen(false); setChgForm({ shiftDefId: '', zoneId: '', reason: '' }); load()
     } catch (e) { toast((e as Error).message) } finally { setChgBusy(false) }
   }
+  const { admin } = useStore()
+  const [leadOpts, setLeadOpts] = useState<TeamLeadOption[]>([])
+  useEffect(() => { fetchTeamLeadOptions(workerId).then(setLeadOpts).catch(() => {}) }, [workerId])
+  const changeLead = async (v: string) => {
+    try { await setWorkerTeamLead(workerId, v ? Number(v) : null); toast(v ? 'Team Lead assigned' : 'Team Lead removed'); reloadAvail() }
+    catch (e) { toast((e as Error).message) }
+  }
+  const reloadAvail = () => fetchWorkerAvailability(workerId).then(setAvail).catch(() => {})
+  const [reqBusy, setReqBusy] = useState(false)
+  const decideRequest = async (approve: boolean) => {
+    let reason = ''
+    if (!approve) {
+      const r = window.prompt('Why is the request rejected? (the expert sees this)')
+      if (r === null) return
+      if (!r.trim()) return toast('Give a reason')
+      reason = r.trim()
+    }
+    setReqBusy(true)
+    try {
+      // Reject = keep the expert on the shift they already have, with the reason.
+      const r = await reviewWorkerAvailability(workerId, approve ? { approve: true } : { approve: false, shiftDefId: avail?.assigned.shiftDefId ?? null, zoneId: avail?.assigned.zoneId ?? null, reason })
+      toast(acMsg(r, approve ? 'Shift change approved' : 'Shift change rejected')); reloadAvail(); load()
+    } catch (e) { toast((e as Error).message) } finally { setReqBusy(false) }
+  }
   const actLeave = async (lid: number, approve: boolean) => {
     setLeaveActBusy(lid)
-    try { await reviewWorkerLeave(workerId, lid, approve); toast(approve ? 'Leave approved' : 'Leave rejected'); load() }
+    try { const r = await reviewWorkerLeave(workerId, lid, approve); toast(acMsg(r, approve ? 'Leave approved' : 'Leave rejected')); load() }
     catch (e) { toast((e as Error).message) } finally { setLeaveActBusy(null) }
   }
 
@@ -89,6 +115,44 @@ export default function WorkerAvailabilityTab({ workerId }: { workerId: number }
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 14, alignItems: 'start' }}>
       {/* ---- main column ---- */}
       <div className="grid" style={{ gap: 14 }}>
+        {avail && (
+          <div className="card pad row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <strong style={{ fontSize: 14 }}>Team Lead</strong>
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                {avail.teamLead ? <>Shift change requests go to <b style={{ color: 'var(--ink, #111)' }}>{avail.teamLead.name}</b> ({avail.teamLead.roleName}); their managers can also decide.</> : 'None assigned — any approver covering this expert’s zone can decide.'}
+              </div>
+            </div>
+            {has(admin, 'workers.edit') && (
+              <div style={{ minWidth: 240 }}>
+                <Dropdown value={avail.teamLead ? String(avail.teamLead.id) : ''} width="100%"
+                  options={[{ value: '', label: 'No Team Lead' }, ...leadOpts.map((o) => ({ value: String(o.id), label: `${o.name} · ${o.roleName}` }))]}
+                  onChange={changeLead} />
+              </div>
+            )}
+          </div>
+        )}
+        {avail?.availability.status === 'Pending' && has(admin, 'shifts.approve') && (() => {
+          const nm = (id: number | null) => { const s = avail.shifts.find((x) => x.id === id); return s ? `${s.name} · ${to12(s.start)}–${to12(s.end)}` : 'Flexible (no fixed shift)' }
+          return (
+            <div className="card pad" style={{ border: '1px solid #fcd34d', background: '#fffbeb' }}>
+              <div className="row" style={{ justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div>
+                  <strong style={{ fontSize: 14.5 }}>Shift change request — waiting for approval</strong>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>
+                    <span className="muted">Current:</span> {nm(avail.assigned.shiftDefId)} &nbsp;→&nbsp; <span className="muted">Requested:</span> <b>{nm(avail.availability.preferredShiftId)}</b>
+                  </div>
+                  {avail.teamLead && <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>Waiting for {avail.teamLead.name} ({avail.teamLead.roleName})</div>}
+                </div>
+                {avail.canDecide === false ? <span className="muted" style={{ fontSize: 12.5 }}>Only {avail.teamLead?.name} or their manager can decide</span> :
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btn" disabled={reqBusy} onClick={() => decideRequest(true)}>Approve</button>
+                  <button className="btn line" disabled={reqBusy} style={{ color: '#dc2626' }} onClick={() => decideRequest(false)}>Reject</button>
+                </div>}
+              </div>
+            </div>
+          )
+        })()}
         <Card>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
             <div>

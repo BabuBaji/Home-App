@@ -145,7 +145,7 @@ fun EarningsScreen(vm: AppViewModel, nav: NavHostController) {
                     Column(Modifier.weight(1f)) {
                         Text(tr("Earned this month"), color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${inr(monthTotal)}", color = TextDark, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.2).sp)
+                        Text("₹${inr(monthTotal)}", color = TextDark, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp)
                         if (pct != null) {
                             Spacer(Modifier.height(6.dp))
                             val up = pct >= 0
@@ -727,6 +727,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
     val progressFrac = if (nextTier != null) (progressCur.toFloat() / progressMax).coerceIn(0f, 1f) else 1f
     val kycVerified = vm.workerStatus.equals("active", true) || vm.bankApproved
 
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadReliability() }
     TabScaffold(tr("Profile"), actions = {
         TabAction(Icons.Filled.Notifications, tr("Notifications"), badge = vm.unreadNotifications) { nav.navigate(Routes.P_NOTIFICATIONS) }
         TabAction(Icons.Filled.Settings, tr("Settings")) { nav.navigate(Routes.SETTINGS) }
@@ -801,17 +802,12 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.width(8.dp))
                     // Outlined pill, as the reference draws it — an outline reads as secondary
                     // next to the filled actions elsewhere on the page.
-                    Row(
-                        Modifier.clip(RoundedCornerShape(Radius.pill))
-                            .border(1.4.dp, Purple, RoundedCornerShape(Radius.pill))
-                            .clickable { nav.navigate(Routes.P_PERSONAL) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Purple, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text(tr("Edit Profile"), color = Purple, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape)
+                            .border(1.4.dp, Purple, CircleShape)
+                            .clickable { nav.navigate(Routes.P_PERSONAL) },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.Edit, contentDescription = tr("Edit Profile"), tint = Purple, modifier = Modifier.size(16.dp)) }
                 }
             }
 
@@ -869,8 +865,8 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
                 ProfileStatCard(Modifier.weight(1f), Icons.Filled.WorkOutline, Purple, PurpleLight, tr("Jobs done"), "${vm.jobsCompleted}", tr("Total"))
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, tr("Accepted"), vm.acceptancePct?.let { "$it%" } ?: "—", tr("This Month"))
-                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, tr("Completed"), vm.completionPct?.let { "$it%" } ?: "—", tr("This Month"))
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.Star, GreenSuccess, GreenLight, tr("Accepted"), (vm.reliability?.acceptance ?: vm.acceptancePct)?.let { "$it%" } ?: "—", tr("This Month"))
+                ProfileStatCard(Modifier.weight(1f), Icons.Filled.ThumbUp, Amber, GoldLight, tr("Completed"), (vm.reliability?.completion ?: vm.completionPct)?.let { "$it%" } ?: "—", tr("This Month"))
                 ProfileStatCard(
                     Modifier.weight(1f), Icons.Filled.SentimentSatisfiedAlt, ProfBlue, ProfBlueBg, tr("Rating"),
                     if (vm.workerRating > 0) String.format("%.1f", vm.workerRating) else "—", tr("Out of 5"),
@@ -960,7 +956,7 @@ private fun ProfileIconLine(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = TextGray, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
-        Text(tr(text), color = TextGray, fontSize = 13.sp)
+        Text(tr(text), color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 

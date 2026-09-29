@@ -12,6 +12,7 @@ import { Card, Badge, Avatar, Loading, ErrorState, useToast, shortDate, Dropdown
 import { useStore } from '../store'
 import WorkerApproval from './WorkerApproval'
 import WorkerAvailabilityTab from './WorkerAvailabilityTab'
+import WorkerReliabilityTab from './WorkerReliabilityTab'
 import WorkerLogs from './WorkerLogs'
 import WorkerOnboarding from './WorkerOnboarding'
 
@@ -193,7 +194,7 @@ function PerfTile({ label, value, sub, subTone }: { label: string; value: ReactN
 }
 
 const jobTone = (s: string) => s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'
-const TABS = [['overview', 'Overview'], ['onboarding', 'Onboarding'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['notes', 'Notes & Activity'], ['logs', 'Logs']] as const
+const TABS = [['overview', 'Overview'], ['onboarding', 'Onboarding'], ['jobs', 'Jobs & Performance'], ['earnings', 'Earnings & Payouts'], ['docs', 'Documents'], ['skills', 'Skills & Services'], ['avail', 'Availability'], ['reliability', 'Reliability'], ['notes', 'Notes & Activity'], ['logs', 'Logs']] as const
 
 export default function WorkerDetail() {
   const { id } = useParams()
@@ -1832,6 +1833,7 @@ export default function WorkerDetail() {
       )}
 
       {tab === 'avail' && <WorkerAvailabilityTab workerId={Number(id)} />}
+      {tab === 'reliability' && <WorkerReliabilityTab workerId={Number(id)} />}
       {tab === 'overview' && <div style={grid3}>{availabilityPanel}
         <Panel title="Attendance & Shift">
           <Info label="On Shift" value={<Badge tone={w.on_shift ? 'green' : 'gray'} dot={false}>{w.on_shift ? 'On shift' : 'Off'}</Badge>} />

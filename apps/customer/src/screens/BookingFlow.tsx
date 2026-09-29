@@ -70,7 +70,7 @@ function hrLabel(label: string) {
   return `${Number(hrs.toFixed(2))} hr`
 }
 const minAt = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
-const serverTime = (m: number) => { const h = Math.floor(m / 60); return `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
+const serverTime = (m: number) => { const h = Math.floor(m / 60); return `${String(h % 12 || 12).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
 const niceTime = (m: number) => { const h = Math.floor(m / 60); return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}` }
 
 // Leaving the flow to add a new address unmounts it; these few choices are restored on the way back.

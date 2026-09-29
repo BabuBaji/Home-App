@@ -412,6 +412,8 @@ app.get('/api/worker/jobs/offer', auth, async (req, res) => {
 
 app.post('/api/worker/jobs/request', auth, async (req, res) => {
   const wl = req.worker.workLimit
+  // Suspended for too many Red Cards: no new work until operations reinstate them.
+  if (req.worker.suspended) return res.json({ job: null, jobStatus: 'NONE', suspended: true, error: 'Your account is suspended for too many Red Cards. See My Performance.' })
   if (wl?.capped) return res.json({ job: null, jobStatus: 'NONE', capped: true, error: cappedMsg(wl) })
   // One job at a time: a worker mid-job gets no new work.
   if (await activeBooking(req.worker.id)) return res.json({ job: null, jobStatus: 'NONE', error: 'Finish your current job first.' })
@@ -774,6 +776,8 @@ app.post('/api/worker/jobs/cancel', auth, async (req, res) => {
   if (b) {
     await internalPost(BOOKING_URL, `/api/internal/bookings/${b.id}/release`, { worker_id: req.worker.id })
     skipSet(req.worker.id).add(b.id)
+    // Dropping a job after accepting it is a reliability violation (Red Card rules).
+    internalPost(WORKER_URL, `/internal/workers/${req.worker.id}/penalty`, { code: 'JOB_DROPPED', ref: b.ref || String(b.id), reason: `Dropped job ${b.ref || b.id} after accepting` }).catch(() => {})
     publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'job.drop', entityType: 'booking', entityId: b.id, ref: b.ref, detail: `${req.worker.name} dropped the job (returned to pool)` })
   }
   res.json({ ok: true, jobStatus: 'NONE' })

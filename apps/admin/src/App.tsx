@@ -13,6 +13,8 @@ import Customers from './screens/Customers'
 import AdminCustomerDetail from './screens/AdminCustomerDetail'
 import Workers from './screens/Workers'
 import WorkerDetail from './screens/WorkerDetail'
+import Reliability from './screens/Reliability'
+import ShiftConfirmations from './screens/ShiftConfirmations'
 import WorkerWallet from './screens/WorkerWallet'
 import Bookings from './screens/Bookings'
 import AdminBookingDetail from './screens/AdminBookingDetail'
@@ -49,6 +51,7 @@ import SettingsScreen from './screens/Settings'
 import Admins from './screens/Admins'
 import Roles from './screens/Roles'
 import Approvals from './screens/Approvals'
+import ApprovalCenter from './screens/ApprovalCenter'
 import OrgHierarchy from './screens/OrgHierarchy'
 import CommandCenter from './screens/CommandCenter'
 import ControlTower from './screens/ControlTower'
@@ -77,6 +80,8 @@ export default function App() {
           <Route path="/customers" element={<Page perm="customers.view"><Customers /></Page>} />
           <Route path="/customers/:id" element={<Page perm="customers.view"><AdminCustomerDetail /></Page>} />
           <Route path="/workers" element={<Page perm="workers.view"><Workers /></Page>} />
+          <Route path="/reliability" element={<Page perm="workers.view"><Reliability /></Page>} />
+          <Route path="/shift-confirmations" element={<Page perm="roster.view"><ShiftConfirmations /></Page>} />
           <Route path="/workers/new" element={<Page perm="workers.create"><AddWorker /></Page>} />
           <Route path="/workers/:id/edit" element={<Page perm="workers.edit"><AddWorker /></Page>} />
           <Route path="/workers/:id" element={<Page perm="workers.view"><WorkerDetail /></Page>} />
@@ -123,6 +128,7 @@ export default function App() {
           <Route path="/admins" element={<Page perm="admins.view"><Admins /></Page>} />
           <Route path="/roles" element={<Page perm="roles.view"><Roles /></Page>} />
           <Route path="/approvals" element={<Page perm="approvals.review"><Approvals /></Page>} />
+          <Route path="/approval-center" element={<Page perm="approvals.decide"><ApprovalCenter /></Page>} />
           <Route path="/organization" element={<Page perm="admins.view"><OrgHierarchy /></Page>} />
         </Route>
         <Route path="*" element={<Navigate to={admin ? home : '/login'} replace />} />

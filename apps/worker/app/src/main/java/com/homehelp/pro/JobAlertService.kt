@@ -48,6 +48,13 @@ class JobAlertService : Service() {
     // still have time to take it.
     private var lastOfferId = 0
 
+    // Highest worker-notification id already shown (Red Cards, appeal results, deductions…).
+    // -1 = never polled on this install: the first poll only sets the mark, so history isn't replayed.
+    private var lastNoteId: Int
+        get() = prefs.getInt(KEY_LAST_NOTE, -1)
+        set(v) { prefs.edit().putInt(KEY_LAST_NOTE, v).apply() }
+    private var tick = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -83,6 +90,7 @@ class JobAlertService : Service() {
                 try { pollOffer() } catch (_: Exception) { /* keep polling */ }
                 try { pollAssignment() } catch (_: Exception) { /* keep polling */ }
                 try { pollMessages() } catch (_: Exception) { /* keep polling */ }
+                if (tick++ % 4 == 0) try { pollNotices() } catch (_: Exception) { /* keep polling */ }
                 delay(8000)
             }
         }
@@ -239,6 +247,42 @@ class JobAlertService : Service() {
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
         try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(OFFER_ID, n) } catch (_: Exception) { }
+        // Full-screen intents only take over a locked/off screen; while the expert is in another app
+        // they shrink to a heads-up. With "display over other apps" allowed, open the offer outright.
+        if (android.provider.Settings.canDrawOverlays(this)) {
+            try {
+                startActivity(Intent(this, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    .putExtra("nav_route", Routes.NEW_JOB))
+            } catch (_: Exception) { }
+        }
+    }
+
+    /* Surface new account notices (Red Card given or removed, appeal decided, suspension,
+     * deductions) as a heads-up, not just a row in the in-app list. */
+    private suspend fun pollNotices() {
+        val items = RetrofitClient.api.walletNotifications().items
+        val maxId = items.maxOfOrNull { it.id } ?: 0
+        val seen = lastNoteId
+        if (seen < 0) { lastNoteId = maxId; return }
+        val fresh = items.filter { it.id > seen && !it.read }.sortedBy { it.id }
+        if (fresh.isNotEmpty() && online) {
+            val latest = fresh.last().text
+            val title = latest.substringBefore(" — ").ifBlank { "HomeHelp Pro" }
+            val body = latest.substringAfter(" — ", "")
+            val n = NotificationCompat.Builder(this, MSG_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(if (fresh.size > 1) "$title (+${fresh.size - 1} more)" else title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .setContentIntent(openRouteIntent(3, Routes.PERFORMANCE))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .build()
+            try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTE_ID, n) } catch (_: Exception) { }
+        }
+        if (maxId > seen) lastNoteId = maxId
     }
 
     private fun notifyMessages(incoming: List<JobMessage>) {
@@ -273,6 +317,8 @@ class JobAlertService : Service() {
         private const val PREFS = "hh_pro_alerts"
         private const val KEY_LAST_MSG = "last_msg_id"
         private const val KEY_LAST_JOB = "last_job_id"
+        private const val KEY_LAST_NOTE = "last_note_id"
+        const val NOTE_ID = 4718
 
         /** Set by the chat screen while it is on top, so we don't alert about what's already on screen. */
         @Volatile

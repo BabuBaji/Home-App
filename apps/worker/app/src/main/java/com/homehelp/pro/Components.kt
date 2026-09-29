@@ -582,7 +582,6 @@ fun Modifier.bounceClick(onClick: () -> Unit): Modifier = composed {
  * scrolls, with optional trailing [actions]. [content] receives the padding to apply and must be
  * vertically scrollable (verticalScroll / LazyColumn) so the title can react to it.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun TabScaffold(
     title: String,
@@ -590,31 +589,23 @@ fun TabScaffold(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
 ) {
-    val behavior = androidx.compose.material3.TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Compact one-row header (title + subtitle left, actions right) — the old Material "large"
+    // collapsing bar left a tall empty band above a 44sp title on every tab.
     androidx.compose.material3.Scaffold(
-        modifier = Modifier.fillMaxSize()
-            .then(Modifier.nestedScroll(behavior.nestedScrollConnection)),
+        modifier = Modifier.fillMaxSize(),
         containerColor = ScreenBg,
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            androidx.compose.material3.LargeTopAppBar(
-                title = {
-                    Column {
-                        Text(tr(title), fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp, maxLines = 1)
-                        if (!subtitle.isNullOrBlank() && behavior.state.collapsedFraction < 0.5f) {
-                            Text(tr(subtitle), color = TextGray, fontSize = 14.sp, fontWeight = FontWeight.Normal, maxLines = 1)
-                        }
-                    }
-                },
-                actions = { actions(); Spacer(Modifier.width(Space.s)) },
-                scrollBehavior = behavior,
-                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
-                colors = androidx.compose.material3.TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = ScreenBg,
-                    scrolledContainerColor = CardBg,
-                    titleContentColor = TextDark,
-                ),
-            )
+            Row(
+                Modifier.fillMaxWidth().background(ScreenBg).padding(start = Space.l, end = Space.s, top = 10.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(tr(title), color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1)
+                    if (!subtitle.isNullOrBlank()) Text(tr(subtitle), color = TextGray, fontSize = 13.sp, fontWeight = FontWeight.Normal, maxLines = 1)
+                }
+                actions()
+            }
         },
         content = content,
     )
@@ -623,11 +614,11 @@ fun TabScaffold(
 /** Round icon action for [TabScaffold] titles, with an optional red count badge. */
 @Composable
 fun TabAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, badge: Int = 0, onClick: () -> Unit) {
-    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
         Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onClick),
+            Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill)).clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
-        ) { Icon(icon, contentDescription = label, tint = TextDark, modifier = Modifier.size(24.dp)) }
+        ) { Icon(icon, contentDescription = label, tint = TextDark, modifier = Modifier.size(22.dp)) }
         if (badge > 0) {
             Box(
                 Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = 4.dp)

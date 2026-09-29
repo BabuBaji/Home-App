@@ -12,6 +12,7 @@
     <!-- Job offers expire in 2 minutes, so they surface like an incoming call rather than waiting
          in the tray. Granted by default for CATEGORY_CALL notifications. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 

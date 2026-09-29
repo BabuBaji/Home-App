@@ -562,6 +562,41 @@ function auth(req, res, next) {
 
 // Internal: ledger summary for a worker (used by the worker service's bootstrap so Home shows
 // the same real balance as the Wallet screen).
+/* ---------- Approval Center (admin service) — see services/admin/approvalCenter.js ---------- */
+function raiseApproval(item) {
+  return internalPost(ADMIN_URL, '/internal/approvals', item).catch((e) => { console.error('[wallet] raiseApproval:', e.message); return null })
+}
+async function viaApprovals(req, res, type, ref, approve, comment) {
+  let r
+  try { r = await internalPost(ADMIN_URL, '/internal/approvals/decide-by-ref', { type, ref: String(ref), approve: !!approve, comment: comment || '', admin: req.admin }) }
+  catch (e) { if (e.status) { res.status(e.status).json({ ok: false, error: e.message }); return true } return false }
+  if (!r?.handled) return false
+  res.json({ ok: true, approvalCenter: true, status: r.status, message: r.message, ...(await walletState(Number(req.params.id))) })
+  return true
+}
+function runCore(core, params, body, by) {
+  return new Promise((resolve) => {
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this }, json(j) { resolve({ status: this.statusCode, body: j }); return this } }
+    Promise.resolve(core({ params, body, admin: { name: by, role: 'super', permissions: [], scope: { type: 'all' } } }, res)).catch((e) => resolve({ status: 500, body: { error: e.message } }))
+  })
+}
+app.post('/internal/approvals/execute', internalOnly, async (req, res) => {
+  const { type, ref, approve, comment = '', by = 'Approval Center' } = req.body || {}
+  let r
+  if (type === 'advance') {
+    const a = (await pool.query('SELECT worker_id FROM worker_advances WHERE id=$1', [Number(ref)])).rows[0]
+    if (!a) return res.json({ ok: false, error: 'Advance request not found' })
+    r = await runCore(advanceCore, { id: String(a.worker_id), adv: String(ref), action: approve ? 'approve' : 'reject' }, { reason: comment }, by)
+  } else if (type === 'withdrawal') {
+    const w = (await pool.query('SELECT worker_id, amount FROM worker_withdrawals WHERE id=$1', [Number(ref)])).rows[0]
+    if (!w) return res.json({ ok: false, error: 'Withdrawal not found' })
+    r = await runCore(approve ? wdApproveCore : wdRejectCore, { id: String(w.worker_id), wd: String(ref) }, {}, by)
+    if (r.status < 400) await notify(w.worker_id, approve ? 'Withdrawal approved' : 'Withdrawal not approved', approve ? `₹${w.amount} is on its way to your account.` : `₹${w.amount} is back in your wallet: ${comment}`)
+  } else return res.json({ ok: false, error: `Unknown request type ${type}` })
+  if (r.status >= 400) return res.json({ ok: false, error: r.body?.error || `Could not apply (${r.status})` })
+  res.json({ ok: true })
+})
+
 app.get('/internal/summary/:wid', internalOnly, async (req, res) => res.json(await summary(Number(req.params.wid))))
 // Referral earnings total (worker_income rows of category 'Referral') for the worker service.
 // Bonus progress for the worker app: the rules, this worker's joining-bonus progress, and how far
@@ -763,6 +798,7 @@ app.post('/api/worker/wallet/withdraw/request', auth, async (req, res) => {
     [req.wid, amount, method, status, wanted?.id || null, ref, destination])
   await adjustBalance(req.wid, { balance: -amount, hold: amount })
   if (auto) publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: rows[0].id, workerId: req.wid, amount, method })
+  else raiseApproval({ type: 'withdrawal', ref: rows[0].id, workerId: req.wid, amount, summary: `Withdraw ₹${amount} to ${destination || method}` })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'wallet.withdraw', entityType: 'wallet', entityId: req.wid, detail: `Requested withdrawal ₹${amount} (${status})`, meta: { amount } })
   res.json({
     ok: true,
@@ -858,7 +894,8 @@ app.post('/api/worker/wallet/advance/request', auth, async (req, res) => {
   if ((w.advance_outstanding || 0) > 0) return res.json({ ok: false, error: 'Repay your current advance first.' })
   if ((await pool.query("SELECT 1 FROM worker_advances WHERE worker_id=$1 AND status='Pending'", [req.wid])).rowCount) return res.json({ ok: false, error: 'Your earlier request is still being reviewed.' })
   // An advance is money out of the company: it waits for an admin to approve it.
-  await pool.query('INSERT INTO worker_advances (worker_id,amount,outstanding,status) VALUES ($1,$2,0,$3)', [req.wid, amount, 'Pending'])
+  const adv = await pool.query('INSERT INTO worker_advances (worker_id,amount,outstanding,status) VALUES ($1,$2,0,$3) RETURNING id', [req.wid, amount, 'Pending'])
+  raiseApproval({ type: 'advance', ref: adv.rows[0].id, workerId: req.wid, amount, summary: `Salary advance ₹${amount}` })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.wid, action: 'advance.request', entityType: 'worker', entityId: req.wid, detail: `Requested a salary advance of ₹${amount}` })
   res.json({ ok: true, pending: true, message: 'Request sent for approval.', ...(await walletState(req.wid)) })
 })
@@ -872,7 +909,7 @@ app.use('/api/admin/workers/:id/wallet', adminAuth, async (req, res, next) => {
   if (!w?.id || !inScope(scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })) return res.status(404).json({ error: 'Not found' })
   next()
 })
-app.post('/api/admin/workers/:id/wallet/advances/:adv/:action(approve|reject)', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+const advanceCore = async (req, res) => {
   const wid = Number(req.params.id)
   const a = (await pool.query("SELECT * FROM worker_advances WHERE id=$1 AND worker_id=$2 AND status='Pending'", [Number(req.params.adv), wid])).rows[0]
   if (!a) return res.status(404).json({ error: 'No pending request' })
@@ -886,6 +923,10 @@ app.post('/api/admin/workers/:id/wallet/advances/:adv/:action(approve|reject)', 
   }
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: req.admin?.name || req.admin?.email, action: `advance.${req.params.action}`, entityType: 'worker', entityId: wid, detail: `${req.params.action === 'approve' ? 'Approved' : 'Rejected'} advance of ₹${a.amount}` })
   res.json(await walletState(wid))
+}
+app.post('/api/admin/workers/:id/wallet/advances/:adv/:action(approve|reject)', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  if (await viaApprovals(req, res, 'advance', req.params.adv, req.params.action === 'approve', req.body?.reason)) return
+  return advanceCore(req, res)
 })
 // Move earnings still in the pending bucket (awaiting quality check) to available.
 app.post('/api/admin/workers/:id/wallet/release-pending', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
@@ -943,8 +984,16 @@ app.post('/api/admin/workers/:id/wallet/release-hold', adminAuth, requirePerm('w
 })
 // Approve → trigger the real payout (money is already held from the request). Status becomes
 // 'Processing'; the payout.completed/failed event finalizes it. Do NOT mark Paid directly here.
-app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) })
-app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, requirePerm('wallet.adjust'), async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) })
+const wdApproveCore = async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Processing'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Processing' WHERE id=$1", [w.id]); publishEvent(REDIS_URL, 'payout.requested', { withdrawalId: w.id, workerId: wid, amount: w.amount, method: w.method || 'bank' }) } res.json(await walletState(wid)) }
+app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/approve', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  if (await viaApprovals(req, res, 'withdrawal', req.params.wd, true, req.body?.reason)) return
+  return wdApproveCore(req, res)
+})
+const wdRejectCore = async (req, res) => { const wid = Number(req.params.id); const w = (await pool.query('SELECT * FROM worker_withdrawals WHERE id=$1', [Number(req.params.wd)])).rows[0]; if (w && !['Paid', 'Rejected', 'Failed'].includes(w.status)) { await pool.query("UPDATE worker_withdrawals SET status='Rejected' WHERE id=$1", [w.id]); await adjustBalance(wid, { hold: -w.amount, balance: w.amount }) } res.json(await walletState(wid)) }
+app.post('/api/admin/workers/:id/wallet/withdrawals/:wd/reject', adminAuth, requirePerm('wallet.adjust'), async (req, res) => {
+  if (await viaApprovals(req, res, 'withdrawal', req.params.wd, false, req.body?.reason)) return
+  return wdRejectCore(req, res)
+})
 
 /**
  * An APPROVED payroll line. The worker service computes and an admin approves; the wallet only
@@ -1031,6 +1080,7 @@ subscribeEvents(REDIS_URL, 'wallet', async (type, data) => {
     await notify(data.workerId, data.title, data.body || '')
   } else if (type === 'shift.late') await applyShiftLatePenalty(data)
   else if (type === 'zone.penalty') await applyOutOfZonePenalty(data)
+  else if (type === 'rc.penalty') await applyRedCardDeduction(data)
   else if (type === 'shift.settle') await settleMinGuarantee(data)
   else if (type === 'geofence.breach') await notifyGeofenceBreach(data)
 })
@@ -1052,6 +1102,19 @@ async function applyShiftLatePenalty({ workerId, amount, shiftName, lateMinutes 
   await adjustBalance(workerId, { balance: -amt })
   await notify(workerId, 'Late check-in penalty', `−₹${amt}: you checked in ${lateMinutes || 0} min after your ${shiftName || ''} shift start`)
   publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Shift late penalty ₹${amt} (${lateMinutes || 0} min late)`, meta: { amount: amt } })
+}
+
+// Red Card with a rupee value set (Admin ▸ Reliability ▸ ₹ per Red Card) → deduct it from the wallet.
+async function applyRedCardDeduction({ workerId, amount, points, reason, ref }) {
+  const amt = Math.max(0, parseInt(amount, 10) || 0)
+  if (!workerId || !amt) return
+  const n = parseInt(points, 10) || 1
+  await pool.query(
+    "INSERT INTO worker_deductions (worker_id, category, label, amount) VALUES ($1,'Red Card Penalty',$2,$3)",
+    [workerId, `${n} Red Card${n > 1 ? 's' : ''}: ${reason || 'reliability violation'}${ref && !String(ref).startsWith('manual-') ? ` (${ref})` : ''}`, amt])
+  await adjustBalance(workerId, { balance: -amt })
+  await notify(workerId, 'Red Card deduction', `−₹${amt} for ${n} Red Card${n > 1 ? 's' : ''}: ${reason || 'reliability violation'}. You can appeal the card in Profile → Performance.`)
+  publishEvent(REDIS_URL, 'activity', { actorType: 'system', actorName: 'Wallet', action: 'wallet.penalty', entityType: 'worker', entityId: workerId, detail: `Red Card deduction ₹${amt}` })
 }
 
 // Three jobs in a row completed outside the worker's preferred zone → deduct an out-of-zone penalty.

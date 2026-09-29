@@ -494,6 +494,50 @@ export const broadcast = (body: Record<string, unknown>) => req<{ sent: number; 
 export const fetchSettings = () => req<Settings>('/settings')
 export const updateSettings = (body: Settings) => req<Settings>('/settings', patch(body))
 
+// ---- Red Cards / reliability (worker service) ----
+export interface RcLevel { key: string; label: string; note: string }
+export interface RcPenalty { id: number; code: string; points: number; reason: string; ref: string; status: string; createdBy: string; created: string; expiresAt: string | null; closedAt: string | null; appeal: { status: string; reason: string; comment: string | null } | null; workerId?: number; workerName?: string; workerPhone?: string }
+export interface RcReliability { score: number; redCards: number; suspendAt: number; level: RcLevel; suspended: boolean; attendance: number; onTime: number; acceptance: number; completion: number; rating: number; jobs: number; history: RcPenalty[] }
+export interface RcRule { code: string; name: string; points: number; auto_apply: boolean; active: boolean }
+export interface RcAppeal { id: number; penalty_id: number; worker_id: number; worker_name: string; reason: string; status: string; penalty_reason: string; points: number; ref: string; created: string; review_comment: string | null; reviewed_by: string | null }
+export interface RcSummary { active: number; zero: number; low: number; mid: number; final: number; suspended: number; pendingAppeals: number; suspendAt: number }
+export const fetchRcSummary = () => req<RcSummary>('/reliability/summary')
+export interface ShiftBoardExpert {
+  workerId: number; name: string; phone: string; suspended: boolean; shift: string; onRoster: boolean
+  answer: boolean | null; note: string; respondedAt: string | null; checkIn: string | null; checkOut: string | null
+  lateMinutes: number; leave: string; noShowCards: number; status: string
+}
+export interface ShiftBoard { date: string; total: number; coming: number; checkedIn: number; notComing: number; leave: number; noReply: number; noShow: number; experts: ShiftBoardExpert[] }
+export interface ShiftRequest { workerId: number; name: string; phone: string; currentShiftId: number | null; currentShift: string; requestedShiftId: number | null; requestedShift: string; assignedTo: { id: number; name: string; roleName: string } | null; mine: boolean }
+export interface AcLevel { level: string; label: string; state: 'approved' | 'rejected' | 'skipped' | 'current' | 'waiting'; by: string; at: string | null; comment: string }
+export interface AcItem {
+  id: number; type: string; typeLabel: string; ref: string; title: string; summary: string; amount: number | null
+  workerId: number | null; workerName: string; status: string; error: string; created: string; decidedAt: string | null
+  levels: AcLevel[]; currentLevel: string; canAct: boolean
+}
+export interface AcFlows { levels: Record<string, string>; flows: { type: string; label: string; enabled: boolean; levels: string[]; slaHours: number; updatedBy: string }[] }
+export const fetchAcItems = (tab: string, type = '') => req<AcItem[]>(`/approval-center/items?tab=${tab}${type ? `&type=${type}` : ''}`)
+export const fetchAcCount = () => req<{ mine: number; money: number; total: number }>('/approval-center/count')
+export const decideAcItem = (id: number, approve: boolean, comment = '') => req<AcItem>(`/approval-center/items/${id}/decide`, post('', { approve, comment }))
+export const retryAcItem = (id: number) => req<AcItem>(`/approval-center/items/${id}/retry`, post('', {}))
+export const fetchAcFlows = () => req<AcFlows>('/approval-center/flows')
+export const saveAcFlow = (type: string, body: { enabled?: boolean; levels?: string[] }) => req<{ ok: boolean }>(`/approval-center/flows/${type}`, { method: 'PUT', body: JSON.stringify(body) })
+export interface TeamLeadOption { id: number; name: string; roleName: string }
+export const fetchTeamLeadOptions = (workerId: number) => req<TeamLeadOption[]>(`/workers/${workerId}/team-lead-options`)
+export const setWorkerTeamLead = (workerId: number, teamLeadId: number | null) =>
+  req<{ ok: boolean; teamLead: TeamLeadOption | null }>(`/workers/${workerId}/team-lead`, { method: 'PUT', body: JSON.stringify({ teamLeadId }) })
+export const fetchShiftRequests = () => req<ShiftRequest[]>('/next-day-availability/shift-requests')
+export const fetchShiftBoard = (date: string) => req<ShiftBoard>(`/next-day-availability/board?date=${date}`)
+export const fetchRcPenalties = (status = '') => req<RcPenalty[]>(`/reliability/penalties?status=${encodeURIComponent(status)}`)
+export const fetchRcAppeals = (status = 'pending') => req<RcAppeal[]>(`/reliability/appeals?status=${encodeURIComponent(status)}`)
+export const decideRcAppeal = (id: number, approve: boolean, comment: string) => req<{ ok: boolean }>(`/reliability/appeals/${id}/decide`, { method: 'POST', body: JSON.stringify({ approve, comment }) })
+export const reverseRcPenalty = (id: number) => req<{ ok: boolean }>(`/reliability/penalties/${id}/reverse`, { method: 'POST' })
+export const fetchRcRules = () => req<RcRule[]>('/reliability/rules')
+export const saveRcRule = (code: string, body: Partial<{ name: string; points: number; autoApply: boolean; active: boolean }>) => req<RcRule>(`/reliability/rules/${code}`, { method: 'PUT', body: JSON.stringify(body) })
+export const fetchWorkerReliability = (id: number) => req<RcReliability>(`/workers/${id}/reliability`)
+export const addWorkerPenalty = (id: number, body: { code: string; reason: string; points?: number | null }) => req<{ ok: boolean }>(`/workers/${id}/penalties`, { method: 'POST', body: JSON.stringify(body) })
+export const reinstateWorker = (id: number) => req<{ ok: boolean }>(`/workers/${id}/reinstate`, { method: 'POST' })
+
 /* admin users */
 export const fetchAdmins = () => req<Admin[]>('/admins')
 /** Managers a worker can report to (allowed with worker create/edit rights; scoped to your territory). */

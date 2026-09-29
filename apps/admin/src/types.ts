@@ -365,6 +365,10 @@ export interface WorkerAvailabilityState {
   shifts: { id: number; name: string; start?: string; end?: string }[]
   assigned: { shiftDefId: number | null; zoneId: number | null }
   hoursThisWeek: number
+  /** The expert's Team Lead — the person their shift change requests go to. */
+  teamLead?: { id: number; name: string; roleName: string } | null
+  /** Whether the signed-in admin may approve / reject this expert's shift request. */
+  canDecide?: boolean
 }
 
 /* Phase 8 — background verification.

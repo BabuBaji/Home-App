@@ -483,15 +483,18 @@ private fun TodayCell(
     label: String,
     value: String,
 ) {
-    Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(ScreenBg).padding(horizontal = 14.dp, vertical = 12.dp),
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(ScreenBg).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(34.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+        Box(Modifier.size(32.dp).clip(CircleShape).background(tintBg), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(17.dp))
         }
-        Spacer(Modifier.height(8.dp))
-        Text(value, color = TextDark, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(tr(label), color = TextGray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(value, color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(tr(label), color = TextGray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

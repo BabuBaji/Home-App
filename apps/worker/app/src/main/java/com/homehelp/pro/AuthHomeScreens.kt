@@ -540,6 +540,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             // ─── Availability ─── the primary online control. goOnline() is the same call the
             // nav FAB makes, so the switch and the FAB stay in step.
             OnlineToggleCard(online = vm.isOnline, onToggle = { vm.goOnline(it) })
+            JobAlertAccessBanner()
 
             // ─── Live job ─── highest-priority state on the screen, so it leads. It used to
             // render below the refer banner, under everything else.

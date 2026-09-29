@@ -1276,6 +1276,8 @@ fun PerformanceScreen(vm: AppViewModel, nav: NavHostController) {
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l).padding(top = Space.m, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
+            // ── Reliability & Red Cards (score, cards vs limit, level, history + appeals) ──
+            ReliabilitySection(vm)
             // ── Hero rating card: big rating on the left, period chip on the right ──
             Surface(
                 Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color.White,
@@ -1612,7 +1614,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
         Card {
             SectionLabel(tr("Your Shift Plan"))
             Text(
-                "Ask for a shift — an admin confirms it. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
+                "Ask for a shift — ${vm.shiftApprover} confirms it. Check in within ${(att.graceMin.takeIf { it > 0 } ?: 15)} min of the start time — later check-ins are penalised.",
                 fontSize = 12.sp, color = TextGray,
             )
             Spacer(Modifier.height(Space.m))
@@ -1625,7 +1627,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
                         // as such — the earnings guarantee follows the assignment, and showing a
                         // pending request as chosen would have workers counting on one they lack.
                         ShiftOption(s, vm.selectedShiftId == s.id) {
-                            vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} — awaiting approval") }
+                            vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} — waiting for ${vm.shiftApprover}") }
                         }
                     }
                 }
@@ -1634,7 +1636,7 @@ fun AttendanceScreen(vm: AppViewModel, nav: NavHostController) {
                     Spacer(Modifier.height(Space.s))
                     val name = vm.shifts.firstOrNull { it.id == requested }?.name ?: "that shift"
                     Text(
-                        "You've asked for $name — waiting for an admin to confirm it. " +
+                        "You've asked for $name — waiting for ${vm.shiftApprover} to confirm it. " +
                             (if (vm.selectedShiftId == null) "You're not on a shift yet." else "Until then your current shift stands."),
                         fontSize = 12.sp, color = Amber, lineHeight = 17.sp,
                     )

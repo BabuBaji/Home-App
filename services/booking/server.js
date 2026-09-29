@@ -323,7 +323,7 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
   let cands = []
   if (zid) {
     const feed = await tryGet(WORKER_URL, `/internal/on-shift?zone_id=${zid}&services=${encodeURIComponent(serviceNames)}`, { workers: [] })
-    cands = (feed.workers || []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.available, lat: w.last?.lat, lng: w.last?.lng, jobs: 0 }))
+    cands = (feed.workers || []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.available, lat: w.last?.lat, lng: w.last?.lng, jobs: 0, redCards: w.redCards || 0 }))
   }
   // Fall back to any qualified active expert when the zone has nobody rostered.
   // The fallback stays inside the zone: it widens "on shift" to "any active worker of this zone", it
@@ -332,7 +332,7 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
   // it only meant a zone with no shift roster got ONE attempt at booking time and was never retried.
   if (!cands.length && zid) {
     const list = await tryGet(WORKER_URL, `/internal/workers/for-service?services=${encodeURIComponent(serviceNames)}&zone_id=${zid}`, [])
-    cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0 }))
+    cands = (Array.isArray(list) ? list : []).map((w) => ({ id: w.id, name: w.name, rating: w.rating, online: !!w.online, lat: w.lat, lng: w.lng, jobs: w.jobs || 0, redCards: w.redCards || 0 }))
   }
   if (!cands.length) return null
 
@@ -345,7 +345,10 @@ async function pickWorker({ zoneId, pincode, serviceNames, custLat, custLng, req
   // 3)+4) Fairness first, distance only as a real tie-break.
   const active = await activeJobCounts()
   const distM = (w) => { const km = distanceKm(custLat, custLng, w.lat, w.lng); return km == null ? null : km * 1000 }
+  const RC_LOW_PRIORITY = 3   // Red Card level "Warning": offered work only after cleaner experts
   free.sort((a, b) => {
+    const ra = (a.redCards || 0) >= RC_LOW_PRIORITY ? 1 : 0, rb = (b.redCards || 0) >= RC_LOW_PRIORITY ? 1 : 0
+    if (ra !== rb) return ra - rb
     const aa = active.get(a.id) || 0, ab = active.get(b.id) || 0
     if (aa !== ab) return aa - ab                       // fewest active jobs
     if ((a.jobs || 0) !== (b.jobs || 0)) return (a.jobs || 0) - (b.jobs || 0)  // then fewest lifetime jobs
@@ -449,7 +452,7 @@ const SLOT_HOURS = Array.from({ length: 12 }, (_, i) => 8 + i)
 const slotLabel = (h) => `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:00 ${h >= 12 ? 'PM' : 'AM'}`
 // Half-hour slot label from minutes-of-day. For :00 it is identical to slotLabel(h), so bookings
 // already stored under hourly labels still count against the same slot.
-const slotLabelMin = (min) => { const h = Math.floor(min / 60); return `${String(h > 12 ? h - 12 : h).padStart(2, '0')}:${String(min % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
+const slotLabelMin = (min) => { const h = Math.floor(min / 60); return `${String(h % 12 || 12).padStart(2, '0')}:${String(min % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
 const ACTIVE_STATES = ['confirmed', 'worker_assigned', 'on_the_way', 'arrived', 'in_progress']
 
 // ── zone working-hours enforcement ──
@@ -2023,7 +2026,11 @@ async function sweepUnacceptedBookings() {
       "SELECT * FROM bookings WHERE type='schedule' AND status IN ('confirmed','worker_assigned')"))
       .rows.map(rowTo).filter((b) => { const t = scheduledStartMs(b); return t != null && t + SCHED_NOSHOW_GRACE_MS <= Date.now() })
     for (const r of instant) await autoCancelNoService(r, 'No expert accepted the booking in time')
-    for (const r of sched) await autoCancelNoService(r, r.worker_id ? 'Expert did not arrive for your slot' : 'No expert accepted the booking in time')
+    for (const r of sched) {
+      await autoCancelNoService(r, r.worker_id ? 'Expert did not arrive for your slot' : 'No expert accepted the booking in time')
+      // The assigned expert never turned up → Red Card (rules in Admin ▸ Reliability).
+      if (r.worker_id) internalPost(WORKER_URL, `/internal/workers/${r.worker_id}/penalty`, { code: 'JOB_NO_SHOW', ref: r.ref, reason: `Did not arrive for ${r.ref}` }).catch(() => {})
+    }
   } catch (e) { console.error('[booking] sweepUnacceptedBookings:', e.message) }
 }
 setInterval(sweepUnacceptedBookings, 30_000)

@@ -241,12 +241,12 @@ private fun ScheduleTab(vm: AppViewModel, nav: NavHostController, ctx: android.c
 /* ── Shift Swap tab — pick a different shift; routes through the real selectShift request. ── */
 @Composable
 private fun ShiftSwapTab(vm: AppViewModel, ctx: android.content.Context) {
-    ShiftHint(tr("Pick the shift you'd like to move to. An admin confirms the swap — your current shift stands until then."))
+    ShiftHint("Pick the shift you'd like to move to. ${vm.shiftApprover.replaceFirstChar { it.uppercase() }} confirms the swap — your current shift stands until then.")
     if (vm.shifts.isEmpty()) { ShiftHint(tr("No shifts available to swap into right now.")); return }
     vm.shifts.forEach { s ->
         val current = vm.selectedShiftId == s.id
         val requested = vm.requestedShiftId == s.id && !current
-        Card(modifier = Modifier.clickable(enabled = !current) { vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} Shift — awaiting approval") } }) {
+        Card(modifier = Modifier.clickable(enabled = !current) { vm.selectShift(s.id) { toast(ctx, "Requested ${s.name} Shift — waiting for ${vm.shiftApprover}") } }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(40.dp).clip(CircleShape).background(if (current) GreenLight else PurpleLight), contentAlignment = Alignment.Center) {
                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = if (current) GreenSuccess else Purple, modifier = Modifier.size(20.dp))

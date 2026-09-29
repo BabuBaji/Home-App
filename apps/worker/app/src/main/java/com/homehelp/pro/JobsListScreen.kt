@@ -416,27 +416,27 @@ private fun HistoryJobCard(b: Booking) {
     Card(padding = Dp16.M) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Box(
-                Modifier.size(58.dp).clip(RoundedCornerShape(Radius.pill)).background(if (done) GreenSuccess else RedLight),
+                Modifier.size(40.dp).clip(RoundedCornerShape(Radius.pill)).background(if (done) GreenLight else RedLight),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (done) Icons.Filled.CheckCircle else Icons.Filled.Close,
                     contentDescription = null,
-                    tint = if (done) Color.White else RedCancel,
-                    modifier = Modifier.size(34.dp),
+                    tint = if (done) GreenSuccess else RedCancel,
+                    modifier = Modifier.size(22.dp),
                 )
             }
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
-                Text(b.service ?: tr("Service"), color = TextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(b.service ?: tr("Service"), color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
-                IconLine(Icons.Filled.Schedule, b.timeInfo ?: "—", 15.sp)
+                IconLine(Icons.Filled.Schedule, b.timeInfo ?: "—", 13.sp)
                 Spacer(Modifier.height(2.dp))
-                IconLine(Icons.Filled.LocationOn, b.address ?: "—", 15.sp)
+                IconLine(Icons.Filled.LocationOn, b.address ?: "—", 13.sp)
             }
             Spacer(Modifier.width(Space.s))
             Column(horizontalAlignment = Alignment.End) {
-                Text("₹${b.amount}", color = TextDark, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text("₹${b.amount}", color = TextDark, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(5.dp))
                 StatusPill(
                     b.status ?: "—",

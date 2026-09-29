@@ -370,6 +370,12 @@ interface ApiService {
     @GET("api/worker/shakti-bonus")
     suspend fun shaktiBonus(): ShaktiBonusDto
 
+    @GET("api/worker/reliability")
+    suspend fun reliability(): ReliabilityDto
+
+    @POST("api/worker/penalties/{id}/appeal")
+    suspend fun appealPenalty(@Path("id") id: Int, @Body body: AppealBody): Map<String, Any>
+
     @GET("api/worker/merch")
     suspend fun merch(): MerchResponse
 

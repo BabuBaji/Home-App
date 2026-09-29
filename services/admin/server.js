@@ -12,6 +12,7 @@ import crypto from 'node:crypto'
 import { makePool, migrate, nowIso, internalOnly, requireRole, requirePerm, requireAnyPerm, publishEvent, tryGet, internalPost, internalPatch,
   PERMISSION_CATALOG, ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, isSystemRole, inScope } from '@homehelp/shared'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+import { installApprovalCenter } from './approvalCenter.js'
 
 assertJwtSecret('admin') // refuse to boot without a signing secret rather than issue forgeable sessions
 
@@ -58,6 +59,9 @@ const DEFAULT_SETTINGS = {
   auto_assign: 'true', dispatch_mode: 'offer', maintenance_mode: 'false', dispatch_timeout_min: '5', schedule_dispatch_lead_min: '120',
   // Booking & expert timing (Settings ▸ Operations): minutes.
   online_window_min: '15', slot_notice_min: '60', otp_lead_min: '60', overrun_grace_min: '15', slot_minutes: '30',
+  // Red Cards (Workforce ▸ Reliability): suspend at N active cards, cards expire after N days (0 = never),
+  // optional ₹ deducted per card (0 = points only).
+  rc_suspend_at: '6', rc_expiry_days: '30', rc_rupee_value: '0',
   gst_inclusive: 'false',   // GST is added on top of the shown price (exclusive) — the market norm; toggle in Settings
   // Seller details printed on the customer tax invoice (edit to your registered company).
   company_name: 'HomeHelp Services Pvt. Ltd.', company_gstin: '36AABCH1234M1Z7',
@@ -1494,6 +1498,23 @@ app.post('/api/admin/customers/:id/wallet/status', admin, scopeCustomer, require
 })
 
 /* ---------- internal: config for other services ---------- */
+// Internal: everyone who may sign off shift change requests (role holds shifts.approve), with
+// their reporting chain (managers above them) and effective territory — the worker service uses it
+// to route each expert's request to their Team Lead and to let that lead's managers step in.
+app.get('/internal/approvers', internalOnly, async (_q, res) => {
+  const all = (await pool.query(
+    'SELECT a.id, a.name, a.role, a.status, a.reports_to, a.scope_type, a.scope_values, r.name role_name FROM admins a LEFT JOIN roles r ON r.key = a.role')).rows
+  const byId = new Map(all.map((a) => [a.id, a]))
+  const chainOf = (id) => { const out = [], seen = new Set(); let cur = byId.get(id)?.reports_to; while (cur != null && !seen.has(cur)) { seen.add(cur); out.push(cur); cur = byId.get(cur)?.reports_to } return out }
+  const out = []
+  for (const a of all) {
+    if (a.status && a.status !== 'active') continue
+    if (!(await resolvePermissions(a.role)).includes('shifts.approve')) continue
+    out.push({ id: a.id, name: a.name, role: a.role, roleName: a.role_name || a.role, reportsTo: a.reports_to, chain: chainOf(a.id), scope: await resolveScope(a, all) })
+  }
+  res.json(out)
+})
+
 app.get('/internal/settings', internalOnly, async (_q, res) => res.json(await getSettings()))
 // Some services log admin-side audit entries through the admin service.
 app.post('/internal/audit', internalOnly, async (req, res) => {
@@ -1502,6 +1523,9 @@ app.post('/internal/audit', internalOnly, async (req, res) => {
   res.json({ ok: true })
 })
 
+const ac = installApprovalCenter({ app, pool, admin, resolvePermissions, resolveScope, U, REDIS_URL })
+
 init()
+  .then(() => ac.migrateAc())
   .then(() => app.listen(PORT, () => console.log(`[admin] service on http://localhost:${PORT}`)))
   .catch((e) => { console.error('[admin] failed to start:', e.message); process.exit(1) });

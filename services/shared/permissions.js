@@ -82,6 +82,7 @@ export const PERMISSION_CATALOG = [
   { module: 'roster', label: 'Shifts / Roster', perms: [
     { key: 'roster.view', label: 'View roster' },
     { key: 'roster.edit', label: 'Edit shifts / roster' },
+    { key: 'shifts.approve', label: 'Approve shift change requests' },
   ] },
   { module: 'attendance', label: 'Shift Plans & Attendance', perms: [
     { key: 'attendance.view', label: 'View attendance' },
@@ -157,6 +158,7 @@ export const PERMISSION_CATALOG = [
   ] },
   { module: 'approvals', label: 'Approvals', perms: [
     { key: 'approvals.review', label: 'Review & approve/reject requests' },
+    { key: 'approvals.decide', label: 'Act on Approval Center requests (their level)' },
     { key: 'approvals.manage', label: 'Configure the approval matrix' },
   ] },
 ]
@@ -202,6 +204,8 @@ const MANAGER = dedupe([
   'notifications.send',
   // A zone/hub manager is the first responder for SOS inside their own area (routing is by scope).
   'safety.view', 'safety.respond',
+  // …and signs off their experts' shift change requests (again limited to their scope).
+  'roster.view', 'shifts.approve', 'approvals.decide',
 ])
 
 // admin — adds everything gated min:'admin' today: the whole Zone Ops + Operations back office,
@@ -228,19 +232,29 @@ const ADMIN = dedupe([
   'approvals.review', 'approvals.manage',
 ])
 
+// ---- Field hierarchy: who runs the experts on the ground. Territory comes from each admin
+// user's scope (zone / city) plus everyone reporting to them, so a lead only sees their own people.
+// zone_manager — runs a zone: its experts, roster, attendance, shift approvals, SOS and jobs there.
+const ZONE_MANAGER = dedupe(['dashboard.view', 'workers.view', 'workers.edit', 'bookings.view', 'bookings.assign', 'customers.view',
+  'zones.view', 'roster.view', 'roster.edit', 'attendance.view', 'shifts.approve', 'liveops.view', 'safety.view', 'safety.respond',
+  'complaints.view', 'tickets.view', 'approvals.decide'])
+// team_lead — looks after a small team of experts: sees them, their roster and attendance, and
+// approves their shift change requests. Nothing else.
+const TEAM_LEAD = dedupe(['dashboard.view', 'workers.view', 'roster.view', 'attendance.view', 'shifts.approve', 'safety.view', 'approvals.decide'])
+
 // ---- Functional roles: narrow bundles for one job each (separation of duties). ----
 const VIEW_ALL = ALL_PERMISSIONS.filter((k) => /\.view$/.test(k)).filter((k) => !['admins.view', 'roles.view'].includes(k))
 // dispatcher — the control tower: watch live jobs, assign / reassign / reschedule, nothing else.
 const DISPATCHER = dedupe(['dashboard.view', 'bookings.view', 'bookings.assign', 'bookings.update_status', 'liveops.view', 'liveops.act',
   'workers.view', 'customers.view', 'zones.view', 'roster.view', 'attendance.view', 'complaints.view', 'tickets.view', 'safety.view'])
 // recruiter — onboarding: add workers, documents, background checks, bank details.
-const RECRUITER = dedupe(['dashboard.view', 'workers.view', 'workers.create', 'workers.edit', 'training.view', 'equipment.view', 'zones.view', 'roster.view'])
+const RECRUITER = dedupe(['dashboard.view', 'workers.view', 'workers.create', 'workers.edit', 'training.view', 'equipment.view', 'zones.view', 'roster.view', 'approvals.decide'])
 // trainer — training modules, quizzes and results.
 const TRAINER = dedupe(['dashboard.view', 'workers.view', 'training.view', 'training.manage', 'equipment.view'])
 // finance — money only: refunds, payouts, payroll sign-off, settlements. Can't change prices or ops.
 const FINANCE = dedupe(['dashboard.view', 'bookings.view', 'customers.view', 'workers.view', 'workers.pay_view', 'payments.view', 'payments.export',
   'refunds.view', 'refunds.approve', 'finance.view', 'finance.settle', 'finance.payout', 'finance.export', 'wallet.view', 'wallet.adjust',
-  'payroll.view', 'payroll.approve', 'cancellations.view', 'reports.view', 'reports.export', 'approvals.review'])
+  'payroll.view', 'payroll.approve', 'cancellations.view', 'reports.view', 'reports.export', 'approvals.review', 'approvals.decide'])
 // marketing — offers, banners, packages, broadcasts; reads pricing and analytics.
 const MARKETING = dedupe(['dashboard.view', 'services.view', 'customers.view', 'campaigns.view', 'campaigns.create', 'campaigns.edit', 'campaigns.delete',
   'pricing.view', 'notifications.view', 'notifications.send', 'analytics.view', 'reports.view'])
@@ -255,6 +269,8 @@ export const SYSTEM_ROLES = [
   { key: 'super', name: 'Super Admin', description: 'Full system access.', rank: 4, landing: '/dashboard' },
   { key: 'admin', name: 'Admin', description: 'Manage platform operations and the back office.', rank: 3, landing: '/dashboard' },
   { key: 'manager', name: 'Manager', description: 'Oversee day-to-day operations in a city, zone or hub; first responder for SOS there.', rank: 2, landing: '/dashboard' },
+  { key: 'zone_manager', name: 'Zone Manager', description: 'Runs one or more zones: experts, roster, attendance and shift approvals there.', rank: 2, landing: '/shift-confirmations' },
+  { key: 'team_lead', name: 'Team Lead', description: 'Looks after a team of experts and approves their shift change requests.', rank: 1, landing: '/shift-confirmations' },
   { key: 'dispatcher', name: 'Dispatcher', description: 'Control tower: watch live jobs, assign and reschedule.', rank: 2, landing: '/control-tower' },
   { key: 'finance', name: 'Finance', description: 'Refunds, payouts, payroll sign-off and settlements.', rank: 2, landing: '/payments' },
   { key: 'support', name: 'Support', description: 'Handle customer support, complaints and tickets.', rank: 1, landing: '/dashboard' },
@@ -270,6 +286,8 @@ export const SYSTEM_ROLE_PERMISSIONS = {
   super: [...ALL_PERMISSIONS],
   admin: ADMIN,
   manager: MANAGER,
+  zone_manager: ZONE_MANAGER,
+  team_lead: TEAM_LEAD,
   support: SUPPORT,
   dispatcher: DISPATCHER,
   finance: FINANCE,

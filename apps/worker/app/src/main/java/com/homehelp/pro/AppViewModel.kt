@@ -1542,6 +1542,24 @@ class AppViewModel : ViewModel() {
         private set
     fun loadRewards() = sync { rewards = api.walletRewards() }
 
+    // Red Cards / reliability (Performance screen).
+    var reliability by mutableStateOf<com.homehelp.pro.network.ReliabilityDto?>(null)
+        private set
+    fun loadReliability() = sync { reliability = api.reliability() }
+    /** Send an appeal; [onDone] gets null on success or the server's message. */
+    fun appealPenalty(id: Int, reason: String, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            val err = try {
+                api.appealPenalty(id, com.homehelp.pro.network.AppealBody(reason)); null
+            } catch (e: retrofit2.HttpException) {
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull().orEmpty()
+                Regex("""\"error\"\s*:\s*\"([^\"]+)\"""").find(body)?.groupValues?.get(1) ?: "Could not send the appeal"
+            } catch (e: Exception) { "Could not reach the server" }
+            if (err == null) loadReliability()
+            onDone(err)
+        }
+    }
+
     var shaktiBonus by mutableStateOf<ShaktiBonusDto?>(null)
         private set
     fun loadShaktiBonus() = sync { shaktiBonus = api.shaktiBonus() }
@@ -1979,6 +1997,9 @@ class AppViewModel : ViewModel() {
         private set
     var shiftStatus by mutableStateOf("Pending")
         private set
+    /** "Ravi (Team Lead)" — who the expert's shift request is waiting on; "admin" if nobody assigned. */
+    var shiftApprover by mutableStateOf("admin")
+        private set
 
     fun loadShifts() = sync {
         val r = api.getShifts()
@@ -1986,6 +2007,7 @@ class AppViewModel : ViewModel() {
         selectedShiftId = r.selectedId
         requestedShiftId = r.requestedId
         shiftStatus = r.shiftStatus
+        shiftApprover = r.approverName?.let { n -> r.approverRole?.let { "$n ($it)" } ?: n } ?: "admin"
     }
 
     /** Ask for a shift. The admin grants it — this does NOT assign it. */
@@ -2008,6 +2030,7 @@ class AppViewModel : ViewModel() {
         selectedShiftId = r.selectedId
         requestedShiftId = r.requestedId
         shiftStatus = r.shiftStatus
+        shiftApprover = r.approverName?.let { n -> r.approverRole?.let { "$n ($it)" } ?: n } ?: "admin"
     }
 
     // ---- geofence (assigned-apartment radius) ----

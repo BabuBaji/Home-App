@@ -15,6 +15,7 @@ import {
 // that only the services actually using them install.
 import { ensureBucket, ensurePublicBucket, storageConfigured, sniffType, checksum, storageKey, putObject, putPublicObject, publicUrl, signedGetUrl, deleteObject } from '@homehelp/shared/storage.js'
 import { signToken, tokenSubject, assertJwtSecret } from '@homehelp/shared/jwt.js'
+import { installReliability, LOWER_PRIORITY_AT } from './reliability.js'
 
 assertJwtSecret('worker') // refuse to boot without a signing secret rather than issue forgeable sessions
 
@@ -59,6 +60,10 @@ const maskPayRow = (w, can) => {
 }
 
 async function init() {
+  await migrateBase()
+  await rc.migrateRc()
+}
+async function migrateBase() {
   await migrate(pool, [
     `CREATE TABLE IF NOT EXISTS workers (
       id SERIAL PRIMARY KEY, name TEXT NOT NULL, phone TEXT, email TEXT, city TEXT,
@@ -507,6 +512,7 @@ async function init() {
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS location_at TIMESTAMPTZ`,
     // Any authenticated request from the expert app (worker or dispatch service) — "app is running".
     `ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
+    `ALTER TABLE workers ADD COLUMN IF NOT EXISTS team_lead_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_id INTEGER`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_name TEXT`,
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS site_lat REAL`,
@@ -818,6 +824,24 @@ async function todaySchedule(bookings, custNames, worker) {
     }))
 }
 async function getWorker(id) { if (!Number.isFinite(id)) return null; const { rows } = await pool.query('SELECT * FROM workers WHERE id=$1', [id]); return rows[0] || null }
+// IST date n days from today (YYYY-MM-DD) and whether the expert is rostered on that date's weekday.
+const istDayOffset = (dateStr) => Math.round((Date.parse(dateStr + 'T00:00:00Z') - Date.parse(istDateStr(Date.now()) + 'T00:00:00Z')) / 86400000)
+// On the roster that weekday, OR on a shift plan and confirmed "coming" for that date.
+async function rosteredOn(wid, dateStr) {
+  const wd = new Date(dateStr + 'T00:00:00Z').getUTCDay()
+  if ((await pool.query('SELECT 1 FROM shifts WHERE worker_id=$1 AND weekday=$2', [wid, wd])).rowCount) return true
+  return (await pool.query(
+    `SELECT 1 FROM workers w JOIN next_day_avail n ON n.worker_id=w.id
+      WHERE w.id=$1 AND w.shift_def_id IS NOT NULL AND n.for_date=$2::date AND n.coming=true`, [wid, dateStr])).rowCount > 0
+}
+// Cancelling a rostered day: penalty by how much notice was given.
+async function penaliseCancel(wid, dateStr, ref, wasRostered = null) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) return
+  if (!(wasRostered ?? (await rosteredOn(wid, dateStr)))) return
+  const d = istDayOffset(dateStr)
+  if (d < 0) return
+  await rc.applyPenalty(wid, d === 0 ? 'SHIFT_CANCEL_SAME_DAY' : d === 1 ? 'SHIFT_CANCEL_1_DAY' : 'SHIFT_CANCEL_EARLY', { ref: `${ref}-${dateStr}` })
+}
 // If the same phone maps to more than one worker (e.g. a stray pending placeholder alongside a
 // real onboarded pro), prefer the active + verified account so login isn't shadowed by the dupe.
 // Match by the last 10 digits, ignoring formatting (+91, spaces, dashes) on BOTH sides, so a
@@ -938,7 +962,7 @@ async function bootstrap(wid) {
     service: (b.items || []).map((i) => i.name).join(', ') || 'Service',
     customerName: custNames[b.user_id] || 'Customer',
     address: b.address || '—',
-    timeInfo: [b.date, b.time].filter(Boolean).join(' • ') || (b.created ? new Date(b.created).toLocaleDateString('en-IN') : ''),
+    timeInfo: (b.date && b.time) ? `${b.date} • ${String(b.time).replace(/^00:/, '12:').replace(/^0/, '')}` : (b.created ? `${new Date(b.created).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })} • ${istClock(b.created)}` : ''),
     amount: Math.round((b.total || 0) * 0.8),
     status: b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : 'Upcoming',
   })
@@ -1047,10 +1071,12 @@ async function shiftPlans(wid) {
   const w = await getWorker(wid)
   // selectedId is the ADMIN'S assignment; requestedId is what the worker asked for. Both, because
   // showing only the assignment would make a pending request look like it never registered.
+  const ap = await approverFor(w)
   return {
     selectedId: w?.shift_def_id || null,
     requestedId: w?.profile?.availability?.preferredShiftId ?? null,
     shiftStatus: w?.profile?.availability?.status || 'Pending',
+    approverName: ap?.name || null, approverRole: ap?.role || null,
     shifts: rows.map((s) => shiftDefDto(s, weekday)),
   }
 }
@@ -1082,6 +1108,8 @@ async function leaveList(wid) {
 
 const app = express()
 app.use(express.json({ limit: '6mb' }))
+// Red Card / reliability engine (see reliability.js) — after body parsing, before the rest of the routes.
+const rc = installReliability({ app, pool, auth, adminAuth, requirePerm, requireAnyPerm, internalOnly, ADMIN_URL, REDIS_URL, getWorker, raiseApproval, viaApprovals })
 app.get('/health', (_q, res) => res.json({ service: 'worker', ok: true }))
 
 /* ---------- worker-app auth ---------- */
@@ -1362,6 +1390,31 @@ async function workLimit(w) {
 }
 
 /** Whatever the admin last decided about this worker's stated preference. */
+/* Shift approvals follow the field hierarchy. Each expert can have an assigned Team Lead (an admin
+ * user whose role holds shifts.approve); their requests go to that lead. The lead's managers (up the
+ * reports_to chain) and anyone with workers.edit (managers / admins) may also decide. No lead
+ * assigned → any approver whose territory covers the expert. */
+let approversCache = { at: 0, list: [] }
+async function approvers() {
+  if (Date.now() - approversCache.at < 30000) return approversCache.list
+  const l = await tryGet(ADMIN_URL, '/internal/approvers', null)
+  if (Array.isArray(l)) approversCache = { at: Date.now(), list: l }
+  return approversCache.list
+}
+async function leadOf(w) { return w?.team_lead_id ? ((await approvers()).find((a) => a.id === w.team_lead_id) || null) : null }
+async function canDecideShift(admin, w) {
+  if (!w?.team_lead_id) return true
+  if (admin?.id === w.team_lead_id) return true
+  if (admin?.role === 'super' || (admin?.permissions || []).includes('workers.edit')) return true
+  const lead = await leadOf(w)
+  return !lead || lead.chain.includes(admin?.id) // lead removed/deactivated → don't strand the request
+}
+// Who the expert is waiting on, in their own words: "Ravi (Team Lead)".
+async function approverFor(w) {
+  const lead = await leadOf(w)
+  return lead ? { name: lead.name, role: lead.roleName } : null
+}
+
 const availabilityDto = (w) => {
   const a = w?.profile?.availability || {}
   const days = a.availableDays && typeof a.availableDays === 'object' ? a.availableDays : {}
@@ -1382,6 +1435,7 @@ const availabilityDto = (w) => {
 
 app.put('/api/worker/availability', auth, async (req, res) => {
   const b = req.body || {}
+  if (b.available === true && (await getWorker(req.worker.id))?.rc_suspended) return res.status(403).json({ ok: false, suspended: true, error: 'Your account is suspended for too many Red Cards. Operations will review it — see My Performance.' })
   // The online/offline toggle is a live state, not a preference — it stays a direct write.
   if (b.available !== undefined) await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [!!b.available, req.worker.id])
 
@@ -1522,6 +1576,7 @@ app.post('/api/worker/bank-accounts', auth, async (req, res) => {
      existing.length === 0])
   await pool.query("UPDATE workers SET bank_status='Pending' WHERE id=$1", [req.worker.id])
   publishEvent(REDIS_URL, 'bank.verify.requested', { workerId: req.worker.id, bank: bankDto(ins.rows[0]), name: req.worker.name })
+  raiseApproval({ type: 'bank_account', ref: req.worker.id, workerId: req.worker.id, summary: `${ins.rows[0].bank_name || 'Bank'} ••••${String(account).slice(-4)} · ${ifsc}` })
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.bank', entityType: 'worker', entityId: req.worker.id, detail: `Added payout account ${maskAcct(account)} (verifying)` })
   res.json({ ok: true, accounts: await bankAccounts(req.worker.id) })
 })
@@ -1592,10 +1647,12 @@ app.get('/api/worker/shifts', auth, async (req, res) => {
   const { weekday } = istNow()
   const { rows } = await pool.query('SELECT * FROM shift_defs WHERE active=true ORDER BY sort, start_min')
   const w = await getWorker(req.worker.id)
+  const ap = await approverFor(w)
   res.json({
     selectedId: w?.shift_def_id || null,
     requestedId: w?.profile?.availability?.preferredShiftId ?? null,
     shiftStatus: w?.profile?.availability?.status || 'Pending',
+    approverName: ap?.name || null, approverRole: ap?.role || null,
     shifts: rows.map((s) => shiftDefDto(s, weekday)),
   })
 })
@@ -1615,7 +1672,11 @@ app.post('/api/worker/shift', auth, async (req, res) => {
     availability: { ...cur, preferredShiftId: id, status: 'Pending', reason: '', reviewedBy: '', reviewedAt: null },
   })
   const sd = await getShiftDef(id)
-  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'shift.request', entityType: 'worker', entityId: req.worker.id, detail: `Requested ${sd ? sd.name + ' shift' : 'no shift'} — awaiting admin approval` })
+  { const today = istDateStr(Date.now()); if (await rosteredOn(req.worker.id, today)) await rc.applyPenalty(req.worker.id, 'SHIFT_EDIT_SAME_DAY', { ref: `edit-${today}` }) }
+  { const cur = await getShiftDef(w?.shift_def_id)
+    const lbl = (x) => (x ? `${x.name} ${toHHMM(x.start_min)}–${toHHMM(x.end_min)}` : 'Flexible')
+    raiseApproval({ type: 'shift_change', ref: req.worker.id, workerId: req.worker.id, summary: `${lbl(cur)} → ${lbl(sd)}`, payload: { shiftDefId: id } }) }
+  publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'shift.request', entityType: 'worker', entityId: req.worker.id, detail: `Requested ${sd ? sd.name + ' shift' : 'no shift'} — awaiting approval from ${(await approverFor(w).then((x) => x && `${x.name} (${x.role})`)) || 'admin'}` })
   res.json({ ...(await attendanceToday(req.worker.id)), availability: availabilityDto(await getWorker(req.worker.id)) })
 })
 
@@ -1650,6 +1711,7 @@ app.post('/api/worker/attendance/checkin', auth, async (req, res) => {
        in_lat = COALESCE(attendance.in_lat, $3), in_lng = COALESCE(attendance.in_lng, $4)`,
     [req.worker.id, day, b.lat ?? null, b.lng ?? null, sd?.id ?? null, lateMin, onTime, firstCheckin ? penalty : 0, minG,
       site?.id ?? null, siteName, siteLat, siteLng, geofenceM])
+  if (firstCheckin && lateMin > 15) await rc.applyPenalty(req.worker.id, lateMin > 30 ? 'LATE_CHECKIN_30' : 'LATE_CHECKIN_15', { ref: day, reason: `Checked in ${lateMin} min late${sd ? ` for ${sd.name}` : ''}` })
   if (firstCheckin && penalty > 0) {
     // Wallet service owns the ledger — it deducts the penalty on this event.
     publishEvent(REDIS_URL, 'shift.late', { workerId: req.worker.id, amount: penalty, shiftName: sd.name, lateMinutes: lateMin })
@@ -1702,10 +1764,12 @@ app.post('/api/worker/shift/next-day', auth, async (req, res) => {
   const coming = req.body?.coming === true || req.body?.coming === 'true'
   const note = String(req.body?.note || '').slice(0, 300)
   const forDate = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : nextDayTargetStr()
+  const wasRostered = coming ? false : await rosteredOn(req.worker.id, forDate)
   await pool.query(
     `INSERT INTO next_day_avail (worker_id, for_date, coming, note) VALUES ($1,$2,$3,$4)
      ON CONFLICT (worker_id, for_date) DO UPDATE SET coming=$3, note=$4, responded_at=now()`,
     [req.worker.id, forDate, coming, note])
+  if (!coming) await penaliseCancel(req.worker.id, forDate, 'notcoming', wasRostered)
   const w = await getWorker(req.worker.id)
   publishEvent(REDIS_URL, 'activity', {
     actorType: 'worker', actorId: req.worker.id, actorName: w?.name, action: 'shift.next_day',
@@ -1731,6 +1795,65 @@ app.get('/api/admin/next-day-availability', adminAuth, requireAnyPerm('roster.vi
       coming: r.coming, note: r.note || '', respondedAt: r.responded_at,
     })),
   })
+})
+
+// Admin: shift change requests waiting for a decision (the worker app sends them as 'Pending').
+app.get('/api/admin/next-day-availability/shift-requests', adminAuth, requireAnyPerm('shifts.approve', 'workers.edit'), async (req, res) => {
+  const { rows: all } = await pool.query(
+    `SELECT w.id, w.name, w.phone, w.shift_def_id, w.zone_id, w.city, w.store_id, w.team_lead_id, w.profile->'availability' av
+       FROM workers w WHERE w.status <> 'inactive' AND w.profile->'availability'->>'status' = 'Pending' ORDER BY w.name`)
+  // Each approver sees only experts in their own zone/city or their team's (reports_to roll-up).
+  const inTurf = all.filter((w) => inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
+  const rows = []
+  for (const w of inTurf) if (await canDecideShift(req.admin, { team_lead_id: w.team_lead_id })) rows.push(w)
+  const leads = new Map((await approvers()).map((a) => [a.id, a]))
+  const defs = Object.fromEntries((await pool.query('SELECT * FROM shift_defs')).rows.map((d) => [d.id, d]))
+  const label = (id) => { const d = defs[id]; return d ? `${d.name} ${toHHMM(d.start_min)}–${toHHMM(d.end_min)}` : 'Flexible (no fixed shift)' }
+  res.json(rows.map((r) => ({
+    workerId: r.id, name: r.name, phone: r.phone,
+    currentShiftId: r.shift_def_id ?? null, currentShift: label(r.shift_def_id),
+    requestedShiftId: r.av?.preferredShiftId ?? null, requestedShift: label(r.av?.preferredShiftId),
+    assignedTo: r.team_lead_id && leads.get(r.team_lead_id) ? { id: r.team_lead_id, name: leads.get(r.team_lead_id).name, roleName: leads.get(r.team_lead_id).roleName } : null,
+    mine: r.team_lead_id === req.admin?.id,
+  })))
+})
+
+// Admin: shift confirmations board for one day (default today) — every active expert who is on the
+// roster that weekday or has a shift plan, with their answer, leave, check-in and any no-show card.
+app.get('/api/admin/next-day-availability/board', adminAuth, requireAnyPerm('roster.view', 'workers.view'), async (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query?.date || '') ? req.query.date : istDateStr(Date.now())
+  const wd = new Date(date + 'T00:00:00Z').getUTCDay()
+  const { rows } = await pool.query(
+    `SELECT w.id, w.name, w.phone, w.rc_suspended,
+            sd.name shift_name, sd.start_min sd_start, sd.end_min sd_end,
+            (SELECT json_agg(json_build_object('s', s.start_min, 'e', s.end_min) ORDER BY s.start_min) FROM shifts s WHERE s.worker_id=w.id AND s.weekday=$2) roster,
+            n.coming, n.note, n.responded_at,
+            a.check_in, a.check_out, a.late_minutes,
+            (SELECT l.leave_type FROM leave_requests l WHERE l.worker_id=w.id AND l.status <> 'Rejected' AND $1::date BETWEEN l.from_date AND COALESCE(l.to_date, l.from_date) LIMIT 1) leave_type,
+            (SELECT p.points FROM worker_penalties p WHERE p.worker_id=w.id AND p.rule_code IN ('SHIFT_NO_SHOW','WEEKEND_NO_SHOW') AND p.ref=$3 AND p.status='active' LIMIT 1) noshow_points
+       FROM workers w
+       LEFT JOIN shift_defs sd ON sd.id=w.shift_def_id
+       LEFT JOIN next_day_avail n ON n.worker_id=w.id AND n.for_date=$1::date
+       LEFT JOIN attendance a ON a.worker_id=w.id AND a.day=$1::date
+      WHERE w.status='active' AND (w.shift_def_id IS NOT NULL OR EXISTS (SELECT 1 FROM shifts s WHERE s.worker_id=w.id AND s.weekday=$2))
+      ORDER BY w.name`, [date, wd, date])
+  const inTurf = new Set((await pool.query('SELECT id, zone_id, city, store_id FROM workers WHERE id = ANY($1)', [rows.map((r) => r.id)])).rows
+    .filter((w) => inScope(req.admin?.scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id })).map((w) => w.id))
+  rows.splice(0, rows.length, ...rows.filter((r) => inTurf.has(r.id)))
+  const hhmm = (m) => m == null ? '' : toHHMM(m)
+  const experts = rows.map((r) => {
+    const roster = r.roster || []
+    const shift = roster.length ? roster.map((x) => `${hhmm(x.s)}–${hhmm(x.e)}`).join(', ') : (r.shift_name ? `${r.shift_name} ${hhmm(r.sd_start)}–${hhmm(r.sd_end)}` : '')
+    const status = r.check_in ? (r.check_out ? 'done' : 'checked_in') : r.leave_type ? 'leave' : r.coming === false ? 'not_coming' : r.noshow_points ? 'no_show' : r.coming ? 'coming' : 'no_reply'
+    return {
+      workerId: r.id, name: r.name, phone: r.phone, suspended: r.rc_suspended, shift, onRoster: roster.length > 0,
+      answer: r.coming == null ? null : r.coming, note: r.note || '', respondedAt: r.responded_at,
+      checkIn: r.check_in, checkOut: r.check_out, lateMinutes: r.late_minutes || 0, leave: r.leave_type || '',
+      noShowCards: r.noshow_points || 0, status,
+    }
+  })
+  const count = (s) => experts.filter((e) => e.status === s).length
+  res.json({ date, total: experts.length, coming: count('coming'), checkedIn: count('checked_in') + count('done'), notComing: count('not_coming'), leave: count('leave'), noReply: count('no_reply'), noShow: count('no_show'), experts })
 })
 
 /* ---------- geofence (assigned-apartment radius) ---------- */
@@ -1764,6 +1887,7 @@ app.post('/api/worker/geofence/report', auth, async (req, res) => {
 // Only 'Available' workers are online for job matching (available=true drives auto-assign/pull).
 app.post('/api/worker/status', auth, async (req, res) => {
   const state = String(req.body?.state || 'Offline')
+  if (state === 'Available' && (await getWorker(req.worker.id))?.rc_suspended) return res.status(403).json({ ok: false, suspended: true, error: 'Your account is suspended for too many Red Cards. Operations will review it — see My Performance.' })
   await pool.query('UPDATE workers SET available=$1 WHERE id=$2', [state === 'Available', req.worker.id])
   await mergeProfile(req.worker.id, { availabilityState: state })
   // Going offline hands back any offer still waiting on an answer, so the booking moves to the next
@@ -1782,8 +1906,11 @@ app.post('/api/worker/status', auth, async (req, res) => {
 app.get('/api/worker/leave', auth, async (req, res) => res.json(await leaveList(req.worker.id)))
 app.post('/api/worker/leave', auth, async (req, res) => {
   const b = req.body || {}
-  await pool.query('INSERT INTO leave_requests (worker_id, from_date, to_date, reason) VALUES ($1,$2,$3,$4)',
+  const lv = await pool.query('INSERT INTO leave_requests (worker_id, from_date, to_date, reason) VALUES ($1,$2,$3,$4) RETURNING id',
     [req.worker.id, b.fromDate || null, b.toDate || b.fromDate || null, b.reason || ''])
+  raiseApproval({ type: 'leave', ref: lv.rows[0].id, workerId: req.worker.id,
+    summary: `${b.fromDate || ''}${b.toDate && b.toDate !== b.fromDate ? ` to ${b.toDate}` : ''}${b.reason ? ` · ${String(b.reason).slice(0, 80)}` : ''}` })
+  await penaliseCancel(req.worker.id, b.fromDate, 'leave')
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, action: 'leave.request', entityType: 'worker', entityId: req.worker.id, detail: `Requested leave ${b.fromDate || ''}` })
   res.json(await leaveList(req.worker.id))
 })
@@ -2117,6 +2244,12 @@ app.put('/api/worker/skills', auth, async (req, res) => {
     await pool.query('UPDATE workers SET services=$1::jsonb WHERE id=$2', [JSON.stringify(keep), req.worker.id])
   }
   await mergeProfile(req.worker.id, { skills: next })
+  for (const [service, v] of Object.entries(next)) {
+    const prev = cur[service]
+    const changed = !prev || prev.status !== 'Pending' || prev.level !== v.level || String(prev.years ?? '') !== v.years
+    if (v.status === 'Pending' && changed) raiseApproval({ type: 'skill', ref: `${req.worker.id}:${service}`, workerId: req.worker.id, summary: `${service} · ${v.level}${v.years ? ` · ${v.years} yrs` : ''}` })
+  }
+  for (const service of dropped) internalPost(ADMIN_URL, '/internal/approvals/cancel', { type: 'skill', ref: `${req.worker.id}:${service}`, reason: 'Skill removed by the expert' }).catch(() => {})
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'skills.claim', entityType: 'worker', entityId: req.worker.id, detail: `Updated skills (${Object.keys(next).length})` })
   const after = await getWorker(req.worker.id)
   res.json({ ok: true, skills: after?.profile?.skills || {}, approved: after?.services || [] })
@@ -3966,13 +4099,37 @@ app.get('/api/admin/workers/:id/availability', adminAuth, requireAnyPerm('worker
     shifts: shifts.map((s) => shiftDefDto(s, weekday)),
     assigned: { shiftDefId: w.shift_def_id || null, zoneId: w.zone_id ?? null },
     hoursThisWeek: await hoursThisWeek(w.id),
+    teamLead: await leadOf(w).then((l) => (l ? { id: l.id, name: l.name, roleName: l.roleName } : null)),
+    canDecide: await canDecideShift(req.admin, w),
   })
 })
 
-app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+// Approvers who could be this expert's Team Lead: they hold shifts.approve and their territory covers the expert.
+app.get('/api/admin/workers/:id/team-lead-options', adminAuth, requireAnyPerm('workers.view'), scopeWorker, async (req, res) => {
+  const w = req._worker
+  const list = (await approvers()).filter((a) => a.scope?.type === 'all' ? a.role !== 'super' : inScope(a.scope, { zoneId: w.zone_id, city: w.city, storeId: w.store_id }))
+  res.json(list.map((a) => ({ id: a.id, name: a.name, roleName: a.roleName })))
+})
+app.put('/api/admin/workers/:id/team-lead', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+  const w = req._worker
+  const id = req.body?.teamLeadId == null || req.body.teamLeadId === '' ? null : Number(req.body.teamLeadId)
+  const lead = id == null ? null : (await approvers()).find((a) => a.id === id)
+  if (id != null && !lead) return res.status(400).json({ error: 'That person cannot approve shifts' })
+  await pool.query('UPDATE workers SET team_lead_id=$1 WHERE id=$2', [id, w.id])
+  const who = req.admin?.name || req.admin?.email || 'Admin'
+  if (lead) publishEvent(REDIS_URL, 'worker.notify', { workerId: w.id, title: 'Your Team Lead', body: `${lead.name} (${lead.roleName}) now looks after your shifts and approves your shift changes.` })
+  publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'worker.team_lead', entityType: 'worker', entityId: w.id, detail: lead ? `Team Lead set to ${lead.name}` : 'Team Lead removed' })
+  res.json({ ok: true, teamLead: lead ? { id: lead.id, name: lead.name, roleName: lead.roleName } : null })
+})
+
+const shiftReviewCore = async (req, res) => {
   const id = Number(req.params.id)
   const w = await getWorker(id)
   if (!w) return res.status(404).json({ error: 'Worker not found' })
+  if (!(await canDecideShift(req.admin, w))) {
+    const lead = await leadOf(w)
+    return res.status(403).json({ error: `${lead?.name || 'Their Team Lead'} (or their manager) decides this expert's shift changes.` })
+  }
   const pref = w.profile?.availability || {}
   const approve = !!req.body?.approve
   const reason = String(req.body?.reason || '').trim()
@@ -4018,6 +4175,10 @@ app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, r
     [id, 'Shift Change', shiftLabel(oldSd), shiftLabel(sd), approve ? '' : reason, who, 'Approved'])
   const after = await getWorker(id)
   res.json({ ok: true, availability: availabilityDto(after), assigned: { shiftDefId: after.shift_def_id || null, zoneId: after.zone_id ?? null } })
+}
+app.post('/api/admin/workers/:id/availability/review', adminAuth, scopeWorker, requireAnyPerm('shifts.approve', 'workers.edit'), async (req, res) => {
+  if (await viaApprovals(req, res, 'shift_change', req.params.id, !!req.body?.approve, req.body?.reason)) return
+  return shiftReviewCore(req, res)
 })
 
 /* ================= Availability tab — consolidated overview =================
@@ -4136,7 +4297,7 @@ app.post('/api/admin/workers/:id/leave', adminAuth, scopeWorker, requirePerm('wo
   res.json({ ok: true, id: rows[0].id })
 })
 /* Approve / reject a leave request. */
-app.post('/api/admin/workers/:id/leave/:lid/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+const leaveReviewCore = async (req, res) => {
   const id = Number(req.params.id), lid = Number(req.params.lid)
   const approve = !!req.body?.approve
   const { rows } = await pool.query('UPDATE leave_requests SET status=$3 WHERE id=$1 AND worker_id=$2 RETURNING from_date, to_date, leave_type', [lid, id, approve ? 'Approved' : 'Rejected'])
@@ -4146,6 +4307,10 @@ app.post('/api/admin/workers/:id/leave/:lid/review', adminAuth, scopeWorker, req
   await pool.query('INSERT INTO worker_availability_log (worker_id,type,from_val,to_val,reason,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7)',
     [id, 'Leave Request', f(rows[0].from_date), f(rows[0].to_date), rows[0].leave_type || '', who, approve ? 'Approved' : 'Rejected'])
   res.json({ ok: true })
+}
+app.post('/api/admin/workers/:id/leave/:lid/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+  if (await viaApprovals(req, res, 'leave', req.params.lid, !!req.body?.approve, req.body?.reason)) return
+  return leaveReviewCore(req, res)
 })
 
 /* ---------- Phase 8: background verification ----------
@@ -4423,6 +4588,8 @@ app.post('/api/worker/documents/upload', auth, upload.single('file'), async (req
     key, mime: kind.mime, size: req.file.size, sum: checksum(req.file.buffer),
     fileName: String(req.body?.fileName || req.file.originalname || `${name}.${kind.ext}`).slice(0, 180),
   })
+  { const d = (await pool.query('SELECT id FROM worker_documents WHERE worker_id=$1 AND name=$2 ORDER BY id DESC LIMIT 1', [req.worker.id, name])).rows[0]
+    if (d) raiseApproval({ type: 'document', ref: d.id, workerId: req.worker.id, summary: name }) }
   publishEvent(REDIS_URL, 'activity', { actorType: 'worker', actorId: req.worker.id, actorName: req.worker.name, action: 'kyc.document', entityType: 'worker', entityId: req.worker.id, detail: `Uploaded document: ${name}` })
   res.json({ ok: true, documents: (await documents(req.worker.id)).map(docDto) })
 })
@@ -4980,21 +5147,21 @@ let ONLINE_WINDOW_MS = 15 * 60000
 async function refreshOnlineWindow() { ONLINE_WINDOW_MS = Math.max(1, await getSettingInt(ADMIN_URL, 'online_window_min', 15)) * 60000 }
 refreshOnlineWindow(); setInterval(refreshOnlineWindow, 30000).unref()
 const lastSeenMs = (w) => Math.max(Date.parse(w.last_seen_at || '') || 0, Date.parse(w.location_at || '') || 0, Date.parse(w.profile?.device?.at || '') || 0)
-const isOnline = (w) => !!w.available && Date.now() - lastSeenMs(w) <= ONLINE_WINDOW_MS
+const isOnline = (w) => !!w.available && !w.rc_suspended && Date.now() - lastSeenMs(w) <= ONLINE_WINDOW_MS
 
 app.get('/internal/on-shift', internalOnly, async (req, res) => {
   const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
   const { weekday, minutes } = istNow()
   const vals = [weekday, minutes]
-  let sql = `SELECT DISTINCT w.* FROM workers w JOIN shifts s ON s.worker_id=w.id
-    WHERE w.status='active' AND s.weekday=$1 AND s.start_min<=$2 AND $2 < s.end_min`
+  let sql = `SELECT DISTINCT w.*, (SELECT COALESCE(SUM(p.points),0)::int FROM worker_penalties p WHERE p.worker_id=w.id AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at > now())) AS red_cards FROM workers w JOIN shifts s ON s.worker_id=w.id
+    WHERE w.status='active' AND NOT w.rc_suspended AND s.weekday=$1 AND s.start_min<=$2 AND $2 < s.end_min`
   // A shift with no zone counts only in the worker's own zone — it used to make them "on shift"
   // in every zone, which sent other zones' jobs to them.
   if (zoneId) { vals.push(zoneId); sql += ` AND (s.zone_id=$3 OR (s.zone_id IS NULL AND w.zone_id=$3))` }
   const rows = (await pool.query(sql, vals)).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.length === 0 || names.some((n) => set.has(n)) })
-  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, rating: w.rating, available: isOnline(w), zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
+  res.json({ count: qualified.length, workers: qualified.map((w) => ({ id: w.id, name: w.name, rating: w.rating, redCards: w.red_cards || 0, available: isOnline(w), zone_id: w.zone_id, last: w.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null })) })
 })
 
 async function patchWorker(id, b, res) {
@@ -5076,10 +5243,10 @@ app.get('/internal/workers/for-service', internalOnly, async (req, res) => {
   const names = String(req.query.services || '').split(',').map((s) => s.toLowerCase().trim()).filter(Boolean)
   const zoneId = req.query.zone_id ? Number(req.query.zone_id) : null
   const rows = (await pool.query(
-    `SELECT id, name, services, rating, jobs, avatar, available, last_lat, last_lng, zone_id, location_at, last_seen_at, profile FROM workers WHERE status='active'${zoneId ? ' AND zone_id=$1' : ''} ORDER BY jobs DESC NULLS LAST, rating DESC`,
+    `SELECT w.id, w.name, w.services, w.rating, w.jobs, w.avatar, w.available, w.last_lat, w.last_lng, w.zone_id, w.location_at, w.last_seen_at, w.profile, w.rc_suspended, (SELECT COALESCE(SUM(p.points),0)::int FROM worker_penalties p WHERE p.worker_id=w.id AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at > now())) AS red_cards FROM workers w WHERE w.status='active' AND NOT w.rc_suspended${zoneId ? ' AND w.zone_id=$1' : ''} ORDER BY w.jobs DESC NULLS LAST, w.rating DESC`,
     zoneId ? [zoneId] : [])).rows
   const qualified = rows.filter((w) => { const set = serviceSet(w); return names.some((n) => set.has(n)) })
-  res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, online: isOnline(w), lat: w.last_lat, lng: w.last_lng })))
+  res.json(qualified.slice(0, 12).map((w) => ({ id: w.id, name: w.name, rating: w.rating || 4.5, jobs: w.jobs || 0, avatar: w.avatar || null, redCards: w.red_cards || 0, online: isOnline(w), lat: w.last_lat, lng: w.last_lng })))
 })
 // Live map: every worker's last known position and state (for the admin control tower).
 app.get('/internal/workers/locations', internalOnly, async (_q, res) => {
@@ -5087,11 +5254,72 @@ app.get('/internal/workers/locations', internalOnly, async (_q, res) => {
     FROM workers WHERE status='active'`)
   res.json(rows)
 })
+/* ---------- Approval Center (admin service) ----------
+ * Requests an expert raises are registered there; its flow (Team Lead → Zone Manager → …) decides.
+ * When the last level approves or anyone rejects, it calls /internal/approvals/execute below, which
+ * runs the same decision core the old admin buttons ran. With a flow switched off nothing is raised
+ * and the old direct buttons decide as before. */
+function raiseApproval(item) {
+  return internalPost(ADMIN_URL, '/internal/approvals', item).catch((e) => { console.error('[worker] raiseApproval:', e.message); return null })
+}
+// An old per-screen Approve/Reject: if the request is under the Approval Center, it counts as this
+// admin's signature on the current level instead of deciding outright. true = response already sent.
+async function viaApprovals(req, res, type, ref, approve, comment) {
+  let r
+  try { r = await internalPost(ADMIN_URL, '/internal/approvals/decide-by-ref', { type, ref: String(ref), approve: !!approve, comment: comment || '', admin: req.admin }) }
+  catch (e) { if (e.status) { res.status(e.status).json({ ok: false, error: e.message }); return true } return false }
+  if (!r?.handled) return false
+  res.json({ ok: true, approvalCenter: true, status: r.status, message: r.message })
+  return true
+}
+// Run a decision core outside a real admin request (the Approval Center already checked who may).
+function runCore(core, params, body, by) {
+  return new Promise((resolve) => {
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this }, json(j) { resolve({ status: this.statusCode, body: j }); return this } }
+    const req = { params, body, admin: { name: by, role: 'super', permissions: [], scope: { type: 'all' } } }
+    Promise.resolve(core(req, res)).catch((e) => resolve({ status: 500, body: { error: e.message } }))
+  })
+}
+app.get('/internal/workers/:id/approval-context', internalOnly, async (req, res) => {
+  const w = await getWorker(Number(req.params.id))
+  if (!w) return res.status(404).json({ error: 'Not found' })
+  res.json({ name: w.name, zoneId: w.zone_id ?? null, city: w.city ?? null, storeId: w.store_id ?? null, teamLeadId: w.team_lead_id ?? null })
+})
+app.post('/internal/approvals/execute', internalOnly, async (req, res) => {
+  const { type, ref, approve, comment = '', by = 'Approval Center' } = req.body || {}
+  let r
+  if (type === 'shift_change') {
+    const w = await getWorker(Number(ref))
+    if (!w) return res.json({ ok: false, error: 'Expert not found' })
+    r = await runCore(shiftReviewCore, { id: String(ref) }, approve ? { approve: true } : { approve: false, shiftDefId: w.shift_def_id ?? null, zoneId: w.zone_id ?? null, reason: comment || 'Request not approved' }, by)
+  } else if (type === 'leave') {
+    const l = (await pool.query('SELECT worker_id, from_date, to_date FROM leave_requests WHERE id=$1', [Number(ref)])).rows[0]
+    if (!l) return res.json({ ok: false, error: 'Leave request not found' })
+    r = await runCore(leaveReviewCore, { id: String(l.worker_id), lid: String(ref) }, { approve: !!approve }, by)
+    const d = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v || '').slice(0, 10))
+    if (r.status < 400) publishEvent(REDIS_URL, 'worker.notify', { workerId: l.worker_id, title: approve ? 'Leave approved' : 'Leave not approved', body: approve ? `Your leave ${d(l.from_date)}${l.to_date && d(l.to_date) !== d(l.from_date) ? ` to ${d(l.to_date)}` : ''} is approved.` : `Your leave ${d(l.from_date)} was not approved: ${comment}` })
+  } else if (type === 'skill') {
+    const [wid, ...rest] = String(ref).split(':'); const service = rest.join(':')
+    r = await runCore(skillReviewCore, { id: wid }, { service, approve: !!approve, reason: comment }, by)
+  } else if (type === 'document') {
+    const d = (await pool.query('SELECT worker_id FROM worker_documents WHERE id=$1', [Number(ref)])).rows[0]
+    if (!d) return res.json({ ok: false, error: 'Document not found' })
+    r = await runCore(docReviewCore, { id: String(d.worker_id), docId: String(ref) }, { approve: !!approve, reason: comment }, by)
+  } else if (type === 'bank_account') {
+    r = await runCore(approve ? bankApproveCore : bankRejectCore, { id: String(ref) }, {}, by)
+    if (r.status < 400) publishEvent(REDIS_URL, 'worker.notify', { workerId: Number(ref), title: approve ? 'Bank account verified' : 'Bank account not verified', body: approve ? 'Your payout account is verified. Withdrawals will go there.' : `Your bank details were not verified: ${comment}` })
+  } else if (type === 'rc_appeal') {
+    r = await rc.decideAppeal(Number(ref), !!approve, comment, by).then((x) => ({ status: x.ok ? 200 : 404, body: x }))
+  } else return res.json({ ok: false, error: `Unknown request type ${type}` })
+  if (r.status >= 400) return res.json({ ok: false, error: r.body?.error || `Could not apply (${r.status})` })
+  res.json({ ok: true })
+})
+
 app.get('/internal/workers/:id', internalOnly, async (req, res) => { const w = await getWorker(Number(req.params.id)); return w ? res.json(rowToWorker(w)) : res.status(404).json({ error: 'Not found' }) })
 app.get('/internal/workers/:id/service-set', internalOnly, async (req, res) => {
   const w = await getWorker(Number(req.params.id))
   res.json({
-    services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available,
+    services: w ? [...serviceSet(w)] : [], name: w?.name, rating: w?.rating, available: !!w?.available, suspended: !!w?.rc_suspended,
     status: w?.status, offered_booking: w?.offered_booking, zone_id: w?.zone_id ?? null,
     offered_at: w?.offered_at ?? null,
     last: w?.last_lat != null ? { lat: w.last_lat, lng: w.last_lng } : null,
@@ -5163,7 +5391,7 @@ app.post('/internal/workers/:id/balance', internalOnly, async (req, res) => {
  * is what dispatch matches on. Rejecting removes it. The worker's claim alone never does either.
  * The admin can also approve at a DIFFERENT level than claimed — that's the point of a review.
  */
-app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+const skillReviewCore = async (req, res) => {
   const id = Number(req.params.id)
   const service = String(req.body?.service || '').trim()
   const approve = !!req.body?.approve
@@ -5206,6 +5434,10 @@ app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, require
   }
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'skills.review', entityType: 'worker', entityId: id, detail: `${approve ? 'Approved' : 'Rejected'} ${service} for ${w.name}${approve ? ` (${skills[service].level})` : ` — ${reason}`}` })
   res.json({ ok: true, ...rowToWorker(await getWorker(id)) })
+}
+app.post('/api/admin/workers/:id/skills/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+  if (await viaApprovals(req, res, 'skill', `${req.params.id}:${String(req.body?.service || '').trim()}`, !!req.body?.approve, req.body?.reason)) return
+  return skillReviewCore(req, res)
 })
 
 /* Toggle a LIVE service Active/Inactive without removing the capability. Stored in
@@ -5256,7 +5488,7 @@ app.get('/api/admin/workers/:id/documents/:docId/url', adminAuth, requireAnyPerm
   if (!d?.storage_key) return res.status(404).json({ ok: false, error: 'No file for this document' })
   res.json({ ok: true, url: await signedGetUrl(d.storage_key) })
 })
-app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+const docReviewCore = async (req, res) => {
   const wid = Number(req.params.id), docId = Number(req.params.docId)
   const approve = !!req.body?.approve
   const reason = String(req.body?.reason || '').trim()
@@ -5277,6 +5509,10 @@ app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, scopeWorke
   })
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.review', entityType: 'worker', entityId: wid, detail: `${approve ? 'Verified' : 'Rejected'} ${rows[0].name} for ${w?.name || `worker ${wid}`}${approve ? '' : ` — ${reason}`}` })
   res.json({ ok: true, documents: (await documents(wid)).map((d) => ({ id: d.id, name: d.name, status: d.status })) })
+}
+app.post('/api/admin/workers/:id/documents/:docId/review', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+  if (await viaApprovals(req, res, 'document', req.params.docId, !!req.body?.approve, req.body?.reason)) return
+  return docReviewCore(req, res)
 })
 
 // Admin captures/edits a document's printed number and its issue/expiry dates. Purely additive to
@@ -5326,7 +5562,7 @@ app.post('/api/admin/workers/:id/documents/upload', adminAuth, scopeWorker, requ
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorName: who, action: 'kyc.upload', entityType: 'worker', entityId: wid, detail: `Uploaded ${name}` })
   res.json({ ok: true })
 })
-app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+const bankApproveCore = async (req, res) => {
   const wid = Number(req.params.id)
   const b = (await getWorker(wid))?.profile?.bank || {}
   const hasLegacy = !!(b.bankAccount || b.account || b.accountNumber || b.bankUpi || b.upi)
@@ -5335,8 +5571,16 @@ app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, requireP
   await pool.query("UPDATE workers SET bank_status='Verified' WHERE id=$1", [wid])
   publishEvent(REDIS_URL, 'activity', { actorType: 'admin', actorId: req.admin?.id, actorName: req.admin?.name || req.admin?.email, action: 'kyc.bank.approve', entityType: 'worker', entityId: wid, detail: 'Bank details verified' })
   res.json({ ok: true })
+}
+app.post('/api/admin/workers/:id/bank/approve', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+  if (await viaApprovals(req, res, 'bank_account', req.params.id, true, '')) return
+  return bankApproveCore(req, res)
 })
-app.post('/api/admin/workers/:id/bank/reject', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) })
+const bankRejectCore = async (req, res) => { await pool.query("UPDATE workers SET bank_status='Rejected' WHERE id=$1", [Number(req.params.id)]); res.json({ ok: true }) }
+app.post('/api/admin/workers/:id/bank/reject', adminAuth, scopeWorker, requirePerm('workers.edit'), async (req, res) => {
+  if (await viaApprovals(req, res, 'bank_account', req.params.id, false, req.body?.reason || 'Bank details could not be verified')) return
+  return bankRejectCore(req, res)
+})
 
 /* ---------- events ---------- */
 // Result of the RazorpayX bank-account validation (penny-drop) kicked off on bank save.
@@ -5438,7 +5682,7 @@ init()
     // else, and the upload endpoint returns a clear 503 rather than accepting files it can't store.
     await ensureBucket().catch((e) => console.error('[worker] storage init failed:', e.message))
     await ensurePublicBucket().catch((e) => console.error('[worker] public storage init failed:', e.message))
-    app.listen(PORT, () => console.log(`[worker] service on http://localhost:${PORT}`))
+    app.listen(PORT, () => { console.log(`[worker] service on http://localhost:${PORT}`); rc.start() })
     scheduleMetricSnapshots()
     scheduleOfferSweep()
   })

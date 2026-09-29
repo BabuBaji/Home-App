@@ -400,6 +400,9 @@ data class ShiftInfo(
     /** What the worker asked for. Pending until an admin approves it; a request is not a grant. */
     val requestedId: Int? = null,
     val shiftStatus: String = "Pending",
+    /** Who decides this expert's shift requests (their Team Lead); null → operations/admin. */
+    val approverName: String? = null,
+    val approverRole: String? = null,
     val shifts: List<ShiftDto> = emptyList(),
 )
 
@@ -689,6 +692,20 @@ data class RewardsDto(
     val cardItems: List<RewardItem> = emptyList(),
 )
 data class ShaktiTier(val name: String = "", val amount: Int = 0, val days: Int = 0, val sundays: Int = 0)
+// Red Cards / reliability (GET /api/worker/reliability).
+data class RcLevelDto(val key: String = "", val label: String = "", val note: String = "")
+data class RcAppealDto(val status: String = "", val reason: String? = null, val comment: String? = null)
+data class RcPenaltyDto(
+    val id: Int = 0, val code: String = "", val points: Int = 0, val reason: String = "", val ref: String = "",
+    val status: String = "", val created: String = "", val expiresAt: String? = null, val appeal: RcAppealDto? = null,
+)
+data class ReliabilityDto(
+    val score: Int = 100, val redCards: Int = 0, val suspendAt: Int = 6, val level: RcLevelDto = RcLevelDto(),
+    val suspended: Boolean = false, val attendance: Int = 100, val onTime: Int = 100, val acceptance: Int = 100,
+    val completion: Int = 100, val history: List<RcPenaltyDto> = emptyList(),
+)
+data class AppealBody(val reason: String)
+
 data class ShaktiBonusDto(
     val tiers: List<ShaktiTier> = emptyList(),
     val workingDays: Int = 0,
