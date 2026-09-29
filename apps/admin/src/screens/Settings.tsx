@@ -212,6 +212,9 @@ export default function SettingsScreen() {
       <Group title="Customer credits">
         <div className="form-grid">
           {input('welcome_bonus', 'New-customer welcome credit (₹)', { type: 'number', min: 0, placeholder: '100', hint: 'Added to the promo balance at sign-up. 0 turns it off.' })}
+          {input('customer_referral_bonus', 'Refer-a-friend reward (₹)', { type: 'number', min: 0, placeholder: '150', hint: 'Paid to the referrer’s promo balance when the friend completes their first booking. 0 turns it off.' })}
+          {input('cashback_percent', 'Cashback on completed bookings (%)', { type: 'number', step: '0.5', min: 0, placeholder: '5', hint: 'Credited to the promo balance once per completed booking. 0 turns it off.' })}
+          {input('cashback_cap', 'Cashback cap per booking (₹)', { type: 'number', min: 0, placeholder: '50', hint: '0 = no cap.' })}
         </div>
       </Group>
       <Group title="Settlement rates" note="These drive each booking's Payment & Settlement breakdown. The gateway fee and its GST are what a card/UPI payment really costs (0 on wallet); incentive, operational and marketing are allocated per-booking costs. Set any to 0 to drop that line.">

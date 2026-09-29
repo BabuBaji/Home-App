@@ -706,6 +706,10 @@ data class ReliabilityDto(
 )
 data class AppealBody(val reason: String)
 
+/** Active incentive rules paid on weekend jobs (GET /api/worker/incentives/weekend). */
+data class WeekendRuleDto(val name: String = "", val amount: Int = 0, val percent: Double = 0.0)
+data class WeekendRulesDto(val rules: List<WeekendRuleDto> = emptyList())
+
 data class ShaktiBonusDto(
     val tiers: List<ShaktiTier> = emptyList(),
     val workingDays: Int = 0,

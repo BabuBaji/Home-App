@@ -6,7 +6,7 @@
  * (earnings, incentives, salary, payouts) from wallet, mapped to the expert's zone.
  * Every figure is limited to the viewer's territory (admin scope), like the rest of the panel.
  */
-import { requireAnyPerm, tryGet, inScope } from '@homehelp/shared'
+import { requireAnyPerm, tryGet, inScope, internalPost } from '@homehelp/shared'
 
 const DAY = 86400000
 const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
@@ -110,6 +110,143 @@ export function installBusiness({ app, admin, U }) {
     const days = []
     for (let i = 0; i < r.days; i++) { const d = shift(r.from, i); days.push(byDay.get(d) || { d, orders: 0, completed: 0, gmv: 0 }) }
     res.json({ range: r, days, services: t.services || [] })
+  })
+
+  /* Ledger: every money movement, newest first. dir: 'in' = the company receives (or is owed back),
+   * 'out' = the company pays or owes, 'settle' = moves money already counted (expert bank payout,
+   * the wallet credit of a top-up) — listed but kept out of the totals so nothing counts twice. */
+  const KIND = {
+    customer_payment: ['Customer payment', 'in'], wallet_topup: ['Wallet top-up (paid)', 'in'], wallet_payment: ['Booking paid from wallet', 'in'],
+    expert_deduction: ['Expert deduction / fine', 'in'], wallet_debit: ['Customer wallet debit', 'in'],
+    refund_gateway: ['Refund to card / UPI', 'out'], refund_wallet: ['Refund to customer wallet', 'out'], wallet_credit: ['Wallet credit / bonus', 'out'],
+    expert_earning: ['Expert job earning', 'out'], expert_incentive: ['Expert incentive / bonus', 'out'], expert_advance: ['Salary advance', 'out'],
+    expert_payout: ['Payout to expert bank', 'settle'], wallet_topup_credit: ['Top-up credited to wallet', 'settle'],
+  }
+  // The specific reward behind a generic wallet credit / expert income line.
+  const CUSTOMER_SUB = { REFERRAL_BONUS: 'Customer referral bonus', CASHBACK: 'Cashback', WELCOME_BONUS: 'Welcome bonus', GIFT_CARD: 'Gift card credit',
+    MEMBERSHIP: 'Membership', ADMIN: 'Wallet credit by admin', ADMIN_CREDIT: 'Wallet credit by admin', COMPENSATION: 'Compensation credit' }
+  const EXPERT_SUB = { 'Joining Bonus': 'Expert joining bonus', Referral: 'Expert referral bonus', Incentive: 'Expert incentive (rule)', Bonus: 'Expert bonus (manual)',
+    'Min Guarantee': 'Expert minimum guarantee', Compensation: 'Expert compensation', Tip: 'Tip to expert', Extension: 'Expert extension pay', Salary: 'Expert salary' }
+  const pretty = (k) => String(k || '').toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
+  // "Incentive" covers every rule-driven payment; its own name is the part of the label before " · ".
+  const expertName = (x) => (x.sub === 'Incentive' && x.note ? `Expert: ${String(x.note).split(' · ')[0]}` : EXPERT_SUB[x.sub] || (x.sub ? `Expert ${String(x.sub).toLowerCase()}` : 'Expert incentive'))
+  const subLabel = (x, fallback) => {
+    if (x.kind === 'wallet_credit' || x.kind === 'wallet_debit') return CUSTOMER_SUB[x.sub] || (x.sub ? pretty(x.sub) : fallback)
+    if (x.kind === 'expert_incentive') return expertName(x)
+    return fallback
+  }
+
+  app.get('/api/admin/business/ledger', admin, requireAnyPerm('finance.view', 'payments.view', 'wallet.view'), async (req, res) => {
+    const r = range(req.query)
+    const qs = `?from=${r.from}&to=${r.to}`
+    const [pay, cw, exp, zones, experts, customers] = await Promise.all([
+      tryGet(U.payment, `/internal/business/ledger${qs}`, []),
+      tryGet(U.auth, `/api/internal/business/ledger${qs}`, []),
+      tryGet(WALLET, `/internal/business/ledger${qs}`, []),
+      tryGet(U.catalog, '/api/internal/zones', []),
+      tryGet(U.worker, '/internal/business/experts', []),
+      tryGet(U.auth, '/api/internal/customers', []),
+    ])
+    const all = [...(pay || []), ...(cw || []), ...(exp || [])]
+    // Zone: booking's zone for customer money (by id or "#HH" ref), the expert's zone for expert money.
+    const ids = [...new Set(all.map((x) => x.bookingId).filter(Boolean))]
+    const refs = [...new Set(all.map((x) => x.ref).filter((v) => /^#?HH\d+/.test(String(v || ''))))]
+    const [byId, byRef] = await Promise.all([
+      ids.length ? internalPost(U.booking, '/internal/business/booking-zones', { ids }).catch(() => ({})) : {},
+      refs.length ? internalPost(U.booking, '/internal/business/booking-refs', { refs }).catch(() => ({})) : {},
+    ])
+    const zb = new Map((zones || []).map((z) => [z.id, z]))
+    const ex = new Map((experts || []).map((e) => [e.id, e]))
+    // OTP sign-up never asks for a name, so fall back to the phone number.
+    const cu = new Map((customers || []).map((c) => [c.id, c.name || c.phone || '']))
+    const scope = req.admin?.scope
+    const typeF = String(req.query.type || ''), zoneF = String(req.query.zoneId || '')
+    const rows = all.map((x) => {
+      const [base, dir] = KIND[x.kind] || [x.kind, 'settle']
+      const label = subLabel(x, base)
+      const zoneId = x.workerId ? (ex.get(x.workerId)?.zoneId ?? null) : x.bookingId ? (byId[x.bookingId] ?? null) : (byRef[x.ref]?.zoneId ?? null)
+      const z = zb.get(zoneId)
+      return {
+        key: x.key, at: x.at, kind: x.kind, sub: x.sub || '', label, dir, amount: Number(x.amount) || 0, method: x.method || '', ref: x.ref || '', note: x.note || '',
+        party: x.workerId ? (ex.get(x.workerId)?.name || `Expert #${x.workerId}`) : (x.customerName || cu.get(x.customerId) || (x.customerId ? `Customer #${x.customerId}` : '—')),
+        partyType: x.workerId ? 'expert' : 'customer', workerId: x.workerId || null, customerId: x.customerId || null,
+        zoneId, zone: z?.name || '—', city: z?.city || '—',
+      }
+    }).filter((x) => zoneVisible(scope, zb.get(x.zoneId) || null) && (!typeF || x.kind === typeF || x.dir === typeF) && (!zoneF || String(x.zoneId ?? 'none') === zoneF))
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+    const sum = (d) => rows.filter((x) => x.dir === d).reduce((s, x) => s + x.amount, 0)
+    res.json({ range: r, totals: { in: sum('in'), out: sum('out'), net: sum('in') - sum('out'), settled: sum('settle'), count: rows.length }, kinds: Object.entries(KIND).map(([k, [l, d]]) => ({ kind: k, label: l, dir: d })), rows: rows.slice(0, 3000) })
+  })
+
+  /* Rewards & Discounts — what every offer, reward and incentive cost over a range.
+   * Discounts (coupons/campaigns, membership, zone) come off the order value; customer rewards are
+   * wallet credits; expert incentives are wallet income. Plus incentive-rule spend vs budget for the
+   * month of `to`, and gift cards issued vs redeemed. Limited to the viewer's territory. */
+  app.get('/api/admin/business/rewards', admin, requireAnyPerm('reports.view', 'finance.view', 'campaigns.view'), async (req, res) => {
+    const r = range(req.query)
+    const qs = `?from=${r.from}&to=${r.to}`
+    const [disc, camp, cw, exp, rules, gift, zones, experts] = await Promise.all([
+      tryGet(U.booking, `/internal/business/discounts${qs}`, []),
+      tryGet(U.catalog, `/api/internal/business/campaign-usage${qs}`, []),
+      tryGet(U.auth, `/api/internal/business/ledger${qs}`, []),
+      tryGet(WALLET, `/internal/business/ledger${qs}`, []),
+      tryGet(U.worker, `/internal/business/incentive-rules?month=${r.to.slice(0, 7)}`, { rules: [] }),
+      tryGet(U.auth, '/api/internal/business/gift-cards', null),
+      tryGet(U.catalog, '/api/internal/zones', []),
+      tryGet(U.worker, '/internal/business/experts', []),
+    ])
+    const scope = req.admin?.scope
+    const zb = new Map((zones || []).map((z) => [z.id, z]))
+    const seeZone = (zid) => zoneVisible(scope, zb.get(zid) || null)
+    const exZone = new Map((experts || []).map((e) => [e.id, e.zoneId ?? null]))
+    const campByBooking = new Map((camp || []).map((c) => [c.bookingId, c]))
+    // cashback / referral rows carry a booking ref → zone
+    const refs = [...new Set((cw || []).map((x) => x.ref).filter((v) => /^#?HH\d+/.test(String(v || ''))))]
+    const byRef = refs.length ? await internalPost(U.booking, '/internal/business/booking-refs', { refs }).catch(() => ({})) : {}
+
+    // --- discounts
+    const d = (disc || []).filter((x) => seeZone(x.zoneId))
+    const coupons = {}
+    for (const x of d) if (x.discount) {
+      const c = campByBooking.get(x.bookingId)
+      const key = c ? `${c.name}${c.code ? ` (${c.code})` : ''}` : x.coupon ? `Coupon ${x.coupon}` : 'Other discount'
+      const e = coupons[key] || (coupons[key] = { name: key, orders: 0, amount: 0 }); e.orders++; e.amount += x.discount
+    }
+    const discounts = {
+      coupon: d.reduce((s, x) => s + x.discount, 0), membership: d.reduce((s, x) => s + x.memberDiscount, 0), zone: d.reduce((s, x) => s + x.zoneDiscount, 0),
+      orders: d.length, byCampaign: Object.values(coupons).sort((a, b) => b.amount - a.amount),
+      couponOrders: d.filter((x) => x.discount).length, membershipOrders: d.filter((x) => x.memberDiscount).length, zoneOrders: d.filter((x) => x.zoneDiscount).length,
+    }
+    discounts.total = discounts.coupon + discounts.membership + discounts.zone
+
+    // --- customer rewards (wallet credits other than refunds / top-ups)
+    const creward = {}
+    for (const x of cw || []) {
+      if (x.kind !== 'wallet_credit') continue
+      const zid = byRef[x.ref]?.zoneId ?? null
+      if (!seeZone(zid) && !(scope?.type === 'all' || !scope)) continue
+      const k = CUSTOMER_SUB[x.sub] || pretty(x.sub) || 'Wallet credit'
+      const e = creward[k] || (creward[k] = { name: k, count: 0, amount: 0 }); e.count++; e.amount += Number(x.amount) || 0
+    }
+    // --- expert incentives (non-job income)
+    const ereward = {}
+    for (const x of exp || []) {
+      if (x.kind !== 'expert_incentive' || !seeZone(exZone.get(x.workerId) ?? null)) continue
+      const k = expertName(x)
+      const e = ereward[k] || (ereward[k] = { name: k, count: 0, amount: 0 }); e.count++; e.amount += Number(x.amount) || 0
+    }
+    const list = (o) => Object.values(o).sort((a, b) => b.amount - a.amount)
+    const customerRewards = list(creward), expertIncentives = list(ereward)
+    const tot = (l) => l.reduce((s, x) => s + x.amount, 0)
+    // Budgets and gift cards are company-wide numbers — only for admins who see everything.
+    const whole = !scope || scope.type === 'all'
+    res.json({
+      range: r,
+      totals: { discounts: discounts.total, customerRewards: tot(customerRewards), expertIncentives: tot(expertIncentives), all: discounts.total + tot(customerRewards) + tot(expertIncentives) },
+      discounts, customerRewards, expertIncentives,
+      rules: whole ? (rules?.rules || []) : [], rulesMonth: rules?.month || r.to.slice(0, 7),
+      giftCards: whole ? gift : null,
+    })
   })
 
   // Every expert payout (withdrawal) in one list, with the expert and their zone.

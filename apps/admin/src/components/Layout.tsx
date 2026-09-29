@@ -52,6 +52,7 @@ const NAV: NavEntry[] = [
   { key: 'finance', label: 'Finance', Icon: CreditCard, items: [
     { to: '/payments', label: 'Payments', Icon: CreditCard, perm: 'payments.view' },
     { to: '/refunds', label: 'Refunds', Icon: RotateCcw, perm: 'refunds.view' },
+    { to: '/ledger', label: 'Ledger', Icon: BarChart3, perm: 'payments.view' },
     { to: '/worker-wallet', label: 'Add Funds / Wallet', Icon: Wallet, perm: 'wallet.view' },
   ] },
   { key: 'catalog', label: 'Services & Pricing', Icon: Tag, items: [
@@ -79,6 +80,7 @@ const NAV: NavEntry[] = [
   ] },
   { key: 'insights', label: 'Insights', Icon: BarChart3, items: [
     { to: '/business', label: 'Business Performance', Icon: IndianRupee, perm: 'reports.view' },
+    { to: '/rewards', label: 'Rewards & Discounts', Icon: Gift, perm: 'reports.view' },
     { to: '/reports', label: 'Reports', Icon: BarChart3, perm: 'reports.view' },
     { to: '/analytics', label: 'Analytics', Icon: PieChart, perm: 'analytics.view' },
     { to: '/activity', label: 'Activity Monitor', Icon: ActivityIcon, perm: 'activity.view' },
@@ -98,7 +100,7 @@ const TITLES: Record<string, string> = {
   dashboard: 'Dashboard', customers: 'Customers', workers: 'Workers (Pros)', 'worker-wallet': 'Add Funds / Wallet', bookings: 'Bookings',
   services: 'Services', campaigns: 'Campaigns & Offers', packages: 'Service Packages', payments: 'Payments', refunds: 'Refunds',
   zones: 'Zone Operations', 'command-center': 'Operations Command Center', 'control-tower': 'Control Tower', 'live-ops': 'Live Ops', 'service-areas': 'Service Areas', roster: 'Shifts / Roster', 'shift-plans': 'Shift Plans & Attendance', training: 'Training & Assessment', equipment: 'Equipment', 'salary-plans': 'Salary Plans', 'incentive-plans': 'Incentive Plans', payroll: 'Payroll', 'compensation-rules': 'Compensation Rules', complaints: 'Complaints', cancellations: 'Cancellations', notifications: 'Notifications', tickets: 'Support Tickets',
-  reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals', reliability: 'Reliability & Penalties', 'shift-confirmations': 'Shift Confirmations', 'approval-center': 'Approval Center', business: 'Business Performance',
+  reports: 'Reports', analytics: 'Analytics', activity: 'Activity Monitor', settings: 'Settings', admins: 'Admin Users', organization: 'Organization', roles: 'Roles & Permissions', approvals: 'Approvals', reliability: 'Reliability & Penalties', 'shift-confirmations': 'Shift Confirmations', 'approval-center': 'Approval Center', business: 'Business Performance', ledger: 'Ledger', rewards: 'Rewards & Discounts',
 }
 
 // Every menu item's label by its path — so a page never shows "Dashboard" as its title just

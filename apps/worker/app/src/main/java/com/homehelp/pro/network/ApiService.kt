@@ -367,6 +367,9 @@ interface ApiService {
     @POST("api/worker/insurance/claim")
     suspend fun claimInsurance(@Body body: ClaimBody): SimpleResult
 
+    @GET("api/worker/incentives/weekend")
+    suspend fun weekendIncentives(): com.homehelp.pro.network.WeekendRulesDto
+
     @GET("api/worker/shakti-bonus")
     suspend fun shaktiBonus(): ShaktiBonusDto
 

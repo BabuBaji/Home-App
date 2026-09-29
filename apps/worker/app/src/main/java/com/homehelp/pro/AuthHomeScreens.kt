@@ -352,7 +352,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     // Pull the wallet ledger so the Home "Last 7 Days" chart + balance chip have live data.
     LaunchedEffect(Unit) { vm.refreshWallet() }
     // Pull the Sitara Bonus (working-days / rating reward) so the Home rewards card is live.
-    LaunchedEffect(Unit) { vm.loadShaktiBonus() }
+    LaunchedEffect(Unit) { vm.loadShaktiBonus(); vm.loadWeekendRules() }
     // Pull notifications so the bell badge + Announcements card show real items.
     LaunchedEffect(Unit) { vm.refreshNotifications() }
     // Joining-bonus progress for a new worker (card hidden once paid, expired or switched off).
@@ -752,14 +752,23 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             // ─── Bonus banner ─── closes the page. When the backend reports a Sitara tier the
             // banner quotes ITS reward and target; with no tier reported it falls back to the
             // generic weekend copy rather than naming a bonus the worker cannot actually earn.
+            // Only real, switched-on bonuses are advertised: a weekend incentive rule (admin ▸
+            // Compensation Rules) quotes its own amount; otherwise the next Sitara tier; otherwise nothing.
+            val weekend = vm.weekendRules.firstOrNull()
             val nextBonusTier = vm.shaktiBonus?.tiers?.firstOrNull { it.days > (vm.shaktiBonus?.workingDays ?: 0) }
-            BonusBanner(
-                title = tr("Weekend Bonus!"),
-                subtitle = nextBonusTier
-                    ?.let { "Earn ₹${it.amount} extra after ${it.days} working days" }
-                    ?: tr("Extra incentive on weekend jobs — tap for details"),
-                onDetails = { nav.navigate(Routes.SHAKTI) },
-            )
+            when {
+                weekend != null -> BonusBanner(
+                    title = tr("Weekend Bonus!"),
+                    subtitle = if (weekend.amount > 0) "Earn ₹${weekend.amount} extra on every Saturday & Sunday job"
+                        else "Earn ${weekend.percent.toInt()}% extra on every Saturday & Sunday job",
+                    onDetails = { nav.navigate(Routes.SHAKTI) },
+                )
+                nextBonusTier != null -> BonusBanner(
+                    title = tr("Sitara Bonus"),
+                    subtitle = "Earn ₹${nextBonusTier.amount} extra after ${nextBonusTier.days} working days",
+                    onDetails = { nav.navigate(Routes.SHAKTI) },
+                )
+            }
 
             // The active-job banner moved to the TOP of this column — a job in progress is the
             // most important thing on the screen and used to render here, below everything.

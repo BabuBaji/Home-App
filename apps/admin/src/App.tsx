@@ -53,6 +53,8 @@ import Roles from './screens/Roles'
 import Approvals from './screens/Approvals'
 import ApprovalCenter from './screens/ApprovalCenter'
 import BusinessPerformance from './screens/BusinessPerformance'
+import Ledger from './screens/Ledger'
+import RewardsReport from './screens/RewardsReport'
 import OrgHierarchy from './screens/OrgHierarchy'
 import CommandCenter from './screens/CommandCenter'
 import ControlTower from './screens/ControlTower'
@@ -119,10 +121,12 @@ export default function App() {
           <Route path="/compensation-rules" element={<Page perm="comp_rules.view"><CompensationRules /></Page>} />
           <Route path="/payments" element={<Page perm="payments.view"><Payments /></Page>} />
           <Route path="/refunds" element={<Page perm="refunds.view"><Refunds /></Page>} />
+          <Route path="/ledger" element={<Page perm="payments.view"><Ledger /></Page>} />
           <Route path="/complaints" element={<Page perm="complaints.view"><Complaints /></Page>} />
           <Route path="/notifications" element={<Page perm="notifications.view"><Notifications /></Page>} />
           <Route path="/tickets" element={<Page perm="tickets.view"><Tickets /></Page>} />
           <Route path="/business" element={<Page perm="reports.view"><BusinessPerformance /></Page>} />
+          <Route path="/rewards" element={<Page perm="reports.view"><RewardsReport /></Page>} />
           <Route path="/reports" element={<Page perm="reports.view"><Reports /></Page>} />
           <Route path="/analytics" element={<Page perm="analytics.view"><Analytics /></Page>} />
           <Route path="/activity" element={<Page perm="activity.view"><Activity /></Page>} />

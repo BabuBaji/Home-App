@@ -1563,6 +1563,9 @@ class AppViewModel : ViewModel() {
     var shaktiBonus by mutableStateOf<ShaktiBonusDto?>(null)
         private set
     fun loadShaktiBonus() = sync { shaktiBonus = api.shaktiBonus() }
+    /** Weekend incentive rules that are switched on — empty means no weekend bonus is running. */
+    val weekendRules = mutableStateListOf<com.homehelp.pro.network.WeekendRuleDto>()
+    fun loadWeekendRules() = sync { val r = api.weekendIncentives(); weekendRules.clear(); weekendRules.addAll(r.rules) }
 
     var withdrawalReceipt by mutableStateOf<com.homehelp.pro.network.WithdrawalReceiptDto?>(null)
         private set

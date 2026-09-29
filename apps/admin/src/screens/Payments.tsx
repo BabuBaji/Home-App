@@ -11,6 +11,9 @@ type PaymentsData = { summary: Summary; transactions: Txn[] }
 type Queue = 'paid' | 'pending' | 'failed' | 'refunded' | 'all'
 const queueOf = (t: Txn): Exclude<Queue, 'all'> => {
   const s = (t.status || '').toUpperCase()
+  // Money sent back to the customer's card/UPI (full or part) is a refund, even though the gateway
+  // still reports the original capture as paid.
+  if ((t.refunded || 0) > 0 || s.includes('REFUND')) return 'refunded'
   if (s === 'PAID' || s === 'VERIFIED' || s === 'CLAIMED') return 'paid'
   if (s === 'FAILED') return 'failed'
   if (s.includes('REFUND')) return 'refunded'

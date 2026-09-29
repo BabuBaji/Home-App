@@ -525,6 +525,22 @@ export interface BizPayouts {
   summary: { paid: number; pending: number; processing: number; failed: number; count: number }
   payouts: { id: number; workerId: number; workerName: string; phone: string; zoneId: number | null; zone: string; city: string; amount: number; method: string; status: string; reference: string; destination: string; utr: string | null; created: string }[]
 }
+export interface LedgerRow {
+  key: string; at: string; kind: string; label: string; dir: 'in' | 'out' | 'settle'; amount: number; method: string; ref: string; note: string
+  party: string; partyType: 'customer' | 'expert'; workerId: number | null; customerId: number | null; zoneId: number | null; zone: string; city: string
+}
+export interface LedgerData { totals: { in: number; out: number; net: number; settled: number; count: number }; kinds: { kind: string; label: string; dir: string }[]; rows: LedgerRow[] }
+export const fetchLedger = (from: string, to: string, type = '', zoneId = '') => req<LedgerData>(`/business/ledger?from=${from}&to=${to}${type ? `&type=${type}` : ''}${zoneId ? `&zoneId=${zoneId}` : ''}`)
+export interface RewardLine { name: string; amount: number; count: number }
+export interface RewardsData {
+  totals: { discounts: number; customerRewards: number; expertIncentives: number; all: number }
+  discounts: { coupon: number; membership: number; zone: number; total: number; orders: number; couponOrders: number; membershipOrders: number; zoneOrders: number; byCampaign: { name: string; orders: number; amount: number }[] }
+  customerRewards: RewardLine[]; expertIncentives: RewardLine[]
+  rules: { id: number; name: string; category: string; active: boolean; trigger: string; calcType: string; calc: { amount?: number; percent?: number }; budget: number; spent: number; paid: number }[]
+  rulesMonth: string
+  giftCards: { issued: number; value: number; redeemed: number; outstanding: number; used: number } | null
+}
+export const fetchRewards = (from: string, to: string) => req<RewardsData>(`/business/rewards?from=${from}&to=${to}`)
 export const fetchBusiness = (from: string, to: string) => req<BizPerformance>(`/business/performance?from=${from}&to=${to}`)
 export const fetchBusinessTrend = (from: string, to: string, zoneIds: string) => req<BizTrend>(`/business/trend?from=${from}&to=${to}&zoneIds=${zoneIds}`)
 export const fetchBusinessPayouts = (from: string, to: string, status = '') => req<BizPayouts>(`/business/payouts?from=${from}&to=${to}${status ? `&status=${status}` : ''}`)
